@@ -39,7 +39,9 @@ PATH, and make it executable (`chmod +x active-collab` on Unix).
 pip install .
 ```
 
-Requires Python 3.10+. No third-party dependencies — stdlib only.
+Requires Python 3.10+. Runtime is stdlib-only on macOS and Linux (`curses` ships
+with Python). On Windows, the `browse` TUI pulls in `windows-curses` — installed
+automatically as a platform-conditional dependency.
 
 ---
 
@@ -85,6 +87,34 @@ active-collab current
 active-collab mine
 active-collab list          # alias
 ```
+
+### browse — interactive TUI
+
+Arrow-key terminal browser for your open tasks. Navigate projects → tasks →
+task detail, then create a git branch or open/download the task's assets.
+
+```sh
+active-collab browse
+active-collab browse --instance collab   # required when >1 instance configured
+```
+
+**Key bindings**
+
+| Screen | Keys |
+|---|---|
+| Lists (projects / tasks / assets) | `↑`/`↓` or `k`/`j` move · `Enter` select · `q` quit · `b` back |
+| Task detail | `c` create branch · `a` assets · `q`/`b` back |
+| Branch-type picker | `feature` / `fix` / `hotfix` (default `feature`) |
+| Assets | `o` open in browser · `d` download · `q`/`b` back |
+
+- **Create branch** — names the branch `<type>/<project_id>-<task_id>` (e.g.
+  `feature/665-75159`, compatible with `current`), branched off `master`. It
+  never overwrites an existing branch.
+- **Assets** — image, attachment, and link URLs extracted from the task body,
+  comments, and attachments. `o` opens the URL in your browser; `d` downloads
+  it. The `X-Angie-AuthApiToken` header is attached **only** when the asset
+  URL's scheme and host match the configured instance — foreign hosts are
+  fetched without credentials.
 
 ### Bare-invocation shortcuts
 
