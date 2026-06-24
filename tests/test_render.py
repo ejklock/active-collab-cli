@@ -5,6 +5,7 @@ import sys
 import unittest
 
 from active_collab import render
+from active_collab.i18n import set_language
 
 
 class TestHtmlToText(unittest.TestCase):
@@ -143,7 +144,11 @@ class TestRenderTask(unittest.TestCase):
     USERS = {486: "Maiara Gutierre"}
 
     def _capture_render(
-        self, task: dict, comments: list = (), no_comments: bool = False, user_map: dict | None = None
+        self,
+        task: dict,
+        comments: list = (),
+        no_comments: bool = False,
+        user_map: dict | None = None,
     ) -> str:
         buf = io.StringIO()
         old = sys.stdout
@@ -234,7 +239,13 @@ class TestRenderMineTable(unittest.TestCase):
 
     def test_shows_instance_project_task_name(self) -> None:
         tasks = [
-            {"instance": "myinst", "project_id": 665, "task_number": 42, "task_id": 75159, "name": "Do it"},
+            {
+                "instance": "myinst",
+                "project_id": 665,
+                "task_number": 42,
+                "task_id": 75159,
+                "name": "Do it",
+            },
         ]
         out = self._capture(tasks)
         self.assertIn("myinst", out)
@@ -247,3 +258,69 @@ class TestRenderMineTable(unittest.TestCase):
         self.assertIn("INSTANCE", out)
         self.assertIn("PROJECT", out)
         self.assertIn("NAME", out)
+
+
+class TestRenderPtBrTranslation(unittest.TestCase):
+    """Verify that render output changes to pt_BR when language is set."""
+
+    TASK = {
+        "id": 75159,
+        "task_number": 42,
+        "name": "Implement login flow",
+        "is_completed": False,
+        "assignee_id": None,
+        "project_id": 665,
+        "body": "",
+        "estimate": 0.0,
+        "tracked_time": 0.0,
+    }
+
+    def setUp(self) -> None:
+        set_language("pt_BR")
+
+    def tearDown(self) -> None:
+        set_language("en")
+
+    def _render_task_str(self, task: dict) -> str:
+        return render.render_task_to_str(task, [], True, {})
+
+    def _capture_mine_table(self, tasks: list) -> str:
+        buf = io.StringIO()
+        old = sys.stdout
+        sys.stdout = buf
+        try:
+            render.render_mine_table(tasks)
+        finally:
+            sys.stdout = old
+        return buf.getvalue()
+
+    def test_task_label_is_translated(self) -> None:
+        out = self._render_task_str(self.TASK)
+        self.assertIn("Tarefa:", out)
+        self.assertNotIn("Task:", out)
+
+    def test_status_open_is_translated(self) -> None:
+        out = self._render_task_str(self.TASK)
+        self.assertIn("Aberto", out)
+        self.assertNotIn("Open", out)
+
+    def test_status_completed_is_translated(self) -> None:
+        task = {**self.TASK, "is_completed": True}
+        out = self._render_task_str(task)
+        self.assertIn("Concluído", out)
+        self.assertNotIn("Completed", out)
+
+    def test_unassigned_is_translated(self) -> None:
+        out = self._render_task_str(self.TASK)
+        self.assertIn("(não atribuído)", out)
+        self.assertNotIn("(unassigned)", out)
+
+    def test_no_description_is_translated(self) -> None:
+        out = self._render_task_str(self.TASK)
+        self.assertIn("(sem descrição)", out)
+        self.assertNotIn("(no description)", out)
+
+    def test_mine_table_header_is_translated(self) -> None:
+        out = self._capture_mine_table([])
+        self.assertIn("INSTÂNCIA", out)
+        self.assertNotIn("INSTANCE", out)
