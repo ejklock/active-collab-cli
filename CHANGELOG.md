@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-06-24
+
+### Added
+
+- Task detail view now renders in a rounded frame with `#{num} — {name}` embedded
+  in the top border and a bottom hint bar inside the frame.
+- Each comment is rendered in its own rounded sub-box with the author and date in
+  the box's top border and the body wrapped inside.
+- Vertical scrolling in the task detail view: `↑`/`↓` (or `k`/`j`) scroll one
+  line; `PgUp`/`PgDn` scroll one viewport. Offset is clamped so scrolling never
+  goes past the end.
+- Responsive layout: the detail view recomputes its layout on `KEY_RESIZE` and
+  guards against too-small terminals without crashing.
+- `__version__` bumped to `0.4.0`.
+
 ## [0.3.0] - 2026-06-24
 
 ### Added

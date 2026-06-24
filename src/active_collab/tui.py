@@ -31,7 +31,7 @@ from active_collab.client import ActiveCollabClient
 from active_collab.config import Config
 from active_collab.http import HttpClient
 from active_collab.models import Instance, MineTask
-from active_collab.render import render_task_to_str
+from active_collab.render import fmt_ts, html_to_text, render_meta_to_str
 from active_collab.store import InstanceRepository, Store
 
 _BRANCH_TYPES = ("feature", "fix", "hotfix")
@@ -211,6 +211,58 @@ def _render_too_small(stdscr: "curses._CursesWindow") -> None:
     stdscr.refresh()
 
 
+def _comment_box(author: str, when: str, body: str, width: int) -> list[str]:
+    """Return lines for a rounded sub-box of exactly `width` columns.
+
+    Top border embeds ' {author} · {when} ' clipped to fit. Body lines are
+    wrapped via wrap_text and each padded to fill the interior. No line
+    exceeds `width` characters.
+    """
+    if width < 4:
+        return []
+    inner = width - 2
+    header_text = f" {author} · {when} "
+    max_header = inner - 2
+    if len(header_text) > max_header:
+        header_text = header_text[: max_header - 1] + "… "
+    fill_left = _BORDER["h"] * 1
+    fill_right = _BORDER["h"] * (inner - 1 - len(header_text))
+    top = _BORDER["tl"] + fill_left + header_text + fill_right + _BORDER["tr"]
+
+    body_lines = wrap_text(body, inner) or [""]
+    middle = [
+        _BORDER["v"] + line.ljust(inner) + _BORDER["v"]
+        for line in body_lines
+    ]
+    bottom = _BORDER["bl"] + _BORDER["h"] * inner + _BORDER["br"]
+    return [top, *middle, bottom]
+
+
+def build_detail_lines(meta_text: str, comments: list, inner_width: int) -> list[str]:
+    """Build the full content lines for the detail view.
+
+    Returns meta/description wrapped lines first, then a blank separator,
+    then each comment in its own rounded box separated by blank lines.
+    When comments is empty, returns only the meta lines.
+    """
+    lines: list[str] = wrap_text(meta_text, inner_width)
+    if not comments:
+        return lines
+
+    lines.append("")
+    for idx, comment in enumerate(comments):
+        author = str(
+            comment.get("created_by_name") or comment.get("created_by_id") or "(unknown)"
+        )
+        when = fmt_ts(comment.get("created_on"))
+        body_html = comment.get("body_plain_text") or html_to_text(comment.get("body") or "")
+        box = _comment_box(author, when, body_html, inner_width)
+        lines.extend(box)
+        if idx < len(comments) - 1:
+            lines.append("")
+    return lines
+
+
 def _render_list(
     stdscr: "curses._CursesWindow",
     items: list[str],
@@ -262,24 +314,6 @@ def _render_list(
     hint = "↑/↓ move  Enter select  q quit  b back"
     status_attr = _attr("status", curses.A_NORMAL)
     _safe_addstr(stdscr, hint_row, inner_left, _truncate(hint, inner_width), status_attr)
-    stdscr.refresh()
-
-
-def _render_detail(
-    stdscr: "curses._CursesWindow",
-    text: str,
-    assets: list[Asset],
-) -> None:
-    stdscr.erase()
-    h, w = stdscr.getmaxyx()
-    lines = text.splitlines()
-    for i, line in enumerate(lines):
-        if i >= h - 3:
-            break
-        stdscr.addstr(i, 0, _truncate(line, w - 1))
-    asset_hint = f"  [{len(assets)} asset(s)]" if assets else ""
-    hint = "q back  c create-branch  a assets" + asset_hint
-    stdscr.addstr(h - 2, 0, _truncate(hint, w - 1), _attr("status", curses.A_NORMAL))
     stdscr.refresh()
 
 
@@ -428,31 +462,116 @@ def _screen_tasks(
     return task_sel, "tasks"
 
 
+def _detail_meta_text(task_dict: dict) -> str:
+    """Return the meta + description block for the detail view (no comments)."""
+    user_map: dict = {}
+    meta = render_meta_to_str(task_dict, user_map)
+    desc = html_to_text(task_dict.get("body") or "") or "(no description)"
+    num = task_dict.get("task_number") or task_dict.get("id", "")
+    name = task_dict.get("name", "")
+    status = "Completed" if task_dict.get("is_completed") else "Open"
+    header = f"Task:   #{num}\nName:   {name}\nStatus: {status}"
+    return f"{header}\n{meta}\n\nDescription:\n{desc}"
+
+
+def _render_detail_frame(
+    stdscr: "curses._CursesWindow",
+    content: list[str],
+    offset: int,
+    title: str,
+) -> None:
+    """Draw the framed detail view with content scrolled to offset."""
+    stdscr.erase()
+    h, w = stdscr.getmaxyx()
+    if h < _MIN_HEIGHT or w < _MIN_WIDTH:
+        _render_too_small(stdscr)
+        return
+
+    border_attr = _attr("header", curses.A_BOLD)
+    _draw_frame(stdscr, 0, 0, h, w, title, border_attr)
+
+    inner_top = 1
+    inner_left = 1
+    inner_width = w - 2
+    hint_row = h - 2
+    viewport = hint_row - inner_top
+
+    for slot in range(viewport):
+        line_idx = offset + slot
+        if line_idx >= len(content):
+            break
+        _safe_addstr(
+            stdscr,
+            inner_top + slot,
+            inner_left,
+            content[line_idx][:inner_width].ljust(inner_width),
+        )
+
+    hint = "q back  c branch  a assets  ↑/↓ scroll  PgUp/PgDn"
+    status_attr = _attr("status", curses.A_NORMAL)
+    _safe_addstr(stdscr, hint_row, inner_left, _truncate(hint, inner_width), status_attr)
+    stdscr.refresh()
+
+
+def _scroll_offset(key: int, offset: int, max_offset: int, viewport: int) -> int:
+    """Return the new scroll offset for scroll-key presses, clamped to [0, max_offset].
+
+    Handles KEY_UP/k (−1), KEY_DOWN/j (+1), KEY_PPAGE (−viewport), KEY_NPAGE
+    (+viewport). Any other key leaves offset unchanged.
+    """
+    if key in (curses.KEY_UP, ord("k")):
+        return max(0, offset - 1)
+    if key in (curses.KEY_DOWN, ord("j")):
+        return min(max_offset, offset + 1)
+    if key == curses.KEY_PPAGE:
+        return max(0, offset - viewport)
+    if key == curses.KEY_NPAGE:
+        return min(max_offset, offset + viewport)
+    return offset
+
+
 def _render_and_handle_detail(
     stdscr: "curses._CursesWindow",
     controller: "BrowseController",
     project_id: int,
     task: MineTask,
 ) -> None:
-    """Render task detail and handle keypresses in a loop until the user exits.
+    """Render task detail with framed layout and vertical scroll; loop until exit.
 
-    Handles: q/b/Esc -> return; c -> branch type picker + create; a -> asset menu.
+    Keys: q/b/Esc return; ↑/k scroll up; ↓/j scroll down; PgUp/PgDn page;
+    c branch picker + create; a asset menu; KEY_RESIZE re-renders.
     """
     task_dict, comments, asset_list = controller.task_detail(project_id, task.id)
-    user_map: dict = {}
-    detail_text = render_task_to_str(task_dict, comments, False, user_map)
+    num = task_dict.get("task_number") or task_dict.get("id", "")
+    name = task_dict.get("name", "")
+    title = f"#{num} — {name}"
+    meta_text = _detail_meta_text(task_dict)
+
+    offset = 0
+
     while True:
-        _render_detail(stdscr, detail_text, asset_list)
+        h, w = stdscr.getmaxyx()
+        inner_width = max(1, w - 2)
+        content = build_detail_lines(meta_text, comments, inner_width)
+        viewport = max(1, h - _MIN_HEIGHT + 2)
+        max_offset = max(0, len(content) - viewport)
+
+        _render_detail_frame(stdscr, content, offset, title)
         key = stdscr.getch()
+
         if key in (ord("q"), ord("b"), 27):
             return
-        if key == ord("c"):
+        if key == curses.KEY_RESIZE:
+            offset = min(offset, max_offset)
+        elif key == ord("c"):
             chosen = _choose_branch_type(stdscr)
             if chosen:
                 result = controller.create_task_branch(chosen, project_id, task.id)
                 _show_branch_result(stdscr, result)
         elif key == ord("a"):
             _asset_menu(stdscr, asset_list, controller)
+        else:
+            offset = _scroll_offset(key, offset, max_offset, viewport)
 
 
 def _screen_detail(

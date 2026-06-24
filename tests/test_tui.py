@@ -16,15 +16,19 @@ from active_collab.models import Instance, MineTask
 from active_collab.tui import (
     BrowseController,
     MineController,
+    _comment_box,
     _draw_frame,
     _init_colors,
+    _render_and_handle_detail,
     _render_list,
     _render_too_small,
     _resolve_browse_instance,
     _safe_addstr,
     _screen_mine_list,
+    _scroll_offset,
     _truncate,
     _visible_window,
+    build_detail_lines,
     clamp_index,
     move_selection,
     wrap_text,
@@ -1426,6 +1430,371 @@ class TestResolveBrowseInstance(unittest.TestCase):
         result, err = _resolve_browse_instance([inst_a, inst_b], "dupe")
         self.assertIs(result, inst_a)
         self.assertIsNone(err)
+
+
+class TestCommentBox(unittest.TestCase):
+    """AC1: _comment_box renders a rounded box; no line exceeds width."""
+
+    def _box(self, author: str = "Alice", when: str = "2026-01-01 10:00",
+             body: str = "Hello world", width: int = 40) -> list[str]:
+        return _comment_box(author, when, body, width)
+
+    def test_first_line_starts_with_rounded_top_left(self) -> None:
+        box = self._box()
+        self.assertTrue(box[0].startswith("╭"), f"Expected ╭ at start, got: {box[0]!r}")
+
+    def test_last_line_starts_with_rounded_bottom_left(self) -> None:
+        box = self._box()
+        self.assertTrue(box[-1].startswith("╰"), f"Expected ╰ at start, got: {box[-1]!r}")
+
+    def test_top_border_contains_author(self) -> None:
+        box = self._box(author="Bob")
+        self.assertIn("Bob", box[0])
+
+    def test_top_border_contains_date(self) -> None:
+        box = self._box(when="2026-06-24 12:00")
+        self.assertIn("2026-06-24 12:00", box[0])
+
+    def test_top_border_contains_separator_dot(self) -> None:
+        box = self._box()
+        self.assertIn("·", box[0])
+
+    def test_body_lines_are_wrapped_inside_box(self) -> None:
+        long_body = "word " * 20
+        box = _comment_box("Alice", "2026-01-01", long_body, width=30)
+        for line in box[1:-1]:
+            self.assertTrue(line.startswith("│"), f"Body line missing │: {line!r}")
+
+    def test_no_line_exceeds_width(self) -> None:
+        box = self._box(body="a longer body that may wrap or not", width=35)
+        for line in box:
+            self.assertLessEqual(len(line), 35, f"Line too long ({len(line)}): {line!r}")
+
+    def test_box_is_empty_when_width_too_small(self) -> None:
+        box = _comment_box("A", "2026-01-01", "body", width=3)
+        self.assertEqual(box, [])
+
+    def test_top_line_ends_with_rounded_top_right(self) -> None:
+        box = self._box(width=40)
+        self.assertTrue(box[0].endswith("╮"), f"Expected ╮ at end: {box[0]!r}")
+
+    def test_bottom_line_ends_with_rounded_bottom_right(self) -> None:
+        box = self._box(width=40)
+        self.assertTrue(box[-1].endswith("╯"), f"Expected ╯ at end: {box[-1]!r}")
+
+    def test_all_lines_same_length(self) -> None:
+        box = self._box(width=40)
+        lengths = [len(line) for line in box]
+        self.assertEqual(len(set(lengths)), 1, f"Lines have different lengths: {lengths}")
+
+    def test_author_clipped_when_header_too_long(self) -> None:
+        long_author = "A" * 100
+        box = _comment_box(long_author, "2026-01-01", "body", width=20)
+        self.assertLessEqual(len(box[0]), 20)
+
+
+class TestBuildDetailLines(unittest.TestCase):
+    """AC2: build_detail_lines renders one box per comment; meta lines first."""
+
+    def _comment(self, author: str = "Alice", body: str = "A comment body",
+                 created_on: int = 0) -> dict:
+        return {
+            "created_by_name": author,
+            "created_on": created_on,
+            "body": body,
+        }
+
+    def test_returns_meta_lines_when_no_comments(self) -> None:
+        lines = build_detail_lines("Task meta text", [], 60)
+        self.assertTrue(len(lines) > 0)
+        combined = "\n".join(lines)
+        self.assertIn("Task meta text", combined)
+
+    def test_no_boxes_when_no_comments(self) -> None:
+        lines = build_detail_lines("meta", [], 60)
+        self.assertFalse(any("╭" in line for line in lines))
+
+    def test_one_box_for_one_comment(self) -> None:
+        comments = [self._comment()]
+        lines = build_detail_lines("meta", comments, 60)
+        box_starts = [line for line in lines if line.startswith("╭")]
+        self.assertEqual(len(box_starts), 1)
+
+    def test_two_boxes_for_two_comments(self) -> None:
+        comments = [self._comment("Alice"), self._comment("Bob")]
+        lines = build_detail_lines("meta", comments, 60)
+        box_starts = [line for line in lines if line.startswith("╭")]
+        self.assertEqual(len(box_starts), 2)
+
+    def test_n_boxes_for_n_comments(self) -> None:
+        n = 5
+        comments = [self._comment(f"Author{i}") for i in range(n)]
+        lines = build_detail_lines("meta", comments, 60)
+        box_starts = [line for line in lines if line.startswith("╭")]
+        self.assertEqual(len(box_starts), n)
+
+    def test_meta_lines_appear_before_comment_boxes(self) -> None:
+        meta = "Task: #42 Name: My Task"
+        comments = [self._comment()]
+        lines = build_detail_lines(meta, comments, 60)
+        first_box = next(i for i, line in enumerate(lines) if line.startswith("╭"))
+        meta_lines = [line for line in lines[:first_box] if "Task" in line or "My Task" in line]
+        self.assertTrue(len(meta_lines) > 0, "Meta text must appear before comment boxes")
+
+    def test_no_line_exceeds_inner_width(self) -> None:
+        comments = [self._comment("Alice", "Some body text")]
+        lines = build_detail_lines("meta text here", comments, inner_width=50)
+        for line in lines:
+            self.assertLessEqual(len(line), 50, f"Line too long ({len(line)}): {line!r}")
+
+    def test_comment_author_appears_in_output(self) -> None:
+        comments = [self._comment("CharlieBrown")]
+        lines = build_detail_lines("meta", comments, 60)
+        combined = "\n".join(lines)
+        self.assertIn("CharlieBrown", combined)
+
+    def test_empty_meta_with_comments_still_produces_boxes(self) -> None:
+        comments = [self._comment()]
+        lines = build_detail_lines("", comments, 60)
+        box_starts = [line for line in lines if line.startswith("╭")]
+        self.assertEqual(len(box_starts), 1)
+
+
+class FakeController:
+    """Minimal BrowseController stand-in for detail-view tests."""
+
+    def __init__(
+        self,
+        task_dict: dict | None = None,
+        comments: list | None = None,
+    ) -> None:
+        self._task_dict = task_dict or {
+            "id": 42,
+            "task_number": 7,
+            "name": "Test Task",
+            "is_completed": False,
+            "body": "Description here",
+        }
+        self._comments = comments or []
+
+    def task_detail(
+        self, project_id: int, task_id: int
+    ) -> tuple[dict, list, list]:
+        return self._task_dict, self._comments, []
+
+    def create_task_branch(self, branch_type: str, project_id: int, task_id: int):  # type: ignore[no-untyped-def]
+        from active_collab.gitbranch import BranchResult, BranchStatus
+        return BranchResult(status=BranchStatus.created, name="feature/10-42")
+
+    def open_asset(self, asset: object) -> None:
+        pass
+
+    def download_asset(self, asset: object, dest_dir: str | None = None) -> str:
+        return "/tmp/file"
+
+
+class FakeStdscrScrollable(FakeStdscr):
+    """FakeStdscr variant that reports a stable size and supports multiple reads."""
+
+    def __init__(self, keys: list[int], height: int = 24, width: int = 80) -> None:
+        super().__init__(keys=keys, height=height, width=width)
+
+
+def _make_scrollable_task() -> MineTask:
+    return MineTask(
+        id=42,
+        task_number=7,
+        name="Test Task",
+        is_completed=False,
+        is_trashed=False,
+        project_id=10,
+        instance_name="test",
+    )
+
+
+class TestDetailScrollOffset(unittest.TestCase):
+    """AC3: scroll offset clamped to [0, max_offset]; no crash at boundaries."""
+
+    def _run_detail(self, keys: list[int], height: int = 24, width: int = 80,
+                    comments: list | None = None) -> FakeStdscrScrollable:
+        stdscr = FakeStdscrScrollable(keys=keys, height=height, width=width)
+        task = _make_scrollable_task()
+        ctrl = FakeController(comments=comments or [])
+        _render_and_handle_detail(stdscr, ctrl, 10, task)
+        return stdscr
+
+    def test_q_exits_without_crash(self) -> None:
+        try:
+            self._run_detail([ord("q")])
+        except Exception as exc:  # noqa: BLE001
+            self.fail(f"_render_and_handle_detail raised: {exc}")
+
+    def test_scroll_down_then_quit_does_not_crash(self) -> None:
+        try:
+            self._run_detail([curses.KEY_DOWN, curses.KEY_DOWN, ord("q")])
+        except Exception as exc:  # noqa: BLE001
+            self.fail(f"Scroll down then quit raised: {exc}")
+
+    def test_scroll_up_from_zero_does_not_crash(self) -> None:
+        try:
+            self._run_detail([curses.KEY_UP, curses.KEY_UP, ord("q")])
+        except Exception as exc:  # noqa: BLE001
+            self.fail(f"Scroll up from zero raised: {exc}")
+
+    def test_page_down_then_quit_does_not_crash(self) -> None:
+        try:
+            self._run_detail([curses.KEY_NPAGE, ord("q")])
+        except Exception as exc:  # noqa: BLE001
+            self.fail(f"PgDn then quit raised: {exc}")
+
+    def test_page_up_then_quit_does_not_crash(self) -> None:
+        try:
+            self._run_detail([curses.KEY_PPAGE, ord("q")])
+        except Exception as exc:  # noqa: BLE001
+            self.fail(f"PgUp then quit raised: {exc}")
+
+    def test_many_downs_clamps_to_max_offset(self) -> None:
+        many_downs = [curses.KEY_DOWN] * 200 + [ord("q")]
+        try:
+            self._run_detail(many_downs)
+        except Exception as exc:  # noqa: BLE001
+            self.fail(f"Many downs raised: {exc}")
+
+    def test_j_key_scrolls_down_without_crash(self) -> None:
+        try:
+            self._run_detail([ord("j"), ord("j"), ord("q")])
+        except Exception as exc:  # noqa: BLE001
+            self.fail(f"j key scrolling raised: {exc}")
+
+    def test_k_key_scrolls_up_without_crash(self) -> None:
+        try:
+            self._run_detail([ord("k"), ord("q")])
+        except Exception as exc:  # noqa: BLE001
+            self.fail(f"k key scrolling raised: {exc}")
+
+    def test_b_key_exits_without_crash(self) -> None:
+        try:
+            self._run_detail([ord("b")])
+        except Exception as exc:  # noqa: BLE001
+            self.fail(f"b key exit raised: {exc}")
+
+    def test_esc_exits_without_crash(self) -> None:
+        try:
+            self._run_detail([27])
+        except Exception as exc:  # noqa: BLE001
+            self.fail(f"Esc exit raised: {exc}")
+
+    def test_scroll_with_comments_does_not_crash(self) -> None:
+        comments = [
+            {"created_by_name": f"Author{i}", "created_on": 0, "body": f"Comment {i} body"}
+            for i in range(10)
+        ]
+        try:
+            self._run_detail(
+                [curses.KEY_DOWN] * 5 + [curses.KEY_NPAGE, ord("q")],
+                comments=comments,
+            )
+        except Exception as exc:  # noqa: BLE001
+            self.fail(f"Scroll with comments raised: {exc}")
+
+    def test_written_output_contains_task_name(self) -> None:
+        stdscr = self._run_detail([ord("q")])
+        text = stdscr.text_written()
+        self.assertIn("Test Task", text)
+
+
+class TestDetailResizeAndTooSmall(unittest.TestCase):
+    """AC4: KEY_RESIZE and too-small terminal do not crash the detail view."""
+
+    def _run_detail(self, keys: list[int], height: int = 24, width: int = 80) -> None:
+        stdscr = FakeStdscrScrollable(keys=keys, height=height, width=width)
+        task = _make_scrollable_task()
+        ctrl = FakeController()
+        _render_and_handle_detail(stdscr, ctrl, 10, task)
+
+    def test_key_resize_does_not_crash(self) -> None:
+        try:
+            self._run_detail([curses.KEY_RESIZE, ord("q")])
+        except Exception as exc:  # noqa: BLE001
+            self.fail(f"KEY_RESIZE raised: {exc}")
+
+    def test_multiple_resize_events_do_not_crash(self) -> None:
+        try:
+            self._run_detail([curses.KEY_RESIZE, curses.KEY_RESIZE, ord("q")])
+        except Exception as exc:  # noqa: BLE001
+            self.fail(f"Multiple KEY_RESIZE raised: {exc}")
+
+    def test_too_small_terminal_does_not_crash(self) -> None:
+        try:
+            self._run_detail([ord("q")], height=3, width=10)
+        except Exception as exc:  # noqa: BLE001
+            self.fail(f"Too-small terminal raised: {exc}")
+
+    def test_very_narrow_terminal_does_not_crash(self) -> None:
+        try:
+            self._run_detail([ord("q")], height=24, width=5)
+        except Exception as exc:  # noqa: BLE001
+            self.fail(f"Very narrow terminal raised: {exc}")
+
+    def test_minimal_terminal_shows_too_small_message(self) -> None:
+        stdscr = FakeStdscrScrollable(keys=[ord("q")], height=3, width=10)
+        task = _make_scrollable_task()
+        ctrl = FakeController()
+        _render_and_handle_detail(stdscr, ctrl, 10, task)
+        text = stdscr.text_written().lower()
+        self.assertIn("terminal", text)
+
+
+class TestScrollOffset(unittest.TestCase):
+    """AC FIX2: _scroll_offset clamps to [0, max_offset]; no-op for unrelated keys."""
+
+    def test_up_at_zero_stays_zero(self) -> None:
+        self.assertEqual(_scroll_offset(curses.KEY_UP, 0, 10, 5), 0)
+
+    def test_k_at_zero_stays_zero(self) -> None:
+        self.assertEqual(_scroll_offset(ord("k"), 0, 10, 5), 0)
+
+    def test_up_decrements_offset(self) -> None:
+        self.assertEqual(_scroll_offset(curses.KEY_UP, 5, 10, 5), 4)
+
+    def test_k_decrements_offset(self) -> None:
+        self.assertEqual(_scroll_offset(ord("k"), 3, 10, 5), 2)
+
+    def test_down_increments_offset(self) -> None:
+        self.assertEqual(_scroll_offset(curses.KEY_DOWN, 3, 10, 5), 4)
+
+    def test_j_increments_offset(self) -> None:
+        self.assertEqual(_scroll_offset(ord("j"), 3, 10, 5), 4)
+
+    def test_down_at_max_offset_stays_at_max(self) -> None:
+        self.assertEqual(_scroll_offset(curses.KEY_DOWN, 10, 10, 5), 10)
+
+    def test_j_at_max_offset_stays_at_max(self) -> None:
+        self.assertEqual(_scroll_offset(ord("j"), 10, 10, 5), 10)
+
+    def test_pgup_moves_back_by_viewport(self) -> None:
+        self.assertEqual(_scroll_offset(curses.KEY_PPAGE, 8, 20, 5), 3)
+
+    def test_pgup_at_start_clamps_to_zero(self) -> None:
+        self.assertEqual(_scroll_offset(curses.KEY_PPAGE, 2, 20, 5), 0)
+
+    def test_pgdn_moves_forward_by_viewport(self) -> None:
+        self.assertEqual(_scroll_offset(curses.KEY_NPAGE, 3, 20, 5), 8)
+
+    def test_pgdn_past_max_clamps_to_max(self) -> None:
+        self.assertEqual(_scroll_offset(curses.KEY_NPAGE, 18, 20, 5), 20)
+
+    def test_unrelated_key_leaves_offset_unchanged(self) -> None:
+        self.assertEqual(_scroll_offset(ord("x"), 7, 20, 5), 7)
+
+    def test_enter_key_leaves_offset_unchanged(self) -> None:
+        self.assertEqual(_scroll_offset(10, 4, 20, 5), 4)
+
+    def test_zero_max_offset_down_stays_at_zero(self) -> None:
+        self.assertEqual(_scroll_offset(curses.KEY_DOWN, 0, 0, 5), 0)
+
+    def test_zero_max_offset_pgdn_stays_at_zero(self) -> None:
+        self.assertEqual(_scroll_offset(curses.KEY_NPAGE, 0, 0, 5), 0)
 
 
 if __name__ == "__main__":

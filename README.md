@@ -108,12 +108,18 @@ The TUI uses color where the terminal supports it (cyan header, cyan/reverse
 selection highlight, styled status bar). On terminals without color support it
 falls back to bold/reverse styling automatically.
 
+The task detail view renders in a rounded frame with the task number and name
+embedded in the top border. Each comment appears in its own rounded sub-box with
+the author and date in the box's top border. The detail view scrolls vertically
+when the content exceeds the screen. The whole TUI is responsive: it adapts to
+terminal resize events and guards against too-small terminals without crashing.
+
 **Key bindings**
 
 | Screen | Keys |
 |---|---|
 | Lists (projects / tasks / assets) | `↑`/`↓` or `k`/`j` move · `Enter` select · `q` quit · `b` back |
-| Task detail | `c` create branch · `a` assets · `q`/`b` back |
+| Task detail | `↑`/`↓` or `k`/`j` scroll · `PgUp`/`PgDn` page · `c` create branch · `a` assets · `q`/`b` back |
 | Branch-type picker | `feature` / `fix` / `hotfix` (default `feature`) |
 | Assets | `o` open in browser · `d` download · `q`/`b` back |
 
