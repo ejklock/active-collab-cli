@@ -30,6 +30,7 @@ from active_collab.assets import Asset, extract_asset_urls
 from active_collab.client import ActiveCollabClient
 from active_collab.config import Config
 from active_collab.http import HttpClient
+from active_collab.i18n import __
 from active_collab.models import Instance, MineTask
 from active_collab.render import fmt_ts, html_to_text, render_meta_to_str
 from active_collab.store import InstanceRepository, Store
@@ -206,9 +207,18 @@ def _visible_window(count: int, sel: int, height: int) -> int:
 def _render_too_small(stdscr: "curses._CursesWindow") -> None:
     """Show a 'terminal too small' message; safe on any window size."""
     stdscr.erase()
-    _safe_addstr(stdscr, 0, 0, "Terminal too small")
-    _safe_addstr(stdscr, 1, 0, "Resize to continue")
+    _safe_addstr(stdscr, 0, 0, __("Terminal too small"))
+    _safe_addstr(stdscr, 1, 0, __("Resize to continue"))
     stdscr.refresh()
+
+
+def _hint_bar(pairs: list[tuple[str, str]]) -> str:
+    """Build a command hint bar string from (key, action_label) pairs.
+
+    Each pair renders as '[key] label'; pairs are joined with two spaces.
+    Action labels are routed through __() for i18n.
+    """
+    return "  ".join(f"[{key}] {__(label)}" for key, label in pairs)
 
 
 def _comment_box(author: str, when: str, body: str, width: int) -> list[str]:
@@ -311,7 +321,7 @@ def _render_list(
             label = _truncate("  " + items[idx], inner_width)
             _safe_addstr(stdscr, row, inner_left, label)
 
-    hint = "↑/↓ move  Enter select  q quit  b back"
+    hint = _hint_bar([("↑↓", "move"), ("Enter", "select"), ("q", "quit"), ("b", "back")])
     status_attr = _attr("status", curses.A_NORMAL)
     _safe_addstr(stdscr, hint_row, inner_left, _truncate(hint, inner_width), status_attr)
     stdscr.refresh()
@@ -324,7 +334,7 @@ def _choose_branch_type(stdscr: "curses._CursesWindow") -> str | None:
     while True:
         _render_list(
             stdscr, items, sel,
-            "Branch type (Enter to confirm, q cancel)",
+            __("Branch type (Enter to confirm, q cancel)"),
         )
         key = stdscr.getch()
         if key == curses.KEY_RESIZE:
@@ -350,10 +360,7 @@ def _asset_menu(
     sel = 0
     while True:
         labels = [f"[{a.kind}] {a.name}" for a in assets]
-        _render_list(
-            stdscr, labels, sel,
-            "Assets (o open  d download  q back)",
-        )
+        _render_list(stdscr, labels, sel, __("Assets"))
         key = stdscr.getch()
         if key == curses.KEY_RESIZE:
             continue
@@ -379,10 +386,10 @@ def _handle_download(
     h, w = stdscr.getmaxyx()
     try:
         path = controller.download_asset(asset)
-        stdscr.addstr(0, 0, _truncate(f"Downloaded: {path}", w - 1))
+        stdscr.addstr(0, 0, _truncate(f"{__('Downloaded:')} {path}", w - 1))
     except RuntimeError as exc:
-        stdscr.addstr(0, 0, _truncate(f"Error: {exc}", w - 1))
-    stdscr.addstr(1, 0, "Press any key...")
+        stdscr.addstr(0, 0, _truncate(f"{__('Error:')} {exc}", w - 1))
+    stdscr.addstr(1, 0, __("Press any key..."))
     stdscr.refresh()
     stdscr.getch()
 
@@ -397,7 +404,7 @@ def _show_branch_result(
     if result.message:
         msg += f" — {result.message}"
     stdscr.addstr(0, 0, _truncate(msg, w - 1))
-    stdscr.addstr(1, 0, "Press any key...")
+    stdscr.addstr(1, 0, __("Press any key..."))
     stdscr.refresh()
     stdscr.getch()
 
@@ -414,7 +421,7 @@ def _screen_projects(
     Returns (proj_sel, task_sel, next_screen) where next_screen is
     None to signal quit.
     """
-    _render_list(stdscr, project_names, proj_sel, "Projects")
+    _render_list(stdscr, project_names, proj_sel, __("Projects"))
     key = stdscr.getch()
     if key == curses.KEY_RESIZE:
         return proj_sel, task_sel, "projects"
@@ -445,7 +452,7 @@ def _screen_tasks(
     task_labels = [
         f"#{t.task_number or t.id}  {t.name}" for t in task_list
     ]
-    _render_list(stdscr, task_labels, task_sel, "Tasks")
+    _render_list(stdscr, task_labels, task_sel, __("Tasks"))
     key = stdscr.getch()
     if key == curses.KEY_RESIZE:
         return task_sel, "tasks"
@@ -466,12 +473,12 @@ def _detail_meta_text(task_dict: dict) -> str:
     """Return the meta + description block for the detail view (no comments)."""
     user_map: dict = {}
     meta = render_meta_to_str(task_dict, user_map)
-    desc = html_to_text(task_dict.get("body") or "") or "(no description)"
+    desc = html_to_text(task_dict.get("body") or "") or __("(no description)")
     num = task_dict.get("task_number") or task_dict.get("id", "")
     name = task_dict.get("name", "")
-    status = "Completed" if task_dict.get("is_completed") else "Open"
-    header = f"Task:   #{num}\nName:   {name}\nStatus: {status}"
-    return f"{header}\n{meta}\n\nDescription:\n{desc}"
+    status = __("Completed") if task_dict.get("is_completed") else __("Open")
+    header = f"{__('Task')}:   #{num}\n{__('Name')}:   {name}\n{__('Status')}: {status}"
+    return f"{header}\n{meta}\n\n{__('Description')}:\n{desc}"
 
 
 def _render_detail_frame(
@@ -507,7 +514,9 @@ def _render_detail_frame(
             content[line_idx][:inner_width].ljust(inner_width),
         )
 
-    hint = "q back  c branch  a assets  ↑/↓ scroll  PgUp/PgDn"
+    hint = _hint_bar([
+        ("q", "back"), ("c", "branch"), ("a", "assets"), ("↑↓", "scroll"), ("⇞⇟", "page"),
+    ])
     status_attr = _attr("status", curses.A_NORMAL)
     _safe_addstr(stdscr, hint_row, inner_left, _truncate(hint, inner_width), status_attr)
     stdscr.refresh()
@@ -775,7 +784,7 @@ def _screen_mine_list(
         f"[{t.instance_name}] #{t.task_number or t.id}  {t.name}"
         for t in tasks
     ]
-    _render_list(stdscr, labels, sel, "My Open Tasks")
+    _render_list(stdscr, labels, sel, __("My Open Tasks"))
     key = stdscr.getch()
     if key == curses.KEY_RESIZE:
         return sel, "list"
@@ -802,9 +811,9 @@ def run_mine_browser(
     if not tasks:
         stdscr.erase()
         h, w = stdscr.getmaxyx()
-        msg = "No open tasks assigned to you."
+        msg = __("No open tasks assigned to you.")
         stdscr.addstr(0, 0, _truncate(msg, w - 1))
-        stdscr.addstr(1, 0, "Press any key to exit...")
+        stdscr.addstr(1, 0, __("Press any key to exit..."))
         stdscr.refresh()
         stdscr.getch()
         return
@@ -845,7 +854,7 @@ def _resolve_browse_instance(
     with no name given.
     """
     if not instances:
-        return None, "Error: no instances configured. Run: active-collab setup add"
+        return None, __("Error: no instances configured. Run: active-collab setup add")
     if instance_name:
         return _resolve_named_instance(instances, instance_name)
     return _resolve_implicit_instance(instances)
@@ -858,7 +867,9 @@ def _resolve_named_instance(
     matches = [i for i in instances if i.name == name]
     if not matches:
         known = ", ".join(i.name for i in instances)
-        return None, f"Error: instance '{name}' not found. Known: {known}"
+        return None, __("Error: instance '{name}' not found. Known: {known}").format(
+            name=name, known=known
+        )
     return matches[0], None
 
 
@@ -868,7 +879,9 @@ def _resolve_implicit_instance(
     if len(instances) == 1:
         return instances[0], None
     names = ", ".join(i.name for i in instances)
-    return None, f"Error: multiple instances ({names}). Use --instance NAME."
+    return None, __("Error: multiple instances ({names}). Use --instance NAME.").format(
+        names=names
+    )
 
 
 def run(args: object) -> int:

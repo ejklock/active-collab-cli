@@ -18,6 +18,7 @@ from active_collab.tui import (
     MineController,
     _comment_box,
     _draw_frame,
+    _hint_bar,
     _init_colors,
     _render_and_handle_detail,
     _render_list,
@@ -1318,7 +1319,7 @@ class TestRenderListFrame(unittest.TestCase):
     def test_hint_bar_text_rendered(self) -> None:
         stdscr = self._render(["item"])
         all_text = " ".join(t for _, _, t, *_ in stdscr.written)
-        self.assertIn("↑/↓", all_text)
+        self.assertIn("[↑↓]", all_text)
 
     def test_too_small_terminal_shows_warning(self) -> None:
         stdscr = FakeStdscr(keys=[], height=3, width=10)
@@ -1795,6 +1796,434 @@ class TestScrollOffset(unittest.TestCase):
 
     def test_zero_max_offset_pgdn_stays_at_zero(self) -> None:
         self.assertEqual(_scroll_offset(curses.KEY_NPAGE, 0, 0, 5), 0)
+
+
+_DETAIL_HINT_PAIRS = [
+    ("q", "back"), ("c", "branch"), ("a", "assets"), ("↑↓", "scroll"), ("⇞⇟", "page"),
+]
+_LIST_HINT_PAIRS = [("↑↓", "move"), ("Enter", "select"), ("q", "quit"), ("b", "back")]
+
+
+class TestHintBar(unittest.TestCase):
+    """S2-AC3: _hint_bar produces key-cap format and routes labels through __()."""
+
+    def test_single_pair_produces_bracket_key_and_label(self) -> None:
+        result = _hint_bar([("q", "back")])
+        self.assertEqual(result, "[q] back")
+
+    def test_multiple_pairs_joined_by_two_spaces(self) -> None:
+        result = _hint_bar([("q", "back"), ("c", "branch")])
+        self.assertEqual(result, "[q] back  [c] branch")
+
+    def test_detail_hint_bar_contains_q_back(self) -> None:
+        self.assertIn("[q] back", _hint_bar(_DETAIL_HINT_PAIRS))
+
+    def test_detail_hint_bar_contains_c_branch(self) -> None:
+        self.assertIn("[c] branch", _hint_bar(_DETAIL_HINT_PAIRS))
+
+    def test_detail_hint_bar_contains_a_assets(self) -> None:
+        self.assertIn("[a] assets", _hint_bar(_DETAIL_HINT_PAIRS))
+
+    def test_detail_hint_bar_contains_scroll_with_arrows(self) -> None:
+        self.assertIn("[↑↓] scroll", _hint_bar(_DETAIL_HINT_PAIRS))
+
+    def test_detail_hint_bar_contains_page_with_arrows(self) -> None:
+        self.assertIn("[⇞⇟] page", _hint_bar(_DETAIL_HINT_PAIRS))
+
+    def test_list_hint_bar_contains_move(self) -> None:
+        self.assertIn("[↑↓] move", _hint_bar(_LIST_HINT_PAIRS))
+
+    def test_list_hint_bar_contains_select(self) -> None:
+        self.assertIn("[Enter] select", _hint_bar(_LIST_HINT_PAIRS))
+
+    def test_empty_pairs_returns_empty_string(self) -> None:
+        self.assertEqual(_hint_bar([]), "")
+
+    def test_labels_routed_through_translation_in_pt_br(self) -> None:
+        from active_collab.i18n import set_language
+        set_language("pt_BR")
+        try:
+            result = _hint_bar([("q", "back")])
+            self.assertIn("[q] voltar", result)
+        finally:
+            set_language("en")
+
+    def test_labels_unchanged_in_en(self) -> None:
+        result = _hint_bar([("q", "back"), ("↑↓", "scroll")])
+        self.assertIn("[q] back", result)
+        self.assertIn("[↑↓] scroll", result)
+
+
+class TestTuiI18n(unittest.TestCase):
+    """S2-AC2: tui.py strings are wrapped in __() with pt_BR catalog entries."""
+
+    def setUp(self) -> None:
+        from active_collab.i18n import set_language
+        set_language("en")
+
+    def tearDown(self) -> None:
+        from active_collab.i18n import set_language
+        set_language("en")
+
+    def test_render_list_title_projects_translated_in_pt_br(self) -> None:
+        from active_collab.i18n import __ as translate
+        from active_collab.i18n import set_language
+        set_language("pt_BR")
+        stdscr = FakeStdscr(keys=[], height=20, width=60)
+        _render_list(stdscr, ["item"], 0, translate("Projects"))
+        all_text = " ".join(t for _, _, t, *_ in stdscr.written)
+        self.assertIn("Projetos", all_text)
+
+    def test_render_list_title_tasks_translated_in_pt_br(self) -> None:
+        from active_collab.i18n import __ as translate
+        from active_collab.i18n import set_language
+        set_language("pt_BR")
+        stdscr = FakeStdscr(keys=[], height=20, width=60)
+        _render_list(stdscr, ["item"], 0, translate("Tasks"))
+        all_text = " ".join(t for _, _, t, *_ in stdscr.written)
+        self.assertIn("Tarefas", all_text)
+
+    def test_render_too_small_translated_in_pt_br(self) -> None:
+        from active_collab.i18n import set_language
+        set_language("pt_BR")
+        win = FakeWindow(height=4, width=30)
+        _render_too_small(win)
+        all_text = win.all_text()
+        self.assertIn("pequeno", all_text)
+
+    def test_render_too_small_en_unchanged(self) -> None:
+        win = FakeWindow(height=4, width=30)
+        _render_too_small(win)
+        all_text = win.all_text()
+        self.assertIn("Terminal too small", all_text)
+        self.assertIn("Resize to continue", all_text)
+
+    def test_hint_bar_detail_screen_format(self) -> None:
+        result = _hint_bar(_DETAIL_HINT_PAIRS)
+        expected = "[q] back  [c] branch  [a] assets  [↑↓] scroll  [⇞⇟] page"
+        self.assertEqual(result, expected)
+
+    def test_hint_bar_detail_screen_format_in_pt_br(self) -> None:
+        from active_collab.i18n import set_language
+        set_language("pt_BR")
+        try:
+            result = _hint_bar(_DETAIL_HINT_PAIRS)
+            self.assertIn("voltar", result)
+            self.assertIn("rolar", result)
+        finally:
+            set_language("en")
+
+
+class TestCliI18n(unittest.TestCase):
+    """S2-AC1: cli.py user-facing output translated in pt_BR, unchanged in en."""
+
+    def setUp(self) -> None:
+        from active_collab.i18n import set_language
+        set_language("en")
+
+    def tearDown(self) -> None:
+        from active_collab.i18n import set_language
+        set_language("en")
+
+    def test_no_open_tasks_message_in_en(self) -> None:
+        from active_collab.i18n import __
+        self.assertEqual(__("No open tasks assigned to you."), "No open tasks assigned to you.")
+
+    def test_no_open_tasks_message_in_pt_br(self) -> None:
+        from active_collab.i18n import __, set_language
+        set_language("pt_BR")
+        try:
+            result = __("No open tasks assigned to you.")
+            self.assertIn("tarefa", result.lower())
+        finally:
+            set_language("en")
+
+    def test_connectivity_ok_in_en(self) -> None:
+        from active_collab.i18n import __
+        self.assertEqual(__("Connectivity: OK"), "Connectivity: OK")
+
+    def test_connectivity_ok_translated_in_pt_br(self) -> None:
+        from active_collab.i18n import __, set_language
+        set_language("pt_BR")
+        try:
+            result = __("Connectivity: OK")
+            self.assertIn("Conectividade", result)
+        finally:
+            set_language("en")
+
+    def test_no_instances_message_in_en(self) -> None:
+        from active_collab.i18n import __
+        msg = __("No instances configured. Run: active_collab.py setup add")
+        self.assertIn("instances configured", msg)
+
+    def test_no_instances_message_translated_in_pt_br(self) -> None:
+        from active_collab.i18n import __, set_language
+        set_language("pt_BR")
+        try:
+            result = __("No instances configured. Run: active_collab.py setup add")
+            self.assertIn("instância", result.lower())
+        finally:
+            set_language("en")
+
+    def test_instance_saved_template_in_en(self) -> None:
+        from active_collab.i18n import __
+        result = __("Instance '{name}' saved.").format(name="myinst")
+        self.assertEqual(result, "Instance 'myinst' saved.")
+
+    def test_instance_saved_template_translated_in_pt_br(self) -> None:
+        from active_collab.i18n import __, set_language
+        set_language("pt_BR")
+        try:
+            result = __("Instance '{name}' saved.").format(name="myinst")
+            self.assertIn("myinst", result)
+            self.assertNotEqual(result, "Instance 'myinst' saved.")
+        finally:
+            set_language("en")
+
+    # --- newly wrapped error messages (S2C completion pass) ---
+
+    def test_error_no_instances_configured_en_unchanged(self) -> None:
+        from active_collab.i18n import __
+        msg = __("Error: no instances configured. Run: active_collab.py setup add")
+        self.assertIn("no instances configured", msg)
+
+    def test_error_no_instances_configured_pt_br_translated(self) -> None:
+        from active_collab.i18n import __, set_language
+        set_language("pt_BR")
+        try:
+            result = __("Error: no instances configured. Run: active_collab.py setup add")
+            self.assertIn("instância", result.lower())
+            self.assertNotIn("no instances", result)
+        finally:
+            set_language("en")
+
+    def test_error_instance_not_found_template_en_unchanged(self) -> None:
+        from active_collab.i18n import __
+        result = __("Error: instance '{name}' not found. Known: {known}").format(
+            name="prod", known="dev, staging"
+        )
+        self.assertEqual(result, "Error: instance 'prod' not found. Known: dev, staging")
+
+    def test_error_instance_not_found_template_pt_br_translated(self) -> None:
+        from active_collab.i18n import __, set_language
+        set_language("pt_BR")
+        try:
+            result = __("Error: instance '{name}' not found. Known: {known}").format(
+                name="prod", known="dev"
+            )
+            self.assertIn("prod", result)
+            self.assertIn("dev", result)
+            self.assertNotIn("not found", result)
+        finally:
+            set_language("en")
+
+    def test_error_multiple_instances_template_en_unchanged(self) -> None:
+        from active_collab.i18n import __
+        result = __(
+            "Error: multiple instances configured ({names}). Use --instance NAME."
+        ).format(names="a, b")
+        expected = "Error: multiple instances configured (a, b). Use --instance NAME."
+        self.assertEqual(result, expected)
+
+    def test_error_multiple_instances_template_pt_br_translated(self) -> None:
+        from active_collab.i18n import __, set_language
+        set_language("pt_BR")
+        try:
+            result = __(
+                "Error: multiple instances configured ({names}). Use --instance NAME."
+            ).format(names="a, b")
+            self.assertIn("a, b", result)
+            self.assertNotIn("multiple instances configured", result)
+        finally:
+            set_language("en")
+
+    def test_error_cannot_parse_task_ref_en_unchanged(self) -> None:
+        from active_collab.i18n import __
+        key = (
+            "Error: cannot parse task ref '{ref}'."
+            " Use URL or PROJECT_ID/TASK_ID (e.g. 665/75159)."
+        )
+        result = __(key).format(ref="bad-ref")
+        self.assertIn("bad-ref", result)
+        self.assertIn("cannot parse task ref", result)
+
+    def test_error_cannot_parse_task_ref_pt_br_translated(self) -> None:
+        from active_collab.i18n import __, set_language
+        set_language("pt_BR")
+        try:
+            key = (
+                "Error: cannot parse task ref '{ref}'."
+                " Use URL or PROJECT_ID/TASK_ID (e.g. 665/75159)."
+            )
+            result = __(key).format(ref="bad-ref")
+            self.assertIn("bad-ref", result)
+            self.assertNotIn("cannot parse task ref", result)
+        finally:
+            set_language("en")
+
+    def test_error_task_not_found_http_en_unchanged(self) -> None:
+        from active_collab.i18n import __
+        result = __("Error: task {p}/{t} not found (HTTP {status}).").format(
+            p=10, t=42, status=404
+        )
+        self.assertEqual(result, "Error: task 10/42 not found (HTTP 404).")
+
+    def test_error_task_not_found_http_pt_br_translated(self) -> None:
+        from active_collab.i18n import __, set_language
+        set_language("pt_BR")
+        try:
+            result = __("Error: task {p}/{t} not found (HTTP {status}).").format(
+                p=10, t=42, status=404
+            )
+            self.assertIn("10", result)
+            self.assertIn("42", result)
+            self.assertIn("404", result)
+            self.assertNotIn("not found", result)
+        finally:
+            set_language("en")
+
+    def test_error_name_url_email_required_en_unchanged(self) -> None:
+        from active_collab.i18n import __
+        result = __("Error: --name, --url and --email are required.")
+        self.assertEqual(result, "Error: --name, --url and --email are required.")
+
+    def test_error_name_url_email_required_pt_br_translated(self) -> None:
+        from active_collab.i18n import __, set_language
+        set_language("pt_BR")
+        try:
+            result = __("Error: --name, --url and --email are required.")
+            self.assertIn("--name", result)
+            self.assertNotIn("are required", result)
+        finally:
+            set_language("en")
+
+    def test_error_password_required_en_unchanged(self) -> None:
+        from active_collab.i18n import __
+        result = __("Error: password is required.")
+        self.assertEqual(result, "Error: password is required.")
+
+    def test_error_password_required_pt_br_translated(self) -> None:
+        from active_collab.i18n import __, set_language
+        set_language("pt_BR")
+        try:
+            result = __("Error: password is required.")
+            self.assertNotIn("password is required", result)
+        finally:
+            set_language("en")
+
+    def test_error_not_in_git_repo_en_unchanged(self) -> None:
+        from active_collab.i18n import __
+        result = __("Error: not in a git repository or HEAD is detached.")
+        self.assertEqual(result, "Error: not in a git repository or HEAD is detached.")
+
+    def test_error_not_in_git_repo_pt_br_translated(self) -> None:
+        from active_collab.i18n import __, set_language
+        set_language("pt_BR")
+        try:
+            result = __("Error: not in a git repository or HEAD is detached.")
+            self.assertNotIn("not in a git repository", result)
+        finally:
+            set_language("en")
+
+    def test_error_branch_pattern_template_en_unchanged(self) -> None:
+        from active_collab.i18n import __
+        key = (
+            "Error: branch '{branch}' does not match expected pattern"
+            " (feature|hotfix|fix)/PROJECT_ID-TASK_ID (e.g. feature/665-75159)."
+        )
+        result = __(key).format(branch="main")
+        self.assertIn("main", result)
+        self.assertIn("does not match", result)
+
+    def test_error_branch_pattern_template_pt_br_translated(self) -> None:
+        from active_collab.i18n import __, set_language
+        set_language("pt_BR")
+        try:
+            key = (
+                "Error: branch '{branch}' does not match expected pattern"
+                " (feature|hotfix|fix)/PROJECT_ID-TASK_ID (e.g. feature/665-75159)."
+            )
+            result = __(key).format(branch="main")
+            self.assertIn("main", result)
+            self.assertNotIn("does not match", result)
+        finally:
+            set_language("en")
+
+
+class TestTuiInstanceResolutionI18n(unittest.TestCase):
+    """S2C-AC1: tui.py instance-resolution error strings translate under pt_BR."""
+
+    def setUp(self) -> None:
+        from active_collab.i18n import set_language
+        set_language("en")
+
+    def tearDown(self) -> None:
+        from active_collab.i18n import set_language
+        set_language("en")
+
+    def _inst(self, name: str) -> Instance:
+        return _make_instance_named(name)
+
+    def test_no_instances_error_en_unchanged(self) -> None:
+        _, err = _resolve_browse_instance([], None)
+        self.assertIsNotNone(err)
+        assert err is not None
+        self.assertIn("no instances configured", err)
+
+    def test_no_instances_error_pt_br_translated(self) -> None:
+        from active_collab.i18n import set_language
+        set_language("pt_BR")
+        try:
+            _, err = _resolve_browse_instance([], None)
+            self.assertIsNotNone(err)
+            assert err is not None
+            self.assertIn("instância", err.lower())
+            self.assertNotIn("no instances", err)
+        finally:
+            set_language("en")
+
+    def test_unknown_instance_error_en_contains_name(self) -> None:
+        inst = self._inst("prod")
+        _, err = _resolve_browse_instance([inst], "ghost")
+        self.assertIsNotNone(err)
+        assert err is not None
+        self.assertIn("ghost", err)
+        self.assertIn("not found", err)
+
+    def test_unknown_instance_error_pt_br_translated(self) -> None:
+        from active_collab.i18n import set_language
+        set_language("pt_BR")
+        try:
+            inst = self._inst("prod")
+            _, err = _resolve_browse_instance([inst], "ghost")
+            self.assertIsNotNone(err)
+            assert err is not None
+            self.assertIn("ghost", err)
+            self.assertNotIn("not found", err)
+        finally:
+            set_language("en")
+
+    def test_multiple_instances_error_en_contains_instance_flag(self) -> None:
+        inst_a = self._inst("alpha")
+        inst_b = self._inst("beta")
+        _, err = _resolve_browse_instance([inst_a, inst_b], None)
+        self.assertIsNotNone(err)
+        assert err is not None
+        self.assertIn("--instance", err)
+
+    def test_multiple_instances_error_pt_br_translated(self) -> None:
+        from active_collab.i18n import set_language
+        set_language("pt_BR")
+        try:
+            inst_a = self._inst("alpha")
+            inst_b = self._inst("beta")
+            _, err = _resolve_browse_instance([inst_a, inst_b], None)
+            self.assertIsNotNone(err)
+            assert err is not None
+            self.assertIn("--instance", err)
+            self.assertNotIn("multiple instances (", err)
+        finally:
+            set_language("en")
 
 
 if __name__ == "__main__":

@@ -9,6 +9,7 @@ from active_collab import render
 from active_collab.client import ActiveCollabClient
 from active_collab.config import Config
 from active_collab.http import HttpClient
+from active_collab.i18n import __
 from active_collab.models import Instance
 from active_collab.store import InstanceRepository, Store, TaskCache
 
@@ -27,8 +28,8 @@ def _parse_task_ref(ref: str) -> tuple[int, int]:
         return int(parts[0]), int(parts[1])
 
     render.print_error(
-        f"Error: cannot parse task ref '{ref}'."
-        " Use URL or PROJECT_ID/TASK_ID (e.g. 665/75159)."
+        __("Error: cannot parse task ref '{ref}'. Use URL or PROJECT_ID/TASK_ID (e.g. 665/75159).")
+        .format(ref=ref)
     )
     sys.exit(2)
 
@@ -65,9 +66,7 @@ def _stdin_is_interactive() -> bool:
 def _pick_instance(instances: list[Instance], instance_name: str | None) -> Instance:
     """Return the matching Instance or print error + exit(2)."""
     if not instances:
-        render.print_error(
-            "Error: no instances configured. Run: active_collab.py setup add"
-        )
+        render.print_error(__("Error: no instances configured. Run: active_collab.py setup add"))
         sys.exit(2)
 
     if instance_name:
@@ -75,7 +74,8 @@ def _pick_instance(instances: list[Instance], instance_name: str | None) -> Inst
         if not matches:
             known = ", ".join(i.name for i in instances)
             render.print_error(
-                f"Error: instance '{instance_name}' not found. Known: {known}"
+                __("Error: instance '{name}' not found. Known: {known}")
+                .format(name=instance_name, known=known)
             )
             sys.exit(2)
         return matches[0]
@@ -85,7 +85,8 @@ def _pick_instance(instances: list[Instance], instance_name: str | None) -> Inst
 
     names = ", ".join(i.name for i in instances)
     render.print_error(
-        f"Error: multiple instances configured ({names}). Use --instance NAME."
+        __("Error: multiple instances configured ({names}). Use --instance NAME.")
+        .format(names=names)
     )
     sys.exit(2)
 
@@ -97,12 +98,12 @@ def _resolve_field(value: str | None, label: str, interactive: bool) -> str | No
         return None
     while True:
         try:
-            val = input(f"{label}: ").strip()
+            val = input(f"{__(label)}: ").strip()
         except (EOFError, KeyboardInterrupt):
             return None
         if val:
             return val
-        print(f"{label} cannot be empty.", file=sys.stderr)
+        print(f"{__(label)} cannot be empty.", file=sys.stderr)
 
 
 def _load_task(
@@ -125,7 +126,8 @@ def _load_task(
     status, payload = client.fetch_task(project_id, task_id)
     if status != 200:
         render.print_error(
-            f"Error: task {project_id}/{task_id} not found (HTTP {status})."
+            __("Error: task {p}/{t} not found (HTTP {status}).")
+            .format(p=project_id, t=task_id, status=status)
         )
         return None
 
@@ -152,7 +154,8 @@ def _do_get_task(
         status, payload = client.fetch_task(project_id, task_id)
         if status != 200:
             render.print_error(
-                f"Error: task {project_id}/{task_id} not found (HTTP {status})."
+                __("Error: task {p}/{t} not found (HTTP {status}).")
+                .format(p=project_id, t=task_id, status=status)
             )
             return 1
         print(json.dumps(payload, indent=2, ensure_ascii=False))
@@ -191,12 +194,12 @@ def cmd_setup_add(args: argparse.Namespace) -> int:
     email = _resolve_field(args.email, "Email", interactive)
 
     if not (name and url and email):
-        render.print_error("Error: --name, --url and --email are required.")
+        render.print_error(__("Error: --name, --url and --email are required."))
         return 2
 
     password = getpass.getpass("Password (input hidden): ")
     if not password:
-        render.print_error("Error: password is required.")
+        render.print_error(__("Error: password is required."))
         return 2
 
     base_url = url.rstrip("/")
@@ -208,7 +211,7 @@ def cmd_setup_add(args: argparse.Namespace) -> int:
 
     if not token:
         detail = response.get("message") or "token exchange failed"
-        render.print_error(f"Error: {detail}")
+        render.print_error(__("Error: {detail}").format(detail=detail))
         return 1
 
     user_id = client.resolve_user_id(base_url, token, email)
@@ -216,7 +219,7 @@ def cmd_setup_add(args: argparse.Namespace) -> int:
     config = Config.load()
     store = Store(config)
     InstanceRepository(store.conn).save(instance)
-    print(f"Instance '{name}' saved.")
+    print(__("Instance '{name}' saved.").format(name=name))
 
     if interactive:
         authed_inst = Instance(name=name, base_url=base_url, email=email, token=token)
@@ -230,11 +233,11 @@ def _run_connectivity_check(client: ActiveCollabClient) -> None:
     try:
         status, _ = client.test_connectivity()
         if status == 200:
-            print("Connectivity: OK")
+            print(__("Connectivity: OK"))
         else:
-            print(f"Connectivity: FAILED (HTTP {status})")
+            print(__("Connectivity: FAILED (HTTP {status})").format(status=status))
     except ConnectionError as exc:
-        print(f"Connectivity: FAILED ({exc})")
+        print(__("Connectivity: FAILED ({exc})").format(exc=exc))
 
 
 def cmd_setup_list(_args: argparse.Namespace) -> int:
@@ -243,7 +246,7 @@ def cmd_setup_list(_args: argparse.Namespace) -> int:
     rows = InstanceRepository(store.conn).list_for_display()
 
     if not rows:
-        print("No instances configured. Run: active_collab.py setup add")
+        print(__("No instances configured. Run: active_collab.py setup add"))
         return 0
 
     print(f"{'NAME':<20} {'URL':<40} {'EMAIL':<30} {'USER_ID'}")
@@ -262,9 +265,11 @@ def cmd_setup_remove(args: argparse.Namespace) -> int:
     cache.delete_for_instance(args.name)
 
     if deleted == 0:
-        render.print_error(f"Error: instance '{args.name}' not found.")
+        render.print_error(
+            __("Error: instance '{name}' not found.").format(name=args.name)
+        )
         return 2
-    print(f"Instance '{args.name}' removed.")
+    print(__("Instance '{name}' removed.").format(name=args.name))
     return 0
 
 
@@ -277,7 +282,9 @@ def cmd_setup_test(args: argparse.Namespace) -> int:
     if args.name:
         rows = repo.find_by_name(args.name)
         if not rows:
-            render.print_error(f"Error: instance '{args.name}' not found.")
+            render.print_error(
+                __("Error: instance '{name}' not found.").format(name=args.name)
+            )
             return 2
     else:
         rows = repo.list_connectivity()
@@ -289,12 +296,12 @@ def cmd_setup_test(args: argparse.Namespace) -> int:
         try:
             status, _ = client.test_connectivity()
             if status == 200:
-                print(f"  {name}: OK ({status})")
+                print(f"  {name}: " + __("OK ({status})").format(status=status))
             else:
-                print(f"  {name}: FAILED (HTTP {status})")
+                print(f"  {name}: " + __("FAILED (HTTP {status})").format(status=status))
                 exit_code = 1
         except ConnectionError as exc:
-            print(f"  {name}: FAILED ({exc})")
+            print(f"  {name}: " + __("FAILED ({exc})").format(exc=exc))
             exit_code = 1
 
     return exit_code
@@ -308,16 +315,16 @@ def cmd_get(args: argparse.Namespace) -> int:
 def cmd_current(args: argparse.Namespace) -> int:
     branch = _current_branch()
     if not branch:
-        render.print_error(
-            "Error: not in a git repository or HEAD is detached."
-        )
+        render.print_error(__("Error: not in a git repository or HEAD is detached."))
         return 2
 
     ids = _parse_branch_ref(branch)
     if not ids:
         render.print_error(
-            f"Error: branch '{branch}' does not match expected pattern "
-            f"(feature|hotfix|fix)/PROJECT_ID-TASK_ID (e.g. feature/665-75159)."
+            __(
+                "Error: branch '{branch}' does not match expected pattern"
+                " (feature|hotfix|fix)/PROJECT_ID-TASK_ID (e.g. feature/665-75159)."
+            ).format(branch=branch)
         )
         return 2
 
@@ -333,9 +340,7 @@ def cmd_mine(args: argparse.Namespace) -> int:
     http = HttpClient()
 
     if not instances:
-        render.print_error(
-            "Error: no instances configured. Run: active_collab.py setup add"
-        )
+        render.print_error(__("Error: no instances configured. Run: active_collab.py setup add"))
         return 2
 
     target = instances
@@ -344,7 +349,8 @@ def cmd_mine(args: argparse.Namespace) -> int:
         if not matches:
             known = ", ".join(i.name for i in instances)
             render.print_error(
-                f"Error: instance '{args.instance}' not found. Known: {known}"
+                __("Error: instance '{name}' not found. Known: {known}")
+                .format(name=args.instance, known=known)
             )
             return 2
         target = matches
@@ -372,7 +378,7 @@ def _render_mine_table(target: list[Instance], http: HttpClient) -> int:
             )
 
     if not all_tasks:
-        print("No open tasks assigned to you.")
+        print(__("No open tasks assigned to you."))
         return 0
 
     render.render_mine_table(all_tasks)
