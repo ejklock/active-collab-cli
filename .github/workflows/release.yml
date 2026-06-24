@@ -1,0 +1,89 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            asset-name: active-collab-linux-x86_64
+            binary-name: active-collab
+          - os: macos-13
+            asset-name: active-collab-macos-x86_64
+            binary-name: active-collab
+          - os: macos-latest
+            asset-name: active-collab-macos-arm64
+            binary-name: active-collab
+          - os: windows-latest
+            asset-name: active-collab-windows-x86_64.exe
+            binary-name: active-collab.exe
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install package and PyInstaller
+        run: |
+          pip install --upgrade pip
+          pip install .
+          pip install pyinstaller
+
+      - name: Run tests (gate build on green tests)
+        run: python -m pytest tests/
+
+      - name: Write entry shim
+        shell: python
+        run: |
+          import pathlib
+          shim = "from active_collab.cli import main\nif __name__ == '__main__':\n    raise SystemExit(main())\n"
+          pathlib.Path("_entry.py").write_text(shim)
+
+      - name: Build binary with PyInstaller
+        run: pyinstaller --onefile --name active-collab _entry.py
+
+      - name: Rename artifact (Unix)
+        if: runner.os != 'Windows'
+        run: mv dist/active-collab dist/${{ matrix.asset-name }}
+
+      - name: Rename artifact (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Move-Item dist\active-collab.exe dist\${{ matrix.asset-name }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset-name }}
+          path: dist/${{ matrix.asset-name }}
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist/
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/**/*
