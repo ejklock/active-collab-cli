@@ -2,6 +2,8 @@
 
 Provides:
 - Pure navigation helpers (clamp_index, move_selection)
+- Pure text helpers (_truncate)
+- Color initialization (_init_colors, _attr)
 - BrowseController — dependency-injected business logic
 - MineController — aggregates tasks across multiple instances
 - run_browser — thin curses view loop (not unit-tested; needs a terminal)
@@ -19,10 +21,9 @@ import webbrowser
 from collections import OrderedDict
 from typing import Callable
 
-from active_collab import render as _render
-
 from active_collab import assets as assets_mod
 from active_collab import gitbranch
+from active_collab import render as _render
 from active_collab.assets import Asset, extract_asset_urls
 from active_collab.client import ActiveCollabClient
 from active_collab.config import Config
@@ -33,6 +34,52 @@ from active_collab.store import InstanceRepository, Store
 
 _BRANCH_TYPES = ("feature", "fix", "hotfix")
 _DEFAULT_BRANCH_TYPE = "feature"
+
+# Populated by _init_colors() at TUI startup; keys are role names.
+_ATTR: dict[str, int] = {}
+
+
+def _truncate(text: str, width: int) -> str:
+    """Return text clipped to width characters.
+
+    When len(text) <= width, returns text unchanged.
+    When len(text) > width, returns text[:width-1] + '…' (a single ellipsis char).
+    When width <= 0, returns ''.
+    """
+    if width <= 0:
+        return ""
+    if len(text) <= width:
+        return text
+    return text[: width - 1] + "…"
+
+
+def _init_colors() -> None:
+    """Initialize curses color pairs and cache attrs in _ATTR.
+
+    Safe to call multiple times (idempotent). When the terminal does not
+    support colors, returns without touching curses color state so callers
+    fall back to the plain A_BOLD/A_REVERSE styling via _attr().
+    """
+    if not curses.has_colors():
+        return
+    curses.start_color()
+    curses.use_default_colors()
+
+    # Pair IDs: 1=header cyan, 2=selected (black on cyan), 3=status bar, 4=badge yellow
+    curses.init_pair(1, curses.COLOR_CYAN, -1)
+    curses.init_pair(2, curses.COLOR_BLACK, curses.COLOR_CYAN)
+    curses.init_pair(3, curses.COLOR_WHITE, curses.COLOR_BLUE)
+    curses.init_pair(4, curses.COLOR_YELLOW, -1)
+
+    _ATTR["header"] = curses.color_pair(1) | curses.A_BOLD
+    _ATTR["selected"] = curses.color_pair(2)
+    _ATTR["status"] = curses.color_pair(3)
+    _ATTR["badge"] = curses.color_pair(4)
+
+
+def _attr(role: str, fallback: int) -> int:
+    """Return the color attr for role, or fallback when colors are unavailable."""
+    return _ATTR.get(role, fallback)
 
 
 def clamp_index(index: int, length: int) -> int:
@@ -117,6 +164,10 @@ class BrowseController:
         asset_list = extract_asset_urls(task, comments)
         return task, comments, asset_list
 
+    def fetch_open_tasks(self) -> list[MineTask]:
+        """Return open tasks from the underlying client."""
+        return self._client.fetch_open_tasks()
+
     def create_task_branch(
         self,
         branch_type: str,
@@ -173,7 +224,7 @@ class MineController:
         """
         result: list[MineTask] = []
         for ctrl in self._controllers.values():
-            result.extend(ctrl._client.fetch_open_tasks())  # noqa: SLF001
+            result.extend(ctrl.fetch_open_tasks())
         return result
 
     def controller_for(self, task: MineTask) -> BrowseController:
@@ -189,16 +240,20 @@ def _render_list(
 ) -> None:
     stdscr.erase()
     h, w = stdscr.getmaxyx()
-    title_line = title[:w - 1]
-    stdscr.addstr(0, 0, title_line, curses.A_BOLD)
-    stdscr.addstr(1, 0, "-" * min(len(title_line), w - 1))
+    stdscr.addstr(0, 0, _truncate(title, w - 1), _attr("header", curses.A_BOLD))
+    stdscr.addstr(1, 0, _truncate("─" * w, w - 1))
     for i, item in enumerate(items):
         row = i + 2
         if row >= h - 1:
             break
-        attr = curses.A_REVERSE if i == sel else curses.A_NORMAL
-        stdscr.addstr(row, 0, item[:w - 1], attr)
-    stdscr.addstr(h - 1, 0, "↑/↓ move  Enter select  q quit  b back"[:w - 1])
+        if i == sel:
+            label = _truncate("▸ " + item, w - 1)
+            stdscr.addstr(row, 0, label, _attr("selected", curses.A_REVERSE))
+        else:
+            label = _truncate("  " + item, w - 1)
+            stdscr.addstr(row, 0, label)
+    hint = "↑/↓ move  Enter select  q quit  b back"
+    stdscr.addstr(h - 1, 0, _truncate(hint, w - 1), _attr("status", curses.A_NORMAL))
     stdscr.refresh()
 
 
@@ -213,12 +268,10 @@ def _render_detail(
     for i, line in enumerate(lines):
         if i >= h - 3:
             break
-        stdscr.addstr(i, 0, line[:w - 1])
+        stdscr.addstr(i, 0, _truncate(line, w - 1))
     asset_hint = f"  [{len(assets)} asset(s)]" if assets else ""
-    stdscr.addstr(
-        h - 2, 0,
-        ("q back  c create-branch  a assets" + asset_hint)[:w - 1],
-    )
+    hint = "q back  c create-branch  a assets" + asset_hint
+    stdscr.addstr(h - 2, 0, _truncate(hint, w - 1), _attr("status", curses.A_NORMAL))
     stdscr.refresh()
 
 
@@ -265,23 +318,27 @@ def _asset_menu(
         elif key == ord("o"):
             controller.open_asset(assets[sel])
         elif key == ord("d"):
-            try:
-                path = controller.download_asset(assets[sel])
-                stdscr.erase()
-                h, w = stdscr.getmaxyx()
-                stdscr.addstr(0, 0, f"Downloaded: {path}"[:w - 1])
-                stdscr.addstr(1, 0, "Press any key...")
-                stdscr.refresh()
-                stdscr.getch()
-            except RuntimeError as exc:
-                stdscr.erase()
-                h, w = stdscr.getmaxyx()
-                stdscr.addstr(0, 0, f"Error: {exc}"[:w - 1])
-                stdscr.addstr(1, 0, "Press any key...")
-                stdscr.refresh()
-                stdscr.getch()
+            _handle_download(stdscr, controller, assets[sel])
         elif key in (ord("q"), ord("b"), 27):
             return
+
+
+def _handle_download(
+    stdscr: "curses._CursesWindow",
+    controller: BrowseController,
+    asset: Asset,
+) -> None:
+    """Attempt to download asset and show the result or error message."""
+    stdscr.erase()
+    h, w = stdscr.getmaxyx()
+    try:
+        path = controller.download_asset(asset)
+        stdscr.addstr(0, 0, _truncate(f"Downloaded: {path}", w - 1))
+    except RuntimeError as exc:
+        stdscr.addstr(0, 0, _truncate(f"Error: {exc}", w - 1))
+    stdscr.addstr(1, 0, "Press any key...")
+    stdscr.refresh()
+    stdscr.getch()
 
 
 def _show_branch_result(
@@ -293,7 +350,7 @@ def _show_branch_result(
     msg = f"{result.status.value}: {result.name}"
     if result.message:
         msg += f" — {result.message}"
-    stdscr.addstr(0, 0, msg[:w - 1])
+    stdscr.addstr(0, 0, _truncate(msg, w - 1))
     stdscr.addstr(1, 0, "Press any key...")
     stdscr.refresh()
     stdscr.getch()
@@ -408,10 +465,7 @@ def run_browser(
 ) -> None:
     """Thin curses view loop; all business logic lives in controller."""
     curses.curs_set(0)
-    try:
-        curses.start_color()
-    except curses.error:
-        pass
+    _init_colors()
 
     groups = controller.tasks_by_project()
     project_names = [name for name, _ in groups]
@@ -467,17 +521,14 @@ def run_mine_browser(
 ) -> None:
     """Curses view loop for the mine flat-list TUI."""
     curses.curs_set(0)
-    try:
-        curses.start_color()
-    except curses.error:
-        pass
+    _init_colors()
 
     tasks = mine_controller.my_tasks()
     if not tasks:
         stdscr.erase()
         h, w = stdscr.getmaxyx()
         msg = "No open tasks assigned to you."
-        stdscr.addstr(0, 0, msg[:w - 1])
+        stdscr.addstr(0, 0, _truncate(msg, w - 1))
         stdscr.addstr(1, 0, "Press any key to exit...")
         stdscr.refresh()
         stdscr.getch()
@@ -508,6 +559,43 @@ def run_mine(
     return 0
 
 
+def _resolve_browse_instance(
+    instances: list[Instance],
+    instance_name: str | None,
+) -> tuple[Instance | None, str | None]:
+    """Resolve which instance to use for the browse command.
+
+    Returns (instance, None) on success, or (None, error_message) on failure.
+    Failure cases: no instances configured, unknown name, multiple instances
+    with no name given.
+    """
+    if not instances:
+        return None, "Error: no instances configured. Run: active-collab setup add"
+    if instance_name:
+        return _resolve_named_instance(instances, instance_name)
+    return _resolve_implicit_instance(instances)
+
+
+def _resolve_named_instance(
+    instances: list[Instance],
+    name: str,
+) -> tuple[Instance | None, str | None]:
+    matches = [i for i in instances if i.name == name]
+    if not matches:
+        known = ", ".join(i.name for i in instances)
+        return None, f"Error: instance '{name}' not found. Known: {known}"
+    return matches[0], None
+
+
+def _resolve_implicit_instance(
+    instances: list[Instance],
+) -> tuple[Instance | None, str | None]:
+    if len(instances) == 1:
+        return instances[0], None
+    names = ", ".join(i.name for i in instances)
+    return None, f"Error: multiple instances ({names}). Use --instance NAME."
+
+
 def run(args: object) -> int:
     """Entry point for the `browse` subcommand; builds deps and launches TUI."""
     if not (sys.stdin.isatty() and sys.stdout.isatty()):
@@ -521,31 +609,9 @@ def run(args: object) -> int:
     repo = InstanceRepository(store.conn)
     instances = repo.load_all()
 
-    if not instances:
-        _render.print_error(
-            "Error: no instances configured. Run: active-collab setup add"
-        )
-        return 2
-
-    instance_name = getattr(args, "instance", None)
-    if instance_name:
-        matches = [i for i in instances if i.name == instance_name]
-        if not matches:
-            known = ", ".join(i.name for i in instances)
-            _render.print_error(
-                f"Error: instance '{instance_name}' not found."
-                f" Known: {known}"
-            )
-            return 2
-        inst = matches[0]
-    elif len(instances) == 1:
-        inst = instances[0]
-    else:
-        names = ", ".join(i.name for i in instances)
-        _render.print_error(
-            f"Error: multiple instances ({names})."
-            f" Use --instance NAME."
-        )
+    inst, error = _resolve_browse_instance(instances, getattr(args, "instance", None))
+    if error:
+        _render.print_error(error)
         return 2
 
     http = HttpClient()

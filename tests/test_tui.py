@@ -16,7 +16,10 @@ from active_collab.models import Instance, MineTask
 from active_collab.tui import (
     BrowseController,
     MineController,
+    _init_colors,
+    _resolve_browse_instance,
     _screen_mine_list,
+    _truncate,
     clamp_index,
     move_selection,
 )
@@ -148,6 +151,126 @@ class TestMoveSelection(unittest.TestCase):
         self.assertEqual(move_selection(2, -100, 5), 0)
 
 
+class TestTruncate(unittest.TestCase):
+    def test_text_shorter_than_width_returned_unchanged(self) -> None:
+        self.assertEqual(_truncate("hello", 10), "hello")
+
+    def test_text_equal_to_width_returned_unchanged(self) -> None:
+        self.assertEqual(_truncate("hello", 5), "hello")
+
+    def test_text_longer_than_width_truncated_with_ellipsis(self) -> None:
+        result = _truncate("hello world", 8)
+        self.assertEqual(result, "hello w…")
+
+    def test_overflow_result_length_equals_width(self) -> None:
+        result = _truncate("abcdefghij", 6)
+        self.assertEqual(len(result), 6)
+
+    def test_overflow_ends_with_ellipsis_char(self) -> None:
+        result = _truncate("abcdefghij", 6)
+        self.assertTrue(result.endswith("…"))
+
+    def test_width_zero_returns_empty_string(self) -> None:
+        self.assertEqual(_truncate("hello", 0), "")
+
+    def test_negative_width_returns_empty_string(self) -> None:
+        self.assertEqual(_truncate("hello", -5), "")
+
+    def test_empty_text_returned_unchanged(self) -> None:
+        self.assertEqual(_truncate("", 10), "")
+
+    def test_width_one_returns_ellipsis_on_overflow(self) -> None:
+        result = _truncate("ab", 1)
+        self.assertEqual(result, "…")
+        self.assertEqual(len(result), 1)
+
+    def test_width_one_returns_single_char_when_fits(self) -> None:
+        self.assertEqual(_truncate("a", 1), "a")
+
+
+class TestInitColors(unittest.TestCase):
+    def test_no_start_color_when_has_colors_false(self) -> None:
+        import active_collab.tui as tui_mod
+        tui_mod._ATTR.clear()
+        with (
+            patch("curses.has_colors", return_value=False),
+            patch("curses.start_color") as mock_start,
+        ):
+            _init_colors()
+        mock_start.assert_not_called()
+
+    def test_no_exception_when_has_colors_false(self) -> None:
+        import active_collab.tui as tui_mod
+        tui_mod._ATTR.clear()
+        with patch("curses.has_colors", return_value=False):
+            try:
+                _init_colors()
+            except Exception as exc:  # noqa: BLE001
+                self.fail(f"_init_colors raised unexpectedly: {exc}")
+
+    def test_attr_dict_empty_when_has_colors_false(self) -> None:
+        import active_collab.tui as tui_mod
+        tui_mod._ATTR.clear()
+        with patch("curses.has_colors", return_value=False):
+            _init_colors()
+        self.assertEqual(tui_mod._ATTR, {})
+
+    def test_start_color_called_when_has_colors_true(self) -> None:
+        import active_collab.tui as tui_mod
+        tui_mod._ATTR.clear()
+        with (
+            patch("curses.has_colors", return_value=True),
+            patch("curses.start_color") as mock_start,
+            patch("curses.use_default_colors"),
+            patch("curses.init_pair"),
+            patch("curses.color_pair", return_value=0),
+        ):
+            _init_colors()
+        mock_start.assert_called_once()
+
+    def test_use_default_colors_called_when_has_colors_true(self) -> None:
+        import active_collab.tui as tui_mod
+        tui_mod._ATTR.clear()
+        with (
+            patch("curses.has_colors", return_value=True),
+            patch("curses.start_color"),
+            patch("curses.use_default_colors") as mock_udc,
+            patch("curses.init_pair"),
+            patch("curses.color_pair", return_value=0),
+        ):
+            _init_colors()
+        mock_udc.assert_called_once()
+
+    def test_attr_dict_populated_when_has_colors_true(self) -> None:
+        import active_collab.tui as tui_mod
+        tui_mod._ATTR.clear()
+        with (
+            patch("curses.has_colors", return_value=True),
+            patch("curses.start_color"),
+            patch("curses.use_default_colors"),
+            patch("curses.init_pair"),
+            patch("curses.color_pair", return_value=42),
+        ):
+            _init_colors()
+        self.assertIn("header", tui_mod._ATTR)
+        self.assertIn("selected", tui_mod._ATTR)
+        self.assertIn("status", tui_mod._ATTR)
+        self.assertIn("badge", tui_mod._ATTR)
+
+    def test_init_pair_called_four_times_when_has_colors_true(self) -> None:
+        import active_collab.tui as tui_mod
+        tui_mod._ATTR.clear()
+        with (
+            patch("curses.has_colors", return_value=True),
+            patch("curses.start_color"),
+            patch("curses.use_default_colors"),
+            patch("curses.init_pair") as mock_init_pair,
+            patch("curses.color_pair", return_value=0),
+        ):
+            _init_colors()
+        self.assertEqual(mock_init_pair.call_count, 4)
+
+
 class TestBrowseControllerTasksByProject(unittest.TestCase):
     def _controller(self, tasks: list, projects_body: bytes = b"[]") -> BrowseController:
         client = FakeClient(open_tasks=tasks, projects_body=projects_body)
@@ -237,6 +360,38 @@ class TestBrowseControllerTasksByProject(unittest.TestCase):
         groups = ctrl.tasks_by_project()
         names = [name for name, _ in groups]
         self.assertIn("7", names)
+
+
+class TestBrowseControllerFetchOpenTasks(unittest.TestCase):
+    def test_delegates_to_client(self) -> None:
+        task = _make_mine_task()
+        client = FakeClient(open_tasks=[task])
+        ctrl = BrowseController(
+            client=client,  # type: ignore[arg-type]
+            http=MagicMock(),
+            instance=_make_instance(),
+        )
+        result = ctrl.fetch_open_tasks()
+        self.assertEqual(result, [task])
+
+    def test_returns_empty_list_when_no_tasks(self) -> None:
+        client = FakeClient(open_tasks=[])
+        ctrl = BrowseController(
+            client=client,  # type: ignore[arg-type]
+            http=MagicMock(),
+            instance=_make_instance(),
+        )
+        self.assertEqual(ctrl.fetch_open_tasks(), [])
+
+    def test_returns_multiple_tasks(self) -> None:
+        tasks = [_make_mine_task(task_id=i) for i in range(3)]
+        client = FakeClient(open_tasks=tasks)
+        ctrl = BrowseController(
+            client=client,  # type: ignore[arg-type]
+            http=MagicMock(),
+            instance=_make_instance(),
+        )
+        self.assertEqual(ctrl.fetch_open_tasks(), tasks)
 
 
 class TestBrowseControllerCreateTaskBranch(unittest.TestCase):
@@ -606,6 +761,8 @@ class TestMineControllerMyTasks(unittest.TestCase):
 
         for inst, tasks in inst_tasks:
             fake_client = FakeClientForMine(tasks)
+            # Replace the underlying client on the browse controller so
+            # fetch_open_tasks() is served by our fake.
             ctrl._controllers[inst.name]._client = fake_client  # noqa: SLF001
 
         return ctrl
@@ -659,6 +816,23 @@ class TestMineControllerMyTasks(unittest.TestCase):
         ]
         ctrl = self._controller([(inst, tasks)])
         self.assertEqual(len(ctrl.my_tasks()), 5)
+
+    def test_my_tasks_uses_public_fetch_open_tasks_not_private_client(self) -> None:
+        """MineController.my_tasks must route through ctrl.fetch_open_tasks()."""
+        inst = _make_instance_named("solo")
+        task = MineTask(id=1, name="T", instance_name="solo", project_id=1)
+        ctrl = MineController([inst], MagicMock())
+
+        fetch_calls: list[int] = []
+
+        def tracking_fetch() -> list[MineTask]:
+            fetch_calls.append(1)
+            return [task]
+
+        ctrl._controllers["solo"].fetch_open_tasks = tracking_fetch  # noqa: SLF001
+        result = ctrl.my_tasks()
+        self.assertEqual(len(fetch_calls), 1, "fetch_open_tasks must be called once")
+        self.assertEqual(result, [task])
 
 
 class TestMineControllerControllerFor(unittest.TestCase):
@@ -789,6 +963,101 @@ class TestScreenMineList(unittest.TestCase):
         stdscr = FakeStdscr(keys=[curses.KEY_UP])
         sel, _ = _screen_mine_list(stdscr, tasks, 0)
         self.assertEqual(sel, 0)
+
+    def test_selected_row_shows_marker(self) -> None:
+        """The ▸ marker must appear on the selected item row and not on others."""
+        from active_collab.tui import _render_list
+        tasks = self._tasks()
+        labels = [
+            f"[{t.instance_name}] #{t.task_number or t.id}  {t.name}"
+            for t in tasks
+        ]
+        stdscr = FakeStdscr(keys=[])
+        _render_list(stdscr, labels, 0, "My Open Tasks")
+        texts = [text for _, _, text, *_ in stdscr.written]
+        self.assertTrue(any("▸" in t for t in texts), "▸ marker must appear somewhere")
+        marker_rows = [
+            (row, text) for row, _, text, *_ in stdscr.written if "▸" in text
+        ]
+        self.assertEqual(len(marker_rows), 1, "exactly one row should have the ▸ marker")
+
+    def test_non_selected_row_has_no_marker(self) -> None:
+        """Non-selected rows must not show the ▸ marker."""
+        from active_collab.tui import _render_list
+        tasks = self._tasks()
+        labels = [
+            f"[{t.instance_name}] #{t.task_number or t.id}  {t.name}"
+            for t in tasks
+        ]
+        stdscr = FakeStdscr(keys=[])
+        _render_list(stdscr, labels, 0, "My Open Tasks")
+        for _row, _, text, *_ in stdscr.written:
+            if "beta" in text:
+                msg = f"Non-selected 'beta' row must not have marker: {text!r}"
+                self.assertNotIn("▸", text, msg)
+
+
+class TestResolveBrowseInstance(unittest.TestCase):
+    def _inst(self, name: str) -> Instance:
+        return _make_instance_named(name)
+
+    def test_single_instance_returned_when_one_configured(self) -> None:
+        inst = self._inst("solo")
+        result, err = _resolve_browse_instance([inst], None)
+        self.assertIs(result, inst)
+        self.assertIsNone(err)
+
+    def test_named_instance_returned_when_name_matches(self) -> None:
+        inst_a = self._inst("alpha")
+        inst_b = self._inst("beta")
+        result, err = _resolve_browse_instance([inst_a, inst_b], "beta")
+        self.assertIs(result, inst_b)
+        self.assertIsNone(err)
+
+    def test_error_for_unknown_instance_name(self) -> None:
+        inst = self._inst("alpha")
+        result, err = _resolve_browse_instance([inst], "nonexistent")
+        self.assertIsNone(result)
+        self.assertIsNotNone(err)
+        self.assertIn("nonexistent", err)  # type: ignore[arg-type]
+
+    def test_error_message_lists_known_instances_on_unknown_name(self) -> None:
+        inst_a = self._inst("alpha")
+        inst_b = self._inst("beta")
+        _, err = _resolve_browse_instance([inst_a, inst_b], "ghost")
+        self.assertIn("alpha", err)  # type: ignore[arg-type]
+        self.assertIn("beta", err)  # type: ignore[arg-type]
+
+    def test_error_when_multiple_instances_and_no_name(self) -> None:
+        inst_a = self._inst("alpha")
+        inst_b = self._inst("beta")
+        result, err = _resolve_browse_instance([inst_a, inst_b], None)
+        self.assertIsNone(result)
+        self.assertIsNotNone(err)
+
+    def test_error_message_mentions_use_instance_flag(self) -> None:
+        inst_a = self._inst("alpha")
+        inst_b = self._inst("beta")
+        _, err = _resolve_browse_instance([inst_a, inst_b], None)
+        self.assertIn("--instance", err)  # type: ignore[arg-type]
+
+    def test_error_when_no_instances_configured(self) -> None:
+        result, err = _resolve_browse_instance([], None)
+        self.assertIsNone(result)
+        self.assertIsNotNone(err)
+
+    def test_error_message_mentions_setup_add_when_no_instances(self) -> None:
+        _, err = _resolve_browse_instance([], None)
+        self.assertIn("setup add", err)  # type: ignore[arg-type]
+
+    def test_first_named_match_returned_when_duplicates(self) -> None:
+        inst_a = Instance(name="dupe", base_url="https://a.example.com",
+                          email="a@example.com", token="t1", user_id=1)
+        inst_b = Instance(name="dupe", base_url="https://b.example.com",
+                          email="b@example.com", token="t2", user_id=2)
+        result, err = _resolve_browse_instance([inst_a, inst_b], "dupe")
+        self.assertIs(result, inst_a)
+        self.assertIsNone(err)
 
 
 if __name__ == "__main__":

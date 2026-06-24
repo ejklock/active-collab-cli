@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-06-24
+
+### Added
+
+- `mine` is now interactive in a terminal (TTY): opens an arrow-key list of your
+  open tasks aggregated across all configured instances; select a task to view
+  detail, create a git branch, or open/download assets. Falls back to the plain
+  table when output is piped or redirected.
+- Colorized TUI across all screens (`browse` and `mine`): cyan bold header,
+  box-drawing `─` separator, `▸` selection marker with cyan/reverse highlight,
+  and a styled status bar. Degrades gracefully to `A_BOLD`/`A_REVERSE` on
+  terminals without color support (`curses.has_colors()` guard).
+
+### Changed
+
+- `BrowseController.fetch_open_tasks()` is now a public method; `MineController`
+  uses it instead of reaching into the private `_client`, removing the
+  `SLF001` suppression.
+- Extracted `_resolve_browse_instance()` from `browse run()` to reduce its
+  cyclomatic complexity (now ≤ 8).
+- `__version__` bumped to `0.3.0`.
+
 ## [0.2.0] - 2026-06-24
 
 ### Added

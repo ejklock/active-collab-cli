@@ -88,6 +88,12 @@ active-collab mine
 active-collab list          # alias
 ```
 
+When run in a terminal (TTY), `mine` opens an interactive arrow-key list of your
+open tasks aggregated across all configured instances. Select a task to view its
+detail, create a git branch, or open/download its assets — the same actions
+available in `browse`. When output is piped or redirected (non-TTY), `mine` falls
+back to a plain table suitable for scripts.
+
 ### browse — interactive TUI
 
 Arrow-key terminal browser for your open tasks. Navigate projects → tasks →
@@ -97,6 +103,10 @@ task detail, then create a git branch or open/download the task's assets.
 active-collab browse
 active-collab browse --instance collab   # required when >1 instance configured
 ```
+
+The TUI uses color where the terminal supports it (cyan header, cyan/reverse
+selection highlight, styled status bar). On terminals without color support it
+falls back to bold/reverse styling automatically.
 
 **Key bindings**
 
