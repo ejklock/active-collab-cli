@@ -416,6 +416,9 @@ def _build_parser() -> argparse.ArgumentParser:
     mine_p = sub.add_parser("mine", aliases=["list"], help="List open tasks assigned to you.")
     mine_p.add_argument("--instance", help="Limit to this instance.")
 
+    browse_p = sub.add_parser("browse", help="Interactive TUI browser for your tasks.")
+    browse_p.add_argument("--instance", help="Force a named instance.")
+
     return parser
 
 
@@ -432,13 +435,19 @@ def _dispatch_setup(args: argparse.Namespace, parser: argparse.ArgumentParser) -
     return 2
 
 
-_KNOWN_COMMANDS = ("setup", "get", "current", "mine", "list")
+def cmd_browse(args: argparse.Namespace) -> int:
+    from active_collab import tui
+    return tui.run(args)
+
+
+_KNOWN_COMMANDS = ("setup", "get", "current", "mine", "list", "browse")
 
 _COMMAND_HANDLERS = {
     "get": cmd_get,
     "current": cmd_current,
     "mine": cmd_mine,
     "list": cmd_mine,
+    "browse": cmd_browse,
 }
 
 
