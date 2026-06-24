@@ -1,6 +1,7 @@
 """Tests for Config.load() — env override and legacy default path."""
 
 import os
+import tempfile
 import unittest
 
 from active_collab.config import Config
@@ -11,9 +12,11 @@ class TestConfigLoad(unittest.TestCase):
         os.environ.pop("ACTIVE_COLLAB_DB", None)
 
     def test_load_uses_env_override_when_set(self) -> None:
-        os.environ["ACTIVE_COLLAB_DB"] = "/tmp/override.db"
-        cfg = Config.load()
-        self.assertEqual(cfg.db_path, "/tmp/override.db")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            override_path = os.path.join(tmp_dir, "override.db")
+            os.environ["ACTIVE_COLLAB_DB"] = override_path
+            cfg = Config.load()
+        self.assertEqual(cfg.db_path, override_path)
 
     def test_load_falls_back_to_default_path_when_env_absent(self) -> None:
         os.environ.pop("ACTIVE_COLLAB_DB", None)
