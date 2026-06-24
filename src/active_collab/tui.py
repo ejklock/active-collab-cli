@@ -2,8 +2,9 @@
 
 Provides:
 - Pure navigation helpers (clamp_index, move_selection)
-- Pure text helpers (_truncate)
+- Pure text helpers (_truncate, wrap_text)
 - Color initialization (_init_colors, _attr)
+- Frame drawing helpers (_safe_addstr, _draw_frame, _visible_window, _render_too_small)
 - BrowseController — dependency-injected business logic
 - MineController — aggregates tasks across multiple instances
 - run_browser — thin curses view loop (not unit-tested; needs a terminal)
@@ -17,6 +18,7 @@ import json
 import subprocess  # nosec B404
 import sys
 import tempfile
+import textwrap
 import webbrowser
 from collections import OrderedDict
 from typing import Callable
@@ -35,6 +37,20 @@ from active_collab.store import InstanceRepository, Store
 _BRANCH_TYPES = ("feature", "fix", "hotfix")
 _DEFAULT_BRANCH_TYPE = "feature"
 
+_BORDER = {
+    "tl": "╭",
+    "tr": "╮",
+    "bl": "╰",
+    "br": "╯",
+    "h": "─",
+    "v": "│",
+    "ltee": "├",
+    "rtee": "┤",
+}
+
+_MIN_HEIGHT = 6
+_MIN_WIDTH = 24
+
 # Populated by _init_colors() at TUI startup; keys are role names.
 _ATTR: dict[str, int] = {}
 
@@ -51,6 +67,24 @@ def _truncate(text: str, width: int) -> str:
     if len(text) <= width:
         return text
     return text[: width - 1] + "…"
+
+
+def wrap_text(text: str, width: int) -> list[str]:
+    """Wrap text to width, preserving blank lines and whole words.
+
+    Returns [] when width <= 0. Splits on existing newlines and wraps each
+    paragraph; blank lines yield an empty string in the result. No output
+    line exceeds width characters.
+    """
+    if width <= 0:
+        return []
+    result: list[str] = []
+    for paragraph in text.splitlines():
+        if not paragraph.strip():
+            result.append("")
+        else:
+            result.extend(textwrap.wrap(paragraph, width))
+    return result
 
 
 def _init_colors() -> None:
@@ -92,6 +126,353 @@ def clamp_index(index: int, length: int) -> int:
 def move_selection(index: int, delta: int, length: int) -> int:
     """Apply delta to index and clamp to [0, length-1]."""
     return clamp_index(index + delta, length)
+
+
+def _safe_addstr(
+    win: "curses._CursesWindow",
+    y: int,
+    x: int,
+    text: str,
+    attr: int = 0,
+) -> None:
+    """Write text to win at (y, x) with attr; silently ignore curses errors.
+
+    Writes to the bottom-right cell or beyond the window boundary raise
+    curses.error in most terminals — swallowing them is the standard pattern.
+    """
+    try:
+        win.addstr(y, x, text, attr)
+    except curses.error:
+        pass
+
+
+def _draw_frame(
+    win: "curses._CursesWindow",
+    top: int,
+    left: int,
+    height: int,
+    width: int,
+    title: str,
+    attr: int = 0,
+) -> None:
+    """Draw a rounded box at (top, left) spanning height rows x width cols.
+
+    Embeds ' {title} ' in the top border clipped to fit. Applies attr to all
+    border characters.
+    """
+    bottom = top + height - 1
+    right = left + width - 1
+
+    _safe_addstr(win, top, left, _BORDER["tl"], attr)
+    _safe_addstr(win, top, right, _BORDER["tr"], attr)
+    _safe_addstr(win, bottom, left, _BORDER["bl"], attr)
+    _safe_addstr(win, bottom, right, _BORDER["br"], attr)
+
+    inner_width = width - 2
+    top_fill = _BORDER["h"] * inner_width
+    _safe_addstr(win, top, left + 1, top_fill, attr)
+    _safe_addstr(win, bottom, left + 1, _BORDER["h"] * inner_width, attr)
+
+    for row in range(top + 1, bottom):
+        _safe_addstr(win, row, left, _BORDER["v"], attr)
+        _safe_addstr(win, row, right, _BORDER["v"], attr)
+
+    if inner_width >= 4:
+        label = f" {title} "
+        max_label = inner_width - 2
+        label = _truncate(label, max_label)
+        _safe_addstr(win, top, left + 2, label, attr)
+
+
+def _visible_window(count: int, sel: int, height: int) -> int:
+    """Return scroll offset so index sel is visible in a window of height rows.
+
+    Returns 0 when count <= height (no scroll needed). Otherwise clamps the
+    offset to [0, count-height] and guarantees sel is within [offset, offset+height-1].
+    """
+    if count <= height:
+        return 0
+    max_offset = count - height
+    offset = sel - height + 1
+    if offset < 0:
+        offset = 0
+    if offset > max_offset:
+        offset = max_offset
+    if sel < offset:
+        offset = sel
+    return offset
+
+
+def _render_too_small(stdscr: "curses._CursesWindow") -> None:
+    """Show a 'terminal too small' message; safe on any window size."""
+    stdscr.erase()
+    _safe_addstr(stdscr, 0, 0, "Terminal too small")
+    _safe_addstr(stdscr, 1, 0, "Resize to continue")
+    stdscr.refresh()
+
+
+def _render_list(
+    stdscr: "curses._CursesWindow",
+    items: list[str],
+    sel: int,
+    title: str,
+) -> None:
+    """Draw a rounded-frame list screen with title, items, and a hint bar.
+
+    The outer frame uses _BORDER rounded corners. The title is embedded in
+    the top border. A one-line hint bar sits just above the bottom border.
+    The item list scrolls when it overflows the inner viewport. The selected
+    item shows a ▸ marker with the 'selected' highlight; others get a plain
+    two-space indent. All writes are routed through _safe_addstr.
+    """
+    stdscr.erase()
+    h, w = stdscr.getmaxyx()
+    if h < _MIN_HEIGHT or w < _MIN_WIDTH:
+        _render_too_small(stdscr)
+        return
+
+    border_attr = _attr("header", curses.A_BOLD)
+    _draw_frame(stdscr, 0, 0, h, w, title, border_attr)
+
+    # Inner content area: rows 1..(h-2), cols 1..(w-2)
+    inner_top = 1
+    inner_bottom = h - 2
+    inner_left = 1
+    inner_width = w - 2
+
+    # Bottom hint bar sits at row (h-2), one row above the bottom border
+    hint_row = inner_bottom
+    # Item rows: inner_top .. hint_row-1
+    item_area_height = hint_row - inner_top
+
+    offset = _visible_window(len(items), sel, item_area_height)
+
+    for slot in range(item_area_height):
+        idx = offset + slot
+        if idx >= len(items):
+            break
+        row = inner_top + slot
+        if idx == sel:
+            label = _truncate("▸ " + items[idx], inner_width)
+            _safe_addstr(stdscr, row, inner_left, label, _attr("selected", curses.A_REVERSE))
+        else:
+            label = _truncate("  " + items[idx], inner_width)
+            _safe_addstr(stdscr, row, inner_left, label)
+
+    hint = "↑/↓ move  Enter select  q quit  b back"
+    status_attr = _attr("status", curses.A_NORMAL)
+    _safe_addstr(stdscr, hint_row, inner_left, _truncate(hint, inner_width), status_attr)
+    stdscr.refresh()
+
+
+def _render_detail(
+    stdscr: "curses._CursesWindow",
+    text: str,
+    assets: list[Asset],
+) -> None:
+    stdscr.erase()
+    h, w = stdscr.getmaxyx()
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        if i >= h - 3:
+            break
+        stdscr.addstr(i, 0, _truncate(line, w - 1))
+    asset_hint = f"  [{len(assets)} asset(s)]" if assets else ""
+    hint = "q back  c create-branch  a assets" + asset_hint
+    stdscr.addstr(h - 2, 0, _truncate(hint, w - 1), _attr("status", curses.A_NORMAL))
+    stdscr.refresh()
+
+
+def _choose_branch_type(stdscr: "curses._CursesWindow") -> str | None:
+    """Show a branch-type picker; return chosen type or None on cancel."""
+    items = list(_BRANCH_TYPES)
+    sel = 0
+    while True:
+        _render_list(
+            stdscr, items, sel,
+            "Branch type (Enter to confirm, q cancel)",
+        )
+        key = stdscr.getch()
+        if key == curses.KEY_RESIZE:
+            continue
+        if key in (curses.KEY_UP, ord("k")):
+            sel = move_selection(sel, -1, len(items))
+        elif key in (curses.KEY_DOWN, ord("j")):
+            sel = move_selection(sel, 1, len(items))
+        elif key in (curses.KEY_ENTER, 10, 13):
+            return items[sel]
+        elif key in (ord("q"), ord("b"), 27):
+            return None
+
+
+def _asset_menu(
+    stdscr: "curses._CursesWindow",
+    assets: list[Asset],
+    controller: "BrowseController",
+) -> None:
+    """Show asset list; handle open/download per item."""
+    if not assets:
+        return
+    sel = 0
+    while True:
+        labels = [f"[{a.kind}] {a.name}" for a in assets]
+        _render_list(
+            stdscr, labels, sel,
+            "Assets (o open  d download  q back)",
+        )
+        key = stdscr.getch()
+        if key == curses.KEY_RESIZE:
+            continue
+        if key in (curses.KEY_UP, ord("k")):
+            sel = move_selection(sel, -1, len(assets))
+        elif key in (curses.KEY_DOWN, ord("j")):
+            sel = move_selection(sel, 1, len(assets))
+        elif key == ord("o"):
+            controller.open_asset(assets[sel])
+        elif key == ord("d"):
+            _handle_download(stdscr, controller, assets[sel])
+        elif key in (ord("q"), ord("b"), 27):
+            return
+
+
+def _handle_download(
+    stdscr: "curses._CursesWindow",
+    controller: "BrowseController",
+    asset: Asset,
+) -> None:
+    """Attempt to download asset and show the result or error message."""
+    stdscr.erase()
+    h, w = stdscr.getmaxyx()
+    try:
+        path = controller.download_asset(asset)
+        stdscr.addstr(0, 0, _truncate(f"Downloaded: {path}", w - 1))
+    except RuntimeError as exc:
+        stdscr.addstr(0, 0, _truncate(f"Error: {exc}", w - 1))
+    stdscr.addstr(1, 0, "Press any key...")
+    stdscr.refresh()
+    stdscr.getch()
+
+
+def _show_branch_result(
+    stdscr: "curses._CursesWindow",
+    result: gitbranch.BranchResult,
+) -> None:
+    stdscr.erase()
+    h, w = stdscr.getmaxyx()
+    msg = f"{result.status.value}: {result.name}"
+    if result.message:
+        msg += f" — {result.message}"
+    stdscr.addstr(0, 0, _truncate(msg, w - 1))
+    stdscr.addstr(1, 0, "Press any key...")
+    stdscr.refresh()
+    stdscr.getch()
+
+
+def _screen_projects(
+    stdscr: "curses._CursesWindow",
+    project_names: list[str],
+    groups: list,
+    proj_sel: int,
+    task_sel: int,
+) -> tuple[int, int, str | None]:
+    """Render + handle one keypress on the projects screen.
+
+    Returns (proj_sel, task_sel, next_screen) where next_screen is
+    None to signal quit.
+    """
+    _render_list(stdscr, project_names, proj_sel, "Projects")
+    key = stdscr.getch()
+    if key == curses.KEY_RESIZE:
+        return proj_sel, task_sel, "projects"
+    if key in (curses.KEY_UP, ord("k")):
+        proj_sel = move_selection(proj_sel, -1, len(project_names))
+    elif key in (curses.KEY_DOWN, ord("j")):
+        proj_sel = move_selection(proj_sel, 1, len(project_names))
+    elif key in (curses.KEY_ENTER, 10, 13) and groups:
+        task_sel = 0
+        return proj_sel, task_sel, "tasks"
+    elif key in (ord("q"), 27):
+        return proj_sel, task_sel, None
+    return proj_sel, task_sel, "projects"
+
+
+def _screen_tasks(
+    stdscr: "curses._CursesWindow",
+    groups: list,
+    proj_sel: int,
+    task_sel: int,
+) -> tuple[int, str | None]:
+    """Render + handle one keypress on the tasks screen.
+
+    Returns (task_sel, next_screen) where next_screen is None to
+    signal quit.
+    """
+    _, task_list = groups[proj_sel]
+    task_labels = [
+        f"#{t.task_number or t.id}  {t.name}" for t in task_list
+    ]
+    _render_list(stdscr, task_labels, task_sel, "Tasks")
+    key = stdscr.getch()
+    if key == curses.KEY_RESIZE:
+        return task_sel, "tasks"
+    if key in (curses.KEY_UP, ord("k")):
+        task_sel = move_selection(task_sel, -1, len(task_list))
+    elif key in (curses.KEY_DOWN, ord("j")):
+        task_sel = move_selection(task_sel, 1, len(task_list))
+    elif key in (curses.KEY_ENTER, 10, 13) and task_list:
+        return task_sel, "detail"
+    elif key in (ord("b"), 27):
+        return task_sel, "projects"
+    elif key in (ord("q"),):
+        return task_sel, None
+    return task_sel, "tasks"
+
+
+def _render_and_handle_detail(
+    stdscr: "curses._CursesWindow",
+    controller: "BrowseController",
+    project_id: int,
+    task: MineTask,
+) -> None:
+    """Render task detail and handle keypresses in a loop until the user exits.
+
+    Handles: q/b/Esc -> return; c -> branch type picker + create; a -> asset menu.
+    """
+    task_dict, comments, asset_list = controller.task_detail(project_id, task.id)
+    user_map: dict = {}
+    detail_text = render_task_to_str(task_dict, comments, False, user_map)
+    while True:
+        _render_detail(stdscr, detail_text, asset_list)
+        key = stdscr.getch()
+        if key in (ord("q"), ord("b"), 27):
+            return
+        if key == ord("c"):
+            chosen = _choose_branch_type(stdscr)
+            if chosen:
+                result = controller.create_task_branch(chosen, project_id, task.id)
+                _show_branch_result(stdscr, result)
+        elif key == ord("a"):
+            _asset_menu(stdscr, asset_list, controller)
+
+
+def _screen_detail(
+    stdscr: "curses._CursesWindow",
+    groups: list,
+    proj_sel: int,
+    task_sel: int,
+    controller: "BrowseController",
+) -> str:
+    """Render + handle detail screen for the project-browse flow.
+
+    Returns the next screen name (always a string; no quit from detail).
+    Delegates detail rendering and key handling to _render_and_handle_detail,
+    then signals the browse loop to return to the tasks screen.
+    """
+    _, task_list = groups[proj_sel]
+    task = task_list[task_sel]
+    project_id = task.project_id or 0
+    _render_and_handle_detail(stdscr, controller, project_id, task)
+    return "tasks"
 
 
 class BrowseController:
@@ -232,233 +613,6 @@ class MineController:
         return self._controllers[task.instance_name]
 
 
-def _render_list(
-    stdscr: "curses._CursesWindow",
-    items: list[str],
-    sel: int,
-    title: str,
-) -> None:
-    stdscr.erase()
-    h, w = stdscr.getmaxyx()
-    stdscr.addstr(0, 0, _truncate(title, w - 1), _attr("header", curses.A_BOLD))
-    stdscr.addstr(1, 0, _truncate("─" * w, w - 1))
-    for i, item in enumerate(items):
-        row = i + 2
-        if row >= h - 1:
-            break
-        if i == sel:
-            label = _truncate("▸ " + item, w - 1)
-            stdscr.addstr(row, 0, label, _attr("selected", curses.A_REVERSE))
-        else:
-            label = _truncate("  " + item, w - 1)
-            stdscr.addstr(row, 0, label)
-    hint = "↑/↓ move  Enter select  q quit  b back"
-    stdscr.addstr(h - 1, 0, _truncate(hint, w - 1), _attr("status", curses.A_NORMAL))
-    stdscr.refresh()
-
-
-def _render_detail(
-    stdscr: "curses._CursesWindow",
-    text: str,
-    assets: list[Asset],
-) -> None:
-    stdscr.erase()
-    h, w = stdscr.getmaxyx()
-    lines = text.splitlines()
-    for i, line in enumerate(lines):
-        if i >= h - 3:
-            break
-        stdscr.addstr(i, 0, _truncate(line, w - 1))
-    asset_hint = f"  [{len(assets)} asset(s)]" if assets else ""
-    hint = "q back  c create-branch  a assets" + asset_hint
-    stdscr.addstr(h - 2, 0, _truncate(hint, w - 1), _attr("status", curses.A_NORMAL))
-    stdscr.refresh()
-
-
-def _choose_branch_type(stdscr: "curses._CursesWindow") -> str | None:
-    """Show a branch-type picker; return chosen type or None on cancel."""
-    items = list(_BRANCH_TYPES)
-    sel = 0
-    while True:
-        _render_list(
-            stdscr, items, sel,
-            "Branch type (Enter to confirm, q cancel)",
-        )
-        key = stdscr.getch()
-        if key in (curses.KEY_UP, ord("k")):
-            sel = move_selection(sel, -1, len(items))
-        elif key in (curses.KEY_DOWN, ord("j")):
-            sel = move_selection(sel, 1, len(items))
-        elif key in (curses.KEY_ENTER, 10, 13):
-            return items[sel]
-        elif key in (ord("q"), ord("b"), 27):
-            return None
-
-
-def _asset_menu(
-    stdscr: "curses._CursesWindow",
-    assets: list[Asset],
-    controller: BrowseController,
-) -> None:
-    """Show asset list; handle open/download per item."""
-    if not assets:
-        return
-    sel = 0
-    while True:
-        labels = [f"[{a.kind}] {a.name}" for a in assets]
-        _render_list(
-            stdscr, labels, sel,
-            "Assets (o open  d download  q back)",
-        )
-        key = stdscr.getch()
-        if key in (curses.KEY_UP, ord("k")):
-            sel = move_selection(sel, -1, len(assets))
-        elif key in (curses.KEY_DOWN, ord("j")):
-            sel = move_selection(sel, 1, len(assets))
-        elif key == ord("o"):
-            controller.open_asset(assets[sel])
-        elif key == ord("d"):
-            _handle_download(stdscr, controller, assets[sel])
-        elif key in (ord("q"), ord("b"), 27):
-            return
-
-
-def _handle_download(
-    stdscr: "curses._CursesWindow",
-    controller: BrowseController,
-    asset: Asset,
-) -> None:
-    """Attempt to download asset and show the result or error message."""
-    stdscr.erase()
-    h, w = stdscr.getmaxyx()
-    try:
-        path = controller.download_asset(asset)
-        stdscr.addstr(0, 0, _truncate(f"Downloaded: {path}", w - 1))
-    except RuntimeError as exc:
-        stdscr.addstr(0, 0, _truncate(f"Error: {exc}", w - 1))
-    stdscr.addstr(1, 0, "Press any key...")
-    stdscr.refresh()
-    stdscr.getch()
-
-
-def _show_branch_result(
-    stdscr: "curses._CursesWindow",
-    result: gitbranch.BranchResult,
-) -> None:
-    stdscr.erase()
-    h, w = stdscr.getmaxyx()
-    msg = f"{result.status.value}: {result.name}"
-    if result.message:
-        msg += f" — {result.message}"
-    stdscr.addstr(0, 0, _truncate(msg, w - 1))
-    stdscr.addstr(1, 0, "Press any key...")
-    stdscr.refresh()
-    stdscr.getch()
-
-
-def _screen_projects(
-    stdscr: "curses._CursesWindow",
-    project_names: list[str],
-    groups: list,
-    proj_sel: int,
-    task_sel: int,
-) -> tuple[int, int, str | None]:
-    """Render + handle one keypress on the projects screen.
-
-    Returns (proj_sel, task_sel, next_screen) where next_screen is
-    None to signal quit.
-    """
-    _render_list(stdscr, project_names, proj_sel, "Projects")
-    key = stdscr.getch()
-    if key in (curses.KEY_UP, ord("k")):
-        proj_sel = move_selection(proj_sel, -1, len(project_names))
-    elif key in (curses.KEY_DOWN, ord("j")):
-        proj_sel = move_selection(proj_sel, 1, len(project_names))
-    elif key in (curses.KEY_ENTER, 10, 13) and groups:
-        task_sel = 0
-        return proj_sel, task_sel, "tasks"
-    elif key in (ord("q"), 27):
-        return proj_sel, task_sel, None
-    return proj_sel, task_sel, "projects"
-
-
-def _screen_tasks(
-    stdscr: "curses._CursesWindow",
-    groups: list,
-    proj_sel: int,
-    task_sel: int,
-) -> tuple[int, str | None]:
-    """Render + handle one keypress on the tasks screen.
-
-    Returns (task_sel, next_screen) where next_screen is None to
-    signal quit.
-    """
-    _, task_list = groups[proj_sel]
-    task_labels = [
-        f"#{t.task_number or t.id}  {t.name}" for t in task_list
-    ]
-    _render_list(stdscr, task_labels, task_sel, "Tasks")
-    key = stdscr.getch()
-    if key in (curses.KEY_UP, ord("k")):
-        task_sel = move_selection(task_sel, -1, len(task_list))
-    elif key in (curses.KEY_DOWN, ord("j")):
-        task_sel = move_selection(task_sel, 1, len(task_list))
-    elif key in (curses.KEY_ENTER, 10, 13) and task_list:
-        return task_sel, "detail"
-    elif key in (ord("b"), 27):
-        return task_sel, "projects"
-    elif key in (ord("q"),):
-        return task_sel, None
-    return task_sel, "tasks"
-
-
-def _render_and_handle_detail(
-    stdscr: "curses._CursesWindow",
-    controller: BrowseController,
-    project_id: int,
-    task: MineTask,
-) -> None:
-    """Render task detail and handle keypresses in a loop until the user exits.
-
-    Handles: q/b/Esc -> return; c -> branch type picker + create; a -> asset menu.
-    """
-    task_dict, comments, asset_list = controller.task_detail(project_id, task.id)
-    user_map: dict = {}
-    detail_text = render_task_to_str(task_dict, comments, False, user_map)
-    while True:
-        _render_detail(stdscr, detail_text, asset_list)
-        key = stdscr.getch()
-        if key in (ord("q"), ord("b"), 27):
-            return
-        if key == ord("c"):
-            chosen = _choose_branch_type(stdscr)
-            if chosen:
-                result = controller.create_task_branch(chosen, project_id, task.id)
-                _show_branch_result(stdscr, result)
-        elif key == ord("a"):
-            _asset_menu(stdscr, asset_list, controller)
-
-
-def _screen_detail(
-    stdscr: "curses._CursesWindow",
-    groups: list,
-    proj_sel: int,
-    task_sel: int,
-    controller: BrowseController,
-) -> str:
-    """Render + handle detail screen for the project-browse flow.
-
-    Returns the next screen name (always a string; no quit from detail).
-    Delegates detail rendering and key handling to _render_and_handle_detail,
-    then signals the browse loop to return to the tasks screen.
-    """
-    _, task_list = groups[proj_sel]
-    task = task_list[task_sel]
-    project_id = task.project_id or 0
-    _render_and_handle_detail(stdscr, controller, project_id, task)
-    return "tasks"
-
-
 def run_browser(
     stdscr: "curses._CursesWindow",
     controller: BrowseController,
@@ -504,6 +658,8 @@ def _screen_mine_list(
     ]
     _render_list(stdscr, labels, sel, "My Open Tasks")
     key = stdscr.getch()
+    if key == curses.KEY_RESIZE:
+        return sel, "list"
     if key in (curses.KEY_UP, ord("k")):
         return move_selection(sel, -1, len(tasks)), "list"
     if key in (curses.KEY_DOWN, ord("j")):

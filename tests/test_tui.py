@@ -16,12 +16,18 @@ from active_collab.models import Instance, MineTask
 from active_collab.tui import (
     BrowseController,
     MineController,
+    _draw_frame,
     _init_colors,
+    _render_list,
+    _render_too_small,
     _resolve_browse_instance,
+    _safe_addstr,
     _screen_mine_list,
     _truncate,
+    _visible_window,
     clamp_index,
     move_selection,
+    wrap_text,
 )
 
 
@@ -186,6 +192,252 @@ class TestTruncate(unittest.TestCase):
 
     def test_width_one_returns_single_char_when_fits(self) -> None:
         self.assertEqual(_truncate("a", 1), "a")
+
+
+class TestWrapText(unittest.TestCase):
+    def test_width_zero_returns_empty(self) -> None:
+        self.assertEqual(wrap_text("hello world", 0), [])
+
+    def test_negative_width_returns_empty(self) -> None:
+        self.assertEqual(wrap_text("hello world", -5), [])
+
+    def test_short_text_fits_in_one_line(self) -> None:
+        result = wrap_text("hello", 20)
+        self.assertEqual(result, ["hello"])
+
+    def test_no_line_exceeds_width(self) -> None:
+        long_text = "word " * 30
+        result = wrap_text(long_text, 20)
+        for line in result:
+            self.assertLessEqual(len(line), 20, f"Line too long: {line!r}")
+
+    def test_preserves_blank_lines(self) -> None:
+        text = "first\n\nsecond"
+        result = wrap_text(text, 40)
+        self.assertIn("", result)
+        self.assertIn("first", result)
+        self.assertIn("second", result)
+
+    def test_blank_line_between_paragraphs_preserved(self) -> None:
+        text = "para one\n\npara two"
+        result = wrap_text(text, 40)
+        blank_index = result.index("")
+        self.assertGreater(blank_index, 0)
+        self.assertLess(blank_index, len(result) - 1)
+
+    def test_wraps_at_word_boundary(self) -> None:
+        result = wrap_text("hello world foo bar", 10)
+        for line in result:
+            self.assertLessEqual(len(line), 10)
+            self.assertNotIn("  ", line)
+
+    def test_empty_string_returns_empty_list(self) -> None:
+        result = wrap_text("", 20)
+        self.assertEqual(result, [])
+
+    def test_single_very_long_word_fits_width_constraint(self) -> None:
+        result = wrap_text("abcdefghij", 5)
+        for line in result:
+            self.assertLessEqual(len(line), 5)
+
+    def test_multiple_paragraphs_each_wrapped_independently(self) -> None:
+        text = "short\n\n" + "word " * 20
+        result = wrap_text(text, 15)
+        for line in result:
+            self.assertLessEqual(len(line), 15)
+
+
+class TestVisibleWindow(unittest.TestCase):
+    def test_count_fits_returns_zero(self) -> None:
+        self.assertEqual(_visible_window(5, 0, 10), 0)
+
+    def test_count_equals_height_returns_zero(self) -> None:
+        self.assertEqual(_visible_window(10, 5, 10), 0)
+
+    def test_sel_at_start_returns_zero(self) -> None:
+        self.assertEqual(_visible_window(20, 0, 5), 0)
+
+    def test_sel_near_end_scrolls_to_show_it(self) -> None:
+        offset = _visible_window(20, 19, 5)
+        self.assertGreaterEqual(19, offset)
+        self.assertLess(19, offset + 5)
+
+    def test_sel_in_middle_is_visible(self) -> None:
+        offset = _visible_window(20, 10, 5)
+        self.assertGreaterEqual(10, offset)
+        self.assertLess(10, offset + 5)
+
+    def test_offset_clamped_to_zero_minimum(self) -> None:
+        offset = _visible_window(10, 0, 5)
+        self.assertGreaterEqual(offset, 0)
+
+    def test_offset_clamped_to_count_minus_height_maximum(self) -> None:
+        offset = _visible_window(20, 19, 5)
+        self.assertLessEqual(offset, 20 - 5)
+
+    def test_sel_visible_for_all_positions(self) -> None:
+        count, height = 15, 5
+        for sel in range(count):
+            offset = _visible_window(count, sel, height)
+            self.assertGreaterEqual(sel, offset, f"sel={sel} not >= offset={offset}")
+            self.assertLess(sel, offset + height, f"sel={sel} not < offset+height={offset+height}")
+
+    def test_zero_count_returns_zero(self) -> None:
+        self.assertEqual(_visible_window(0, 0, 5), 0)
+
+
+class FakeWindow:
+    """Fake curses window that records addstr calls; raises curses.error on demand."""
+
+    def __init__(self, height: int = 24, width: int = 80, raise_on: set | None = None) -> None:
+        self._height = height
+        self._width = width
+        self._raise_on: set = raise_on or set()
+        self.calls: list[tuple] = []
+        self._erased = False
+
+    def erase(self) -> None:
+        self._erased = True
+
+    def getmaxyx(self) -> tuple[int, int]:
+        return self._height, self._width
+
+    def addstr(self, y: int, x: int, text: str, attr: int = 0) -> None:
+        key = (y, x)
+        if key in self._raise_on:
+            raise curses.error("simulated write error")
+        self.calls.append((y, x, text, attr))
+
+    def refresh(self) -> None:
+        pass
+
+    def getch(self) -> int:
+        return ord("q")
+
+    def texts_at(self, row: int) -> list[str]:
+        return [text for r, _c, text, _a in self.calls if r == row]
+
+    def all_text(self) -> str:
+        return " ".join(text for _r, _c, text, _a in self.calls)
+
+
+class TestSafeAddstr(unittest.TestCase):
+    def test_normal_write_is_recorded(self) -> None:
+        win = FakeWindow()
+        _safe_addstr(win, 0, 0, "hello")
+        self.assertEqual(len(win.calls), 1)
+        self.assertEqual(win.calls[0][2], "hello")
+
+    def test_curses_error_is_silently_suppressed(self) -> None:
+        win = FakeWindow(raise_on={(0, 0)})
+        try:
+            _safe_addstr(win, 0, 0, "boom")
+        except curses.error:
+            self.fail("_safe_addstr must not propagate curses.error")
+
+    def test_attr_is_passed_through(self) -> None:
+        win = FakeWindow()
+        _safe_addstr(win, 1, 2, "txt", 99)
+        self.assertEqual(win.calls[0][3], 99)
+
+    def test_coordinates_are_correct(self) -> None:
+        win = FakeWindow()
+        _safe_addstr(win, 3, 7, "x")
+        row, col, _text, _attr = win.calls[0]
+        self.assertEqual(row, 3)
+        self.assertEqual(col, 7)
+
+
+class TestDrawFrame(unittest.TestCase):
+    def _corners(self, win: FakeWindow) -> dict[str, str]:
+        by_pos = {(r, c): text for r, c, text, _a in win.calls}
+        h, w = win.getmaxyx()
+        return {
+            "tl": by_pos.get((0, 0), ""),
+            "tr": by_pos.get((0, w - 1), ""),
+            "bl": by_pos.get((h - 1, 0), ""),
+            "br": by_pos.get((h - 1, w - 1), ""),
+        }
+
+    def test_top_left_corner_is_rounded(self) -> None:
+        win = FakeWindow(height=10, width=30)
+        _draw_frame(win, 0, 0, 10, 30, "Title")
+        corners = self._corners(win)
+        self.assertEqual(corners["tl"], "╭")
+
+    def test_top_right_corner_is_rounded(self) -> None:
+        win = FakeWindow(height=10, width=30)
+        _draw_frame(win, 0, 0, 10, 30, "Title")
+        corners = self._corners(win)
+        self.assertEqual(corners["tr"], "╮")
+
+    def test_bottom_left_corner_is_rounded(self) -> None:
+        win = FakeWindow(height=10, width=30)
+        _draw_frame(win, 0, 0, 10, 30, "Title")
+        corners = self._corners(win)
+        self.assertEqual(corners["bl"], "╰")
+
+    def test_bottom_right_corner_is_rounded(self) -> None:
+        win = FakeWindow(height=10, width=30)
+        _draw_frame(win, 0, 0, 10, 30, "Title")
+        corners = self._corners(win)
+        self.assertEqual(corners["br"], "╯")
+
+    def test_title_embedded_in_top_border(self) -> None:
+        win = FakeWindow(height=10, width=40)
+        _draw_frame(win, 0, 0, 10, 40, "My Title")
+        top_texts = win.texts_at(0)
+        combined = "".join(top_texts)
+        self.assertIn("My Title", combined)
+
+    def test_title_clipped_when_too_long(self) -> None:
+        win = FakeWindow(height=10, width=12)
+        _draw_frame(win, 0, 0, 10, 12, "Very Long Title That Does Not Fit")
+        top_texts = win.texts_at(0)
+        combined = "".join(top_texts)
+        self.assertLessEqual(len(combined), 12 + 10)
+
+    def test_curses_error_does_not_propagate(self) -> None:
+        win = FakeWindow(height=10, width=30, raise_on={(0, 29)})
+        try:
+            _draw_frame(win, 0, 0, 10, 30, "Title")
+        except curses.error:
+            self.fail("_draw_frame must not propagate curses.error")
+
+    def test_vertical_sides_drawn(self) -> None:
+        win = FakeWindow(height=8, width=20)
+        _draw_frame(win, 0, 0, 8, 20, "T")
+        by_pos = {(r, c): text for r, c, text, _a in win.calls}
+        for row in range(1, 7):
+            self.assertEqual(by_pos.get((row, 0), ""), "│", f"missing left side at row {row}")
+            self.assertEqual(by_pos.get((row, 19), ""), "│", f"missing right side at row {row}")
+
+
+class TestRenderTooSmall(unittest.TestCase):
+    def test_renders_message_without_raising(self) -> None:
+        win = FakeWindow(height=2, width=10)
+        try:
+            _render_too_small(win)
+        except Exception as exc:  # noqa: BLE001
+            self.fail(f"_render_too_small raised unexpectedly: {exc}")
+
+    def test_message_mentions_terminal(self) -> None:
+        win = FakeWindow(height=2, width=20)
+        _render_too_small(win)
+        text = win.all_text().lower()
+        self.assertIn("terminal", text)
+
+    def test_works_on_tiny_window(self) -> None:
+        win = FakeWindow(height=1, width=5)
+        try:
+            _render_too_small(win)
+        except Exception as exc:  # noqa: BLE001
+            self.fail(f"_render_too_small raised on tiny window: {exc}")
+
+    def test_erase_called(self) -> None:
+        win = FakeWindow(height=4, width=30)
+        _render_too_small(win)
+        self.assertTrue(win._erased)  # noqa: SLF001
 
 
 class TestInitColors(unittest.TestCase):
@@ -964,9 +1216,16 @@ class TestScreenMineList(unittest.TestCase):
         sel, _ = _screen_mine_list(stdscr, tasks, 0)
         self.assertEqual(sel, 0)
 
+    def test_key_resize_returns_list_action_without_crashing(self) -> None:
+        """KEY_RESIZE must be handled as a benign re-render trigger."""
+        tasks = self._tasks()
+        stdscr = FakeStdscr(keys=[curses.KEY_RESIZE, ord("q")])
+        sel, action = _screen_mine_list(stdscr, tasks, 0)
+        self.assertEqual(sel, 0)
+        self.assertEqual(action, "list")
+
     def test_selected_row_shows_marker(self) -> None:
         """The ▸ marker must appear on the selected item row and not on others."""
-        from active_collab.tui import _render_list
         tasks = self._tasks()
         labels = [
             f"[{t.instance_name}] #{t.task_number or t.id}  {t.name}"
@@ -983,7 +1242,6 @@ class TestScreenMineList(unittest.TestCase):
 
     def test_non_selected_row_has_no_marker(self) -> None:
         """Non-selected rows must not show the ▸ marker."""
-        from active_collab.tui import _render_list
         tasks = self._tasks()
         labels = [
             f"[{t.instance_name}] #{t.task_number or t.id}  {t.name}"
@@ -995,6 +1253,116 @@ class TestScreenMineList(unittest.TestCase):
             if "beta" in text:
                 msg = f"Non-selected 'beta' row must not have marker: {text!r}"
                 self.assertNotIn("▸", text, msg)
+
+
+class TestRenderListFrame(unittest.TestCase):
+    """_render_list must draw rounded corners and embed the title in the top border."""
+
+    def _render(
+        self,
+        items: list[str],
+        sel: int = 0,
+        title: str = "Test",
+        height: int = 20,
+        width: int = 60,
+    ) -> FakeStdscr:
+        stdscr = FakeStdscr(keys=[], height=height, width=width)
+        _render_list(stdscr, items, sel, title)
+        return stdscr
+
+    def test_top_left_corner_is_rounded(self) -> None:
+        stdscr = self._render(["item one", "item two"])
+        by_pos = {(r, c): text for r, c, text, _a in stdscr.written}
+        self.assertEqual(by_pos.get((0, 0), ""), "╭")
+
+    def test_top_right_corner_is_rounded(self) -> None:
+        stdscr = self._render(["item one", "item two"], width=40)
+        by_pos = {(r, c): text for r, c, text, _a in stdscr.written}
+        self.assertEqual(by_pos.get((0, 39), ""), "╮")
+
+    def test_bottom_left_corner_is_rounded(self) -> None:
+        stdscr = self._render(["item one", "item two"], height=15)
+        by_pos = {(r, c): text for r, c, text, _a in stdscr.written}
+        self.assertEqual(by_pos.get((14, 0), ""), "╰")
+
+    def test_bottom_right_corner_is_rounded(self) -> None:
+        stdscr = self._render(["item one"], height=10, width=30)
+        by_pos = {(r, c): text for r, c, text, _a in stdscr.written}
+        self.assertEqual(by_pos.get((9, 29), ""), "╯")
+
+    def test_title_appears_in_rendered_output(self) -> None:
+        stdscr = self._render(["item"], title="My Projects")
+        all_text = " ".join(t for _, _, t, *_ in stdscr.written)
+        self.assertIn("My Projects", all_text)
+
+    def test_selected_item_has_marker(self) -> None:
+        items = ["Alpha", "Beta", "Gamma"]
+        stdscr = self._render(items, sel=1)
+        all_text = " ".join(t for _, _, t, *_ in stdscr.written)
+        self.assertIn("▸", all_text)
+        marker_texts = [t for _, _, t, *_ in stdscr.written if "▸" in t]
+        self.assertEqual(len(marker_texts), 1)
+        self.assertIn("Beta", marker_texts[0])
+
+    def test_non_selected_items_have_no_marker(self) -> None:
+        items = ["Alpha", "Beta", "Gamma"]
+        stdscr = self._render(items, sel=1)
+        for _, _, text, *_ in stdscr.written:
+            if "Alpha" in text or "Gamma" in text:
+                self.assertNotIn("▸", text, f"Non-selected item has marker: {text!r}")
+
+    def test_hint_bar_text_rendered(self) -> None:
+        stdscr = self._render(["item"])
+        all_text = " ".join(t for _, _, t, *_ in stdscr.written)
+        self.assertIn("↑/↓", all_text)
+
+    def test_too_small_terminal_shows_warning(self) -> None:
+        stdscr = FakeStdscr(keys=[], height=3, width=10)
+        _render_list(stdscr, ["item"], 0, "Title")
+        all_text = " ".join(t for _, _, t, *_ in stdscr.written).lower()
+        self.assertIn("terminal", all_text)
+
+    def test_too_small_terminal_does_not_crash(self) -> None:
+        stdscr = FakeStdscr(keys=[], height=2, width=8)
+        try:
+            _render_list(stdscr, ["item"], 0, "Title")
+        except Exception as exc:  # noqa: BLE001
+            self.fail(f"_render_list raised on tiny terminal: {exc}")
+
+    def test_scrolling_list_shows_selected_item(self) -> None:
+        items = [f"Item {i}" for i in range(30)]
+        sel = 25
+        stdscr = self._render(items, sel=sel, height=12, width=40)
+        all_text = " ".join(t for _, _, t, *_ in stdscr.written)
+        self.assertIn(f"Item {sel}", all_text)
+
+    def test_scrolled_list_hides_items_before_viewport(self) -> None:
+        items = [f"Item {i}" for i in range(30)]
+        stdscr = self._render(items, sel=29, height=12, width=40)
+        all_text = " ".join(t for _, _, t, *_ in stdscr.written)
+        self.assertNotIn("Item 0", all_text)
+
+
+class TestResizeSafeListScreens(unittest.TestCase):
+    """KEY_RESIZE must not crash any list screen; it should re-render."""
+
+    def test_screen_mine_list_handles_key_resize(self) -> None:
+        tasks = [
+            MineTask(id=1, name="Task", instance_name="inst", project_id=1),
+        ]
+        stdscr = FakeStdscr(keys=[curses.KEY_RESIZE, ord("q")])
+        try:
+            sel, action = _screen_mine_list(stdscr, tasks, 0)
+        except Exception as exc:  # noqa: BLE001
+            self.fail(f"_screen_mine_list crashed on KEY_RESIZE: {exc}")
+        self.assertEqual(action, "list")
+
+    def test_render_list_called_after_resize(self) -> None:
+        tasks = [MineTask(id=1, name="T", instance_name="i", project_id=1)]
+        stdscr = FakeStdscr(keys=[curses.KEY_RESIZE, ord("q")])
+        _screen_mine_list(stdscr, tasks, 0)
+        all_text = stdscr.text_written()
+        self.assertIn("T", all_text)
 
 
 class TestResolveBrowseInstance(unittest.TestCase):
