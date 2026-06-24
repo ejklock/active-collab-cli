@@ -1,10 +1,13 @@
 """Tests for tui.py: navigation helpers and BrowseController (no curses)."""
 
+import contextlib
+import io
 import json
+import types
 import unittest
 from dataclasses import dataclass
 from typing import Callable
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from active_collab.assets import Asset
 from active_collab.gitbranch import BranchResult, BranchStatus
@@ -423,6 +426,90 @@ class TestBrowseControllerDownloadAsset(unittest.TestCase):
                 ctrl.download_asset(
                     self._asset(f"{self._BASE_URL}/missing.jpg"), dest_dir=tmp
                 )
+
+
+class TestRunNonTtyGuard(unittest.TestCase):
+    """run() must exit early with code 2 when stdin or stdout is not a TTY."""
+
+    def _args_stub(self) -> types.SimpleNamespace:
+        return types.SimpleNamespace(instance=None)
+
+    def _run_with_non_tty(
+        self, stdin_is_tty: bool = False, stdout_is_tty: bool = False
+    ) -> tuple[int, str]:
+        """Invoke tui.run with patched isatty values; return (exit_code, stderr)."""
+        from active_collab import tui
+
+        stderr_buf = io.StringIO()
+        with (
+            patch.object(tui.sys.stdin, "isatty", return_value=stdin_is_tty),
+            patch.object(tui.sys.stdout, "isatty", return_value=stdout_is_tty),
+            contextlib.redirect_stderr(stderr_buf),
+        ):
+            exit_code = tui.run(self._args_stub())
+        return exit_code, stderr_buf.getvalue()
+
+    def test_returns_2_when_stdin_not_a_tty(self) -> None:
+        exit_code, _ = self._run_with_non_tty(stdin_is_tty=False, stdout_is_tty=True)
+        self.assertEqual(exit_code, 2)
+
+    def test_returns_2_when_stdout_not_a_tty(self) -> None:
+        exit_code, _ = self._run_with_non_tty(stdin_is_tty=True, stdout_is_tty=False)
+        self.assertEqual(exit_code, 2)
+
+    def test_returns_2_when_both_not_a_tty(self) -> None:
+        exit_code, _ = self._run_with_non_tty(stdin_is_tty=False, stdout_is_tty=False)
+        self.assertEqual(exit_code, 2)
+
+    def test_no_exception_raised_in_non_tty_path(self) -> None:
+        stderr_buf = io.StringIO()
+        from active_collab import tui
+
+        with (
+            patch.object(tui.sys.stdin, "isatty", return_value=False),
+            patch.object(tui.sys.stdout, "isatty", return_value=False),
+            contextlib.redirect_stderr(stderr_buf),
+        ):
+            try:
+                tui.run(self._args_stub())
+            except Exception as exc:  # noqa: BLE001
+                self.fail(f"run() raised an unexpected exception: {exc}")
+
+    def test_error_message_mentions_interactive_terminal(self) -> None:
+        _, stderr = self._run_with_non_tty(stdin_is_tty=False, stdout_is_tty=False)
+        self.assertIn("interactive terminal", stderr.lower())
+
+    def test_error_message_mentions_tty(self) -> None:
+        _, stderr = self._run_with_non_tty(stdin_is_tty=False, stdout_is_tty=False)
+        self.assertIn("TTY", stderr)
+
+    def test_error_written_to_stderr_not_stdout(self) -> None:
+        from active_collab import tui
+
+        stdout_buf = io.StringIO()
+        stderr_buf = io.StringIO()
+        with (
+            patch.object(tui.sys.stdin, "isatty", return_value=False),
+            patch.object(tui.sys.stdout, "isatty", return_value=False),
+            contextlib.redirect_stdout(stdout_buf),
+            contextlib.redirect_stderr(stderr_buf),
+        ):
+            tui.run(self._args_stub())
+        self.assertNotEqual(stderr_buf.getvalue(), "")
+        self.assertEqual(stdout_buf.getvalue(), "")
+
+    def test_config_load_not_called_in_non_tty_path(self) -> None:
+        from active_collab import tui
+
+        stderr_buf = io.StringIO()
+        with (
+            patch.object(tui.sys.stdin, "isatty", return_value=False),
+            patch.object(tui.sys.stdout, "isatty", return_value=False),
+            patch("active_collab.tui.Config") as mock_config,
+            contextlib.redirect_stderr(stderr_buf),
+        ):
+            tui.run(self._args_stub())
+        mock_config.load.assert_not_called()
 
 
 class TestCliIntegrationBrowseSubcommand(unittest.TestCase):

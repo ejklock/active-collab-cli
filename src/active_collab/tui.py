@@ -10,6 +10,7 @@ Provides:
 import curses
 import json
 import subprocess  # nosec B404
+import sys
 import tempfile
 import webbrowser
 from collections import OrderedDict
@@ -384,8 +385,13 @@ def run_browser(
 
 
 def run(args: object) -> int:
-    """Entry point for the `browse` subcommand; builds deps and launches TUI.
-    """
+    """Entry point for the `browse` subcommand; builds deps and launches TUI."""
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        _render.print_error(
+            "Error: 'browse' requires an interactive terminal (TTY)."
+        )
+        return 2
+
     config = Config.load()
     store = Store(config)
     repo = InstanceRepository(store.conn)
