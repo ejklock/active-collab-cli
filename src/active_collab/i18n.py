@@ -98,6 +98,12 @@ _CATALOG: dict[str, dict[str, str]] = {
         "page": "página",
         "open": "abrir",
         "download": "baixar",
+        # detail-view redesign labels
+        "Details": "Detalhes",
+        "Artifacts": "Anexos/Artefatos",
+        "Error: 'browse' requires an interactive terminal (TTY).": (
+            "Erro: 'browse' requer um terminal interativo (TTY)."
+        ),
     }
 }
 

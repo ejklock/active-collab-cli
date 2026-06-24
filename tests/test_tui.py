@@ -16,10 +16,14 @@ from active_collab.models import Instance, MineTask
 from active_collab.tui import (
     BrowseController,
     MineController,
+    _artifacts_panel,
     _comment_box,
     _draw_frame,
     _hint_bar,
     _init_colors,
+    _meta_rows,
+    _meta_table,
+    _open_asset_by_digit,
     _render_and_handle_detail,
     _render_list,
     _render_too_small,
@@ -2224,6 +2228,550 @@ class TestTuiInstanceResolutionI18n(unittest.TestCase):
             self.assertNotIn("multiple instances (", err)
         finally:
             set_language("en")
+
+
+class TestMetaRows(unittest.TestCase):
+    """S3-AC1: _meta_rows returns structured (label, value) tuples from task_dict."""
+
+    def _task(self, **kwargs: object) -> dict:
+        base = {
+            "id": 42,
+            "task_number": 7,
+            "name": "My Task",
+            "is_completed": False,
+            "assignee_id": None,
+            "start_on": None,
+            "due_on": None,
+            "estimate": None,
+            "tracked_time": None,
+        }
+        base.update(kwargs)
+        return base
+
+    def test_returns_list_of_tuples(self) -> None:
+        rows = _meta_rows(self._task())
+        self.assertIsInstance(rows, list)
+        for item in rows:
+            self.assertIsInstance(item, tuple)
+            self.assertEqual(len(item), 2)
+
+    def test_task_label_and_number_present(self) -> None:
+        rows = _meta_rows(self._task(task_number=7))
+        labels_values = dict(rows)
+        from active_collab.i18n import __
+        task_label = __("Task")
+        self.assertIn(task_label, labels_values)
+        self.assertIn("#7", labels_values[task_label])
+
+    def test_status_open_when_not_completed(self) -> None:
+        rows = _meta_rows(self._task(is_completed=False))
+        values = [v for _, v in rows]
+        from active_collab.i18n import __
+        self.assertIn(__("Open"), values)
+
+    def test_status_completed_when_is_completed(self) -> None:
+        rows = _meta_rows(self._task(is_completed=True))
+        values = [v for _, v in rows]
+        from active_collab.i18n import __
+        self.assertIn(__("Completed"), values)
+
+    def test_assignee_unassigned_when_none(self) -> None:
+        rows = _meta_rows(self._task(assignee_id=None))
+        values = [v for _, v in rows]
+        from active_collab.i18n import __
+        self.assertIn(__("(unassigned)"), values)
+
+    def test_assignee_shows_id_when_set(self) -> None:
+        rows = _meta_rows(self._task(assignee_id=99))
+        values = [v for _, v in rows]
+        self.assertTrue(any("99" in v for v in values))
+
+    def test_start_date_included_when_set(self) -> None:
+        rows = _meta_rows(self._task(start_on=1700000000))
+        labels = [label for label, _ in rows]
+        from active_collab.i18n import __
+        self.assertIn(__("Start"), labels)
+
+    def test_start_date_omitted_when_none(self) -> None:
+        rows = _meta_rows(self._task(start_on=None))
+        labels = [label for label, _ in rows]
+        from active_collab.i18n import __
+        self.assertNotIn(__("Start"), labels)
+
+    def test_due_date_included_when_set(self) -> None:
+        rows = _meta_rows(self._task(due_on=1700000000))
+        labels = [label for label, _ in rows]
+        from active_collab.i18n import __
+        self.assertIn(__("Due"), labels)
+
+    def test_estimate_and_logged_always_present(self) -> None:
+        rows = _meta_rows(self._task())
+        labels = [label for label, _ in rows]
+        from active_collab.i18n import __
+        self.assertIn(__("Estimate"), labels)
+        self.assertIn(__("Logged"), labels)
+
+    def test_name_not_in_rows(self) -> None:
+        rows = _meta_rows(self._task(name="Should Not Appear In Grid"))
+        values = [v for _, v in rows]
+        self.assertFalse(
+            any("Should Not Appear In Grid" in v for v in values),
+            "Task name must stay in the frame title, not in meta rows",
+        )
+
+    def test_estimate_shows_hours_suffix(self) -> None:
+        rows = _meta_rows(self._task(estimate=4))
+        values = [v for _, v in rows]
+        self.assertTrue(any("h" in v for v in values))
+
+
+class TestMetaTable(unittest.TestCase):
+    """S3-AC1: _meta_table renders a full-grid bordered table; no line exceeds width."""
+
+    def _rows(self) -> list[tuple[str, str]]:
+        return [
+            ("Task", "#7"),
+            ("Status", "Open"),
+            ("Assignee", "(unassigned)"),
+            ("Estimate", "0h"),
+            ("Logged", "0h"),
+        ]
+
+    def test_returns_list_of_strings(self) -> None:
+        result = _meta_table(self._rows(), 60, "Details")
+        self.assertIsInstance(result, list)
+        self.assertTrue(all(isinstance(line, str) for line in result))
+
+    def test_no_line_exceeds_width(self) -> None:
+        width = 60
+        result = _meta_table(self._rows(), width, "Details")
+        for line in result:
+            self.assertLessEqual(
+                len(line), width, f"Line too long ({len(line)}): {line!r}"
+            )
+
+    def test_top_border_starts_with_rounded_corner(self) -> None:
+        result = _meta_table(self._rows(), 60, "Details")
+        self.assertTrue(result[0].startswith("╭"), f"Expected ╭, got: {result[0]!r}")
+
+    def test_top_border_ends_with_rounded_corner(self) -> None:
+        result = _meta_table(self._rows(), 60, "Details")
+        self.assertTrue(result[0].endswith("╮"), f"Expected ╮, got: {result[0]!r}")
+
+    def test_bottom_border_starts_with_rounded_corner(self) -> None:
+        result = _meta_table(self._rows(), 60, "Details")
+        self.assertTrue(result[-1].startswith("╰"), f"Expected ╰, got: {result[-1]!r}")
+
+    def test_bottom_border_ends_with_rounded_corner(self) -> None:
+        result = _meta_table(self._rows(), 60, "Details")
+        self.assertTrue(result[-1].endswith("╯"), f"Expected ╯, got: {result[-1]!r}")
+
+    def test_title_embedded_in_top_border(self) -> None:
+        result = _meta_table(self._rows(), 60, "Details")
+        self.assertIn("Details", result[0])
+
+    def test_separator_rows_between_fields(self) -> None:
+        rows = self._rows()
+        result = _meta_table(rows, 60, "Details")
+        sep_lines = [line for line in result if "├" in line and "┼" in line and "┤" in line]
+        self.assertEqual(
+            len(sep_lines), len(rows) - 1,
+            f"Expected {len(rows) - 1} separators, got {len(sep_lines)}: {result}",
+        )
+
+    def test_separator_uses_ltee_cross_rtee(self) -> None:
+        result = _meta_table(self._rows(), 60, "Details")
+        sep_lines = [line for line in result if "├" in line]
+        self.assertTrue(len(sep_lines) > 0, "No separator line found")
+        for line in sep_lines:
+            self.assertIn("┼", line, f"Missing cross in separator: {line!r}")
+            self.assertTrue(line.endswith("┤"), f"Missing ┤ at end of separator: {line!r}")
+
+    def test_value_columns_separated_by_pipe(self) -> None:
+        result = _meta_table(self._rows(), 60, "Details")
+        data_lines = [line for line in result if line.startswith("│")]
+        self.assertTrue(len(data_lines) > 0, "No data lines found")
+        for line in data_lines:
+            self.assertIn("│", line[1:], f"Missing interior │ in data line: {line!r}")
+
+    def test_returns_empty_for_too_narrow_width(self) -> None:
+        result = _meta_table(self._rows(), 5, "Details")
+        self.assertEqual(result, [])
+
+    def test_values_truncated_to_fit(self) -> None:
+        long_value = "x" * 200
+        rows = [("Label", long_value)]
+        result = _meta_table(rows, 40, "Details")
+        for line in result:
+            self.assertLessEqual(
+                len(line), 40, f"Line not truncated to width: {line!r}"
+            )
+
+    def test_empty_rows_produces_minimal_table(self) -> None:
+        result = _meta_table([], 40, "Details")
+        self.assertIsInstance(result, list)
+
+    def test_no_line_exceeds_width_narrow(self) -> None:
+        result = _meta_table(self._rows(), 30, "Details")
+        for line in result:
+            self.assertLessEqual(len(line), 30, f"Line too long: {line!r}")
+
+    def test_pt_br_title_used_when_set(self) -> None:
+        from active_collab.i18n import __, set_language
+        set_language("pt_BR")
+        try:
+            title = __("Details")
+            result = _meta_table(self._rows(), 60, title)
+            self.assertIn("Detalhes", result[0])
+        finally:
+            set_language("en")
+
+
+class TestArtifactsPanel(unittest.TestCase):
+    """S3-AC2: _artifacts_panel renders a bordered box; empty for no assets."""
+
+    def _asset(self, name: str, url: str) -> Asset:
+        return Asset(name=name, url=url, kind="link")
+
+    def test_empty_list_returns_empty(self) -> None:
+        result = _artifacts_panel([], 60)
+        self.assertEqual(result, [])
+
+    def test_too_narrow_returns_empty(self) -> None:
+        assets = [self._asset("file.png", "https://example.com/file.png")]
+        result = _artifacts_panel(assets, 5)
+        self.assertEqual(result, [])
+
+    def test_top_border_starts_with_rounded_corner(self) -> None:
+        assets = [self._asset("photo.jpg", "https://example.com/photo.jpg")]
+        result = _artifacts_panel(assets, 60)
+        self.assertTrue(result[0].startswith("╭"), f"Expected ╭: {result[0]!r}")
+
+    def test_bottom_border_ends_with_rounded_corner(self) -> None:
+        assets = [self._asset("photo.jpg", "https://example.com/photo.jpg")]
+        result = _artifacts_panel(assets, 60)
+        self.assertTrue(result[-1].endswith("╯"), f"Expected ╯: {result[-1]!r}")
+
+    def test_artifacts_title_in_top_border(self) -> None:
+        from active_collab.i18n import __
+        assets = [self._asset("file.png", "https://example.com/file.png")]
+        result = _artifacts_panel(assets, 60)
+        self.assertIn(__("Artifacts"), result[0])
+
+    def test_first_asset_shows_n1_label(self) -> None:
+        assets = [self._asset("report.pdf", "https://example.com/report.pdf")]
+        result = _artifacts_panel(assets, 60)
+        content_lines = "\n".join(result)
+        self.assertIn("[1]", content_lines)
+        self.assertIn("report.pdf", content_lines)
+
+    def test_second_asset_shows_n2_label(self) -> None:
+        assets = [
+            self._asset("first.pdf", "https://example.com/first.pdf"),
+            self._asset("second.pdf", "https://example.com/second.pdf"),
+        ]
+        result = _artifacts_panel(assets, 60)
+        content_lines = "\n".join(result)
+        self.assertIn("[2]", content_lines)
+
+    def test_url_shown_on_indented_line(self) -> None:
+        url = "https://example.com/image.png"
+        assets = [self._asset("image.png", url)]
+        result = _artifacts_panel(assets, 80)
+        content_lines = "\n".join(result)
+        self.assertIn(url, content_lines)
+
+    def test_no_line_exceeds_width(self) -> None:
+        assets = [
+            self._asset("long-name-file.png", "https://example.com/very/long/path/image.png"),
+        ]
+        width = 50
+        result = _artifacts_panel(assets, width)
+        for line in result:
+            self.assertLessEqual(len(line), width, f"Line too long: {line!r}")
+
+    def test_multiple_assets_each_has_label_and_url(self) -> None:
+        assets = [
+            self._asset(f"file{i}.pdf", f"https://example.com/file{i}.pdf")
+            for i in range(3)
+        ]
+        result = _artifacts_panel(assets, 80)
+        content = "\n".join(result)
+        for i in range(1, 4):
+            self.assertIn(f"[{i}]", content)
+
+    def test_pt_br_title_in_top_border(self) -> None:
+        from active_collab.i18n import set_language
+        set_language("pt_BR")
+        try:
+            assets = [self._asset("file.pdf", "https://example.com/file.pdf")]
+            result = _artifacts_panel(assets, 60)
+            self.assertIn("Anexos", result[0])
+        finally:
+            set_language("en")
+
+
+class TestOpenAssetByDigit(unittest.TestCase):
+    """S3-AC2: digit keys 1-9 open matching asset; out-of-range is a no-op."""
+
+    def _asset(self, name: str) -> Asset:
+        return Asset(name=name, url=f"https://example.com/{name}", kind="link")
+
+    def _controller_with_tracking(self) -> tuple[object, list[Asset]]:
+        opened: list[Asset] = []
+
+        class TrackingController:
+            def open_asset(self, asset: Asset) -> None:
+                opened.append(asset)
+
+        return TrackingController(), opened
+
+    def test_key_1_opens_first_asset(self) -> None:
+        assets = [self._asset("a.pdf"), self._asset("b.pdf")]
+        ctrl, opened = self._controller_with_tracking()
+        _open_asset_by_digit(ord("1"), assets, ctrl)  # type: ignore[arg-type]
+        self.assertEqual(len(opened), 1)
+        self.assertEqual(opened[0].name, "a.pdf")
+
+    def test_key_2_opens_second_asset(self) -> None:
+        assets = [self._asset("a.pdf"), self._asset("b.pdf"), self._asset("c.pdf")]
+        ctrl, opened = self._controller_with_tracking()
+        _open_asset_by_digit(ord("2"), assets, ctrl)  # type: ignore[arg-type]
+        self.assertEqual(len(opened), 1)
+        self.assertEqual(opened[0].name, "b.pdf")
+
+    def test_key_9_opens_ninth_asset(self) -> None:
+        assets = [self._asset(f"f{i}.pdf") for i in range(9)]
+        ctrl, opened = self._controller_with_tracking()
+        _open_asset_by_digit(ord("9"), assets, ctrl)  # type: ignore[arg-type]
+        self.assertEqual(opened[0].name, "f8.pdf")
+
+    def test_out_of_range_key_is_noop(self) -> None:
+        assets = [self._asset("a.pdf")]
+        ctrl, opened = self._controller_with_tracking()
+        _open_asset_by_digit(ord("5"), assets, ctrl)  # type: ignore[arg-type]
+        self.assertEqual(len(opened), 0)
+
+    def test_key_1_with_empty_list_is_noop(self) -> None:
+        ctrl, opened = self._controller_with_tracking()
+        _open_asset_by_digit(ord("1"), [], ctrl)  # type: ignore[arg-type]
+        self.assertEqual(len(opened), 0)
+
+
+class TestDetailViewDigitKeyIntegration(unittest.TestCase):
+    """S3-AC2: digit keys in _render_and_handle_detail open assets via controller."""
+
+    def _asset(self, name: str, url: str) -> Asset:
+        return Asset(name=name, url=url, kind="link")
+
+    def test_digit_1_key_opens_first_asset(self) -> None:
+        opened: list[Asset] = []
+        asset = self._asset("doc.pdf", "https://example.com/doc.pdf")
+
+        class TrackingController:
+            def task_detail(self, pid: int, tid: int) -> tuple[dict, list, list]:
+                return (
+                    {"id": 1, "task_number": 1, "name": "T", "is_completed": False},
+                    [],
+                    [asset],
+                )
+
+            def open_asset(self, a: Asset) -> None:
+                opened.append(a)
+
+            def create_task_branch(self, *_args: object) -> object:
+                from active_collab.gitbranch import BranchResult, BranchStatus
+                return BranchResult(status=BranchStatus.created, name="feature/1-1")
+
+        task = _make_scrollable_task()
+        stdscr = FakeStdscrScrollable(keys=[ord("1"), ord("q")], height=24, width=80)
+        _render_and_handle_detail(stdscr, TrackingController(), 1, task)  # type: ignore[arg-type]
+        self.assertEqual(len(opened), 1)
+        self.assertIs(opened[0], asset)
+
+    def test_out_of_range_digit_does_not_open_any_asset(self) -> None:
+        opened: list[Asset] = []
+        asset = self._asset("doc.pdf", "https://example.com/doc.pdf")
+
+        class TrackingController:
+            def task_detail(self, pid: int, tid: int) -> tuple[dict, list, list]:
+                return (
+                    {"id": 1, "task_number": 1, "name": "T", "is_completed": False},
+                    [],
+                    [asset],
+                )
+
+            def open_asset(self, a: Asset) -> None:
+                opened.append(a)
+
+            def create_task_branch(self, *_args: object) -> object:
+                from active_collab.gitbranch import BranchResult, BranchStatus
+                return BranchResult(status=BranchStatus.created, name="feature/1-1")
+
+        task = _make_scrollable_task()
+        stdscr = FakeStdscrScrollable(keys=[ord("5"), ord("q")], height=24, width=80)
+        _render_and_handle_detail(stdscr, TrackingController(), 1, task)  # type: ignore[arg-type]
+        self.assertEqual(len(opened), 0)
+
+
+class TestBuildDetailLinesNewLayout(unittest.TestCase):
+    """S3-AC3: build_detail_lines composes meta table + description + artifacts + comments."""
+
+    def _rows(self) -> list[tuple[str, str]]:
+        return [("Task", "#1"), ("Status", "Open")]
+
+    def _asset(self, name: str, url: str) -> Asset:
+        return Asset(name=name, url=url, kind="link")
+
+    def test_meta_table_appears_before_description(self) -> None:
+        rows = self._rows()
+        lines = build_detail_lines("Description body", [], 60, meta_rows=rows)
+        first_box = next((i for i, line in enumerate(lines) if line.startswith("╭")), -1)
+        desc_idx = next((i for i, line in enumerate(lines) if "Description" in line), -1)
+        self.assertGreater(
+            desc_idx, first_box, "Description heading must come after meta table"
+        )
+
+    def test_artifacts_panel_appears_in_output_when_assets_provided(self) -> None:
+        rows = self._rows()
+        assets = [self._asset("file.pdf", "https://example.com/file.pdf")]
+        lines = build_detail_lines("body", [], 60, meta_rows=rows, asset_list=assets)
+        content = "\n".join(lines)
+        self.assertIn("[1]", content)
+
+    def test_no_artifacts_panel_when_no_assets(self) -> None:
+        rows = self._rows()
+        lines = build_detail_lines("body", [], 60, meta_rows=rows, asset_list=[])
+        content = "\n".join(lines)
+        self.assertNotIn("Artifacts", content)
+
+    def test_comment_boxes_appear_after_description(self) -> None:
+        rows = self._rows()
+        comment = {"created_by_name": "Alice", "created_on": 0, "body": "A comment"}
+        lines = build_detail_lines("body", [comment], 60, meta_rows=rows)
+        desc_idx = next((i for i, line in enumerate(lines) if "Description" in line), -1)
+        box_indices = [i for i, line in enumerate(lines) if line.startswith("╭")]
+        last_box = max(box_indices)
+        self.assertGreater(
+            last_box, desc_idx, "Comment box must appear after Description heading"
+        )
+
+    def test_backward_compat_no_meta_rows_uses_wrapped_text(self) -> None:
+        lines = build_detail_lines("plain meta text", [], 60)
+        combined = "\n".join(lines)
+        self.assertIn("plain meta text", combined)
+
+    def test_no_line_exceeds_inner_width_with_new_layout(self) -> None:
+        rows = self._rows()
+        assets = [self._asset("img.png", "https://example.com/img.png")]
+        comment = {"created_by_name": "Bob", "created_on": 0, "body": "body"}
+        lines = build_detail_lines("desc", [comment], 60, meta_rows=rows, asset_list=assets)
+        for line in lines:
+            self.assertLessEqual(len(line), 60, f"Line too long: {line!r}")
+
+
+class TestDetailFooterHasDigitOpen(unittest.TestCase):
+    """S3-AC3: detail footer includes '[1-9] open' cap when assets present."""
+
+    def test_footer_contains_1_9_open_when_assets_present(self) -> None:
+        opened: list = []
+        asset = Asset(name="f.pdf", url="https://example.com/f.pdf", kind="link")
+
+        class TrackingController:
+            def task_detail(self, pid: int, tid: int) -> tuple[dict, list, list]:
+                return (
+                    {"id": 1, "task_number": 1, "name": "T", "is_completed": False},
+                    [],
+                    [asset],
+                )
+
+            def open_asset(self, a: object) -> None:
+                opened.append(a)
+
+            def create_task_branch(self, *_a: object) -> object:
+                from active_collab.gitbranch import BranchResult, BranchStatus
+                return BranchResult(status=BranchStatus.created, name="f/1-1")
+
+        stdscr = FakeStdscrScrollable(keys=[ord("q")], height=24, width=80)
+        task = _make_scrollable_task()
+        _render_and_handle_detail(stdscr, TrackingController(), 1, task)  # type: ignore[arg-type]
+        all_text = stdscr.text_written()
+        self.assertIn("[1-9]", all_text)
+        self.assertIn("open", all_text)
+
+    def test_footer_omits_1_9_open_when_no_assets(self) -> None:
+        class NoAssetsController:
+            def task_detail(self, pid: int, tid: int) -> tuple[dict, list, list]:
+                return (
+                    {"id": 1, "task_number": 1, "name": "T", "is_completed": False},
+                    [],
+                    [],
+                )
+
+            def open_asset(self, a: object) -> None:
+                pass
+
+            def create_task_branch(self, *_a: object) -> object:
+                from active_collab.gitbranch import BranchResult, BranchStatus
+                return BranchResult(status=BranchStatus.created, name="f/1-1")
+
+        stdscr = FakeStdscrScrollable(keys=[ord("q")], height=24, width=80)
+        task = _make_scrollable_task()
+        _render_and_handle_detail(stdscr, NoAssetsController(), 1, task)  # type: ignore[arg-type]
+        all_text = stdscr.text_written()
+        self.assertNotIn("[1-9]", all_text)
+
+
+class TestTtyGuardI18n(unittest.TestCase):
+    """S3-AC4: browse TTY-guard error string is wrapped through __() with pt_BR entry."""
+
+    def setUp(self) -> None:
+        from active_collab.i18n import set_language
+        set_language("en")
+
+    def tearDown(self) -> None:
+        from active_collab.i18n import set_language
+        set_language("en")
+
+    def test_tty_guard_error_translated_in_pt_br(self) -> None:
+        import contextlib
+        import io
+        import types
+
+        from active_collab import tui
+        from active_collab.i18n import set_language
+
+        set_language("pt_BR")
+        stderr_buf = io.StringIO()
+        args = types.SimpleNamespace(instance=None)
+        with (
+            patch.object(tui.sys.stdin, "isatty", return_value=False),
+            patch.object(tui.sys.stdout, "isatty", return_value=False),
+            contextlib.redirect_stderr(stderr_buf),
+        ):
+            tui.run(args)
+        output = stderr_buf.getvalue()
+        self.assertIn("TTY", output)
+        self.assertNotIn("'browse' requires an interactive terminal", output)
+
+    def test_tty_guard_error_en_unchanged(self) -> None:
+        import contextlib
+        import io
+        import types
+
+        from active_collab import tui
+
+        stderr_buf = io.StringIO()
+        args = types.SimpleNamespace(instance=None)
+        with (
+            patch.object(tui.sys.stdin, "isatty", return_value=False),
+            patch.object(tui.sys.stdout, "isatty", return_value=False),
+            contextlib.redirect_stderr(stderr_buf),
+        ):
+            tui.run(args)
+        output = stderr_buf.getvalue()
+        self.assertIn("browse", output)
+        self.assertIn("TTY", output)
 
 
 if __name__ == "__main__":

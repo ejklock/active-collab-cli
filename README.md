@@ -109,17 +109,28 @@ selection highlight, styled status bar). On terminals without color support it
 falls back to bold/reverse styling automatically.
 
 The task detail view renders in a rounded frame with the task number and name
-embedded in the top border. Each comment appears in its own rounded sub-box with
-the author and date in the box's top border. The detail view scrolls vertically
-when the content exceeds the screen. The whole TUI is responsive: it adapts to
-terminal resize events and guards against too-small terminals without crashing.
+embedded in the top border. The detail screen shows:
+
+- **Meta grid** — a full-grid bordered table (label | value columns, ├──┼──┤ row
+  separators) listing Task, Status, Assignee, Start, Due, Estimate, and Logged.
+- **Description** — the task body, wrapped to the terminal width.
+- **Artifacts panel** — a rounded `Artifacts` box listing each image / attachment /
+  link as `[n] name` with its URL on the next line. Terminal emulators that
+  auto-link URLs make them clickable. Press `1`–`9` to open the matching asset in
+  your browser directly from the detail view.
+- **Comments** — each comment in its own rounded sub-box (author · date in the border).
+
+The detail view scrolls vertically when the content exceeds the screen. The whole
+TUI is responsive: it adapts to terminal resize events and guards against too-small
+terminals without crashing. A command-cap footer is always visible at the bottom of
+the frame.
 
 **Key bindings**
 
 | Screen | Keys |
 |---|---|
 | Lists (projects / tasks / assets) | `↑`/`↓` or `k`/`j` move · `Enter` select · `q` quit · `b` back |
-| Task detail | `↑`/`↓` or `k`/`j` scroll · `PgUp`/`PgDn` page · `c` create branch · `a` assets · `q`/`b` back |
+| Task detail | `↑`/`↓` or `k`/`j` scroll · `PgUp`/`PgDn` page · `c` branch · `a` assets · `1`–`9` open artifact · `q`/`b` back |
 | Branch-type picker | `feature` / `fix` / `hotfix` (default `feature`) |
 | Assets | `o` open in browser · `d` download · `q`/`b` back |
 
@@ -148,6 +159,24 @@ active-collab               # same as: active-collab current (when branch matche
 | `--no-comments` | `get`, `current` | Omit the comments section |
 | `--json` | `get`, `current` | Print raw task JSON (always hits the API, bypasses cache) |
 | `--refresh` | `get`, `current` | Bypass the task cache and re-fetch from the API |
+
+---
+
+## Internationalization
+
+The CLI ships with English (default) and Brazilian Portuguese (`pt_BR`) translations
+for all user-facing output. Set the locale with the `ACTIVE_COLLAB_LANG` environment
+variable:
+
+```sh
+ACTIVE_COLLAB_LANG=pt_BR active-collab browse
+```
+
+Resolution order: `ACTIVE_COLLAB_LANG` → `LANG` prefix → `en`.
+
+All translated strings go through the `__()` helper (`active_collab.i18n`). The
+catalog is a plain Python dict compiled into the package — no `.mo` files, no
+`bindtextdomain`, works inside a PyInstaller `--onefile` binary.
 
 ---
 

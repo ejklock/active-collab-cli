@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-06-24
+
+### Added
+
+- Task detail redesign: structured meta fields rendered as a full-grid rounded
+  bordered table (`├──┼──┤` separators, label | value columns, `Details` title
+  embedded in the top border). Task name stays in the frame title, not the grid.
+- Artifacts panel: a rounded `Artifacts` box in the detail view lists each image,
+  attachment, and link as `[n] name` with its real URL on an indented line.
+  Terminal emulators that auto-link URLs make them clickable without any escape
+  codes.
+- Digit hotkeys `1`–`9` in the detail view open the matching artifact in the
+  browser via `controller.open_asset`; out-of-range digits are safe no-ops.
+- Detail footer now includes a `[1-9] open` cap when artifacts are present.
+- i18n (en + pt_BR): lightweight in-code dict catalog via `__()` helper; locale
+  resolved from `ACTIVE_COLLAB_LANG` → `LANG` prefix → `en`. All user-facing
+  strings in `render.py`, `cli.py`, and `tui.py` are now wrapped. Works inside
+  a PyInstaller `--onefile` binary with zero bundling overhead.
+- The `browse` TTY-guard error (`"Error: 'browse' requires an interactive terminal
+  (TTY)."`) is now routed through `__()` with a `pt_BR` catalog entry.
+- `__version__` bumped to `0.5.0`.
+
 ## [0.4.0] - 2026-06-24
 
 ### Added

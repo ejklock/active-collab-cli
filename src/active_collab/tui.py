@@ -32,7 +32,7 @@ from active_collab.config import Config
 from active_collab.http import HttpClient
 from active_collab.i18n import __
 from active_collab.models import Instance, MineTask
-from active_collab.render import fmt_ts, html_to_text, render_meta_to_str
+from active_collab.render import fmt_ts, html_to_text
 from active_collab.store import InstanceRepository, Store
 
 _BRANCH_TYPES = ("feature", "fix", "hotfix")
@@ -248,18 +248,30 @@ def _comment_box(author: str, when: str, body: str, width: int) -> list[str]:
     return [top, *middle, bottom]
 
 
-def build_detail_lines(meta_text: str, comments: list, inner_width: int) -> list[str]:
-    """Build the full content lines for the detail view.
+def _detail_meta_section(
+    meta_rows: list[tuple[str, str]],
+    meta_text: str,
+    inner_width: int,
+) -> list[str]:
+    """Return the meta table + blank + Description heading + wrapped body."""
+    table = _meta_table(meta_rows, inner_width, __("Details"))
+    body_lines = wrap_text(meta_text, inner_width) or [""]
+    return [*table, "", __("Description") + ":", *body_lines]
 
-    Returns meta/description wrapped lines first, then a blank separator,
-    then each comment in its own rounded box separated by blank lines.
-    When comments is empty, returns only the meta lines.
-    """
-    lines: list[str] = wrap_text(meta_text, inner_width)
+
+def _detail_artifacts_section(asset_list: list, inner_width: int) -> list[str]:
+    """Return a blank + artifacts panel when assets exist, otherwise []."""
+    if not asset_list:
+        return []
+    panel = _artifacts_panel(asset_list, inner_width)
+    return ["", *panel] if panel else []
+
+
+def _detail_comment_section(comments: list, inner_width: int) -> list[str]:
+    """Return a blank + comment boxes joined by blank separators."""
     if not comments:
-        return lines
-
-    lines.append("")
+        return []
+    boxes: list[str] = []
     for idx, comment in enumerate(comments):
         author = str(
             comment.get("created_by_name") or comment.get("created_by_id") or "(unknown)"
@@ -267,9 +279,32 @@ def build_detail_lines(meta_text: str, comments: list, inner_width: int) -> list
         when = fmt_ts(comment.get("created_on"))
         body_html = comment.get("body_plain_text") or html_to_text(comment.get("body") or "")
         box = _comment_box(author, when, body_html, inner_width)
-        lines.extend(box)
+        boxes.extend(box)
         if idx < len(comments) - 1:
-            lines.append("")
+            boxes.append("")
+    return ["", *boxes]
+
+
+def build_detail_lines(
+    meta_text: str,
+    comments: list,
+    inner_width: int,
+    meta_rows: list[tuple[str, str]] | None = None,
+    asset_list: list | None = None,
+) -> list[str]:
+    """Build the full content lines for the detail view.
+
+    Composes: meta table (when meta_rows provided), blank, Description heading +
+    wrapped body, blank, artifacts panel (when asset_list provided), blank,
+    comment boxes. Falls back to plain wrapped meta_text when meta_rows is None.
+    """
+    if meta_rows is not None:
+        lines = _detail_meta_section(meta_rows, meta_text, inner_width)
+    else:
+        lines = list(wrap_text(meta_text, inner_width))
+
+    lines.extend(_detail_artifacts_section(asset_list or [], inner_width))
+    lines.extend(_detail_comment_section(comments, inner_width))
     return lines
 
 
@@ -469,16 +504,119 @@ def _screen_tasks(
     return task_sel, "tasks"
 
 
-def _detail_meta_text(task_dict: dict) -> str:
-    """Return the meta + description block for the detail view (no comments)."""
-    user_map: dict = {}
-    meta = render_meta_to_str(task_dict, user_map)
-    desc = html_to_text(task_dict.get("body") or "") or __("(no description)")
+def _meta_rows(task_dict: dict) -> list[tuple[str, str]]:
+    """Return (label, value) pairs for the meta grid; Name stays in the frame title."""
+    assignee_id = task_dict.get("assignee_id")
+    if assignee_id is None:
+        assignee_label = __("(unassigned)")
+    else:
+        assignee_label = f"({assignee_id})"
+
+    status_val = __("Completed") if task_dict.get("is_completed") else __("Open")
     num = task_dict.get("task_number") or task_dict.get("id", "")
-    name = task_dict.get("name", "")
-    status = __("Completed") if task_dict.get("is_completed") else __("Open")
-    header = f"{__('Task')}:   #{num}\n{__('Name')}:   {name}\n{__('Status')}: {status}"
-    return f"{header}\n{meta}\n\n{__('Description')}:\n{desc}"
+
+    rows: list[tuple[str, str]] = [
+        (__("Task"), f"#{num}"),
+        (__("Status"), status_val),
+        (__("Assignee"), assignee_label),
+    ]
+
+    start = _render.fmt_date(task_dict.get("start_on"))
+    if start:
+        rows.append((__("Start"), start))
+
+    due = _render.fmt_date(task_dict.get("due_on"))
+    if due:
+        rows.append((__("Due"), due))
+
+    rows.append((__("Estimate"), f"{_render.fmt_hours(task_dict.get('estimate'))}h"))
+    rows.append((__("Logged"), f"{_render.fmt_hours(task_dict.get('tracked_time'))}h"))
+    return rows
+
+
+def _meta_table(rows: list[tuple[str, str]], width: int, title: str) -> list[str]:
+    """Return a full-grid rounded bordered table with label and value columns.
+
+    A ├──┼──┤ separator row appears between every field. The title is embedded
+    in the top border. Values are truncated with … to fit. Returns [] when width
+    is too narrow to be useful (< 10).
+    """
+    if width < 10:
+        return []
+
+    label_col = max((len(label) for label, _ in rows), default=0)
+    label_col = min(label_col, width // 3)
+    # Data row: │ {label:<label_col} │ {val:<val_col} │
+    # = 1 + 1 + label_col + 1 + 1 + 1 + val_col + 1 + 1 = label_col + val_col + 7
+    val_col = width - label_col - 7
+
+    if val_col < 1:
+        return []
+
+    h = _BORDER["h"]
+    v = _BORDER["v"]
+    ltee = _BORDER["ltee"]
+    rtee = _BORDER["rtee"]
+    cross = "┼"
+
+    label_fill = h * (label_col + 2)
+    val_fill = h * (val_col + 2)
+
+    top_inner = h * (width - 2)
+    if len(title) + 4 <= width - 2:
+        label_str = f" {title} "
+        top_inner = h + label_str + h * (width - 4 - len(label_str))
+    top = _BORDER["tl"] + top_inner + _BORDER["tr"]
+
+    sep = ltee + label_fill + cross + val_fill + rtee
+
+    result = [top]
+    for idx, (label, value) in enumerate(rows):
+        padded_label = label.ljust(label_col)
+        truncated_val = _truncate(value, val_col)
+        line = f"{v} {padded_label} {v} {truncated_val.ljust(val_col)} {v}"
+        result.append(line)
+        if idx < len(rows) - 1:
+            result.append(sep)
+
+    bottom = _BORDER["bl"] + h * (width - 2) + _BORDER["br"]
+    result.append(bottom)
+    return result
+
+
+def _artifacts_panel(assets: list, width: int) -> list[str]:
+    """Return a rounded 'Artifacts' box with '[n] name' and indented URL per asset.
+
+    Returns [] when assets is empty or width is too narrow (< 8).
+    No line exceeds width characters.
+    """
+    if not assets or width < 8:
+        return []
+
+    inner = width - 2
+    title = __("Artifacts")
+    title_str = f" {title} "
+    if len(title_str) + 1 <= inner:
+        right_fill = _BORDER["h"] * (inner - 1 - len(title_str))
+        top_fill = _BORDER["h"] + title_str + right_fill
+    else:
+        top_fill = _BORDER["h"] * inner
+    top = _BORDER["tl"] + top_fill + _BORDER["tr"]
+    bottom = _BORDER["bl"] + _BORDER["h"] * inner + _BORDER["br"]
+
+    lines = [top]
+    for idx, asset in enumerate(assets, 1):
+        label = _truncate(f"[{idx}] {asset.name}", inner)
+        lines.append(_BORDER["v"] + label.ljust(inner) + _BORDER["v"])
+        url_line = _truncate(f"  {asset.url}", inner)
+        lines.append(_BORDER["v"] + url_line.ljust(inner) + _BORDER["v"])
+    lines.append(bottom)
+    return lines
+
+
+def _detail_meta_text(task_dict: dict) -> str:
+    """Return the description block only (meta is now rendered as a grid table)."""
+    return html_to_text(task_dict.get("body") or "") or __("(no description)")
 
 
 def _render_detail_frame(
@@ -486,6 +624,7 @@ def _render_detail_frame(
     content: list[str],
     offset: int,
     title: str,
+    has_assets: bool = False,
 ) -> None:
     """Draw the framed detail view with content scrolled to offset."""
     stdscr.erase()
@@ -514,9 +653,12 @@ def _render_detail_frame(
             content[line_idx][:inner_width].ljust(inner_width),
         )
 
-    hint = _hint_bar([
+    hint_pairs = [
         ("q", "back"), ("c", "branch"), ("a", "assets"), ("↑↓", "scroll"), ("⇞⇟", "page"),
-    ])
+    ]
+    if has_assets:
+        hint_pairs.insert(3, ("1-9", "open"))
+    hint = _hint_bar(hint_pairs)
     status_attr = _attr("status", curses.A_NORMAL)
     _safe_addstr(stdscr, hint_row, inner_left, _truncate(hint, inner_width), status_attr)
     stdscr.refresh()
@@ -539,6 +681,44 @@ def _scroll_offset(key: int, offset: int, max_offset: int, viewport: int) -> int
     return offset
 
 
+def _open_asset_by_digit(key: int, asset_list: list, controller: "BrowseController") -> None:
+    """Open the asset at index (key - ord('1')) via controller.open_asset; no-op if out of range."""
+    idx = key - ord("1")
+    if 0 <= idx < len(asset_list):
+        controller.open_asset(asset_list[idx])
+
+
+def _handle_detail_key(
+    key: int,
+    stdscr: "curses._CursesWindow",
+    controller: "BrowseController",
+    project_id: int,
+    task: MineTask,
+    asset_list: list,
+) -> str | None:
+    """Dispatch non-scroll action keys in the detail loop.
+
+    Returns 'quit' when the detail loop should exit, 'handled' when the key
+    was consumed by a non-scroll action, and None when the key should be
+    forwarded to _scroll_offset.
+    """
+    if key in (ord("q"), ord("b"), 27):
+        return "quit"
+    if key == ord("c"):
+        chosen = _choose_branch_type(stdscr)
+        if chosen:
+            result = controller.create_task_branch(chosen, project_id, task.id)
+            _show_branch_result(stdscr, result)
+        return "handled"
+    if key == ord("a"):
+        _asset_menu(stdscr, asset_list, controller)
+        return "handled"
+    if ord("1") <= key <= ord("9"):
+        _open_asset_by_digit(key, asset_list, controller)
+        return "handled"
+    return None
+
+
 def _render_and_handle_detail(
     stdscr: "curses._CursesWindow",
     controller: "BrowseController",
@@ -548,39 +728,35 @@ def _render_and_handle_detail(
     """Render task detail with framed layout and vertical scroll; loop until exit.
 
     Keys: q/b/Esc return; ↑/k scroll up; ↓/j scroll down; PgUp/PgDn page;
-    c branch picker + create; a asset menu; KEY_RESIZE re-renders.
+    c branch picker + create; a asset menu; 1-9 open Nth asset; KEY_RESIZE re-renders.
     """
     task_dict, comments, asset_list = controller.task_detail(project_id, task.id)
     num = task_dict.get("task_number") or task_dict.get("id", "")
     name = task_dict.get("name", "")
     title = f"#{num} — {name}"
-    meta_text = _detail_meta_text(task_dict)
+    desc_text = _detail_meta_text(task_dict)
+    rows = _meta_rows(task_dict)
 
     offset = 0
 
     while True:
         h, w = stdscr.getmaxyx()
         inner_width = max(1, w - 2)
-        content = build_detail_lines(meta_text, comments, inner_width)
+        content = build_detail_lines(desc_text, comments, inner_width, rows, asset_list)
         viewport = max(1, h - _MIN_HEIGHT + 2)
         max_offset = max(0, len(content) - viewport)
 
-        _render_detail_frame(stdscr, content, offset, title)
+        _render_detail_frame(stdscr, content, offset, title, has_assets=bool(asset_list))
         key = stdscr.getch()
 
-        if key in (ord("q"), ord("b"), 27):
+        action = _handle_detail_key(key, stdscr, controller, project_id, task, asset_list)
+        if action == "quit":
             return
-        if key == curses.KEY_RESIZE:
-            offset = min(offset, max_offset)
-        elif key == ord("c"):
-            chosen = _choose_branch_type(stdscr)
-            if chosen:
-                result = controller.create_task_branch(chosen, project_id, task.id)
-                _show_branch_result(stdscr, result)
-        elif key == ord("a"):
-            _asset_menu(stdscr, asset_list, controller)
-        else:
-            offset = _scroll_offset(key, offset, max_offset, viewport)
+        if action is None:
+            if key == curses.KEY_RESIZE:
+                offset = min(offset, max_offset)
+            else:
+                offset = _scroll_offset(key, offset, max_offset, viewport)
 
 
 def _screen_detail(
@@ -888,7 +1064,7 @@ def run(args: object) -> int:
     """Entry point for the `browse` subcommand; builds deps and launches TUI."""
     if not (sys.stdin.isatty() and sys.stdout.isatty()):
         _render.print_error(
-            "Error: 'browse' requires an interactive terminal (TTY)."
+            __("Error: 'browse' requires an interactive terminal (TTY).")
         )
         return 2
 
