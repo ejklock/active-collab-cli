@@ -1,6 +1,7 @@
 """Tests for tui.py: navigation helpers and BrowseController (no curses)."""
 
 import contextlib
+import curses
 import io
 import json
 import types
@@ -14,6 +15,8 @@ from active_collab.gitbranch import BranchResult, BranchStatus
 from active_collab.models import Instance, MineTask
 from active_collab.tui import (
     BrowseController,
+    MineController,
+    _screen_mine_list,
     clamp_index,
     move_selection,
 )
@@ -538,6 +541,254 @@ class TestCliIntegrationBrowseSubcommand(unittest.TestCase):
         parser = _build_parser()
         args = parser.parse_args(["browse", "--instance", "myinst"])
         self.assertEqual(args.instance, "myinst")
+
+
+class FakeStdscr:
+    """Minimal fake curses window for testing screen functions without a terminal."""
+
+    def __init__(self, keys: list[int], height: int = 24, width: int = 80) -> None:
+        self._keys = list(keys)
+        self._key_idx = 0
+        self._height = height
+        self._width = width
+        self.written: list[tuple] = []
+
+    def erase(self) -> None:
+        pass
+
+    def getmaxyx(self) -> tuple[int, int]:
+        return self._height, self._width
+
+    def addstr(self, row: int, col: int, text: str, attr: int = 0) -> None:
+        self.written.append((row, col, text, attr))
+
+    def refresh(self) -> None:
+        pass
+
+    def getch(self) -> int:
+        if self._key_idx < len(self._keys):
+            key = self._keys[self._key_idx]
+            self._key_idx += 1
+            return key
+        return ord("q")
+
+    def text_written(self) -> str:
+        return " ".join(t for _, _, t, *_ in self.written)
+
+
+def _make_instance_named(name: str, base_url: str = "https://collab.example.com") -> Instance:
+    return Instance(name=name, base_url=base_url, email="u@example.com", token="tok", user_id=1)
+
+
+class FakeClientForMine:
+    """Test double for ActiveCollabClient that returns a fixed list of MineTasks."""
+
+    def __init__(self, tasks: list[MineTask]) -> None:
+        self._tasks = tasks
+
+    def fetch_open_tasks(self) -> list[MineTask]:
+        return self._tasks
+
+    def list_projects(self) -> tuple[int, bytes]:
+        return 200, b"[]"
+
+    def fetch_task(self, project_id: int, task_id: int) -> tuple[int, dict | None]:
+        return 200, {}
+
+
+class TestMineControllerMyTasks(unittest.TestCase):
+    def _controller(
+        self,
+        inst_tasks: list[tuple[Instance, list[MineTask]]],
+    ) -> MineController:
+        instances = [inst for inst, _ in inst_tasks]
+        ctrl = MineController(instances, MagicMock())
+
+        for inst, tasks in inst_tasks:
+            fake_client = FakeClientForMine(tasks)
+            ctrl._controllers[inst.name]._client = fake_client  # noqa: SLF001
+
+        return ctrl
+
+    def test_aggregates_tasks_across_two_instances(self) -> None:
+        inst_a = _make_instance_named("alpha")
+        inst_b = _make_instance_named("beta", "https://beta.example.com")
+        task_a = MineTask(id=1, name="Alpha task", instance_name="alpha", project_id=10)
+        task_b = MineTask(id=2, name="Beta task", instance_name="beta", project_id=20)
+
+        ctrl = self._controller([(inst_a, [task_a]), (inst_b, [task_b])])
+        tasks = ctrl.my_tasks()
+
+        self.assertEqual(len(tasks), 2)
+
+    def test_each_task_retains_its_instance_name(self) -> None:
+        inst_a = _make_instance_named("alpha")
+        inst_b = _make_instance_named("beta", "https://beta.example.com")
+        task_a = MineTask(id=1, name="Alpha task", instance_name="alpha", project_id=10)
+        task_b = MineTask(id=2, name="Beta task", instance_name="beta", project_id=20)
+
+        ctrl = self._controller([(inst_a, [task_a]), (inst_b, [task_b])])
+        tasks = ctrl.my_tasks()
+
+        instance_names = {t.instance_name for t in tasks}
+        self.assertIn("alpha", instance_names)
+        self.assertIn("beta", instance_names)
+
+    def test_preserves_instance_order_then_task_order(self) -> None:
+        inst_a = _make_instance_named("first")
+        inst_b = _make_instance_named("second", "https://second.example.com")
+        t1 = MineTask(id=1, name="T1", instance_name="first", project_id=1)
+        t2 = MineTask(id=2, name="T2", instance_name="first", project_id=1)
+        t3 = MineTask(id=3, name="T3", instance_name="second", project_id=2)
+
+        ctrl = self._controller([(inst_a, [t1, t2]), (inst_b, [t3])])
+        tasks = ctrl.my_tasks()
+
+        self.assertEqual([t.id for t in tasks], [1, 2, 3])
+
+    def test_empty_tasks_returns_empty_list(self) -> None:
+        inst = _make_instance_named("solo")
+        ctrl = self._controller([(inst, [])])
+        self.assertEqual(ctrl.my_tasks(), [])
+
+    def test_single_instance_with_multiple_tasks(self) -> None:
+        inst = _make_instance_named("solo")
+        tasks = [
+            MineTask(id=i, name=f"Task {i}", instance_name="solo", project_id=5)
+            for i in range(5)
+        ]
+        ctrl = self._controller([(inst, tasks)])
+        self.assertEqual(len(ctrl.my_tasks()), 5)
+
+
+class TestMineControllerControllerFor(unittest.TestCase):
+    def _controller(self, inst_a: Instance, inst_b: Instance) -> MineController:
+        return MineController([inst_a, inst_b], MagicMock())
+
+    def test_returns_controller_bound_to_correct_instance(self) -> None:
+        inst_a = _make_instance_named("alpha")
+        inst_b = _make_instance_named("beta", "https://beta.example.com")
+        ctrl = self._controller(inst_a, inst_b)
+        task = MineTask(id=1, name="Task", instance_name="beta", project_id=10)
+        browse_ctrl = ctrl.controller_for(task)
+        self.assertEqual(browse_ctrl._instance.name, "beta")  # noqa: SLF001
+
+    def test_controller_for_alpha_task_points_to_alpha_instance(self) -> None:
+        inst_a = _make_instance_named("alpha")
+        inst_b = _make_instance_named("beta", "https://beta.example.com")
+        ctrl = self._controller(inst_a, inst_b)
+        task = MineTask(id=2, name="Task", instance_name="alpha", project_id=5)
+        browse_ctrl = ctrl.controller_for(task)
+        self.assertEqual(browse_ctrl._instance.name, "alpha")  # noqa: SLF001
+
+    def test_controller_for_beta_is_different_from_alpha(self) -> None:
+        inst_a = _make_instance_named("alpha")
+        inst_b = _make_instance_named("beta", "https://beta.example.com")
+        ctrl = self._controller(inst_a, inst_b)
+        task_a = MineTask(id=1, name="A", instance_name="alpha", project_id=1)
+        task_b = MineTask(id=2, name="B", instance_name="beta", project_id=2)
+        self.assertIsNot(ctrl.controller_for(task_a), ctrl.controller_for(task_b))
+
+
+class TestScreenMineList(unittest.TestCase):
+    def _tasks(self) -> list[MineTask]:
+        return [
+            MineTask(id=1, task_number=5, name="Alpha task", instance_name="alpha", project_id=10),
+            MineTask(id=2, task_number=None, name="Beta task", instance_name="beta", project_id=20),
+        ]
+
+    def test_label_contains_instance_name(self) -> None:
+        tasks = self._tasks()
+        stdscr = FakeStdscr(keys=[ord("q")])
+        _screen_mine_list(stdscr, tasks, 0)
+        text = stdscr.text_written()
+        self.assertIn("alpha", text)
+        self.assertIn("beta", text)
+
+    def test_label_contains_task_number_when_present(self) -> None:
+        tasks = self._tasks()
+        stdscr = FakeStdscr(keys=[ord("q")])
+        _screen_mine_list(stdscr, tasks, 0)
+        text = stdscr.text_written()
+        self.assertIn("#5", text)
+
+    def test_label_falls_back_to_id_when_task_number_is_none(self) -> None:
+        tasks = self._tasks()
+        stdscr = FakeStdscr(keys=[ord("q")])
+        _screen_mine_list(stdscr, tasks, 0)
+        text = stdscr.text_written()
+        self.assertIn("#2", text)
+
+    def test_label_contains_task_name(self) -> None:
+        tasks = self._tasks()
+        stdscr = FakeStdscr(keys=[ord("q")])
+        _screen_mine_list(stdscr, tasks, 0)
+        text = stdscr.text_written()
+        self.assertIn("Alpha task", text)
+        self.assertIn("Beta task", text)
+
+    def test_q_returns_quit_action(self) -> None:
+        tasks = self._tasks()
+        stdscr = FakeStdscr(keys=[ord("q")])
+        _, action = _screen_mine_list(stdscr, tasks, 0)
+        self.assertIsNone(action)
+
+    def test_esc_returns_quit_action(self) -> None:
+        tasks = self._tasks()
+        stdscr = FakeStdscr(keys=[27])
+        _, action = _screen_mine_list(stdscr, tasks, 0)
+        self.assertIsNone(action)
+
+    def test_down_arrow_increments_selection(self) -> None:
+        tasks = self._tasks()
+        stdscr = FakeStdscr(keys=[curses.KEY_DOWN])
+        sel, action = _screen_mine_list(stdscr, tasks, 0)
+        self.assertEqual(sel, 1)
+        self.assertEqual(action, "list")
+
+    def test_j_key_increments_selection(self) -> None:
+        tasks = self._tasks()
+        stdscr = FakeStdscr(keys=[ord("j")])
+        sel, action = _screen_mine_list(stdscr, tasks, 0)
+        self.assertEqual(sel, 1)
+        self.assertEqual(action, "list")
+
+    def test_up_arrow_decrements_selection(self) -> None:
+        tasks = self._tasks()
+        stdscr = FakeStdscr(keys=[curses.KEY_UP])
+        sel, action = _screen_mine_list(stdscr, tasks, 1)
+        self.assertEqual(sel, 0)
+        self.assertEqual(action, "list")
+
+    def test_k_key_decrements_selection(self) -> None:
+        tasks = self._tasks()
+        stdscr = FakeStdscr(keys=[ord("k")])
+        sel, action = _screen_mine_list(stdscr, tasks, 1)
+        self.assertEqual(sel, 0)
+        self.assertEqual(action, "list")
+
+    def test_enter_returns_detail_action(self) -> None:
+        tasks = self._tasks()
+        stdscr = FakeStdscr(keys=[10])
+        _, action = _screen_mine_list(stdscr, tasks, 0)
+        self.assertEqual(action, "detail")
+
+    def test_enter_on_empty_list_stays_on_list(self) -> None:
+        stdscr = FakeStdscr(keys=[10, ord("q")])
+        _, action = _screen_mine_list(stdscr, [], 0)
+        self.assertEqual(action, "list")
+
+    def test_selection_clamped_at_bottom(self) -> None:
+        tasks = self._tasks()
+        stdscr = FakeStdscr(keys=[curses.KEY_DOWN])
+        sel, _ = _screen_mine_list(stdscr, tasks, 1)
+        self.assertEqual(sel, 1)
+
+    def test_selection_clamped_at_top(self) -> None:
+        tasks = self._tasks()
+        stdscr = FakeStdscr(keys=[curses.KEY_UP])
+        sel, _ = _screen_mine_list(stdscr, tasks, 0)
+        self.assertEqual(sel, 0)
 
 
 if __name__ == "__main__":

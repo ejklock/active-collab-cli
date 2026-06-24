@@ -349,6 +349,14 @@ def cmd_mine(args: argparse.Namespace) -> int:
             return 2
         target = matches
 
+    if sys.stdout.isatty() and sys.stdin.isatty():
+        from active_collab import tui
+        return tui.run_mine(target, http)
+
+    return _render_mine_table(target, http)
+
+
+def _render_mine_table(target: list[Instance], http: HttpClient) -> int:
     all_tasks: list[dict] = []
     for inst in target:
         client = ActiveCollabClient(inst, http)

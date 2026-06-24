@@ -613,6 +613,117 @@ class TestSetupAdd(CliTestBase):
         self.assertEqual(auth_headers[0], TOKEN)
 
 
+class TestMineInteractiveTty(CliTestBase):
+    """cmd_mine routes to tui.run_mine when both stdout and stdin are TTYs."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self._http = self._make_stub_http({
+            f"/users/{USER_ID}/tasks": (200, MINE_PAYLOAD),
+        })
+
+    def _run_mine_with_tty(
+        self,
+        argv: list,
+        stdout_tty: bool,
+        stdin_tty: bool,
+        run_mine_return: int = 0,
+    ) -> tuple[int, str, str]:
+        old_out, old_err = sys.stdout, sys.stderr
+        sys.stdout = io.StringIO()
+        sys.stderr = io.StringIO()
+        try:
+            with (
+                mock.patch("active_collab.cli.HttpClient", return_value=self._http),
+                mock.patch.object(sys.stdout, "isatty", return_value=stdout_tty),
+                mock.patch.object(sys.stdin, "isatty", return_value=stdin_tty),
+                mock.patch(
+                    "active_collab.tui.run_mine", return_value=run_mine_return
+                ) as mock_run_mine,
+            ):
+                self._mock_run_mine = mock_run_mine
+                code = cli.main(argv)
+        except SystemExit as exc:
+            code = exc.code if isinstance(exc.code, int) else 1
+        finally:
+            out = sys.stdout.getvalue()
+            err = sys.stderr.getvalue()
+            sys.stdout, sys.stderr = old_out, old_err
+        return code, out, err
+
+    def test_tty_launches_run_mine_and_returns_its_code(self) -> None:
+        self._add_instance(user_id=USER_ID)
+        code, _, _ = self._run_mine_with_tty(["mine"], stdout_tty=True, stdin_tty=True)
+        self._mock_run_mine.assert_called_once()
+        self.assertEqual(code, 0)
+
+    def test_tty_run_mine_receives_target_instances(self) -> None:
+        self._add_instance(name="inst1", user_id=USER_ID)
+        self._run_mine_with_tty(["mine"], stdout_tty=True, stdin_tty=True)
+        call_args = self._mock_run_mine.call_args
+        instances_arg = call_args[0][0]
+        self.assertEqual(len(instances_arg), 1)
+        self.assertEqual(instances_arg[0].name, "inst1")
+
+    def test_tty_run_mine_returns_exit_code_from_run_mine(self) -> None:
+        self._add_instance(user_id=USER_ID)
+        code, _, _ = self._run_mine_with_tty(
+            ["mine"], stdout_tty=True, stdin_tty=True, run_mine_return=42
+        )
+        self.assertEqual(code, 42)
+
+    def test_non_tty_stdout_renders_table_not_tui(self) -> None:
+        self._add_instance(user_id=USER_ID)
+        code, out, _ = self._run_mine_with_tty(["mine"], stdout_tty=False, stdin_tty=True)
+        self._mock_run_mine.assert_not_called()
+        self.assertIn("Implement login flow", out)
+        self.assertEqual(code, 0)
+
+    def test_non_tty_stdin_renders_table_not_tui(self) -> None:
+        self._add_instance(user_id=USER_ID)
+        code, out, _ = self._run_mine_with_tty(["mine"], stdout_tty=True, stdin_tty=False)
+        self._mock_run_mine.assert_not_called()
+        self.assertIn("Implement login flow", out)
+        self.assertEqual(code, 0)
+
+    def test_both_non_tty_renders_table_not_tui(self) -> None:
+        self._add_instance(user_id=USER_ID)
+        code, out, _ = self._run_mine_with_tty(["mine"], stdout_tty=False, stdin_tty=False)
+        self._mock_run_mine.assert_not_called()
+        self.assertIn("Implement login flow", out)
+        self.assertEqual(code, 0)
+
+    def test_tty_with_instance_filter_passes_filtered_list_to_run_mine(self) -> None:
+        self._add_instance(name="target", user_id=USER_ID)
+        self._add_instance(name="other", base_url="https://other.example.com", user_id=USER_ID)
+        self._run_mine_with_tty(["mine", "--instance", "target"], stdout_tty=True, stdin_tty=True)
+        call_args = self._mock_run_mine.call_args
+        instances_arg = call_args[0][0]
+        self.assertEqual(len(instances_arg), 1)
+        self.assertEqual(instances_arg[0].name, "target")
+
+    def test_unknown_instance_exits_2_in_tty_mode(self) -> None:
+        self._add_instance(name="real", user_id=USER_ID)
+        code, _, err = self._run_mine_with_tty(
+            ["mine", "--instance", "ghost"], stdout_tty=True, stdin_tty=True
+        )
+        self.assertEqual(code, 2)
+        self.assertIn("not found", err.lower())
+
+    def test_unknown_instance_exits_2_in_non_tty_mode(self) -> None:
+        self._add_instance(name="real", user_id=USER_ID)
+        code, _, err = self._run_mine_with_tty(
+            ["mine", "--instance", "ghost"], stdout_tty=False, stdin_tty=False
+        )
+        self.assertEqual(code, 2)
+        self.assertIn("not found", err.lower())
+
+    def test_list_alias_tty_launches_run_mine(self) -> None:
+        self._add_instance(user_id=USER_ID)
+        self._run_mine_with_tty(["list"], stdout_tty=True, stdin_tty=True)
+        self._mock_run_mine.assert_called_once()
+
+
 class TestTokenNeverLeaks(CliTestBase):
     def setUp(self) -> None:
         super().setUp()

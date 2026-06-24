@@ -3,8 +3,11 @@
 Provides:
 - Pure navigation helpers (clamp_index, move_selection)
 - BrowseController — dependency-injected business logic
+- MineController — aggregates tasks across multiple instances
 - run_browser — thin curses view loop (not unit-tested; needs a terminal)
+- run_mine_browser — flat-list TUI for mine/list subcommand
 - run — entry point called by cli.py's `browse` subcommand
+- run_mine — entry point called by cli.py's `mine` subcommand when TTY
 """
 
 import curses
@@ -138,6 +141,44 @@ class BrowseController:
             self._instance.token,
             directory,
         )
+
+
+class MineController:
+    """Aggregates open tasks from multiple instances for the mine TUI."""
+
+    def __init__(
+        self,
+        instances: list[Instance],
+        http: HttpClient,
+        run: Callable = subprocess.run,
+        opener: Callable = webbrowser.open,
+        download_dir: str | None = None,
+    ) -> None:
+        self._controllers: dict[str, BrowseController] = {
+            inst.name: BrowseController(
+                client=ActiveCollabClient(inst, http),
+                http=http,
+                instance=inst,
+                run=run,
+                opener=opener,
+                download_dir=download_dir,
+            )
+            for inst in instances
+        }
+
+    def my_tasks(self) -> list[MineTask]:
+        """Return open tasks aggregated across all instances.
+
+        Preserves instance insertion order, then task order within each instance.
+        """
+        result: list[MineTask] = []
+        for ctrl in self._controllers.values():
+            result.extend(ctrl._client.fetch_open_tasks())  # noqa: SLF001
+        return result
+
+    def controller_for(self, task: MineTask) -> BrowseController:
+        """Return the BrowseController bound to the task's instance."""
+        return self._controllers[task.instance_name]
 
 
 def _render_list(
@@ -314,6 +355,33 @@ def _screen_tasks(
     return task_sel, "tasks"
 
 
+def _render_and_handle_detail(
+    stdscr: "curses._CursesWindow",
+    controller: BrowseController,
+    project_id: int,
+    task: MineTask,
+) -> None:
+    """Render task detail and handle keypresses in a loop until the user exits.
+
+    Handles: q/b/Esc -> return; c -> branch type picker + create; a -> asset menu.
+    """
+    task_dict, comments, asset_list = controller.task_detail(project_id, task.id)
+    user_map: dict = {}
+    detail_text = render_task_to_str(task_dict, comments, False, user_map)
+    while True:
+        _render_detail(stdscr, detail_text, asset_list)
+        key = stdscr.getch()
+        if key in (ord("q"), ord("b"), 27):
+            return
+        if key == ord("c"):
+            chosen = _choose_branch_type(stdscr)
+            if chosen:
+                result = controller.create_task_branch(chosen, project_id, task.id)
+                _show_branch_result(stdscr, result)
+        elif key == ord("a"):
+            _asset_menu(stdscr, asset_list, controller)
+
+
 def _screen_detail(
     stdscr: "curses._CursesWindow",
     groups: list,
@@ -321,34 +389,17 @@ def _screen_detail(
     task_sel: int,
     controller: BrowseController,
 ) -> str:
-    """Render + handle one keypress on the detail screen.
+    """Render + handle detail screen for the project-browse flow.
 
     Returns the next screen name (always a string; no quit from detail).
+    Delegates detail rendering and key handling to _render_and_handle_detail,
+    then signals the browse loop to return to the tasks screen.
     """
     _, task_list = groups[proj_sel]
     task = task_list[task_sel]
     project_id = task.project_id or 0
-    task_dict, comments, asset_list = controller.task_detail(
-        project_id, task.id
-    )
-    user_map: dict = {}
-    detail_text = render_task_to_str(
-        task_dict, comments, False, user_map
-    )
-    _render_detail(stdscr, detail_text, asset_list)
-    key = stdscr.getch()
-    if key in (ord("q"), ord("b"), 27):
-        return "tasks"
-    if key == ord("c"):
-        chosen = _choose_branch_type(stdscr)
-        if chosen:
-            result = controller.create_task_branch(
-                chosen, project_id, task.id
-            )
-            _show_branch_result(stdscr, result)
-    elif key == ord("a"):
-        _asset_menu(stdscr, asset_list, controller)
-    return "detail"
+    _render_and_handle_detail(stdscr, controller, project_id, task)
+    return "tasks"
 
 
 def run_browser(
@@ -382,6 +433,79 @@ def run_browser(
             screen = _screen_detail(
                 stdscr, groups, proj_sel, task_sel, controller
             )
+
+
+def _screen_mine_list(
+    stdscr: "curses._CursesWindow",
+    tasks: list[MineTask],
+    sel: int,
+) -> tuple[int, str | None]:
+    """Render the flat mine-task list and handle one keypress.
+
+    Returns (sel, action) where action is 'detail', None (quit), or 'list' (stay).
+    """
+    labels = [
+        f"[{t.instance_name}] #{t.task_number or t.id}  {t.name}"
+        for t in tasks
+    ]
+    _render_list(stdscr, labels, sel, "My Open Tasks")
+    key = stdscr.getch()
+    if key in (curses.KEY_UP, ord("k")):
+        return move_selection(sel, -1, len(tasks)), "list"
+    if key in (curses.KEY_DOWN, ord("j")):
+        return move_selection(sel, 1, len(tasks)), "list"
+    if key in (curses.KEY_ENTER, 10, 13) and tasks:
+        return sel, "detail"
+    if key in (ord("q"), 27):
+        return sel, None
+    return sel, "list"
+
+
+def run_mine_browser(
+    stdscr: "curses._CursesWindow",
+    mine_controller: MineController,
+) -> None:
+    """Curses view loop for the mine flat-list TUI."""
+    curses.curs_set(0)
+    try:
+        curses.start_color()
+    except curses.error:
+        pass
+
+    tasks = mine_controller.my_tasks()
+    if not tasks:
+        stdscr.erase()
+        h, w = stdscr.getmaxyx()
+        msg = "No open tasks assigned to you."
+        stdscr.addstr(0, 0, msg[:w - 1])
+        stdscr.addstr(1, 0, "Press any key to exit...")
+        stdscr.refresh()
+        stdscr.getch()
+        return
+
+    sel = 0
+    screen: str | None = "list"
+    while screen is not None:
+        if screen == "list":
+            sel, screen = _screen_mine_list(stdscr, tasks, sel)
+        elif screen == "detail":
+            task = tasks[sel]
+            controller = mine_controller.controller_for(task)
+            _render_and_handle_detail(stdscr, controller, task.project_id or 0, task)
+            screen = "list"
+
+
+def run_mine(
+    instances: list[Instance],
+    http: HttpClient,
+    run: Callable = subprocess.run,
+    opener: Callable = webbrowser.open,
+    download_dir: str | None = None,
+) -> int:
+    """Launch the interactive mine TUI. Caller must have verified TTY."""
+    controller = MineController(instances, http, run=run, opener=opener, download_dir=download_dir)
+    curses.wrapper(run_mine_browser, controller)
+    return 0
 
 
 def run(args: object) -> int:
