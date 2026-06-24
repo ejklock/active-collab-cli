@@ -1,7 +1,7 @@
 """Interactive TUI browser for ActiveCollab tasks.
 
 Provides:
-- Pure navigation helpers (clamp_index, move_selection, BackStack)
+- Pure navigation helpers (clamp_index, move_selection)
 - BrowseController — dependency-injected business logic
 - run_browser — thin curses view loop (not unit-tested; needs a terminal)
 - run — entry point called by cli.py's `browse` subcommand
@@ -41,25 +41,6 @@ def clamp_index(index: int, length: int) -> int:
 def move_selection(index: int, delta: int, length: int) -> int:
     """Apply delta to index and clamp to [0, length-1]."""
     return clamp_index(index + delta, length)
-
-
-class BackStack:
-    """Minimal screen-transition back-stack."""
-
-    def __init__(self) -> None:
-        self._stack: list[str] = []
-
-    def push(self, screen: str) -> None:
-        self._stack.append(screen)
-
-    def pop(self) -> str | None:
-        return self._stack.pop() if self._stack else None
-
-    def current(self) -> str | None:
-        return self._stack[-1] if self._stack else None
-
-    def is_empty(self) -> bool:
-        return not self._stack
 
 
 class BrowseController:

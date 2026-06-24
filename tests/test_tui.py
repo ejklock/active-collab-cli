@@ -11,7 +11,6 @@ from active_collab.gitbranch import BranchResult, BranchStatus
 from active_collab.models import Instance, MineTask
 from active_collab.tui import (
     BrowseController,
-    BackStack,
     clamp_index,
     move_selection,
 )
@@ -141,32 +140,6 @@ class TestMoveSelection(unittest.TestCase):
 
     def test_large_negative_delta_clamped(self) -> None:
         self.assertEqual(move_selection(2, -100, 5), 0)
-
-
-class TestBackStack(unittest.TestCase):
-    def test_push_and_current(self) -> None:
-        stack = BackStack()
-        stack.push("projects")
-        self.assertEqual(stack.current(), "projects")
-
-    def test_pop_returns_last_pushed(self) -> None:
-        stack = BackStack()
-        stack.push("projects")
-        stack.push("tasks")
-        self.assertEqual(stack.pop(), "tasks")
-        self.assertEqual(stack.current(), "projects")
-
-    def test_pop_empty_returns_none(self) -> None:
-        stack = BackStack()
-        self.assertIsNone(stack.pop())
-
-    def test_is_empty_on_new_stack(self) -> None:
-        self.assertTrue(BackStack().is_empty())
-
-    def test_not_empty_after_push(self) -> None:
-        stack = BackStack()
-        stack.push("x")
-        self.assertFalse(stack.is_empty())
 
 
 class TestBrowseControllerTasksByProject(unittest.TestCase):
