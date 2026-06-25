@@ -1,8 +1,12 @@
 # active-collab-cli
 
-Command-line tool for fetching ActiveCollab tasks from self-hosted instances. Supports
-multi-instance configuration, SQLite-backed token storage, and outputs human-readable or
-JSON task views.
+Command-line tool and interactive terminal UI (TUI) for reading and browsing
+[ActiveCollab](https://activecollab.com) tasks from self-hosted instances.
+Supports multi-instance configuration, SQLite-backed token storage, and outputs
+human-readable or JSON task views.
+
+The application ships as a single self-contained binary (`ac`) built with Rust
+(ratatui + crossterm + tokio). No interpreter or runtime is required on the target.
 
 ---
 
@@ -13,6 +17,9 @@ JSON task views.
 ```sh
 curl -fsSL https://raw.githubusercontent.com/ejklock/active-collab-cli/main/install.sh | sh
 ```
+
+The script downloads the pre-built `active-collab` binary for your platform from
+the latest GitHub Release and places it on your PATH.
 
 ### Windows (PowerShell one-liner)
 
@@ -33,15 +40,19 @@ PATH, and make it executable (`chmod +x active-collab` on Unix).
 | macOS arm64 (Apple Silicon) | `active-collab-macos-arm64` |
 | Windows x86\_64 | `active-collab-windows-x86_64.exe` |
 
-### From source
+### Build from source (Docker required)
+
+No local Rust toolchain needed. The crate is at the repo root; Docker provides
+the build environment.
 
 ```sh
-pip install .
-```
+# Development build
+docker compose run --rm dev cargo build
 
-Requires Python 3.10+. Runtime is stdlib-only on macOS and Linux (`curses` ships
-with Python). On Windows, the `browse` TUI pulls in `windows-curses` — installed
-automatically as a platform-conditional dependency.
+# Release binary (placed in target/release/ac)
+docker compose build
+docker compose run --rm build
+```
 
 ---
 
@@ -51,26 +62,33 @@ automatically as a platform-conditional dependency.
 
 ```sh
 # Register an ActiveCollab instance (interactive wizard prompts for missing fields)
-active-collab setup add
-active-collab setup add --name collab --url https://collab.example.com --email me@example.com
+ac setup add
+ac setup add --name collab --url https://collab.example.com --email me@example.com
 # Password is always entered hidden via a prompt — never passed as a flag.
 
 # List configured instances (tokens never shown)
-active-collab setup list
+ac setup list
 
 # Remove an instance and its cached tasks
-active-collab setup remove --name collab
+ac setup remove --name collab
 
 # Test connectivity to all (or one) configured instance
-active-collab setup test
-active-collab setup test --name collab
+ac setup test
+ac setup test --name collab
+
+# Show the current display language
+ac setup language
+
+# Set the display language (persists to SQLite; survives across invocations)
+ac setup language en
+ac setup language pt_BR
 ```
 
 ### get — fetch a task by URL or short form
 
 ```sh
-active-collab get 665/75159
-active-collab get https://collab.example.com/projects/665/tasks/75159
+ac get 665/75159
+ac get https://collab.example.com/projects/665/tasks/75159
 ```
 
 ### current — fetch the task from the current git branch
@@ -78,65 +96,70 @@ active-collab get https://collab.example.com/projects/665/tasks/75159
 Branch must match `(feature|hotfix|fix)/PROJECT_ID-TASK_ID` (e.g. `feature/665-75159`).
 
 ```sh
-active-collab current
+ac current
 ```
 
 ### mine — list open tasks assigned to you
 
 ```sh
-active-collab mine
-active-collab list          # alias
+ac mine
+ac list          # alias
 ```
 
 When run in a terminal (TTY), `mine` opens an interactive arrow-key list of your
 open tasks aggregated across all configured instances. Select a task to view its
-detail, create a git branch, or open/download its assets — the same actions
-available in `browse`. When output is piped or redirected (non-TTY), `mine` falls
-back to a plain table suitable for scripts.
+detail or open/download its assets. When output is piped or redirected (non-TTY),
+`mine` falls back to a plain table suitable for scripts.
 
 ### browse — interactive TUI
 
 Arrow-key terminal browser for your open tasks. Navigate projects → tasks →
-task detail, then create a git branch or open/download the task's assets.
+task detail, then open/download the task's assets.
 
 ```sh
-active-collab browse
-active-collab browse --instance collab   # required when >1 instance configured
+ac browse
+ac browse --instance collab   # required when >1 instance configured
 ```
 
-The TUI uses color where the terminal supports it (cyan header, cyan/reverse
-selection highlight, styled status bar). On terminals without color support it
-falls back to bold/reverse styling automatically.
+The TUI uses ratatui for layout and crossterm for input, giving consistent mouse
+click, scroll, and keyboard behavior on Linux, macOS, and Windows. It shows a
+loading indicator during fetches and guards against duplicate in-flight refresh
+requests (single-flight).
 
-The task detail view renders in a rounded frame with the task number and name
-embedded in the top border. The detail screen shows:
+The task detail view shows:
 
-- **Meta grid** — a full-grid bordered table (label | value columns, ├──┼──┤ row
-  separators) listing Task, Status, Assignee, Start, Due, Estimate, and Logged.
-- **Description** — the task body, wrapped to the terminal width.
-- **Artifacts panel** — a rounded `Artifacts` box listing each image / attachment /
-  link as `[n] name` with its URL on the next line. Terminal emulators that
-  auto-link URLs make them clickable. Press `1`–`9` to open the matching asset in
-  your browser directly from the detail view.
-- **Comments** — each comment in its own rounded sub-box (author · date in the border).
+- **Meta table** — a two-column table listing Task, Project, Title, Status,
+  Assignee, Start, Due, Estimate, and Logged.
+- **Description** — the task body; falls back to `(no description)` when empty.
+- **Artifacts panel** — lists each image / attachment / link as `[n] name` with
+  its URL. Press `1`–`9` to open the matching artifact in your browser.
+- **Comments** — one panel per comment (author · date as the panel title).
 
-The detail view scrolls vertically when the content exceeds the screen. The whole
-TUI is responsive: it adapts to terminal resize events and guards against too-small
-terminals without crashing. A command-cap footer is always visible at the bottom of
-the frame.
+The detail view scrolls vertically when content exceeds the screen. The TUI
+adapts to terminal resize events and guards against too-small terminals without
+crashing. The footer shows key-cap style hints (`[key] action`).
+
+Each task you open is written to the local SQLite `ticket_cache` keyed by instance
+name; re-opening the same task is instant and offline-tolerant. Press `r` inside
+the detail view to bypass the cache and re-fetch from the API.
 
 **Key bindings**
 
 | Screen | Keys |
 |---|---|
-| Lists (projects / tasks / assets) | `↑`/`↓` or `k`/`j` move · `Enter` select · `q` quit · `b` back |
-| Task detail | `↑`/`↓` or `k`/`j` scroll · `PgUp`/`PgDn` page · `c` branch · `a` assets · `1`–`9` open artifact · `q`/`b` back |
-| Branch-type picker | `feature` / `fix` / `hotfix` (default `feature`) |
-| Assets | `o` open in browser · `d` download · `q`/`b` back |
+| Projects / Tasks lists | `↑`/`↓` or `k`/`j` move · `Enter` select · `q` quit · `b` back · `s` settings |
+| Task detail | `↑`/`↓` or `k`/`j` scroll · `PgUp`/`PgDn` page · `a` assets · `r` refresh · `1`–`9` open artifact · `q`/`b` back |
+| Settings | `↑`/`↓` or `k`/`j` move · `Enter` select · `q`/`b` back |
+| Assets | `↑`/`↓` or `k`/`j` move · `o` open in browser · `d` download · `q`/`b` back |
 
-- **Create branch** — names the branch `<type>/<project_id>-<task_id>` (e.g.
-  `feature/665-75159`, compatible with `current`), branched off `master`. It
-  never overwrites an existing branch.
+**Settings screen** — press `[s]` from any list screen to open the Settings panel.
+It offers two pickers:
+
+- **Language** — choose `en` (English) or `pt_BR` (Portuguese (Brazil)). The
+  selection persists to SQLite and takes effect immediately without restarting.
+- **Active instance** — choose which configured instance `browse` uses by default
+  when you have more than one. The selection persists to SQLite.
+
 - **Assets** — image, attachment, and link URLs extracted from the task body,
   comments, and attachments. `o` opens the URL in your browser; `d` downloads
   it. The `X-Angie-AuthApiToken` header is attached **only** when the asset
@@ -146,16 +169,16 @@ the frame.
 ### Bare-invocation shortcuts
 
 ```sh
-active-collab 665/75159     # same as: active-collab get 665/75159
-active-collab               # same as: active-collab current (when branch matches)
+ac 665/75159     # same as: ac get 665/75159
+ac               # same as: ac current (when branch matches)
 ```
 
 ### Flags
 
 | Flag | Applies to | Effect |
 |---|---|---|
-| `--instance NAME` | `get`, `current`, `mine` | Force a specific configured instance (required when >1 configured) |
-| `--short` | `get`, `current` | Print `PROJECT/TASK<TAB>name` only; does not call the users API |
+| `--instance NAME` | `get`, `current`, `mine`, `browse` | Force a specific configured instance (required when >1 configured) |
+| `--short` | `get`, `current` | Print `PROJECT/TASK<TAB>name` only |
 | `--no-comments` | `get`, `current` | Omit the comments section |
 | `--json` | `get`, `current` | Print raw task JSON (always hits the API, bypasses cache) |
 | `--refresh` | `get`, `current` | Bypass the task cache and re-fetch from the API |
@@ -164,19 +187,29 @@ active-collab               # same as: active-collab current (when branch matche
 
 ## Internationalization
 
-The CLI ships with English (default) and Brazilian Portuguese (`pt_BR`) translations
-for all user-facing output. Set the locale with the `ACTIVE_COLLAB_LANG` environment
-variable:
+The binary ships with English (default) and Brazilian Portuguese (`pt_BR`)
+translations for all user-facing output. Translations are embedded at compile time
+as JSON catalogs — no external files required at runtime.
+
+**Durable setting** — persist your preferred language to SQLite:
 
 ```sh
-ACTIVE_COLLAB_LANG=pt_BR active-collab browse
+ac setup language pt_BR   # set
+ac setup language          # show current
 ```
 
-Resolution order: `ACTIVE_COLLAB_LANG` → `LANG` prefix → `en`.
+**One-off override** — the `ACTIVE_COLLAB_LANG` environment variable overrides the
+stored setting for a single invocation:
 
-All translated strings go through the `__()` helper (`active_collab.i18n`). The
-catalog is a plain Python dict compiled into the package — no `.mo` files, no
-`bindtextdomain`, works inside a PyInstaller `--onefile` binary.
+```sh
+ACTIVE_COLLAB_LANG=pt_BR ac browse
+```
+
+**Resolution order:** `ACTIVE_COLLAB_LANG` env var → SQLite setting → `en`.
+
+The language can also be changed interactively from inside `browse` — press `[s]`
+to open Settings and select a language; the change takes effect immediately without
+restarting.
 
 ---
 
@@ -187,19 +220,21 @@ catalog is a plain Python dict compiled into the package — no `.mo` files, no
 Override with the `ACTIVE_COLLAB_DB` environment variable:
 
 ```sh
-ACTIVE_COLLAB_DB=/custom/path/active-collab.db active-collab get 665/75159
+ACTIVE_COLLAB_DB=/custom/path/active-collab.db ac get 665/75159
 ```
 
 ---
 
 ## Security
 
-- The API token is stored only in the local SQLite database with directory permissions
-  `0700` and file permissions `0600`.
-- The token is transmitted exclusively via the `X-Angie-AuthApiToken` HTTP header — never
-  in a URL, never printed, never passed as a process argument.
-- The password is **never stored**. Only the token returned from the issue-token endpoint
-  is persisted.
+- The API token is stored only in the local SQLite database with directory
+  permissions `0700` and file permissions `0600`.
+- The token is transmitted exclusively via the `X-Angie-AuthApiToken` HTTP header —
+  never in a URL, never printed, never passed as a process argument.
+- The password is **never stored**. Only the token returned from the issue-token
+  endpoint is persisted.
+- The token is sent only to the configured instance's own host. Requests to asset
+  URLs on other hosts carry no token.
 
 ---
 
@@ -213,22 +248,21 @@ ACTIVE_COLLAB_DB=/custom/path/active-collab.db active-collab get 665/75159
 
 ---
 
-## Building from source
+## Development
 
 ```sh
-pip install pyinstaller
-pyinstaller --onefile --name active-collab _entry.py
-# Binary is placed in dist/active-collab
+# Run all tests (unit + integration, including comment-policy gate)
+docker compose run --rm dev cargo test
+
+# Run only the comment-policy gate
+docker compose run --rm dev cargo test --test comment_policy
+
+# Lint
+docker compose run --rm dev cargo clippy -- -D warnings
+
+# Format check
+docker compose run --rm dev cargo fmt --check
 ```
 
-Where `_entry.py` contains:
-
-```python
-from active_collab.cli import main
-if __name__ == '__main__':
-    raise SystemExit(main())
-```
-
-Pre-built binaries for all platforms are produced automatically by the
-`.github/workflows/release.yml` GitHub Actions workflow and attached to each tagged
-release.
+The TUI core (`src/app.rs` `update`) is a pure function with no terminal or
+network dependency — it is unit-tested directly without a TTY.
