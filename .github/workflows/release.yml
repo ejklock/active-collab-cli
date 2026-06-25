@@ -12,59 +12,48 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
             asset-name: active-collab-linux-x86_64
-            binary-name: active-collab
           - os: macos-13
+            target: x86_64-apple-darwin
             asset-name: active-collab-macos-x86_64
-            binary-name: active-collab
           - os: macos-latest
+            target: aarch64-apple-darwin
             asset-name: active-collab-macos-arm64
-            binary-name: active-collab
           - os: windows-latest
+            target: x86_64-pc-windows-msvc
             asset-name: active-collab-windows-x86_64.exe
-            binary-name: active-collab.exe
 
     runs-on: ${{ matrix.os }}
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          python-version: "3.12"
+          targets: ${{ matrix.target }}
 
-      - name: Install package and PyInstaller
-        run: |
-          pip install --upgrade pip
-          pip install .
-          pip install pyinstaller
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
 
-      - name: Run tests (gate build on green tests)
-        run: python -m pytest tests/
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }}
 
-      - name: Write entry shim
-        shell: python
-        run: |
-          import pathlib
-          shim = "from active_collab.cli import main\nif __name__ == '__main__':\n    raise SystemExit(main())\n"
-          pathlib.Path("_entry.py").write_text(shim)
-
-      - name: Build binary with PyInstaller
-        run: pyinstaller --onefile --name active-collab _entry.py
-
-      - name: Rename artifact (Unix)
+      - name: Stage artifact (Unix)
         if: runner.os != 'Windows'
-        run: mv dist/active-collab dist/${{ matrix.asset-name }}
+        run: |
+          mkdir -p dist
+          mv target/${{ matrix.target }}/release/ac dist/${{ matrix.asset-name }}
 
-      - name: Rename artifact (Windows)
+      - name: Stage artifact (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: Move-Item dist\active-collab.exe dist\${{ matrix.asset-name }}
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Move-Item target\${{ matrix.target }}\release\ac.exe dist\${{ matrix.asset-name }}
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.asset-name }}
           path: dist/${{ matrix.asset-name }}
@@ -78,12 +67,10 @@ jobs:
       contents: write
 
     steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           path: dist/
 
-      - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v2
         with:
           files: dist/**/*
