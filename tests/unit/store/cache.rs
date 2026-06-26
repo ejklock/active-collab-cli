@@ -1,7 +1,9 @@
 use super::*;
 use crate::config::Config;
+use crate::store::cache::UserMapCache;
 use crate::store::Store;
 use serde_json::json;
+use std::collections::HashMap;
 use tempfile::TempDir;
 
 fn make_store() -> (TempDir, Store) {
@@ -85,9 +87,60 @@ fn payload_merge_matches_python_semantics() {
     let comments = json!([{ "id": 1, "body": "hello" }]);
     cache.write("inst", 3, 7, &task, &comments).unwrap();
     let result = cache.read("inst", 3, 7).unwrap().unwrap();
-    // all task fields present
     assert_eq!(result.fields["id"], 7);
     assert_eq!(result.fields["status"], "open");
-    // comments merged in
     assert_eq!(result.fields["comments"], comments);
+}
+
+// S5-A4: UserMapCache round-trip preserves i64 keys and string values
+#[test]
+fn user_map_cache_write_then_read_round_trips_i64_keys() {
+    let (_dir, store) = make_store();
+    let cache = UserMapCache::new(store.conn());
+    let mut users: HashMap<i64, String> = HashMap::new();
+    users.insert(1, "Alice".to_string());
+    users.insert(9999999999i64, "Bob Large Id".to_string());
+    cache.write("acme", &users).unwrap();
+    let result = cache.read("acme").unwrap().unwrap();
+    assert_eq!(result.users.get(&1).map(|s| s.as_str()), Some("Alice"));
+    assert_eq!(
+        result.users.get(&9999999999i64).map(|s| s.as_str()),
+        Some("Bob Large Id")
+    );
+    assert_eq!(result.users.len(), 2);
+}
+
+#[test]
+fn user_map_cache_read_returns_none_when_missing() {
+    let (_dir, store) = make_store();
+    let cache = UserMapCache::new(store.conn());
+    let result = cache.read("nonexistent").unwrap();
+    assert!(result.is_none());
+}
+
+#[test]
+fn user_map_cache_write_overwrites_existing_entry() {
+    let (_dir, store) = make_store();
+    let cache = UserMapCache::new(store.conn());
+    let v1: HashMap<i64, String> = [(1i64, "Old".to_string())].into_iter().collect();
+    let v2: HashMap<i64, String> = [(1i64, "New".to_string()), (2i64, "Extra".to_string())]
+        .into_iter()
+        .collect();
+    cache.write("acme", &v1).unwrap();
+    cache.write("acme", &v2).unwrap();
+    let result = cache.read("acme").unwrap().unwrap();
+    assert_eq!(result.users.get(&1).map(|s| s.as_str()), Some("New"));
+    assert_eq!(result.users.get(&2).map(|s| s.as_str()), Some("Extra"));
+}
+
+#[test]
+fn user_map_cache_fetched_at_is_iso_utc() {
+    let (_dir, store) = make_store();
+    let cache = UserMapCache::new(store.conn());
+    let users: HashMap<i64, String> = [(5i64, "Dave".to_string())].into_iter().collect();
+    cache.write("acme", &users).unwrap();
+    let result = cache.read("acme").unwrap().unwrap();
+    assert_eq!(result.fetched_at.len(), 20);
+    assert!(result.fetched_at.ends_with('Z'));
+    assert_eq!(&result.fetched_at[10..11], "T");
 }

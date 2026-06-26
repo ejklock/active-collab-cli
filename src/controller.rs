@@ -1,12 +1,12 @@
-use crate::app::{ProjectGroup, TaskRow};
 use crate::client::ActiveCollabClient;
 use crate::config::Config;
 use crate::http::Http;
 use crate::models::MineTask;
 use crate::render::{extract_assets, is_openable_url, Asset};
-use crate::store::cache::TaskCache;
+use crate::store::cache::{TaskCache, UserMapCache};
 use crate::store::instances::Instance;
 use crate::store::Store;
+use crate::tui::model::{ProjectGroup, TaskRow};
 use anyhow::{anyhow, Context};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -18,23 +18,36 @@ use std::path::{Path, PathBuf};
 /// When `list_projects` fails for an instance, task groups fall back to
 /// using the numeric project id as the name — no crash.
 pub async fn tasks_by_project(targets: &[Instance], http: &Http) -> Vec<ProjectGroup> {
-    let mut all_tasks: Vec<(MineTask, String)> = vec![];
-    let mut project_names: HashMap<i64, String> = HashMap::new();
+    let t = std::time::Instant::now();
+
+    let mut set: tokio::task::JoinSet<(String, Vec<MineTask>, HashMap<i64, String>)> =
+        tokio::task::JoinSet::new();
 
     for inst in targets {
         let client = ActiveCollabClient::new(inst.clone(), http.clone());
+        let inst_name = inst.name.clone();
+        set.spawn(async move {
+            let (tasks, names) =
+                tokio::join!(client.fetch_open_tasks(), fetch_project_names(&client));
+            (inst_name, tasks.unwrap_or_default(), names)
+        });
+    }
 
-        let tasks = client.fetch_open_tasks().await.unwrap_or_default();
+    let mut all_tasks: Vec<(MineTask, String)> = vec![];
+    let mut project_names: HashMap<i64, String> = HashMap::new();
 
-        let names = fetch_project_names(&client).await;
-        project_names.extend(names);
-
-        for task in tasks {
-            all_tasks.push((task, inst.name.clone()));
+    while let Some(joined) = set.join_next().await {
+        if let Ok((inst_name, tasks, names)) = joined {
+            project_names.extend(names);
+            for task in tasks {
+                all_tasks.push((task, inst_name.clone()));
+            }
         }
     }
 
-    build_groups(all_tasks, &project_names)
+    let result = build_groups(all_tasks, &project_names);
+    crate::timing::record("browse_list_load", t.elapsed());
+    result
 }
 
 async fn fetch_project_names(client: &ActiveCollabClient) -> HashMap<i64, String> {
@@ -88,6 +101,7 @@ fn build_groups(
             task_number: task.task_number.unwrap_or(task.id),
             name: task.name,
             instance: instance_name,
+            project_id: pid,
         });
     }
 
@@ -99,7 +113,8 @@ fn build_groups(
     sorted
 }
 
-/// All data needed to render a task detail screen.
+/// All data needed to render a task detail screen (used by the test seam).
+#[cfg(test)]
 pub struct DetailData {
     pub task: Value,
     pub comments: Vec<Value>,
@@ -107,34 +122,72 @@ pub struct DetailData {
     pub user_map: HashMap<i64, String>,
 }
 
-/// Fetch or serve from cache the full detail for a single task.
+/// Task content (meta + comments + assets) fetched without the user directory.
 ///
-/// When `refresh` is false and a cache entry exists, no network call is made.
-/// When `refresh` is true or the cache misses, the API is called and the result
-/// is written back to the cache. The user map is fetched to resolve assignee
-/// names; failures yield an empty map. Opens its own DB connection so the
-/// caller can pass it to tokio::spawn without lifetime issues.
-pub async fn task_detail(
+/// Caller renders this immediately, then resolves user_map in the background
+/// for a second paint that updates the Assignee line.
+pub struct TaskCore {
+    pub task: Value,
+    pub comments: Vec<Value>,
+    pub assets: Vec<Asset>,
+}
+
+/// Fetch or serve from cache task content — no user-directory request.
+///
+/// Opens its own DB connection so the caller can pass it to tokio::spawn.
+/// Never holds a Connection across an await boundary.
+pub async fn load_task_core(
     db_path: PathBuf,
     inst: Instance,
     http: Http,
     project_id: i64,
     task_id: i64,
     refresh: bool,
-) -> DetailData {
+) -> TaskCore {
     let client = ActiveCollabClient::new(inst.clone(), http);
-
     let (task, comments) =
         load_task_data_from_path(&db_path, &inst, &client, project_id, task_id, refresh).await;
-    let user_map = fetch_user_map_graceful(&client).await;
     let assets = extract_assets(&task, &comments);
-
-    DetailData {
+    TaskCore {
         task,
         comments,
         assets,
-        user_map,
     }
+}
+
+/// Read the user map from the per-instance cache without any network call.
+pub fn cached_user_map(db_path: &Path, inst: &Instance) -> Option<HashMap<i64, String>> {
+    let config = Config {
+        db_path: db_path.to_path_buf(),
+        task_cache_ttl_hours: 24,
+    };
+    let t = std::time::Instant::now();
+    let result = try_user_map_cache_read(&config, &inst.name);
+    crate::timing::record("user_map_cache_read", t.elapsed());
+    result
+}
+
+/// Force-fetch the user directory, write to cache, and return the result.
+///
+/// Never holds a Connection across an await — cache write happens synchronously
+/// before this function returns, satisfying tokio::spawn's Send bound.
+pub async fn refresh_user_map(
+    db_path: PathBuf,
+    inst: Instance,
+    http: Http,
+) -> HashMap<i64, String> {
+    let config = Config {
+        db_path,
+        task_cache_ttl_hours: 24,
+    };
+    let client = ActiveCollabClient::new(inst.clone(), http);
+    let t = std::time::Instant::now();
+    let map = client.fetch_user_map().await.unwrap_or_default();
+    crate::timing::record("fetch_user_map", t.elapsed());
+    if !map.is_empty() {
+        try_user_map_cache_write(&config, &inst.name, &map);
+    }
+    map
 }
 
 /// Open a DB connection and serve cache or network for the task.
@@ -155,12 +208,17 @@ async fn load_task_data_from_path(
     };
 
     if !refresh {
-        if let Some(hit) = try_cache_read(&config, &inst.name, project_id, task_id) {
+        let t = std::time::Instant::now();
+        let cache_hit = try_cache_read(&config, &inst.name, project_id, task_id);
+        crate::timing::record("task_cache_read", t.elapsed());
+        if let Some(hit) = cache_hit {
             return hit;
         }
     }
 
+    let t = std::time::Instant::now();
     let result = fetch_from_network(client, project_id, task_id).await;
+    crate::timing::record("fetch_task", t.elapsed());
     let (task, comments) = match result {
         None => return (Value::Null, vec![]),
         Some(pair) => pair,
@@ -168,6 +226,19 @@ async fn load_task_data_from_path(
 
     try_cache_write(&config, &inst.name, project_id, task_id, &task, &comments);
     (task, comments)
+}
+
+/// Remove the embedded `comments` array from cached task fields, returning both parts.
+///
+/// Cache entries store comments inside the task JSON to avoid a second row; this
+/// helper splits them so callers can treat task metadata and comments separately.
+fn split_comments_from_fields(mut fields: Value) -> (Value, Vec<Value>) {
+    let comments = fields
+        .as_object_mut()
+        .and_then(|obj| obj.remove("comments"))
+        .and_then(|v| v.as_array().cloned())
+        .unwrap_or_default();
+    (fields, comments)
 }
 
 fn try_cache_read(
@@ -179,13 +250,7 @@ fn try_cache_read(
     let store = Store::open(config).ok()?;
     let cache = TaskCache::new(store.conn());
     let cached = cache.read(instance_name, project_id, task_id).ok()??;
-    let mut task = cached.fields;
-    let comments = task
-        .as_object_mut()
-        .and_then(|obj| obj.remove("comments"))
-        .and_then(|v| v.as_array().cloned())
-        .unwrap_or_default();
-    Some((task, comments))
+    Some(split_comments_from_fields(cached.fields))
 }
 
 fn try_cache_write(
@@ -231,8 +296,17 @@ async fn fetch_from_network(
     Some(parse_task_payload(payload_opt.unwrap_or(Value::Null)))
 }
 
-async fn fetch_user_map_graceful(client: &ActiveCollabClient) -> HashMap<i64, String> {
-    client.fetch_user_map().await.unwrap_or_default()
+fn try_user_map_cache_read(config: &Config, instance_name: &str) -> Option<HashMap<i64, String>> {
+    let store = Store::open(config).ok()?;
+    let cache = UserMapCache::new(store.conn());
+    cache.read(instance_name).ok()?.map(|hit| hit.users)
+}
+
+fn try_user_map_cache_write(config: &Config, instance_name: &str, users: &HashMap<i64, String>) {
+    if let Ok(store) = Store::open(config) {
+        let cache = UserMapCache::new(store.conn());
+        cache.write(instance_name, users).ok();
+    }
 }
 
 /// Parity: Python assets.py open_asset / tui/controller.py open_asset.
@@ -295,15 +369,7 @@ pub async fn task_detail_with_conn(
             .read(&inst.name, project_id, task_id)
             .ok()
             .flatten()
-            .map(|cached| {
-                let mut task = cached.fields;
-                let comments = task
-                    .as_object_mut()
-                    .and_then(|obj| obj.remove("comments"))
-                    .and_then(|v| v.as_array().cloned())
-                    .unwrap_or_default();
-                (task, comments)
-            })
+            .map(|cached| split_comments_from_fields(cached.fields))
     } else {
         None
     };
@@ -326,7 +392,7 @@ pub async fn task_detail_with_conn(
         }
     };
 
-    let user_map = fetch_user_map_graceful(&client).await;
+    let user_map = resolve_user_map_with_conn(conn, &inst.name, &client, refresh).await;
     let assets = extract_assets(&task, &comments);
 
     DetailData {
@@ -335,6 +401,38 @@ pub async fn task_detail_with_conn(
         assets,
         user_map,
     }
+}
+
+/// Resolve the user map using the provided connection (test seam).
+///
+/// Reads from UserMapCache synchronously (no Connection held across await),
+/// then fetches the network only on miss or refresh, and writes the result back.
+#[cfg(test)]
+async fn resolve_user_map_with_conn(
+    conn: &rusqlite::Connection,
+    instance_name: &str,
+    client: &ActiveCollabClient,
+    refresh: bool,
+) -> HashMap<i64, String> {
+    let cached: Option<HashMap<i64, String>> = if !refresh {
+        UserMapCache::new(conn)
+            .read(instance_name)
+            .ok()
+            .flatten()
+            .map(|hit| hit.users)
+    } else {
+        None
+    };
+
+    if let Some(map) = cached {
+        return map;
+    }
+
+    let map = client.fetch_user_map().await.unwrap_or_default();
+    if !map.is_empty() {
+        UserMapCache::new(conn).write(instance_name, &map).ok();
+    }
+    map
 }
 
 #[cfg(test)]

@@ -125,151 +125,6 @@ pub fn is_openable_url(url: &str) -> bool {
     }
 }
 
-/// Parity: Python build_detail_lines composition.
-///
-/// Builds the full scrollable content for the Detail screen:
-/// meta rows (Task/Project/Title/Status/Assignee/Start/Due/Estimate/Logged),
-/// then Description, then Artifacts ([n] name + indented URL per asset),
-/// then Comments (per comment: author + when + body).
-/// Pure: no I/O, no async — suitable for unit testing.
-pub fn render_detail_lines(
-    task: &Value,
-    comments: &[Value],
-    assets: &[Asset],
-    user_map: &HashMap<i64, String>,
-) -> Vec<String> {
-    let mut lines: Vec<String> = vec![];
-
-    append_meta_section(task, user_map, &mut lines);
-    append_description_section(task, &mut lines);
-    append_artifacts_section(assets, &mut lines);
-    append_comments_section(comments, &mut lines);
-
-    lines
-}
-
-fn append_meta_section(task: &Value, user_map: &HashMap<i64, String>, lines: &mut Vec<String>) {
-    let project_id = task.get("project_id").and_then(|v| v.as_i64()).unwrap_or(0);
-    let task_id = task.get("id").and_then(|v| v.as_i64()).unwrap_or(0);
-    let project_name = task
-        .get("project_name")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
-    let title = task.get("name").and_then(|v| v.as_str()).unwrap_or("");
-    let status = if task
-        .get("is_completed")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false)
-    {
-        t("Completed")
-    } else {
-        t("Open")
-    };
-    let assignee = match task.get("assignee_id").and_then(|v| v.as_i64()) {
-        None => t("(unassigned)"),
-        Some(id) => match user_map.get(&id) {
-            Some(name) => format!("{name} ({id})"),
-            None => format!("({id})"),
-        },
-    };
-
-    lines.push(format!("{}:  {}-{}", t("Task"), project_id, task_id));
-    lines.push(format!("{}:  {}", t("Project"), project_name));
-    lines.push(format!("{}:  {}", t("Title"), title));
-    lines.push(format!("{}:  {}", t("Status"), status));
-    lines.push(format!("{}:  {}", t("Assignee"), assignee));
-
-    let start = fmt_date(task.get("start_on").unwrap_or(&Value::Null));
-    if !start.is_empty() {
-        lines.push(format!("{}:  {}", t("Start"), start));
-    }
-    let due = fmt_date(task.get("due_on").unwrap_or(&Value::Null));
-    if !due.is_empty() {
-        lines.push(format!("{}:  {}", t("Due"), due));
-    }
-
-    lines.push(format!(
-        "{}:  {}h",
-        t("Estimate"),
-        fmt_hours(task.get("estimate").unwrap_or(&Value::Null))
-    ));
-    lines.push(format!(
-        "{}:  {}h",
-        t("Logged"),
-        fmt_hours(task.get("tracked_time").unwrap_or(&Value::Null))
-    ));
-}
-
-fn append_description_section(task: &Value, lines: &mut Vec<String>) {
-    lines.push(String::new());
-    lines.push(format!("{}:", t("Description")));
-    let body_html = task.get("body").and_then(|v| v.as_str()).unwrap_or("");
-    let text = html_to_text(body_html);
-    if text.is_empty() {
-        lines.push(t("(no description)"));
-    } else {
-        for line in text.lines() {
-            lines.push(line.to_string());
-        }
-    }
-}
-
-fn append_artifacts_section(assets: &[Asset], lines: &mut Vec<String>) {
-    if assets.is_empty() {
-        return;
-    }
-    lines.push(String::new());
-    lines.push(format!("{}:", t("Artifacts")));
-    for (i, asset) in assets.iter().enumerate() {
-        lines.push(format!("[{}] {}", i + 1, asset.name));
-        lines.push(format!("  {}", asset.url));
-    }
-}
-
-fn append_comments_section(comments: &[Value], lines: &mut Vec<String>) {
-    if comments.is_empty() {
-        return;
-    }
-    lines.push(String::new());
-    lines.push(format!("{}:", t("Comments")));
-    for comment in comments {
-        let author = comment
-            .get("created_by_name")
-            .and_then(|v| v.as_str())
-            .filter(|s| !s.is_empty())
-            .map(|s| s.to_string())
-            .or_else(|| {
-                comment
-                    .get("created_by_id")
-                    .map(|v| v.to_string())
-                    .filter(|s| !s.is_empty() && s != "null")
-            })
-            .unwrap_or_else(|| t("(unknown)"));
-
-        let when = fmt_ts(comment.get("created_on").unwrap_or(&Value::Null));
-        let body = {
-            let plain = comment
-                .get("body_plain_text")
-                .and_then(|v| v.as_str())
-                .filter(|s| !s.is_empty());
-            match plain {
-                Some(s) => s.to_string(),
-                None => {
-                    let html = comment.get("body").and_then(|v| v.as_str()).unwrap_or("");
-                    html_to_text(html)
-                }
-            }
-        };
-
-        lines.push(String::new());
-        lines.push(format!("  {} \u{2014} {}", author, when));
-        for line in body.lines() {
-            lines.push(format!("  {}", line));
-        }
-    }
-}
-
 /// One row in the mine/list table.
 pub struct MineTableRow {
     pub instance: String,
@@ -583,6 +438,345 @@ pub fn render_task(
 /// This is the render.print_error parity seam.
 pub fn print_error(msg: &str) {
     eprintln!("{msg}");
+}
+
+const BOX_TL: &str = "\u{256D}";
+const BOX_TR: &str = "\u{256E}";
+const BOX_BL: &str = "\u{2570}";
+const BOX_BR: &str = "\u{256F}";
+const BOX_H: &str = "\u{2500}";
+const BOX_V: &str = "\u{2502}";
+const ELLIPSIS: &str = "\u{2026}";
+const MIDDOT: &str = "\u{00B7}";
+
+/// Parity: Python tui.py wrap_text.
+///
+/// Greedy word-wrap on whitespace to at most `width` columns per line (char count).
+/// A single word longer than `width` is hard-split at `width`. Existing line breaks
+/// in `text` are preserved — each input line is wrapped independently. Empty input
+/// yields an empty Vec (callers use `or vec!["".into()]`).
+pub fn wrap_text(text: &str, width: usize) -> Vec<String> {
+    if text.is_empty() || width == 0 {
+        return vec![];
+    }
+    let mut result = Vec::new();
+    for input_line in text.split('\n') {
+        wrap_single_line(input_line, width, &mut result);
+    }
+    result
+}
+
+fn append_word_to_line(
+    word: &str,
+    word_len: usize,
+    width: usize,
+    current: &mut String,
+    current_len: &mut usize,
+    out: &mut Vec<String>,
+) {
+    if word_len <= width {
+        current.push_str(word);
+        *current_len = word_len;
+    } else {
+        hard_split_word(word, width, current, current_len, out);
+    }
+}
+
+fn wrap_single_line(line: &str, width: usize, out: &mut Vec<String>) {
+    let mut current = String::new();
+    let mut current_len = 0usize;
+
+    for word in line.split_whitespace() {
+        let word_len = word.chars().count();
+
+        if current_len == 0 {
+            append_word_to_line(word, word_len, width, &mut current, &mut current_len, out);
+            continue;
+        }
+
+        if current_len + 1 + word_len <= width {
+            current.push(' ');
+            current.push_str(word);
+            current_len += 1 + word_len;
+            continue;
+        }
+
+        out.push(current.clone());
+        current.clear();
+        current_len = 0;
+        append_word_to_line(word, word_len, width, &mut current, &mut current_len, out);
+    }
+
+    if !current.is_empty() || line.chars().next().is_none() {
+        out.push(current);
+    }
+}
+
+fn hard_split_word(
+    word: &str,
+    width: usize,
+    current: &mut String,
+    current_len: &mut usize,
+    out: &mut Vec<String>,
+) {
+    let mut chars = word.chars();
+    loop {
+        let chunk: String = chars.by_ref().take(width).collect();
+        if chunk.is_empty() {
+            break;
+        }
+        let chunk_len = chunk.chars().count();
+        if chunk_len < width {
+            *current = chunk;
+            *current_len = chunk_len;
+            break;
+        } else {
+            out.push(chunk);
+        }
+    }
+}
+
+/// Parity: Python tui.py _comment_box.
+///
+/// Returns a box of lines each exactly `width` chars wide (char count).
+/// If `width` < 4 returns an empty Vec.
+/// The top border embeds ' {author} {MIDDOT} {when} ' padded/clipped to fit.
+/// A header longer than inner-2 is clipped with ELLIPSIS + space before the tr corner.
+/// Body lines are BOX_V + ljust(inner) + BOX_V. Bottom is BOX_BL + h*inner + BOX_BR.
+pub fn comment_box(author: &str, when: &str, body: &str, width: usize) -> Vec<String> {
+    if width < 4 {
+        return vec![];
+    }
+    let inner = width - 2;
+    let header_text = format!(" {} {} {} ", author, MIDDOT, when);
+    let max_header = inner.saturating_sub(2);
+    let header_chars: Vec<char> = header_text.chars().collect();
+    let header_fitted = if header_chars.len() > max_header {
+        let clipped: String = header_chars[..max_header.saturating_sub(1)]
+            .iter()
+            .collect();
+        format!("{}{} ", clipped, ELLIPSIS)
+    } else {
+        header_text.clone()
+    };
+    let fitted_len = header_fitted.chars().count();
+    let h_right = if inner > 1 + fitted_len {
+        BOX_H.repeat(inner - 1 - fitted_len)
+    } else {
+        String::new()
+    };
+    let top = format!("{}{}{}{}{}", BOX_TL, BOX_H, header_fitted, h_right, BOX_TR);
+
+    let body_lines = {
+        let wrapped = wrap_text(body, inner);
+        if wrapped.is_empty() {
+            vec![String::new()]
+        } else {
+            wrapped
+        }
+    };
+
+    let middle: Vec<String> = body_lines
+        .iter()
+        .map(|line| {
+            let line_len = line.chars().count();
+            let padding = inner.saturating_sub(line_len);
+            format!("{}{}{}{}", BOX_V, line, " ".repeat(padding), BOX_V)
+        })
+        .collect();
+
+    let bottom = format!("{}{}{}", BOX_BL, BOX_H.repeat(inner), BOX_BR);
+
+    let mut result = vec![top];
+    result.extend(middle);
+    result.push(bottom);
+    result
+}
+
+/// Parity: Python tui.py build_detail_lines.
+///
+/// Composes the full detail content at `inner_width`:
+/// (1) meta section, (2) blank, (3) Description + wrapped body,
+/// (4) blank, (5) comment boxes (blank-separated, blank-prefixed).
+/// No line exceeds `inner_width` chars. Pure: no I/O, no async.
+pub fn build_detail_lines(
+    task: &Value,
+    comments: &[Value],
+    user_map: &HashMap<i64, String>,
+    inner_width: usize,
+) -> Vec<String> {
+    let mut lines: Vec<String> = Vec::new();
+    build_meta_rows(task, user_map, inner_width, &mut lines);
+    lines.push(String::new());
+    build_description_rows(task, inner_width, &mut lines);
+    if !comments.is_empty() {
+        lines.push(String::new());
+        build_comments_rows(comments, inner_width, &mut lines);
+    }
+    lines
+}
+
+fn build_meta_rows(
+    task: &Value,
+    user_map: &HashMap<i64, String>,
+    inner_width: usize,
+    lines: &mut Vec<String>,
+) {
+    let project_id = task.get("project_id").and_then(|v| v.as_i64()).unwrap_or(0);
+    let task_id = task.get("id").and_then(|v| v.as_i64()).unwrap_or(0);
+    let project_name = task
+        .get("project_name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let title = task.get("name").and_then(|v| v.as_str()).unwrap_or("");
+    let status = if task
+        .get("is_completed")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+    {
+        t("Completed")
+    } else {
+        t("Open")
+    };
+    let assignee = match task.get("assignee_id").and_then(|v| v.as_i64()) {
+        None => t("(unassigned)"),
+        Some(id) => match user_map.get(&id) {
+            Some(name) => format!("{name} ({id})"),
+            None => format!("({id})"),
+        },
+    };
+
+    let meta_entries: &[(&str, String)] = &[
+        ("Task", format!("{}-{}", project_id, task_id)),
+        ("Project", project_name),
+        ("Title", title.to_string()),
+        ("Status", status),
+        ("Assignee", assignee),
+    ];
+
+    for (label, value) in meta_entries {
+        push_truncated(lines, &format!("{}:  {}", t(label), value), inner_width);
+    }
+
+    let start = fmt_date(task.get("start_on").unwrap_or(&Value::Null));
+    if !start.is_empty() {
+        push_truncated(lines, &format!("{}:  {}", t("Start"), start), inner_width);
+    }
+    let due = fmt_date(task.get("due_on").unwrap_or(&Value::Null));
+    if !due.is_empty() {
+        push_truncated(lines, &format!("{}:  {}", t("Due"), due), inner_width);
+    }
+
+    push_truncated(
+        lines,
+        &format!(
+            "{}:  {}h",
+            t("Estimate"),
+            fmt_hours(task.get("estimate").unwrap_or(&Value::Null))
+        ),
+        inner_width,
+    );
+    push_truncated(
+        lines,
+        &format!(
+            "{}:  {}h",
+            t("Logged"),
+            fmt_hours(task.get("tracked_time").unwrap_or(&Value::Null))
+        ),
+        inner_width,
+    );
+}
+
+fn build_description_rows(task: &Value, inner_width: usize, lines: &mut Vec<String>) {
+    push_truncated(lines, &format!("{}:", t("Description")), inner_width);
+    let body_html = task.get("body").and_then(|v| v.as_str()).unwrap_or("");
+    let text = html_to_text(body_html);
+    if text.is_empty() {
+        push_truncated(lines, &t("(no description)"), inner_width);
+    } else {
+        for wrapped in wrap_text(&text, inner_width) {
+            lines.push(wrapped);
+        }
+    }
+}
+
+fn build_comments_rows(comments: &[Value], inner_width: usize, lines: &mut Vec<String>) {
+    let mut first = true;
+    for comment in comments {
+        if !first {
+            lines.push(String::new());
+        }
+        first = false;
+
+        let author = extract_comment_author(comment);
+        let when = fmt_ts(comment.get("created_on").unwrap_or(&Value::Null));
+        let body = extract_comment_body(comment);
+
+        for line in comment_box(&author, &when, &body, inner_width) {
+            lines.push(line);
+        }
+    }
+}
+
+fn extract_comment_author(comment: &Value) -> String {
+    comment
+        .get("created_by_name")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .or_else(|| {
+            comment
+                .get("created_by_id")
+                .map(|v| v.to_string())
+                .filter(|s| !s.is_empty() && s != "null")
+        })
+        .unwrap_or_else(|| t("(unknown)"))
+}
+
+fn extract_comment_body(comment: &Value) -> String {
+    let plain = comment
+        .get("body_plain_text")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty());
+    match plain {
+        Some(s) => s.to_string(),
+        None => {
+            let html = comment.get("body").and_then(|v| v.as_str()).unwrap_or("");
+            html_to_text(html)
+        }
+    }
+}
+
+fn push_truncated(lines: &mut Vec<String>, s: &str, max_width: usize) {
+    if max_width == 0 {
+        lines.push(String::new());
+        return;
+    }
+    let chars: Vec<char> = s.chars().collect();
+    if chars.len() <= max_width {
+        lines.push(s.to_string());
+    } else {
+        lines.push(chars[..max_width].iter().collect());
+    }
+}
+
+/// Returns `s` truncated to exactly `max_width` chars.
+///
+/// When `s` fits within `max_width`, it is returned unchanged. When it is longer,
+/// the result is the first `max_width - 1` chars followed by "\u{2026}" so the
+/// caller's column stays at exactly `max_width` chars. Edge cases: `max_width == 0`
+/// returns an empty string; `max_width == 1` returns "\u{2026}".
+pub fn truncate_cell(s: &str, max_width: usize) -> String {
+    let char_count = s.chars().count();
+    if char_count <= max_width {
+        return s.to_string();
+    }
+    if max_width == 0 {
+        return String::new();
+    }
+    let prefix: String = s.chars().take(max_width - 1).collect();
+    format!("{}\u{2026}", prefix)
 }
 
 #[cfg(test)]

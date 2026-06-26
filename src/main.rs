@@ -1,4 +1,3 @@
-mod app;
 mod cli;
 mod client;
 mod commands;
@@ -9,6 +8,7 @@ mod i18n;
 mod models;
 mod render;
 mod store;
+mod timing;
 mod tui;
 
 use clap::{CommandFactory, Parser};
@@ -340,6 +340,8 @@ async fn dispatch_current(args: cli::DisplayArgs) -> i32 {
 }
 
 async fn dispatch_mine(args: cli::MineArgs) -> i32 {
+    let config = config::load();
+    let db_path = config.db_path.clone();
     let store = match open_store() {
         Some(s) => s,
         None => return 1,
@@ -356,16 +358,36 @@ async fn dispatch_mine(args: cli::MineArgs) -> i32 {
         use std::io::IsTerminal;
         std::io::stdout().is_terminal() && std::io::stdin().is_terminal()
     };
-    mine_core(
+    type TuiCapture = std::sync::Arc<std::sync::Mutex<Option<MineTuiArgs>>>;
+    struct MineTuiArgs {
+        targets: Vec<store::instances::Instance>,
+        rows: Vec<crate::render::MineTableRow>,
+    }
+
+    let captured: TuiCapture = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let captured_for_closure = captured.clone();
+
+    let exit_code = mine_core(
         &repo,
-        &http,
+        &http.clone(),
         args.instance.as_deref(),
         is_tty,
         &mut std::io::stdout(),
         &mut std::io::stderr(),
-        tui::run_mine,
+        move |targets, rows| {
+            if let Ok(mut guard) = captured_for_closure.lock() {
+                *guard = Some(MineTuiArgs { targets, rows });
+            }
+            0
+        },
     )
-    .await
+    .await;
+
+    let tui_launch = captured.lock().ok().and_then(|mut g| g.take());
+    if let Some(args) = tui_launch {
+        return tui::run_mine(args.targets, http, db_path, args.rows).await;
+    }
+    exit_code
 }
 
 async fn dispatch_browse(args: cli::BrowseArgs) -> i32 {
@@ -415,7 +437,7 @@ async fn dispatch_browse(args: cli::BrowseArgs) -> i32 {
     } else {
         instances
     };
-    tui::run_browse(targets, http, db_path)
+    tui::browse(targets, http, db_path).await
 }
 
 /// Invoke `git rev-parse --abbrev-ref HEAD` and return the branch name.

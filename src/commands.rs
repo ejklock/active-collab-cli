@@ -689,32 +689,60 @@ pub async fn current_core(
 /// For each target instance, builds a client and fetches open tasks. Maps each
 /// MineTask to a MineTableRow using task_number when present (else id as fallback),
 /// mirroring Python `t.task_number or t.id`.
+///
+/// Instance order is preserved deterministically via an indexed JoinSet.
 pub async fn collect_mine_rows(targets: &[Instance], http: &Http) -> Vec<MineTableRow> {
-    let mut rows = Vec::new();
-    for inst in targets {
+    let t = std::time::Instant::now();
+
+    let mut set: tokio::task::JoinSet<(usize, Vec<crate::models::MineTask>)> =
+        tokio::task::JoinSet::new();
+
+    for (idx, inst) in targets.iter().enumerate() {
         let client = ActiveCollabClient::new(inst.clone(), http.clone());
-        let tasks = client.fetch_open_tasks().await.unwrap_or_default();
-        for task in tasks {
-            let task_number = match task.task_number {
-                Some(n) if n != 0 => n,
-                _ => task.id,
-            };
-            rows.push(MineTableRow {
-                instance: task.instance_name.clone(),
-                project_id: task.project_id.unwrap_or(0),
-                task_number,
-                task_id: task.id,
-                name: task.name.clone(),
-            });
+        set.spawn(async move {
+            let tasks = client.fetch_open_tasks().await.unwrap_or_default();
+            (idx, tasks)
+        });
+    }
+
+    let mut per_index: Vec<Vec<crate::models::MineTask>> =
+        (0..targets.len()).map(|_| Vec::new()).collect();
+
+    while let Some(joined) = set.join_next().await {
+        if let Ok((idx, tasks)) = joined {
+            per_index[idx] = tasks;
         }
     }
+
+    let rows = per_index
+        .into_iter()
+        .flat_map(|tasks| tasks.into_iter().map(mine_task_to_row))
+        .collect();
+
+    crate::timing::record("mine_list_load", t.elapsed());
     rows
+}
+
+fn mine_task_to_row(task: crate::models::MineTask) -> MineTableRow {
+    let task_number = match task.task_number {
+        Some(n) if n != 0 => n,
+        _ => task.id,
+    };
+    MineTableRow {
+        instance: task.instance_name,
+        project_id: task.project_id.unwrap_or(0),
+        task_number,
+        task_id: task.id,
+        name: task.name,
+    }
 }
 
 /// Parity: Python cmd_mine (testable core).
 ///
 /// Loads instances, applies optional instance filter, aggregates rows, then either
 /// invokes `launch` (TTY path) or writes the table (non-TTY path).
+/// The launch closure receives both the resolved targets (Vec<Instance>) and the
+/// fetched rows so the TUI can open Detail for any task across any instance.
 #[allow(clippy::too_many_arguments)]
 pub async fn mine_core(
     repo: &InstanceRepository<'_>,
@@ -723,7 +751,7 @@ pub async fn mine_core(
     is_tty: bool,
     out: &mut dyn Write,
     err: &mut dyn Write,
-    launch: impl FnOnce(Vec<MineTableRow>) -> i32,
+    launch: impl FnOnce(Vec<Instance>, Vec<MineTableRow>) -> i32,
 ) -> i32 {
     let instances = match repo.load_all() {
         Ok(v) => v,
@@ -772,7 +800,7 @@ pub async fn mine_core(
     let rows = collect_mine_rows(&targets, http).await;
 
     if is_tty {
-        return launch(rows);
+        return launch(targets, rows);
     }
 
     if rows.is_empty() {

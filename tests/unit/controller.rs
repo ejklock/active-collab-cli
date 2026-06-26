@@ -1,4 +1,5 @@
 use super::*;
+use crate::store::cache::UserMapCache;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -581,4 +582,557 @@ fn open_asset_javascript_scheme_returns_err() {
 fn open_asset_empty_url_returns_err() {
     let result = open_asset("");
     assert!(result.is_err(), "empty url must be rejected");
+}
+
+// S5.1 tests: load_task_core, cached_user_map, refresh_user_map
+
+fn make_db_path() -> (tempfile::TempDir, std::path::PathBuf) {
+    let dir = tempfile::TempDir::new().unwrap();
+    let db_path = dir.path().join("test.db");
+    (dir, db_path)
+}
+
+fn seed_task_cache(db_path: &std::path::Path, inst_name: &str, task: &serde_json::Value) {
+    let config = crate::config::Config {
+        db_path: db_path.to_path_buf(),
+        task_cache_ttl_hours: 24,
+    };
+    let store = crate::store::Store::open(&config).unwrap();
+    crate::store::cache::TaskCache::new(store.conn())
+        .write(inst_name, 10, 99, task, &serde_json::json!([]))
+        .unwrap();
+}
+
+fn seed_user_map_cache(
+    db_path: &std::path::Path,
+    inst_name: &str,
+    users: &std::collections::HashMap<i64, String>,
+) {
+    let config = crate::config::Config {
+        db_path: db_path.to_path_buf(),
+        task_cache_ttl_hours: 24,
+    };
+    let store = crate::store::Store::open(&config).unwrap();
+    crate::store::cache::UserMapCache::new(store.conn())
+        .write(inst_name, users)
+        .unwrap();
+}
+
+struct CoreTestFixture {
+    _dir: tempfile::TempDir,
+    db_path: std::path::PathBuf,
+    inst: Instance,
+    http: Http,
+}
+
+impl CoreTestFixture {
+    async fn with_server(server: &wiremock::MockServer) -> Self {
+        let (_dir, db_path) = make_db_path();
+        let inst = make_instance("inst", &server.uri(), Some(1));
+        let http = make_http();
+        CoreTestFixture {
+            _dir,
+            db_path,
+            inst,
+            http,
+        }
+    }
+
+    fn without_server() -> Self {
+        let (_dir, db_path) = make_db_path();
+        let inst = make_instance("inst", "http://localhost", Some(1));
+        let http = make_http();
+        CoreTestFixture {
+            _dir,
+            db_path,
+            inst,
+            http,
+        }
+    }
+}
+
+async fn assert_no_user_fetches(server: &wiremock::MockServer, context: &str) {
+    let reqs = server.received_requests().await.unwrap();
+    let user_fetches: Vec<_> = reqs
+        .iter()
+        .filter(|r| r.url.path() == "/api/v1/users")
+        .collect();
+    assert!(user_fetches.is_empty(), "{context}: got {user_fetches:?}");
+}
+
+#[tokio::test]
+async fn load_task_core_returns_task_and_comments_without_user_fetch() {
+    let server = MockServer::start().await;
+    let fix = CoreTestFixture::with_server(&server).await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/projects/10/tasks/99"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "single": {
+                "id": 99,
+                "name": "Core Task",
+                "assignee_id": 42,
+                "project_id": 10,
+                "body": "Task body text"
+            },
+            "tracked_time": null,
+            "comments": [
+                { "id": 1, "created_by_name": "Alice", "body_plain_text": "Great work" }
+            ]
+        })))
+        .mount(&server)
+        .await;
+
+    let core = load_task_core(fix.db_path, fix.inst, fix.http, 10, 99, false).await;
+
+    assert_eq!(core.task["name"], "Core Task");
+    assert_eq!(core.comments.len(), 1);
+    assert_eq!(core.comments[0]["created_by_name"], "Alice");
+    assert_no_user_fetches(&server, "load_task_core must not fetch users").await;
+}
+
+#[tokio::test]
+async fn load_task_core_assignee_line_shows_id_when_user_map_empty() {
+    let server = MockServer::start().await;
+    let fix = CoreTestFixture::with_server(&server).await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/projects/10/tasks/99"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "single": {
+                "id": 99,
+                "name": "Assigned Task",
+                "assignee_id": 7,
+                "project_id": 10
+            },
+            "tracked_time": null,
+            "comments": [
+                { "id": 1, "created_by_name": "Bob", "body_plain_text": "comment text" }
+            ]
+        })))
+        .mount(&server)
+        .await;
+
+    let core = load_task_core(fix.db_path, fix.inst, fix.http, 10, 99, false).await;
+
+    let empty_map = std::collections::HashMap::new();
+    let lines = crate::render::build_detail_lines(&core.task, &core.comments, &empty_map, 80);
+
+    let assignee_line = lines
+        .iter()
+        .find(|l| l.contains("Assignee"))
+        .cloned()
+        .unwrap_or_default();
+    assert!(
+        assignee_line.contains("(7)"),
+        "assignee line must show '(id)' when user_map is empty, got: {assignee_line:?}"
+    );
+    assert!(
+        lines.iter().any(|l| l.contains("comment text")),
+        "comments must render fully even without user_map"
+    );
+    assert!(
+        lines.iter().any(|l| l.contains("Assigned Task")),
+        "task title must appear in rendered lines"
+    );
+}
+
+#[tokio::test]
+async fn load_task_core_extracts_assets() {
+    let server = MockServer::start().await;
+    let fix = CoreTestFixture::with_server(&server).await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/projects/10/tasks/99"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "single": {
+                "id": 99,
+                "name": "Task with asset",
+                "body": r#"<a href="https://files.example.com/doc.pdf">doc</a>"#
+            },
+            "tracked_time": null,
+            "comments": []
+        })))
+        .mount(&server)
+        .await;
+
+    let core = load_task_core(fix.db_path, fix.inst, fix.http, 10, 99, false).await;
+
+    assert_eq!(core.assets.len(), 1);
+    assert_eq!(core.assets[0].url, "https://files.example.com/doc.pdf");
+}
+
+#[tokio::test]
+async fn cached_user_map_returns_none_when_cache_empty() {
+    let fix = CoreTestFixture::without_server();
+
+    let result = cached_user_map(&fix.db_path, &fix.inst);
+    assert!(
+        result.is_none(),
+        "cold cache must return None, got: {result:?}"
+    );
+}
+
+#[tokio::test]
+async fn cached_user_map_returns_some_when_cache_populated() {
+    let fix = CoreTestFixture::without_server();
+
+    let users: std::collections::HashMap<i64, String> =
+        [(5i64, "Eve".to_string())].into_iter().collect();
+    seed_user_map_cache(&fix.db_path, "inst", &users);
+
+    let result = cached_user_map(&fix.db_path, &fix.inst);
+    assert!(result.is_some(), "populated cache must return Some");
+    assert_eq!(result.unwrap().get(&5).map(|s| s.as_str()), Some("Eve"));
+}
+
+#[tokio::test]
+async fn refresh_user_map_fetches_from_network_and_writes_cache() {
+    let server = MockServer::start().await;
+    let fix = CoreTestFixture::with_server(&server).await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/users"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            { "id": 9, "display_name": "Frank" }
+        ])))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let map = refresh_user_map(fix.db_path.clone(), fix.inst.clone(), fix.http).await;
+    assert_eq!(map.get(&9).map(|s| s.as_str()), Some("Frank"));
+
+    let cached = cached_user_map(&fix.db_path, &fix.inst);
+    assert!(cached.is_some(), "refresh_user_map must write to cache");
+    assert_eq!(
+        cached.unwrap().get(&9).map(|s| s.as_str()),
+        Some("Frank"),
+        "cached value must match fetched value"
+    );
+
+    server.verify().await;
+}
+
+#[tokio::test]
+async fn cached_user_map_present_means_no_refresh_needed() {
+    let server = MockServer::start().await;
+    let fix = CoreTestFixture::with_server(&server).await;
+
+    let users: std::collections::HashMap<i64, String> =
+        [(3i64, "Grace".to_string())].into_iter().collect();
+    seed_user_map_cache(&fix.db_path, "inst", &users);
+
+    assert!(
+        cached_user_map(&fix.db_path, &fix.inst).is_some(),
+        "cached map present means no user-directory network call is needed"
+    );
+    assert_no_user_fetches(&server, "cached_user_map must not make network calls").await;
+}
+
+#[tokio::test]
+async fn load_task_core_served_from_cache_makes_no_task_fetch() {
+    let server = MockServer::start().await;
+    let fix = CoreTestFixture::with_server(&server).await;
+
+    let task_fields = serde_json::json!({
+        "id": 99,
+        "name": "Cached Core Task",
+        "project_id": 10
+    });
+    seed_task_cache(&fix.db_path, "inst", &task_fields);
+
+    let core = load_task_core(fix.db_path, fix.inst, fix.http, 10, 99, false).await;
+    assert_eq!(core.task["name"], "Cached Core Task");
+
+    let reqs = server.received_requests().await.unwrap();
+    assert!(
+        reqs.is_empty(),
+        "cache hit must make zero network calls: got {reqs:?}"
+    );
+}
+
+// S5-A1: pre-populated user_map_cache → zero GET /api/v1/users calls on detail open
+#[tokio::test]
+async fn task_detail_with_cached_user_map_makes_no_users_request() {
+    let server = MockServer::start().await;
+    let (_dir, store) = make_store();
+    let inst = make_instance("inst", &server.uri(), Some(1));
+    let http = make_http();
+
+    let task_fields = serde_json::json!({ "id": 99, "name": "Task", "project_id": 10 });
+    crate::store::cache::TaskCache::new(store.conn())
+        .write("inst", 10, 99, &task_fields, &serde_json::json!([]))
+        .unwrap();
+
+    let user_map: std::collections::HashMap<i64, String> = [(7i64, "Pre-Cached User".to_string())]
+        .into_iter()
+        .collect();
+    UserMapCache::new(store.conn())
+        .write("inst", &user_map)
+        .unwrap();
+
+    let detail = task_detail_with_conn(store.conn(), &inst, &http, 10, 99, false).await;
+
+    assert_eq!(
+        detail.user_map.get(&7).map(|s| s.as_str()),
+        Some("Pre-Cached User")
+    );
+
+    let reqs = server.received_requests().await.unwrap();
+    let user_fetches: Vec<_> = reqs
+        .iter()
+        .filter(|r| r.url.path() == "/api/v1/users")
+        .collect();
+    assert!(
+        user_fetches.is_empty(),
+        "pre-populated user_map_cache must not trigger GET /api/v1/users: got {user_fetches:?}"
+    );
+}
+
+// S5-A2: empty user_map_cache → first open fetches once and writes; second open hits cache
+#[tokio::test]
+async fn task_detail_empty_user_cache_fetches_once_then_serves_from_cache() {
+    let server = MockServer::start().await;
+    let (_dir, store) = make_store();
+    let inst = make_instance("inst", &server.uri(), Some(1));
+    let http = make_http();
+
+    let task_fields = serde_json::json!({ "id": 99, "name": "Task", "project_id": 10 });
+    crate::store::cache::TaskCache::new(store.conn())
+        .write("inst", 10, 99, &task_fields, &serde_json::json!([]))
+        .unwrap();
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/users"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            { "id": 42, "display_name": "Network User" }
+        ])))
+        .mount(&server)
+        .await;
+
+    // First open: cache miss → network fetch
+    let detail1 = task_detail_with_conn(store.conn(), &inst, &http, 10, 99, false).await;
+    assert_eq!(
+        detail1.user_map.get(&42).map(|s| s.as_str()),
+        Some("Network User")
+    );
+
+    let reqs_after_first = server.received_requests().await.unwrap();
+    let user_hits_first: Vec<_> = reqs_after_first
+        .iter()
+        .filter(|r| r.url.path() == "/api/v1/users")
+        .collect();
+    assert_eq!(
+        user_hits_first.len(),
+        1,
+        "first open must fetch users exactly once"
+    );
+
+    // Second open: user_map_cache populated → no further network calls
+    let detail2 = task_detail_with_conn(store.conn(), &inst, &http, 10, 99, false).await;
+    assert_eq!(
+        detail2.user_map.get(&42).map(|s| s.as_str()),
+        Some("Network User")
+    );
+
+    let reqs_after_second = server.received_requests().await.unwrap();
+    let user_hits_second: Vec<_> = reqs_after_second
+        .iter()
+        .filter(|r| r.url.path() == "/api/v1/users")
+        .collect();
+    assert_eq!(
+        user_hits_second.len(),
+        1,
+        "second open must serve from cache — still only one users request total"
+    );
+}
+
+// S5.3 tests: concurrent tasks_by_project
+
+#[tokio::test]
+async fn tasks_by_project_concurrent_aggregates_across_two_instances() {
+    let server1 = MockServer::start().await;
+    let server2 = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/users/1/tasks"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "tasks": [
+                { "id": 10, "task_number": 1, "name": "Concurrent Alpha", "project_id": 100,
+                  "is_completed": false, "is_trashed": false }
+            ]
+        })))
+        .mount(&server1)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/projects"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            { "id": 100, "name": "Project Gamma" }
+        ])))
+        .mount(&server1)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/users/2/tasks"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "tasks": [
+                { "id": 20, "task_number": 2, "name": "Concurrent Beta", "project_id": 200,
+                  "is_completed": false, "is_trashed": false }
+            ]
+        })))
+        .mount(&server2)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/projects"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            { "id": 200, "name": "Project Delta" }
+        ])))
+        .mount(&server2)
+        .await;
+
+    let inst1 = make_instance("c-inst1", &server1.uri(), Some(1));
+    let inst2 = make_instance("c-inst2", &server2.uri(), Some(2));
+    let http = make_http();
+
+    let groups = tasks_by_project(&[inst1, inst2], &http).await;
+
+    assert_eq!(groups.len(), 2, "must aggregate tasks from both instances");
+
+    let project_names: Vec<&str> = groups.iter().map(|g| g.project_name.as_str()).collect();
+    assert!(
+        project_names.contains(&"Project Gamma"),
+        "Project Gamma missing from groups: {project_names:?}"
+    );
+    assert!(
+        project_names.contains(&"Project Delta"),
+        "Project Delta missing from groups: {project_names:?}"
+    );
+
+    let alpha_group = groups
+        .iter()
+        .find(|g| g.project_name == "Project Gamma")
+        .unwrap();
+    assert_eq!(alpha_group.tasks[0].name, "Concurrent Alpha");
+    assert_eq!(alpha_group.tasks[0].instance, "c-inst1");
+
+    let beta_group = groups
+        .iter()
+        .find(|g| g.project_name == "Project Delta")
+        .unwrap();
+    assert_eq!(beta_group.tasks[0].name, "Concurrent Beta");
+    assert_eq!(beta_group.tasks[0].instance, "c-inst2");
+}
+
+#[tokio::test]
+async fn tasks_by_project_failing_instance_excluded_other_still_present() {
+    let server_ok = MockServer::start().await;
+    let server_err = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/users/1/tasks"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "tasks": [
+                { "id": 5, "task_number": 5, "name": "Survivor Task", "project_id": 10,
+                  "is_completed": false, "is_trashed": false }
+            ]
+        })))
+        .mount(&server_ok)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/projects"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            { "id": 10, "name": "Survivor Project" }
+        ])))
+        .mount(&server_ok)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/users/2/tasks"))
+        .respond_with(ResponseTemplate::new(500).set_body_string("error"))
+        .mount(&server_err)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/projects"))
+        .respond_with(ResponseTemplate::new(500).set_body_string("error"))
+        .mount(&server_err)
+        .await;
+
+    let inst_ok = make_instance("ok-inst", &server_ok.uri(), Some(1));
+    let inst_err = make_instance("err-inst", &server_err.uri(), Some(2));
+    let http = make_http();
+
+    let groups = tasks_by_project(&[inst_ok, inst_err], &http).await;
+
+    assert_eq!(
+        groups.len(),
+        1,
+        "failing instance must contribute no groups"
+    );
+    assert_eq!(groups[0].project_name, "Survivor Project");
+    assert_eq!(groups[0].tasks[0].name, "Survivor Task");
+    assert_eq!(groups[0].tasks[0].instance, "ok-inst");
+}
+
+// S5-A3: refresh=true bypasses user_map_cache and writes fresh result back
+#[tokio::test]
+async fn task_detail_refresh_true_bypasses_user_map_cache() {
+    let server = MockServer::start().await;
+    let (_dir, store) = make_store();
+    let inst = make_instance("inst", &server.uri(), Some(1));
+    let http = make_http();
+
+    let task_fields = serde_json::json!({ "id": 99, "name": "Task", "project_id": 10 });
+    crate::store::cache::TaskCache::new(store.conn())
+        .write("inst", 10, 99, &task_fields, &serde_json::json!([]))
+        .unwrap();
+
+    let stale_map: std::collections::HashMap<i64, String> =
+        [(7i64, "Stale User".to_string())].into_iter().collect();
+    UserMapCache::new(store.conn())
+        .write("inst", &stale_map)
+        .unwrap();
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/projects/10/tasks/99"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(make_task_payload()))
+        .mount(&server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/users"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            { "id": 7, "display_name": "Fresh User" }
+        ])))
+        .mount(&server)
+        .await;
+
+    let detail = task_detail_with_conn(store.conn(), &inst, &http, 10, 99, true).await;
+
+    assert_eq!(
+        detail.user_map.get(&7).map(|s| s.as_str()),
+        Some("Fresh User"),
+        "refresh=true must return the freshly fetched user name"
+    );
+
+    let reqs = server.received_requests().await.unwrap();
+    let user_hits: Vec<_> = reqs
+        .iter()
+        .filter(|r| r.url.path() == "/api/v1/users")
+        .collect();
+    assert_eq!(user_hits.len(), 1, "refresh=true must fetch users once");
+
+    let cached = UserMapCache::new(store.conn())
+        .read("inst")
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        cached.users.get(&7).map(|s| s.as_str()),
+        Some("Fresh User"),
+        "fresh result must be written back to user_map_cache"
+    );
 }

@@ -27,9 +27,9 @@ fn open_creates_parent_dir_and_db_file() {
 }
 
 #[test]
-fn schema_has_all_three_tables() {
+fn schema_has_all_four_tables() {
     let (_dir, store) = open_test_store();
-    for table in &["instances", "ticket_cache", "settings"] {
+    for table in &["instances", "ticket_cache", "settings", "user_map_cache"] {
         let count: i64 = store
             .conn()
             .query_row(
@@ -40,6 +40,21 @@ fn schema_has_all_three_tables() {
             .unwrap();
         assert_eq!(count, 1, "table {table} not found");
     }
+}
+
+#[test]
+fn user_map_cache_table_has_correct_columns() {
+    let (_dir, store) = open_test_store();
+    let mut stmt = store
+        .conn()
+        .prepare("PRAGMA table_info(user_map_cache)")
+        .unwrap();
+    let cols: Vec<String> = stmt
+        .query_map([], |r| r.get(1))
+        .unwrap()
+        .map(|r| r.unwrap())
+        .collect();
+    assert_eq!(cols, ["instance", "users_json", "fetched_at"]);
 }
 
 #[test]

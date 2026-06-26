@@ -531,249 +531,6 @@ fn render_mine_table_empty_rows_gives_two_lines() {
     assert_eq!(lines.len(), 2, "header + separator only: {s}");
 }
 
-fn full_task() -> serde_json::Value {
-    json!({
-        "id": 99,
-        "task_number": 7,
-        "project_id": 10,
-        "project_name": "Acme Project",
-        "name": "Fix the bug",
-        "is_completed": false,
-        "assignee_id": 5,
-        "start_on": 1614556800i64,
-        "due_on": 1614643200i64,
-        "estimate": 4.0f64,
-        "tracked_time": 2.5f64,
-        "body": "<p>Some details here</p>"
-    })
-}
-
-#[test]
-fn render_detail_lines_meta_rows_present() {
-    let task = full_task();
-    let mut user_map = HashMap::new();
-    user_map.insert(5i64, "Alice".to_string());
-    let lines = render_detail_lines(&task, &[], &[], &user_map);
-    let joined = lines.join("\n");
-    assert!(joined.contains("Task:"), "missing Task row: {joined}");
-    assert!(joined.contains("10-99"), "missing task ref: {joined}");
-    assert!(joined.contains("Project:"), "missing Project row: {joined}");
-    assert!(
-        joined.contains("Acme Project"),
-        "missing project name: {joined}"
-    );
-    assert!(joined.contains("Title:"), "missing Title row: {joined}");
-    assert!(joined.contains("Fix the bug"), "missing title: {joined}");
-    assert!(joined.contains("Status:"), "missing Status row: {joined}");
-    assert!(joined.contains("Open"), "missing status: {joined}");
-    assert!(
-        joined.contains("Assignee:"),
-        "missing Assignee row: {joined}"
-    );
-    assert!(
-        joined.contains("Alice (5)"),
-        "missing assignee name: {joined}"
-    );
-    assert!(joined.contains("Start:"), "missing Start row: {joined}");
-    assert!(joined.contains("Due:"), "missing Due row: {joined}");
-    assert!(
-        joined.contains("Estimate:"),
-        "missing Estimate row: {joined}"
-    );
-    assert!(joined.contains("4h"), "missing estimate value: {joined}");
-    assert!(joined.contains("Logged:"), "missing Logged row: {joined}");
-    assert!(joined.contains("2.5h"), "missing logged value: {joined}");
-}
-
-#[test]
-fn render_detail_lines_description_from_body_html() {
-    let task = full_task();
-    let lines = render_detail_lines(&task, &[], &[], &HashMap::new());
-    let joined = lines.join("\n");
-    assert!(
-        joined.contains("Description:"),
-        "missing Description header: {joined}"
-    );
-    assert!(
-        joined.contains("Some details here"),
-        "missing description body: {joined}"
-    );
-}
-
-#[test]
-fn render_detail_lines_no_description_fallback() {
-    let task = json!({ "id": 1, "body": null });
-    let lines = render_detail_lines(&task, &[], &[], &HashMap::new());
-    let joined = lines.join("\n");
-    assert!(
-        joined.contains("(no description)"),
-        "missing fallback: {joined}"
-    );
-}
-
-#[test]
-fn render_detail_lines_empty_body_falls_back() {
-    let task = json!({ "id": 1, "body": "" });
-    let lines = render_detail_lines(&task, &[], &[], &HashMap::new());
-    let joined = lines.join("\n");
-    assert!(
-        joined.contains("(no description)"),
-        "empty body must fall back: {joined}"
-    );
-}
-
-#[test]
-fn render_detail_lines_artifacts_section_with_assets() {
-    let task = json!({ "id": 1 });
-    let assets = vec![
-        Asset {
-            name: "doc.pdf".into(),
-            url: "https://example.com/doc.pdf".into(),
-        },
-        Asset {
-            name: "image.png".into(),
-            url: "https://example.com/image.png".into(),
-        },
-    ];
-    let lines = render_detail_lines(&task, &[], &assets, &HashMap::new());
-    let joined = lines.join("\n");
-    assert!(
-        joined.contains("Artifacts:"),
-        "missing Artifacts header: {joined}"
-    );
-    assert!(
-        joined.contains("[1] doc.pdf"),
-        "missing first asset name: {joined}"
-    );
-    assert!(
-        joined.contains("  https://example.com/doc.pdf"),
-        "missing first url: {joined}"
-    );
-    assert!(
-        joined.contains("[2] image.png"),
-        "missing second asset name: {joined}"
-    );
-}
-
-#[test]
-fn render_detail_lines_no_artifacts_section_when_empty() {
-    let task = json!({ "id": 1 });
-    let lines = render_detail_lines(&task, &[], &[], &HashMap::new());
-    let joined = lines.join("\n");
-    assert!(
-        !joined.contains("Artifacts:"),
-        "must omit Artifacts when empty: {joined}"
-    );
-}
-
-#[test]
-fn render_detail_lines_comments_section() {
-    let comments = vec![json!({
-        "created_by_name": "Bob",
-        "created_on": 1614556800i64,
-        "body_plain_text": "LGTM!"
-    })];
-    let task = json!({ "id": 1 });
-    let lines = render_detail_lines(&task, &comments, &[], &HashMap::new());
-    let joined = lines.join("\n");
-    assert!(
-        joined.contains("Comments:"),
-        "missing Comments header: {joined}"
-    );
-    assert!(joined.contains("Bob"), "missing comment author: {joined}");
-    assert!(joined.contains("LGTM!"), "missing comment body: {joined}");
-}
-
-#[test]
-fn render_detail_lines_no_comments_section_when_empty() {
-    let task = json!({ "id": 1 });
-    let lines = render_detail_lines(&task, &[], &[], &HashMap::new());
-    let joined = lines.join("\n");
-    assert!(
-        !joined.contains("Comments:"),
-        "must omit Comments when empty: {joined}"
-    );
-}
-
-#[test]
-fn render_detail_lines_unassigned_fallback() {
-    let task = json!({ "id": 1, "assignee_id": null });
-    let lines = render_detail_lines(&task, &[], &[], &HashMap::new());
-    let joined = lines.join("\n");
-    assert!(
-        joined.contains("(unassigned)"),
-        "missing unassigned fallback: {joined}"
-    );
-}
-
-#[test]
-fn render_detail_lines_assignee_id_not_in_map() {
-    let task = json!({ "id": 1, "assignee_id": 77 });
-    let lines = render_detail_lines(&task, &[], &[], &HashMap::new());
-    let joined = lines.join("\n");
-    assert!(
-        joined.contains("(77)"),
-        "missing bare id fallback: {joined}"
-    );
-}
-
-#[test]
-fn render_detail_lines_start_due_omitted_when_null() {
-    let task = json!({ "id": 1, "start_on": null, "due_on": null });
-    let lines = render_detail_lines(&task, &[], &[], &HashMap::new());
-    let joined = lines.join("\n");
-    assert!(
-        !joined.contains("Start:"),
-        "must omit Start when null: {joined}"
-    );
-    assert!(
-        !joined.contains("Due:"),
-        "must omit Due when null: {joined}"
-    );
-}
-
-#[test]
-fn render_detail_lines_comment_falls_back_to_html_to_text() {
-    let comments = vec![json!({
-        "created_by_name": "Alice",
-        "created_on": 1614556800i64,
-        "body": "<p>Paragraph comment</p>"
-    })];
-    let task = json!({ "id": 1 });
-    let lines = render_detail_lines(&task, &comments, &[], &HashMap::new());
-    let joined = lines.join("\n");
-    assert!(
-        joined.contains("Paragraph comment"),
-        "html body must be converted: {joined}"
-    );
-}
-
-#[test]
-fn render_detail_lines_comment_unknown_author_fallback() {
-    let comments = vec![json!({
-        "created_on": 1614556800i64,
-        "body_plain_text": "hello"
-    })];
-    let task = json!({ "id": 1 });
-    let lines = render_detail_lines(&task, &comments, &[], &HashMap::new());
-    let joined = lines.join("\n");
-    assert!(
-        joined.contains("(unknown)"),
-        "missing unknown author fallback: {joined}"
-    );
-}
-
-#[test]
-fn render_detail_lines_completed_status() {
-    let task = json!({ "id": 1, "is_completed": true });
-    let lines = render_detail_lines(&task, &[], &[], &HashMap::new());
-    let joined = lines.join("\n");
-    assert!(
-        joined.contains("Completed"),
-        "missing Completed status: {joined}"
-    );
-}
-
 #[test]
 fn extract_assets_from_body_html() {
     let task = json!({
@@ -818,4 +575,438 @@ fn extract_assets_empty_when_no_body_or_attachments() {
     let task = json!({ "id": 1 });
     let assets = extract_assets(&task, &[]);
     assert!(assets.is_empty());
+}
+
+#[test]
+fn wrap_text_empty_input_returns_empty_vec() {
+    let result = wrap_text("", 40);
+    assert!(
+        result.is_empty(),
+        "empty input must yield empty vec: {:?}",
+        result
+    );
+}
+
+#[test]
+fn wrap_text_single_short_word_fits_on_one_line() {
+    let result = wrap_text("hello", 10);
+    assert_eq!(result, vec!["hello"]);
+}
+
+#[test]
+fn wrap_text_greedy_wrap_at_width() {
+    let result = wrap_text("one two three four", 9);
+    assert_eq!(
+        result,
+        vec!["one two", "three", "four"],
+        "got: {:?}",
+        result
+    );
+}
+
+#[test]
+fn wrap_text_hard_splits_word_longer_than_width() {
+    let result = wrap_text("abcdefghij", 4);
+    assert_eq!(result, vec!["abcd", "efgh", "ij"], "got: {:?}", result);
+}
+
+#[test]
+fn wrap_text_preserves_embedded_newlines_as_independent_wraps() {
+    let result = wrap_text("foo bar\nbaz qux", 20);
+    assert_eq!(result, vec!["foo bar", "baz qux"], "got: {:?}", result);
+}
+
+#[test]
+fn wrap_text_embedded_newline_line_that_wraps() {
+    let result = wrap_text("short\na very long line here", 10);
+    assert_eq!(
+        result,
+        vec!["short", "a very", "long line", "here"],
+        "got: {:?}",
+        result
+    );
+}
+
+#[test]
+fn wrap_text_multibyte_chars_counted_by_char_not_byte() {
+    let s = "Ação muito longa para caber";
+    let result = wrap_text(s, 10);
+    for line in &result {
+        assert!(
+            line.chars().count() <= 10,
+            "line exceeds width: {:?} (len={})",
+            line,
+            line.chars().count()
+        );
+    }
+}
+
+fn char_width(s: &str) -> usize {
+    s.chars().count()
+}
+
+#[test]
+fn comment_box_returns_empty_when_width_less_than_4() {
+    assert!(comment_box("Alice", "2024-01-01 10:00", "body", 3).is_empty());
+    assert!(comment_box("Alice", "2024-01-01 10:00", "body", 0).is_empty());
+}
+
+#[test]
+fn comment_box_short_comment_every_line_is_exactly_width_chars() {
+    let width = 40;
+    let lines = comment_box("Alice", "2024-01-01 10:00", "Nice work!", width);
+    assert!(
+        lines.len() >= 3,
+        "need at least top+body+bottom: {:?}",
+        lines
+    );
+    for line in &lines {
+        assert_eq!(
+            char_width(line),
+            width,
+            "line must be exactly {width} chars wide: {:?}",
+            line
+        );
+    }
+}
+
+#[test]
+fn comment_box_top_border_contains_author_and_when_with_rounded_corners() {
+    let lines = comment_box("Alice", "2024-01-01 10:00", "body", 60);
+    let top = &lines[0];
+    assert!(
+        top.starts_with('\u{256D}'),
+        "top must start with corner: {:?}",
+        top
+    );
+    assert!(
+        top.ends_with('\u{256E}'),
+        "top must end with corner: {:?}",
+        top
+    );
+    assert!(top.contains("Alice"), "top must contain author: {:?}", top);
+    assert!(
+        top.contains("2024-01-01 10:00"),
+        "top must contain when: {:?}",
+        top
+    );
+    assert!(
+        top.contains('\u{00B7}'),
+        "top must contain middot: {:?}",
+        top
+    );
+}
+
+#[test]
+fn comment_box_bottom_border_has_rounded_corners() {
+    let lines = comment_box("Alice", "2024-01-01", "body", 40);
+    let bottom = lines.last().unwrap();
+    assert!(
+        bottom.starts_with('\u{2570}'),
+        "bottom must start with bl: {:?}",
+        bottom
+    );
+    assert!(
+        bottom.ends_with('\u{256F}'),
+        "bottom must end with br: {:?}",
+        bottom
+    );
+}
+
+#[test]
+fn comment_box_body_lines_start_and_end_with_v_char() {
+    let lines = comment_box("Alice", "2024-01-01", "body text here", 30);
+    for middle_line in &lines[1..lines.len() - 1] {
+        assert!(
+            middle_line.starts_with('\u{2502}'),
+            "middle line must start with v: {:?}",
+            middle_line
+        );
+        assert!(
+            middle_line.ends_with('\u{2502}'),
+            "middle line must end with v: {:?}",
+            middle_line
+        );
+    }
+}
+
+#[test]
+fn comment_box_long_header_is_clipped_with_ellipsis_before_corner() {
+    let width = 20;
+    let lines = comment_box("VeryLongAuthorName", "2024-01-01 10:00:00", "body", width);
+    let top = &lines[0];
+    assert_eq!(
+        char_width(top),
+        width,
+        "top must be exactly {width} chars: {:?}",
+        top
+    );
+    assert!(
+        top.ends_with('\u{256E}'),
+        "top must end with corner: {:?}",
+        top
+    );
+    let before_corner: String = top
+        .chars()
+        .rev()
+        .skip(1)
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect();
+    assert!(
+        before_corner.ends_with('\u{2026}')
+            || before_corner.ends_with('\u{2026}')
+            || top.contains('\u{2026}'),
+        "clipped header must contain ellipsis: {:?}",
+        top
+    );
+}
+
+#[test]
+fn comment_box_multiline_body_each_middle_line_exactly_width() {
+    let body = "This is a longer body text that should wrap across multiple lines in the box";
+    let width = 30;
+    let lines = comment_box("Author", "2024-01-01", body, width);
+    assert!(
+        lines.len() > 3,
+        "must have more than 3 lines for wrapped body: {:?}",
+        lines
+    );
+    for line in &lines {
+        assert_eq!(
+            char_width(line),
+            width,
+            "every line must be exactly {width} chars: {:?}",
+            line
+        );
+    }
+}
+
+#[test]
+fn build_detail_lines_meta_section_present() {
+    let task = json!({
+        "id": 99,
+        "project_id": 10,
+        "project_name": "Acme",
+        "name": "Fix bug",
+        "is_completed": false,
+        "assignee_id": 5,
+        "estimate": 4.0f64,
+        "tracked_time": 2.5f64
+    });
+    let mut user_map = HashMap::new();
+    user_map.insert(5i64, "Alice".to_string());
+    let lines = build_detail_lines(&task, &[], &user_map, 80);
+    let joined = lines.join("\n");
+    assert!(joined.contains("Task:"), "missing Task: {joined}");
+    assert!(joined.contains("10-99"), "missing task ref: {joined}");
+    assert!(joined.contains("Project:"), "missing Project: {joined}");
+    assert!(joined.contains("Acme"), "missing project name: {joined}");
+    assert!(joined.contains("Title:"), "missing Title: {joined}");
+    assert!(joined.contains("Fix bug"), "missing title: {joined}");
+    assert!(joined.contains("Status:"), "missing Status: {joined}");
+    assert!(joined.contains("Open"), "missing status: {joined}");
+    assert!(joined.contains("Assignee:"), "missing Assignee: {joined}");
+    assert!(joined.contains("Alice (5)"), "missing assignee: {joined}");
+}
+
+#[test]
+fn build_detail_lines_description_present() {
+    let task = json!({ "id": 1, "body": "<p>Some details here</p>" });
+    let lines = build_detail_lines(&task, &[], &HashMap::new(), 80);
+    let joined = lines.join("\n");
+    assert!(
+        joined.contains("Description:"),
+        "missing Description: {joined}"
+    );
+    assert!(
+        joined.contains("Some details here"),
+        "missing body text: {joined}"
+    );
+}
+
+#[test]
+fn build_detail_lines_no_description_fallback() {
+    let task = json!({ "id": 1, "body": null });
+    let lines = build_detail_lines(&task, &[], &HashMap::new(), 80);
+    let joined = lines.join("\n");
+    assert!(
+        joined.contains("(no description)"),
+        "missing fallback: {joined}"
+    );
+}
+
+#[test]
+fn build_detail_lines_no_comment_block_when_empty() {
+    let task = json!({ "id": 1 });
+    let lines = build_detail_lines(&task, &[], &HashMap::new(), 80);
+    let joined = lines.join("\n");
+    assert!(
+        !joined.contains('\u{256D}'),
+        "must not have box corners when no comments: {joined}"
+    );
+}
+
+#[test]
+fn build_detail_lines_comment_boxes_present() {
+    let task = json!({ "id": 1 });
+    let comments = vec![json!({
+        "created_by_name": "Bob",
+        "created_on": 1614556800i64,
+        "body_plain_text": "LGTM!"
+    })];
+    let lines = build_detail_lines(&task, &comments, &HashMap::new(), 60);
+    let joined = lines.join("\n");
+    assert!(
+        joined.contains('\u{256D}'),
+        "must have box top-left corner: {joined}"
+    );
+    assert!(
+        joined.contains("Bob"),
+        "must contain comment author: {joined}"
+    );
+    assert!(
+        joined.contains("LGTM!"),
+        "must contain comment body: {joined}"
+    );
+}
+
+#[test]
+fn build_detail_lines_no_line_exceeds_inner_width() {
+    let task = json!({
+        "id": 99,
+        "project_id": 10,
+        "project_name": "A Very Long Project Name That Could Overflow The Line Width",
+        "name": "A task with an extremely verbose name that also goes long",
+        "body": "<p>Body text that is quite verbose and goes on for a while to test wrapping behavior</p>"
+    });
+    let comments = vec![json!({
+        "created_by_name": "Alice Wonderland",
+        "created_on": 1614556800i64,
+        "body_plain_text": "This is a fairly long comment body that should be word-wrapped to fit within the box"
+    })];
+    let inner_width = 50;
+    let lines = build_detail_lines(&task, &comments, &HashMap::new(), inner_width);
+    for line in &lines {
+        let len = line.chars().count();
+        assert!(
+            len <= inner_width,
+            "line exceeds {inner_width} chars ({len}): {:?}",
+            line
+        );
+    }
+}
+
+#[test]
+fn truncate_cell_shorter_than_width_returns_unchanged() {
+    assert_eq!(truncate_cell("hello", 10), "hello");
+}
+
+#[test]
+fn truncate_cell_equal_to_width_returns_unchanged() {
+    assert_eq!(truncate_cell("hello", 5), "hello");
+}
+
+#[test]
+fn truncate_cell_longer_than_width_ends_with_ellipsis_and_has_exact_char_count() {
+    let result = truncate_cell("abcdefghij", 6);
+    assert_eq!(result.chars().count(), 6, "result must be exactly 6 chars");
+    assert!(
+        result.ends_with('\u{2026}'),
+        "result must end with ellipsis: {result:?}"
+    );
+    assert_eq!(
+        &result[..result.len() - '\u{2026}'.len_utf8()],
+        "abcde",
+        "first max_width-1 chars must be preserved"
+    );
+}
+
+#[test]
+fn truncate_cell_max_width_zero_returns_empty() {
+    assert_eq!(truncate_cell("anything", 0), "");
+}
+
+#[test]
+fn truncate_cell_max_width_one_returns_only_ellipsis() {
+    let result = truncate_cell("abc", 1);
+    assert_eq!(result, "\u{2026}");
+    assert_eq!(result.chars().count(), 1);
+}
+
+#[test]
+fn truncate_cell_multibyte_truncates_on_char_boundary_without_panic() {
+    let s = "Ação longa demais para caber aqui no campo";
+    let max_width = 10;
+    let result = truncate_cell(s, max_width);
+    assert_eq!(
+        result.chars().count(),
+        max_width,
+        "multibyte result must be exactly {max_width} chars"
+    );
+    assert!(
+        result.ends_with('\u{2026}'),
+        "multibyte result must end with ellipsis: {result:?}"
+    );
+}
+
+#[test]
+fn truncate_cell_cjk_truncates_on_char_boundary_without_panic() {
+    let s = "日本語テスト文字列が長すぎる場合";
+    let max_width = 5;
+    let result = truncate_cell(s, max_width);
+    assert_eq!(
+        result.chars().count(),
+        max_width,
+        "CJK result must be exactly {max_width} chars"
+    );
+    assert!(
+        result.ends_with('\u{2026}'),
+        "CJK result must end with ellipsis: {result:?}"
+    );
+}
+
+#[test]
+fn build_detail_lines_multiple_comments_separated_by_blank() {
+    let task = json!({ "id": 1 });
+    let comments = vec![
+        json!({ "created_by_name": "Alice", "created_on": 1614556800i64, "body_plain_text": "First" }),
+        json!({ "created_by_name": "Bob", "created_on": 1614556801i64, "body_plain_text": "Second" }),
+    ];
+    let lines = build_detail_lines(&task, &comments, &HashMap::new(), 50);
+    let joined = lines.join("\n");
+    assert!(
+        joined.contains("Alice"),
+        "must contain first author: {joined}"
+    );
+    assert!(
+        joined.contains("Bob"),
+        "must contain second author: {joined}"
+    );
+    assert!(
+        joined.contains("First"),
+        "must contain first body: {joined}"
+    );
+    assert!(
+        joined.contains("Second"),
+        "must contain second body: {joined}"
+    );
+    let top_corners: Vec<usize> = lines
+        .iter()
+        .enumerate()
+        .filter(|(_, l)| l.starts_with('\u{256D}'))
+        .map(|(i, _)| i)
+        .collect();
+    assert_eq!(
+        top_corners.len(),
+        2,
+        "must have 2 comment boxes: lines={:?}",
+        lines
+    );
+    let gap = top_corners[1] - top_corners[0];
+    assert!(
+        gap > 3,
+        "boxes must be separated by at least the first box bottom + blank: gap={gap}"
+    );
 }

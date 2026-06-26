@@ -1,6 +1,7 @@
 use super::*;
 use crate::config::Config;
 use crate::i18n::set_language;
+use crate::render;
 use crate::store::Store;
 use std::sync::Mutex;
 use tempfile::TempDir;
@@ -1395,6 +1396,147 @@ async fn collect_mine_rows_aggregates_across_two_instances() {
     assert_eq!(rows[1].name, "Beta task");
 }
 
+// S5.3 tests: concurrent collect_mine_rows
+
+#[tokio::test]
+async fn collect_mine_rows_concurrent_aggregates_all_instances() {
+    let server_a = MockServer::start().await;
+    let server_b = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/users/1/tasks"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(tasks_response(serde_json::json!([
+            { "id": 1, "task_number": 10, "name": "Concurrent A", "is_completed": false, "is_trashed": false, "project_id": 1 }
+        ]))))
+        .mount(&server_a)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/users/2/tasks"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(tasks_response(serde_json::json!([
+            { "id": 2, "task_number": 20, "name": "Concurrent B", "is_completed": false, "is_trashed": false, "project_id": 2 }
+        ]))))
+        .mount(&server_b)
+        .await;
+
+    let inst_a = Instance {
+        name: "conc-a".to_owned(),
+        base_url: server_a.uri(),
+        email: "a@a.com".to_owned(),
+        token: "tok-a".to_owned(),
+        user_id: Some(1),
+    };
+    let inst_b = Instance {
+        name: "conc-b".to_owned(),
+        base_url: server_b.uri(),
+        email: "b@b.com".to_owned(),
+        token: "tok-b".to_owned(),
+        user_id: Some(2),
+    };
+
+    let rows = collect_mine_rows(&[inst_a, inst_b], &make_http()).await;
+
+    assert_eq!(rows.len(), 2, "must aggregate from both instances");
+    let names: Vec<&str> = rows.iter().map(|r| r.name.as_str()).collect();
+    assert!(
+        names.contains(&"Concurrent A"),
+        "missing Concurrent A: {names:?}"
+    );
+    assert!(
+        names.contains(&"Concurrent B"),
+        "missing Concurrent B: {names:?}"
+    );
+}
+
+#[tokio::test]
+async fn collect_mine_rows_preserves_instance_order() {
+    let server_first = MockServer::start().await;
+    let server_second = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/users/1/tasks"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(tasks_response(serde_json::json!([
+            { "id": 100, "task_number": 1, "name": "First Instance Task", "is_completed": false, "is_trashed": false, "project_id": 1 }
+        ]))))
+        .mount(&server_first)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/users/2/tasks"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(tasks_response(serde_json::json!([
+            { "id": 200, "task_number": 2, "name": "Second Instance Task", "is_completed": false, "is_trashed": false, "project_id": 2 }
+        ]))))
+        .mount(&server_second)
+        .await;
+
+    let inst_first = Instance {
+        name: "first".to_owned(),
+        base_url: server_first.uri(),
+        email: "f@f.com".to_owned(),
+        token: "tok-f".to_owned(),
+        user_id: Some(1),
+    };
+    let inst_second = Instance {
+        name: "second".to_owned(),
+        base_url: server_second.uri(),
+        email: "s@s.com".to_owned(),
+        token: "tok-s".to_owned(),
+        user_id: Some(2),
+    };
+
+    let rows = collect_mine_rows(&[inst_first, inst_second], &make_http()).await;
+
+    assert_eq!(rows.len(), 2);
+    assert_eq!(
+        rows[0].instance, "first",
+        "instance[0] rows must come first"
+    );
+    assert_eq!(rows[0].name, "First Instance Task");
+    assert_eq!(rows[1].instance, "second", "instance[1] rows must follow");
+    assert_eq!(rows[1].name, "Second Instance Task");
+}
+
+#[tokio::test]
+async fn collect_mine_rows_failing_instance_yields_no_rows_for_it() {
+    let server_ok = MockServer::start().await;
+    let server_err = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/users/1/tasks"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(tasks_response(serde_json::json!([
+            { "id": 77, "task_number": 3, "name": "Healthy Task", "is_completed": false, "is_trashed": false, "project_id": 5 }
+        ]))))
+        .mount(&server_ok)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/users/2/tasks"))
+        .respond_with(ResponseTemplate::new(500).set_body_string("internal error"))
+        .mount(&server_err)
+        .await;
+
+    let inst_ok = Instance {
+        name: "healthy".to_owned(),
+        base_url: server_ok.uri(),
+        email: "h@h.com".to_owned(),
+        token: "tok-h".to_owned(),
+        user_id: Some(1),
+    };
+    let inst_err = Instance {
+        name: "broken".to_owned(),
+        base_url: server_err.uri(),
+        email: "b@b.com".to_owned(),
+        token: "tok-b".to_owned(),
+        user_id: Some(2),
+    };
+
+    let rows = collect_mine_rows(&[inst_ok, inst_err], &make_http()).await;
+
+    assert_eq!(rows.len(), 1, "failing instance must yield no rows");
+    assert_eq!(rows[0].name, "Healthy Task");
+    assert_eq!(rows[0].instance, "healthy");
+}
+
 #[tokio::test]
 async fn collect_mine_rows_falls_back_task_number_to_id_when_absent() {
     let server = MockServer::start().await;
@@ -1433,7 +1575,16 @@ async fn mine_core_empty_instances_returns_exit2_with_message() {
     let mut out = Vec::new();
     let mut err = Vec::new();
 
-    let code = mine_core(&repo, &make_http(), None, false, &mut out, &mut err, |_| 0).await;
+    let code = mine_core(
+        &repo,
+        &make_http(),
+        None,
+        false,
+        &mut out,
+        &mut err,
+        |_, _| 0,
+    )
+    .await;
 
     assert_eq!(code, 2);
     let e = output_str(&err);
@@ -1457,7 +1608,7 @@ async fn mine_core_instance_filter_not_found_returns_exit2_with_known() {
         false,
         &mut out,
         &mut err,
-        |_| 0,
+        |_, _| 0,
     )
     .await;
 
@@ -1502,7 +1653,7 @@ async fn mine_core_instance_filter_limits_to_matching_instance() {
         false,
         &mut out,
         &mut err,
-        |_| 0,
+        |_, _| 0,
     )
     .await;
 
@@ -1540,7 +1691,16 @@ async fn mine_core_non_tty_with_rows_writes_table_and_returns_0() {
     let mut out = Vec::new();
     let mut err = Vec::new();
 
-    let code = mine_core(&repo, &make_http(), None, false, &mut out, &mut err, |_| 99).await;
+    let code = mine_core(
+        &repo,
+        &make_http(),
+        None,
+        false,
+        &mut out,
+        &mut err,
+        |_, _| 99,
+    )
+    .await;
 
     assert_eq!(code, 0);
     let s = output_str(&out);
@@ -1575,7 +1735,16 @@ async fn mine_core_non_tty_no_rows_writes_no_tasks_message_and_returns_0() {
     let mut out = Vec::new();
     let mut err = Vec::new();
 
-    let code = mine_core(&repo, &make_http(), None, false, &mut out, &mut err, |_| 99).await;
+    let code = mine_core(
+        &repo,
+        &make_http(),
+        None,
+        false,
+        &mut out,
+        &mut err,
+        |_, _| 99,
+    )
+    .await;
 
     assert_eq!(code, 0);
     let s = output_str(&out);
@@ -1618,7 +1787,7 @@ async fn mine_core_tty_invokes_launch_closure_with_rows_not_table() {
         true,
         &mut out,
         &mut err,
-        |rows| {
+        |_targets, rows| {
             received_rows.set(rows.len());
             42
         },
@@ -1631,6 +1800,67 @@ async fn mine_core_tty_invokes_launch_closure_with_rows_not_table() {
     assert!(
         !s.contains("INSTANCE"),
         "table must NOT be printed on TTY path: {s}"
+    );
+}
+
+// S3-A3: Non-TTY mine path writes render_mine_table byte-for-byte; launch is NOT invoked
+#[tokio::test]
+async fn mine_core_non_tty_writes_render_mine_table_exactly_and_never_calls_launch() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/users/42/tasks"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(tasks_response(serde_json::json!([
+            { "id": 77, "task_number": 4, "name": "Table row task", "is_completed": false, "is_trashed": false, "project_id": 9 }
+        ]))))
+        .mount(&server)
+        .await;
+
+    let (_dir, store) = make_store();
+    let inst = Instance {
+        name: "s3inst".to_owned(),
+        base_url: server.uri(),
+        email: "x@x.com".to_owned(),
+        token: "tok".to_owned(),
+        user_id: Some(42),
+    };
+    InstanceRepository::new(store.conn()).save(&inst).unwrap();
+
+    let repo = InstanceRepository::new(store.conn());
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    let launch_called = std::cell::Cell::new(false);
+
+    let code = mine_core(
+        &repo,
+        &make_http(),
+        None,
+        false,
+        &mut out,
+        &mut err,
+        |_, _| {
+            launch_called.set(true);
+            0
+        },
+    )
+    .await;
+
+    assert_eq!(code, 0);
+    assert!(
+        !launch_called.get(),
+        "launch must NOT be called on non-TTY path"
+    );
+
+    let expected = render::render_mine_table(&[render::MineTableRow {
+        instance: "s3inst".to_owned(),
+        project_id: 9,
+        task_number: 4,
+        task_id: 77,
+        name: "Table row task".to_owned(),
+    }]);
+    let s = output_str(&out);
+    assert!(
+        s.trim() == expected.trim(),
+        "non-TTY output must match render_mine_table exactly.\nexpected:\n{expected}\ngot:\n{s}"
     );
 }
 
@@ -1655,5 +1885,17 @@ fn setup_list_empty_emits_pt_br_message_when_language_is_pt_br() {
     assert!(
         s.contains("Execute: active_collab.py setup add"),
         "expected pt-BR command hint, got: {s}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn browse_async_inside_active_runtime_returns_i32_without_panic() {
+    let dir = TempDir::new().unwrap();
+    let db_path = dir.path().join("test.db");
+    let http = make_http();
+    let code = crate::tui::browse(vec![], http, db_path).await;
+    assert_eq!(
+        code, 1,
+        "no-TTY path must return exit code 1 (terminal setup fails)"
     );
 }

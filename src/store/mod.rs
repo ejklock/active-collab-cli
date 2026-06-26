@@ -96,6 +96,11 @@ fn init_schema(conn: &Connection) -> Result<()> {
         CREATE TABLE IF NOT EXISTS settings (
             key   TEXT PRIMARY KEY,
             value TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS user_map_cache (
+            instance   TEXT PRIMARY KEY,
+            users_json TEXT NOT NULL,
+            fetched_at TEXT NOT NULL
         );",
     )?;
     Ok(())

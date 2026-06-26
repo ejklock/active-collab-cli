@@ -1,4 +1,8 @@
 use super::*;
+use crate::render::MineTableRow;
+use crate::tui::model::DetailLoad;
+use serde_json::json;
+use std::collections::HashMap;
 
 fn make_groups(count: usize) -> Vec<ProjectGroup> {
     (0..count)
@@ -10,6 +14,7 @@ fn make_groups(count: usize) -> Vec<ProjectGroup> {
                 task_number: i as i64,
                 name: format!("Task {i}"),
                 instance: "inst".into(),
+                project_id: i as i64,
             }],
         })
         .collect()
@@ -22,6 +27,7 @@ fn make_tasks(count: usize) -> Vec<TaskRow> {
             task_number: i as i64,
             name: format!("Task {i}"),
             instance: "inst".into(),
+            project_id: 0,
         })
         .collect()
 }
@@ -342,41 +348,16 @@ fn select_on_empty_projects_is_a_noop() {
     assert!(!m.should_quit);
 }
 
-#[test]
-fn flat_model_tests_preserved() {
-    let tasks = vec![
-        Task {
-            project: "P1".into(),
-            id: 1,
-            name: "Task A".into(),
-        },
-        Task {
-            project: "P2".into(),
-            id: 2,
-            name: "Task B".into(),
-        },
-    ];
-    let m = FlatModel::with_tasks(tasks);
-    assert_eq!(m.tasks.len(), 2);
-    assert_eq!(m.selected, 0);
-    assert!(!m.should_quit);
-
-    let m = update_flat(m, FlatMsg::Down);
-    assert_eq!(m.selected, 1);
-    let m = update_flat(m, FlatMsg::Down);
-    assert_eq!(m.selected, 1);
-
-    let m2 = FlatModel::with_tasks(vec![]);
-    let m2 = update_flat(m2, FlatMsg::Down);
-    assert!(!m2.should_quit);
-
-    let m3 = FlatModel::with_tasks(vec![Task {
-        project: "P".into(),
-        id: 1,
-        name: "T".into(),
-    }]);
-    let m3 = update_flat(m3, FlatMsg::Quit);
-    assert!(m3.should_quit);
+fn make_tasks_with_project_id(count: usize, project_id: i64) -> Vec<TaskRow> {
+    (0..count)
+        .map(|i| TaskRow {
+            task_id: i as i64,
+            task_number: i as i64,
+            name: format!("Task {i}"),
+            instance: "inst".into(),
+            project_id,
+        })
+        .collect()
 }
 
 fn tasks_model_with_project_id(task_count: usize, project_id: i64) -> Model {
@@ -386,14 +367,14 @@ fn tasks_model_with_project_id(task_count: usize, project_id: i64) -> Model {
                 groups: vec![ProjectGroup {
                     project_id,
                     project_name: "Test Project".into(),
-                    tasks: make_tasks(task_count),
+                    tasks: make_tasks_with_project_id(task_count, project_id),
                 }],
                 selected: 0,
                 loading: false,
             },
             Screen::Tasks {
                 project_name: "Test Project".into(),
-                tasks: make_tasks(task_count),
+                tasks: make_tasks_with_project_id(task_count, project_id),
                 selected: 0,
                 loading: false,
             },
@@ -421,11 +402,15 @@ fn detail_model(line_count: usize, offset: usize) -> Model {
                 instance: "inst".into(),
                 project_id: 0,
                 task_id: 0,
+                task: serde_json::Value::Null,
+                comments: vec![],
+                user_map: HashMap::new(),
                 lines,
                 assets: vec![],
                 offset,
                 loading: false,
                 pending_download: false,
+                rendered_width: 80,
             },
         ],
         should_quit: false,
@@ -450,11 +435,15 @@ fn loading_detail_model() -> Model {
                 instance: "inst".into(),
                 project_id: 10,
                 task_id: 99,
+                task: serde_json::Value::Null,
+                comments: vec![],
+                user_map: HashMap::new(),
                 lines: vec![],
                 assets: vec![],
                 offset: 0,
                 loading: true,
                 pending_download: false,
+                rendered_width: usize::MAX,
             },
         ],
         should_quit: false,
@@ -502,19 +491,39 @@ fn select_on_tasks_emits_exactly_one_load_detail_cmd() {
     assert!(matches!(&cmds[0], Cmd::LoadDetail { refresh: false, .. }));
 }
 
+fn make_detail_load(task: serde_json::Value, user_map: HashMap<i64, String>) -> DetailLoad {
+    DetailLoad {
+        task,
+        comments: vec![],
+        assets: vec![],
+        user_map,
+    }
+}
+
 #[test]
-fn loaded_detail_stores_lines_and_clears_loading() {
+fn loaded_detail_stores_structured_data_and_clears_loading() {
     let m = loading_detail_model();
-    let lines = vec!["Line 1".to_string(), "Line 2".to_string()];
-    let (m, cmds) = update(m, Msg::LoadedDetail(lines.clone(), vec![]));
+    let task = json!({ "name": "Test Task", "id": 99 });
+    let load = make_detail_load(task.clone(), HashMap::new());
+    let (m, cmds) = update(m, Msg::LoadedDetail(load));
     assert!(cmds.is_empty());
     assert!(!m.should_quit);
     match m.stack.last() {
         Some(Screen::Detail {
-            lines: l, loading, ..
+            task: stored_task,
+            loading,
+            rendered_width,
+            lines,
+            ..
         }) => {
             assert!(!*loading, "loading must be cleared after LoadedDetail");
-            assert_eq!(*l, lines);
+            assert_eq!(stored_task, &task, "task JSON must be stored");
+            assert_eq!(
+                *rendered_width,
+                usize::MAX,
+                "rendered_width must be MAX (cache invalidated)"
+            );
+            assert!(lines.is_empty(), "lines cache must be empty after load");
         }
         other => panic!("expected Detail screen, got {other:?}"),
     }
@@ -808,6 +817,7 @@ fn detail_model_with_assets(assets: Vec<Asset>, instance: &str) -> Model {
                     task_number: 1,
                     name: "T".into(),
                     instance: instance.into(),
+                    project_id: 0,
                 }],
                 selected: 0,
                 loading: false,
@@ -816,11 +826,15 @@ fn detail_model_with_assets(assets: Vec<Asset>, instance: &str) -> Model {
                 instance: instance.into(),
                 project_id: 0,
                 task_id: 1,
+                task: serde_json::Value::Null,
+                comments: vec![],
+                user_map: HashMap::new(),
                 lines: vec![],
                 assets,
                 offset: 0,
                 loading: false,
                 pending_download: false,
+                rendered_width: usize::MAX,
             },
         ],
         should_quit: false,
@@ -921,12 +935,14 @@ fn asset_open_carries_selected_tasks_instance_not_first_instance() {
                             task_number: 1,
                             name: "task on inst1".into(),
                             instance: "inst1".into(),
+                            project_id: 1,
                         },
                         TaskRow {
                             task_id: 20,
                             task_number: 2,
                             name: "task on inst2".into(),
                             instance: "inst2".into(),
+                            project_id: 1,
                         },
                     ],
                 }],
@@ -941,12 +957,14 @@ fn asset_open_carries_selected_tasks_instance_not_first_instance() {
                         task_number: 1,
                         name: "task on inst1".into(),
                         instance: "inst1".into(),
+                        project_id: 1,
                     },
                     TaskRow {
                         task_id: 20,
                         task_number: 2,
                         name: "task on inst2".into(),
                         instance: "inst2".into(),
+                        project_id: 1,
                     },
                 ],
                 selected: 1,
@@ -956,11 +974,15 @@ fn asset_open_carries_selected_tasks_instance_not_first_instance() {
                 instance: "inst2".into(),
                 project_id: 1,
                 task_id: 20,
+                task: serde_json::Value::Null,
+                comments: vec![],
+                user_map: HashMap::new(),
                 lines: vec![],
                 assets: vec![make_asset("x.pdf", "https://inst2.example.com/x.pdf")],
                 offset: 0,
                 loading: false,
                 pending_download: false,
+                rendered_width: usize::MAX,
             },
         ],
         should_quit: false,
@@ -991,6 +1013,7 @@ fn select_on_tasks_threads_instance_into_load_detail_cmd() {
                         task_number: 1,
                         name: "T".into(),
                         instance: "second-inst".into(),
+                        project_id: 10,
                     }],
                 }],
                 selected: 0,
@@ -1003,6 +1026,7 @@ fn select_on_tasks_threads_instance_into_load_detail_cmd() {
                     task_number: 1,
                     name: "T".into(),
                     instance: "second-inst".into(),
+                    project_id: 10,
                 }],
                 selected: 0,
                 loading: false,
@@ -1033,7 +1057,13 @@ fn select_on_tasks_threads_instance_into_load_detail_cmd() {
 fn loaded_detail_stores_assets_on_screen() {
     let m = loading_detail_model();
     let assets = vec![make_asset("img.png", "https://example.com/img.png")];
-    let (m, _) = update(m, Msg::LoadedDetail(vec!["line".into()], assets.clone()));
+    let load = DetailLoad {
+        task: serde_json::Value::Null,
+        comments: vec![],
+        assets: assets.clone(),
+        user_map: HashMap::new(),
+    };
+    let (m, _) = update(m, Msg::LoadedDetail(load));
     match m.stack.last() {
         Some(Screen::Detail { assets: stored, .. }) => {
             assert_eq!(stored.len(), 1);
@@ -1048,5 +1078,594 @@ fn asset_action_on_non_detail_screen_is_noop() {
     let m = projects_model(2);
     let (m, cmds) = update(m, Msg::AssetOpen('1'));
     assert!(cmds.is_empty());
+    assert!(!m.should_quit);
+}
+
+fn make_mine_row(task_id: i64, task_number: i64, project_id: i64, instance: &str) -> MineTableRow {
+    MineTableRow {
+        instance: instance.into(),
+        project_id,
+        task_number,
+        task_id,
+        name: format!("Task {task_id}"),
+    }
+}
+
+// S3-A1: Select on mine screen pushes Detail with THAT row's project_id/task_id/instance
+#[test]
+fn mine_select_pushes_detail_with_row_project_id_and_instance() {
+    let rows = vec![
+        make_mine_row(101, 1, 10, "inst-alpha"),
+        make_mine_row(202, 2, 20, "inst-beta"),
+    ];
+    let m = mine_model(rows);
+
+    // Verify initial state: Tasks screen, row 0 selected
+    assert_eq!(m.stack.len(), 1);
+    assert!(matches!(
+        m.stack.last(),
+        Some(Screen::Tasks { selected: 0, .. })
+    ));
+
+    // Move to row 1 (inst-beta, project 20, task 202), then Select
+    let (m, _) = update(m, Msg::Down);
+    let (m, cmds) = update(m, Msg::Select);
+
+    assert_eq!(cmds.len(), 1, "must emit exactly one Cmd::LoadDetail");
+    match &cmds[0] {
+        Cmd::LoadDetail {
+            instance,
+            project_id,
+            task_id,
+            refresh,
+        } => {
+            assert_eq!(instance, "inst-beta", "must use row's instance, not first");
+            assert_eq!(
+                *project_id, 20,
+                "must use row's project_id, not a stack-walk result"
+            );
+            assert_eq!(*task_id, 202);
+            assert!(!*refresh);
+        }
+        other => panic!("expected Cmd::LoadDetail, got {other:?}"),
+    }
+
+    assert_eq!(m.stack.len(), 2);
+    match m.stack.last() {
+        Some(Screen::Detail {
+            instance,
+            project_id,
+            task_id,
+            loading,
+            ..
+        }) => {
+            assert_eq!(instance, "inst-beta");
+            assert_eq!(*project_id, 20);
+            assert_eq!(*task_id, 202);
+            assert!(*loading);
+        }
+        other => panic!("expected Detail screen, got {other:?}"),
+    }
+}
+
+// S3-A1 variant: first row (inst-alpha, project 10) also resolves from row, not stack
+#[test]
+fn mine_select_first_row_uses_its_own_project_id_and_instance() {
+    let rows = vec![
+        make_mine_row(101, 1, 10, "inst-alpha"),
+        make_mine_row(202, 2, 20, "inst-beta"),
+    ];
+    let m = mine_model(rows);
+
+    let (_m, cmds) = update(m, Msg::Select);
+
+    assert_eq!(cmds.len(), 1);
+    match &cmds[0] {
+        Cmd::LoadDetail {
+            instance,
+            project_id,
+            task_id,
+            ..
+        } => {
+            assert_eq!(instance, "inst-alpha");
+            assert_eq!(*project_id, 10);
+            assert_eq!(*task_id, 101);
+        }
+        other => panic!("expected Cmd::LoadDetail, got {other:?}"),
+    }
+}
+
+// S3-A2: Click selects the clicked row; subsequent Select opens THAT row's detail
+#[test]
+fn mine_click_then_select_opens_clicked_rows_detail() {
+    let rows = vec![
+        make_mine_row(101, 1, 10, "inst-alpha"),
+        make_mine_row(202, 2, 20, "inst-beta"),
+        make_mine_row(303, 3, 30, "inst-gamma"),
+    ];
+    let m = mine_model(rows);
+
+    // Click row 2 (inst-gamma, project 30, task 303)
+    let (m, _) = update(m, Msg::Click(2));
+    match m.stack.last() {
+        Some(Screen::Tasks { selected, .. }) => assert_eq!(*selected, 2),
+        other => panic!("expected Tasks screen, got {other:?}"),
+    }
+
+    let (m, cmds) = update(m, Msg::Select);
+    assert_eq!(cmds.len(), 1);
+    match &cmds[0] {
+        Cmd::LoadDetail {
+            instance,
+            project_id,
+            task_id,
+            ..
+        } => {
+            assert_eq!(instance, "inst-gamma", "must use clicked row's instance");
+            assert_eq!(*project_id, 30, "must use clicked row's project_id");
+            assert_eq!(*task_id, 303);
+        }
+        other => panic!("expected Cmd::LoadDetail, got {other:?}"),
+    }
+    match m.stack.last() {
+        Some(Screen::Detail {
+            instance,
+            project_id,
+            task_id,
+            ..
+        }) => {
+            assert_eq!(instance, "inst-gamma");
+            assert_eq!(*project_id, 30);
+            assert_eq!(*task_id, 303);
+        }
+        other => panic!("expected Detail screen, got {other:?}"),
+    }
+}
+
+// S3-A2 variant: click row 0 after clicking row 2 — selection switches back
+#[test]
+fn mine_click_row_zero_after_nonzero_selects_first_row() {
+    let rows = vec![
+        make_mine_row(101, 1, 10, "inst-alpha"),
+        make_mine_row(202, 2, 20, "inst-beta"),
+    ];
+    let m = mine_model(rows);
+
+    let (m, _) = update(m, Msg::Click(1));
+    let (m, _) = update(m, Msg::Click(0));
+    match m.stack.last() {
+        Some(Screen::Tasks { selected, .. }) => assert_eq!(*selected, 0),
+        other => panic!("expected Tasks, got {other:?}"),
+    }
+    let (_, cmds) = update(m, Msg::Select);
+    match &cmds[0] {
+        Cmd::LoadDetail { task_id, .. } => assert_eq!(*task_id, 101),
+        other => panic!("expected LoadDetail, got {other:?}"),
+    }
+}
+
+// Verify mine_model produces a single Tasks screen at loading:false with rows mapped
+#[test]
+fn mine_model_produces_tasks_screen_with_all_rows_loaded() {
+    let rows = vec![
+        make_mine_row(10, 1, 5, "inst-a"),
+        make_mine_row(20, 2, 6, "inst-b"),
+    ];
+    let m = mine_model(rows);
+
+    assert_eq!(m.stack.len(), 1);
+    assert!(!m.should_quit);
+    match m.stack.last() {
+        Some(Screen::Tasks {
+            tasks,
+            loading,
+            selected,
+            project_name,
+            ..
+        }) => {
+            assert!(!*loading, "mine model must NOT start loading");
+            assert_eq!(*selected, 0);
+            assert_eq!(tasks.len(), 2);
+            assert_eq!(tasks[0].task_id, 10);
+            assert_eq!(tasks[0].project_id, 5);
+            assert_eq!(tasks[0].instance, "inst-a");
+            assert_eq!(tasks[1].task_id, 20);
+            assert_eq!(tasks[1].project_id, 6);
+            assert_eq!(tasks[1].instance, "inst-b");
+            assert!(
+                project_name.contains("My Tasks"),
+                "project_name must be My Tasks, got: {project_name}"
+            );
+        }
+        other => panic!("expected Tasks screen, got {other:?}"),
+    }
+}
+
+// P2-A1 / P2-A3: reflow_detail builds lines at inner_width; is memoized
+#[test]
+fn reflow_detail_builds_lines_and_is_memoized() {
+    let task = json!({
+        "name": "My Task",
+        "id": 1,
+        "project_id": 10,
+        "is_completed": false
+    });
+    let mut m = Model {
+        stack: vec![Screen::Detail {
+            instance: "inst".into(),
+            project_id: 10,
+            task_id: 1,
+            task,
+            comments: vec![],
+            user_map: HashMap::new(),
+            lines: vec![],
+            assets: vec![],
+            offset: 0,
+            loading: false,
+            pending_download: false,
+            rendered_width: usize::MAX,
+        }],
+        should_quit: false,
+    };
+
+    // First reflow at width 80: lines must be populated, rendered_width updated
+    m.reflow_detail(80);
+    let lines_after_first = match m.stack.last() {
+        Some(Screen::Detail {
+            lines,
+            rendered_width,
+            ..
+        }) => {
+            assert_eq!(*rendered_width, 80, "rendered_width must be updated");
+            assert!(!lines.is_empty(), "lines must be built after reflow");
+            lines.clone()
+        }
+        _ => panic!("expected Detail"),
+    };
+
+    // Second reflow at same width: lines must be identical (memoized, no rebuild)
+    m.reflow_detail(80);
+    match m.stack.last() {
+        Some(Screen::Detail { lines, .. }) => {
+            assert_eq!(
+                lines, &lines_after_first,
+                "lines must not change on a same-width reflow"
+            );
+        }
+        _ => panic!("expected Detail"),
+    }
+
+    // Reflow at a different width: rendered_width must update and lines must remain valid
+    m.reflow_detail(40);
+    match m.stack.last() {
+        Some(Screen::Detail {
+            lines,
+            rendered_width,
+            ..
+        }) => {
+            assert_eq!(
+                *rendered_width, 40,
+                "rendered_width must update to new width"
+            );
+            assert!(
+                !lines.is_empty(),
+                "lines must still be present after second reflow"
+            );
+            // Every line must fit within the new width
+            for line in lines {
+                assert!(
+                    line.chars().count() <= 40,
+                    "line after reflow at 40 must fit 40 chars: {:?}",
+                    line
+                );
+            }
+        }
+        _ => panic!("expected Detail"),
+    }
+}
+
+// P2-A1: every line produced by reflow_detail fits inner_width
+#[test]
+fn reflow_detail_lines_fit_inner_width() {
+    let task = json!({
+        "name": "A task with a long description that should be wrapped",
+        "id": 42,
+        "project_id": 5,
+        "is_completed": false,
+        "body": "<p>This is a body paragraph with enough words to wrap at a narrow width.</p>"
+    });
+    let comment = json!({
+        "created_by_name": "Alice",
+        "created_on": 1700000000,
+        "body": "<p>A comment with sufficient length to demonstrate wrapping at narrow terminal.</p>"
+    });
+    let inner_width: usize = 40;
+    let mut m = Model {
+        stack: vec![Screen::Detail {
+            instance: "inst".into(),
+            project_id: 5,
+            task_id: 42,
+            task,
+            comments: vec![comment],
+            user_map: HashMap::new(),
+            lines: vec![],
+            assets: vec![],
+            offset: 0,
+            loading: false,
+            pending_download: false,
+            rendered_width: usize::MAX,
+        }],
+        should_quit: false,
+    };
+    m.reflow_detail(inner_width);
+    match m.stack.last() {
+        Some(Screen::Detail { lines, .. }) => {
+            assert!(!lines.is_empty(), "must produce at least one line");
+            for line in lines {
+                assert!(
+                    line.chars().count() <= inner_width,
+                    "line exceeds inner_width={}: {:?}",
+                    inner_width,
+                    line
+                );
+            }
+        }
+        _ => panic!("expected Detail"),
+    }
+}
+
+// P2-A1: resize reflows — different width produces different rendered_width
+#[test]
+fn reflow_detail_rebuilds_on_width_change() {
+    let task = json!({ "name": "T", "id": 1, "project_id": 1, "is_completed": false });
+    let mut m = Model {
+        stack: vec![Screen::Detail {
+            instance: "inst".into(),
+            project_id: 1,
+            task_id: 1,
+            task,
+            comments: vec![],
+            user_map: HashMap::new(),
+            lines: vec![],
+            assets: vec![],
+            offset: 0,
+            loading: false,
+            pending_download: false,
+            rendered_width: usize::MAX,
+        }],
+        should_quit: false,
+    };
+    m.reflow_detail(80);
+    let rw_80 = match m.stack.last() {
+        Some(Screen::Detail { rendered_width, .. }) => *rendered_width,
+        _ => panic!("expected Detail"),
+    };
+    assert_eq!(rw_80, 80);
+
+    m.reflow_detail(60);
+    let rw_60 = match m.stack.last() {
+        Some(Screen::Detail { rendered_width, .. }) => *rendered_width,
+        _ => panic!("expected Detail"),
+    };
+    assert_eq!(rw_60, 60);
+}
+
+// P2-A3: reflow_detail is a no-op while loading
+#[test]
+fn reflow_detail_is_noop_while_loading() {
+    let task = json!({ "name": "T", "id": 1, "project_id": 1, "is_completed": false });
+    let mut m = Model {
+        stack: vec![Screen::Detail {
+            instance: "inst".into(),
+            project_id: 1,
+            task_id: 1,
+            task,
+            comments: vec![],
+            user_map: HashMap::new(),
+            lines: vec![],
+            assets: vec![],
+            offset: 0,
+            loading: true,
+            pending_download: false,
+            rendered_width: usize::MAX,
+        }],
+        should_quit: false,
+    };
+    m.reflow_detail(80);
+    match m.stack.last() {
+        Some(Screen::Detail {
+            lines,
+            rendered_width,
+            ..
+        }) => {
+            assert!(lines.is_empty(), "must not build lines while loading");
+            assert_eq!(
+                *rendered_width,
+                usize::MAX,
+                "rendered_width must stay MAX while loading"
+            );
+        }
+        _ => panic!("expected Detail"),
+    }
+}
+
+// P2-A3: reflow_detail clamps offset when content shortens
+#[test]
+fn reflow_detail_clamps_offset_when_content_shortens() {
+    let task = json!({
+        "name": "T", "id": 1, "project_id": 1, "is_completed": false,
+        "body": "<p>Short body.</p>"
+    });
+    let mut m = Model {
+        stack: vec![Screen::Detail {
+            instance: "inst".into(),
+            project_id: 1,
+            task_id: 1,
+            task,
+            comments: vec![],
+            user_map: HashMap::new(),
+            lines: vec!["a".into(), "b".into(), "c".into(), "d".into(), "e".into()],
+            assets: vec![],
+            offset: 4,
+            loading: false,
+            pending_download: false,
+            rendered_width: usize::MAX,
+        }],
+        should_quit: false,
+    };
+    m.reflow_detail(80);
+    match m.stack.last() {
+        Some(Screen::Detail { offset, lines, .. }) => {
+            let max_offset = lines.len().saturating_sub(1);
+            assert!(
+                *offset <= max_offset,
+                "offset={} must be clamped to max_offset={}",
+                offset,
+                max_offset
+            );
+        }
+        _ => panic!("expected Detail"),
+    }
+}
+
+// P2-A2: UserMapResolved updates user_map and invalidates the render cache
+#[test]
+fn user_map_resolved_updates_map_and_invalidates_cache() {
+    let task = json!({
+        "name": "Task",
+        "id": 1,
+        "project_id": 1,
+        "is_completed": false,
+        "assignee_id": 42
+    });
+    let m = Model {
+        stack: vec![Screen::Detail {
+            instance: "inst".into(),
+            project_id: 1,
+            task_id: 1,
+            task,
+            comments: vec![],
+            user_map: HashMap::new(),
+            lines: vec!["old line".into()],
+            assets: vec![],
+            offset: 0,
+            loading: false,
+            pending_download: false,
+            rendered_width: 80,
+        }],
+        should_quit: false,
+    };
+
+    let mut new_map = HashMap::new();
+    new_map.insert(42i64, "Alice".to_string());
+    let (m, cmds) = update(m, Msg::UserMapResolved(new_map.clone()));
+    assert!(cmds.is_empty());
+
+    match m.stack.last() {
+        Some(Screen::Detail {
+            user_map,
+            lines,
+            rendered_width,
+            ..
+        }) => {
+            assert_eq!(
+                user_map.get(&42),
+                Some(&"Alice".to_string()),
+                "user_map must be updated"
+            );
+            assert!(lines.is_empty(), "lines cache must be invalidated");
+            assert_eq!(
+                *rendered_width,
+                usize::MAX,
+                "rendered_width must be reset to MAX"
+            );
+        }
+        _ => panic!("expected Detail"),
+    }
+}
+
+// P2-A2: progressive paint — LoadedDetail with empty user_map, then UserMapResolved
+// with a name; after reflow, the assignee line contains the name.
+#[test]
+fn progressive_paint_assignee_fills_in_after_user_map_resolved() {
+    let task = json!({
+        "name": "Task",
+        "id": 7,
+        "project_id": 3,
+        "is_completed": false,
+        "assignee_id": 99
+    });
+
+    // Phase 1: LoadedDetail with empty user_map
+    let load = DetailLoad {
+        task: task.clone(),
+        comments: vec![],
+        assets: vec![],
+        user_map: HashMap::new(),
+    };
+    let m = Model {
+        stack: vec![Screen::Detail {
+            instance: "inst".into(),
+            project_id: 3,
+            task_id: 7,
+            task: serde_json::Value::Null,
+            comments: vec![],
+            user_map: HashMap::new(),
+            lines: vec![],
+            assets: vec![],
+            offset: 0,
+            loading: true,
+            pending_download: false,
+            rendered_width: usize::MAX,
+        }],
+        should_quit: false,
+    };
+    let (m, _) = update(m, Msg::LoadedDetail(load));
+
+    // Reflow at width 80: assignee shows as "(99)" because user_map is empty
+    let mut m = m;
+    m.reflow_detail(80);
+    let lines_phase1 = match m.stack.last() {
+        Some(Screen::Detail { lines, .. }) => lines.clone(),
+        _ => panic!("expected Detail"),
+    };
+    let phase1_assignee = lines_phase1
+        .iter()
+        .find(|l| l.contains("(99)"))
+        .cloned()
+        .unwrap_or_default();
+    assert!(
+        phase1_assignee.contains("(99)"),
+        "phase-1 must show raw id: {:?}",
+        lines_phase1
+    );
+
+    // Phase 2: UserMapResolved with Alice
+    let mut resolved_map = HashMap::new();
+    resolved_map.insert(99i64, "Alice".to_string());
+    let (mut m, _) = update(m, Msg::UserMapResolved(resolved_map));
+
+    // Reflow at same width: cache must be rebuilt with the new name
+    m.reflow_detail(80);
+    let lines_phase2 = match m.stack.last() {
+        Some(Screen::Detail { lines, .. }) => lines.clone(),
+        _ => panic!("expected Detail"),
+    };
+    assert!(
+        lines_phase2.iter().any(|l| l.contains("Alice")),
+        "phase-2 lines must contain assignee name 'Alice': {:?}",
+        lines_phase2
+    );
+}
+
+// P2-A3: reflow_detail is a no-op on non-Detail screens
+#[test]
+fn reflow_detail_is_noop_on_projects_screen() {
+    let mut m = projects_model(2);
+    m.reflow_detail(80);
+    match m.stack.last() {
+        Some(Screen::Projects { .. }) => {}
+        other => panic!("expected Projects, got {other:?}"),
+    }
     assert!(!m.should_quit);
 }
