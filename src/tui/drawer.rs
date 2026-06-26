@@ -2,7 +2,7 @@ use crate::tui::theme;
 use ratatui::{
     layout::{Constraint, Rect},
     widgets::{
-        Block, Borders, Cell, Row, Scrollbar, ScrollbarOrientation, ScrollbarState, StatefulWidget,
+        Block, Borders, Row, Scrollbar, ScrollbarOrientation, ScrollbarState, StatefulWidget,
         Table, TableState,
     },
     Frame,
@@ -10,28 +10,28 @@ use ratatui::{
 
 /// Render a responsive [`Table`] with a styled header and selection highlight into `frame`.
 ///
-/// `widths` should use `Constraint::Min(0)` for the name/description column so it
-/// absorbs remaining width, degrading gracefully on narrow terminals without panicking.
+/// Each caller builds its own [`Row`] values (with per-row height for multi-line
+/// wrapped names). `widths` should use `Constraint::Min(0)` for the name/description
+/// column so it absorbs remaining width, degrading gracefully on narrow terminals.
 pub fn render_table(
     frame: &mut Frame,
     area: Rect,
     title: &str,
     header: &[&str],
-    rows: Vec<Vec<Cell<'static>>>,
+    rows: Vec<Row<'static>>,
     widths: &[Constraint],
     selected: usize,
 ) {
     let header_row = Row::new(header.to_vec()).style(theme::column_header_style());
 
     let total_rows = rows.len();
-    let data_rows: Vec<Row> = rows.into_iter().map(Row::new).collect();
 
     let block = Block::default()
         .borders(Borders::ALL)
         .title(title.to_owned())
         .title_style(theme::column_header_style());
 
-    let table = Table::new(data_rows, widths)
+    let table = Table::new(rows, widths)
         .header(header_row)
         .block(block)
         .row_highlight_style(theme::selection_style())

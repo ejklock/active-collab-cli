@@ -1,5 +1,6 @@
 use super::*;
 use serde_json::json;
+use unicode_width::UnicodeWidthStr;
 
 #[test]
 fn is_openable_url_accepts_http() {
@@ -641,9 +642,359 @@ fn wrap_text_multibyte_chars_counted_by_char_not_byte() {
     }
 }
 
+// --- D1-A3: wrap_text wraps by DISPLAY width ---
+
+#[test]
+fn wrap_text_cjk_no_line_exceeds_display_width() {
+    let text = "日本語テスト文字列が長すぎる場合のラップ動作を確認する";
+    let target = 10usize;
+    let lines = wrap_text(text, target);
+    assert!(!lines.is_empty(), "must produce wrapped lines for CJK text");
+    for line in &lines {
+        let dw = UnicodeWidthStr::width(line.as_str());
+        assert!(
+            dw <= target,
+            "CJK wrapped line display_width={dw} exceeds target={target}: {line:?}"
+        );
+    }
+}
+
+#[test]
+fn wrap_text_wide_single_word_hard_split_by_display_width() {
+    let word = "日本語テスト文字列";
+    let target = 6usize;
+    let lines = wrap_text(word, target);
+    assert!(!lines.is_empty(), "must hard-split over-wide CJK word");
+    for line in &lines {
+        let dw = UnicodeWidthStr::width(line.as_str());
+        assert!(
+            dw <= target,
+            "hard-split line display_width={dw} exceeds target={target}: {line:?}"
+        );
+    }
+}
+
+#[test]
+fn wrap_text_decomposed_accent_no_line_exceeds_display_width() {
+    let text = "Março Otimização Renovação Programação";
+    let target = 12usize;
+    let lines = wrap_text(text, target);
+    for line in &lines {
+        let dw = UnicodeWidthStr::width(line.as_str());
+        assert!(
+            dw <= target,
+            "accent line display_width={dw} exceeds target={target}: {line:?}"
+        );
+    }
+}
+
 fn char_width(s: &str) -> usize {
     s.chars().count()
 }
+
+fn dw(s: &str) -> usize {
+    UnicodeWidthStr::width(s)
+}
+
+// --- U10: panel_box ---
+
+#[test]
+fn panel_box_returns_empty_when_width_less_than_4() {
+    assert!(panel_box("label", &[], 3).is_empty());
+    assert!(panel_box("label", &[], 0).is_empty());
+    assert!(panel_box("x", &[String::new()], 1).is_empty());
+}
+
+#[test]
+fn panel_box_top_border_starts_with_tl_and_ends_with_tr() {
+    let lines = panel_box("My Label", &["body".into()], 30);
+    assert!(!lines.is_empty(), "must produce lines");
+    let top = &lines[0];
+    assert!(
+        top.starts_with('\u{256D}'),
+        "top must start with BOX_TL ╭: {:?}",
+        top
+    );
+    assert!(
+        top.ends_with('\u{256E}'),
+        "top must end with BOX_TR ╮: {:?}",
+        top
+    );
+}
+
+#[test]
+fn panel_box_top_border_embeds_label() {
+    let lines = panel_box("Details", &["row".into()], 40);
+    let top = &lines[0];
+    assert!(
+        top.contains("Details"),
+        "top border must contain the label: {:?}",
+        top
+    );
+}
+
+#[test]
+fn panel_box_bottom_border_has_rounded_corners() {
+    let lines = panel_box("L", &["x".into()], 20);
+    let bottom = lines.last().unwrap();
+    assert!(
+        bottom.starts_with('\u{2570}'),
+        "bottom must start with BOX_BL ╰: {:?}",
+        bottom
+    );
+    assert!(
+        bottom.ends_with('\u{256F}'),
+        "bottom must end with BOX_BR ╯: {:?}",
+        bottom
+    );
+}
+
+#[test]
+fn panel_box_body_lines_bounded_by_v_chars() {
+    let inner_lines = vec!["hello".into(), "world".into()];
+    let lines = panel_box("L", &inner_lines, 20);
+    // Lines 1..(len-1) are body lines
+    for line in &lines[1..lines.len() - 1] {
+        assert!(
+            line.starts_with('\u{2502}'),
+            "body line must start with BOX_V │: {:?}",
+            line
+        );
+        assert!(
+            line.ends_with('\u{2502}'),
+            "body line must end with BOX_V │: {:?}",
+            line
+        );
+    }
+}
+
+#[test]
+fn panel_box_every_line_exactly_width_chars() {
+    let width = 40;
+    let inner_lines: Vec<String> = vec!["short".into(), "a bit longer line here".into()];
+    let lines = panel_box("Test Panel", &inner_lines, width);
+    for line in &lines {
+        assert_eq!(
+            char_width(line),
+            width,
+            "every line must be exactly {width} chars: {:?}",
+            line
+        );
+    }
+}
+
+#[test]
+fn panel_box_body_line_padded_to_inner_width() {
+    let width = 20;
+    let inner_lines = vec!["hi".into()];
+    let lines = panel_box("L", &inner_lines, width);
+    // With PANEL_VPAD=1, lines are: top, blank, body, blank, bottom (5 lines total)
+    // The actual content body is at index 2 (after the VPAD blank row)
+    let body_line = &lines[2];
+    assert_eq!(
+        char_width(body_line),
+        width,
+        "body line must be exactly {width} chars: {:?}",
+        body_line
+    );
+    // Line structure: BOX_V + HPAD(1 space) + content_width chars + HPAD(1 space) + BOX_V
+    // content_width = width - 2 - 2*PANEL_HPAD = 20 - 2 - 2 = 16
+    // Content starts at position 2 (after BOX_V + HPAD)
+    let inner_content: String = body_line.chars().skip(2).take(16).collect();
+    assert!(
+        inner_content.starts_with("hi"),
+        "body content must start with 'hi' (after BOX_V + HPAD): {:?}",
+        inner_content
+    );
+    assert!(
+        inner_content.ends_with("  "),
+        "body content must be right-padded with spaces: {:?}",
+        inner_content
+    );
+}
+
+#[test]
+fn panel_box_long_label_clipped_with_ellipsis() {
+    let width = 20;
+    let long_label = "A Very Long Label That Does Not Fit";
+    let lines = panel_box(long_label, &["x".into()], width);
+    let top = &lines[0];
+    assert_eq!(
+        char_width(top),
+        width,
+        "top must be exactly {width} chars: {:?}",
+        top
+    );
+    assert!(
+        top.contains('\u{2026}'),
+        "clipped label must contain ellipsis: {:?}",
+        top
+    );
+    assert!(
+        top.ends_with('\u{256E}'),
+        "top must still end with TR corner: {:?}",
+        top
+    );
+}
+
+#[test]
+fn panel_box_body_line_longer_than_inner_truncated() {
+    // A body line longer than inner should be truncated to fit
+    let width = 10;
+    let long_line = "abcdefghijklmnopqrstuvwxyz".to_string();
+    let lines = panel_box("L", &[long_line], width);
+    for line in &lines {
+        assert_eq!(
+            char_width(line),
+            width,
+            "every line must be exactly {width} chars: {:?}",
+            line
+        );
+    }
+}
+
+#[test]
+fn panel_box_empty_inner_lines_produces_empty_body_line() {
+    let lines = panel_box("Label", &[String::new()], 20);
+    // With PANEL_VPAD=1: top + blank + body + blank + bottom = 5 lines
+    assert_eq!(
+        lines.len(),
+        5,
+        "must have 5 lines (top+vpad+body+vpad+bottom): {:?}",
+        lines
+    );
+    let body = &lines[2];
+    assert_eq!(
+        char_width(body),
+        20,
+        "empty body line must be exactly 20 chars: {:?}",
+        body
+    );
+}
+
+// --- D1-A1: panel_box display-width invariant (every line exactly `width` DISPLAY cols) ---
+
+#[test]
+fn panel_box_every_line_exactly_width_display_cols_ascii() {
+    let width = 40usize;
+    let lines = panel_box(
+        "Details",
+        &["short".into(), "a longer line here".into()],
+        width,
+    );
+    for line in &lines {
+        assert_eq!(
+            dw(line),
+            width,
+            "ASCII: every line must be exactly {width} display cols: {line:?}"
+        );
+    }
+}
+
+#[test]
+fn panel_box_every_line_exactly_width_display_cols_cjk() {
+    let width = 40usize;
+    let cjk_line = "日本語タスク".to_string();
+    let lines = panel_box("CJK", &[cjk_line], width);
+    for line in &lines {
+        assert_eq!(
+            dw(line),
+            width,
+            "CJK: every line must be exactly {width} display cols (right │ must close): {line:?}"
+        );
+        assert!(
+            line.ends_with('\u{2502}') || line.ends_with('\u{256E}') || line.ends_with('\u{256F}'),
+            "CJK: line must end with a box char: {line:?}"
+        );
+    }
+}
+
+#[test]
+fn panel_box_every_line_exactly_width_display_cols_diamond() {
+    let width = 40usize;
+    let diamond_line = "◆ item one ◆ item two".to_string();
+    let lines = panel_box("Diamonds", &[diamond_line], width);
+    for line in &lines {
+        assert_eq!(
+            dw(line),
+            width,
+            "◆: every line must be exactly {width} display cols: {line:?}"
+        );
+    }
+}
+
+#[test]
+fn panel_box_every_line_exactly_width_display_cols_decomposed_accent() {
+    let width = 40usize;
+    let accent_line = "Ma\u{0301}rço Otimizac\u{0327}a\u{0303}o".to_string();
+    let lines = panel_box("Accent", &[accent_line], width);
+    for line in &lines {
+        assert_eq!(
+            dw(line),
+            width,
+            "accent: every line must be exactly {width} display cols: {line:?}"
+        );
+    }
+}
+
+#[test]
+fn panel_box_over_long_inner_line_right_border_closes() {
+    let width = 20usize;
+    let long_line = "abcdefghijklmnopqrstuvwxyz0123456789".to_string();
+    let lines = panel_box("L", &[long_line], width);
+    for line in &lines {
+        assert_eq!(
+            dw(line),
+            width,
+            "over-long: line must be exactly {width} display cols: {line:?}"
+        );
+    }
+    let body_line = &lines[2];
+    assert!(
+        body_line.ends_with('\u{2502}'),
+        "over-long: body line right border must be BOX_V: {body_line:?}"
+    );
+}
+
+// --- D1-A2: panel_box horizontal + vertical padding invariants ---
+
+#[test]
+fn panel_box_vpad_first_and_last_body_rows_are_blank() {
+    let width = 30usize;
+    let lines = panel_box("Test", &["content".into()], width);
+    // lines: top(0), blank_vpad(1), content(2), blank_vpad(3), bottom(4)
+    assert_eq!(lines.len(), 5, "must have 5 lines with VPAD=1: {lines:?}");
+    let first_body = &lines[1];
+    let last_body = &lines[3];
+    let inner = width - 2;
+    let expected_blank = format!("\u{2502}{}\u{2502}", " ".repeat(inner));
+    assert_eq!(
+        first_body, &expected_blank,
+        "first body row must be blank VPAD row: {first_body:?}"
+    );
+    assert_eq!(
+        last_body, &expected_blank,
+        "last body row must be blank VPAD row: {last_body:?}"
+    );
+}
+
+#[test]
+fn panel_box_hpad_separates_content_from_borders() {
+    let width = 30usize;
+    let lines = panel_box("P", &["content".into()], width);
+    let content_line = &lines[2];
+    let chars: Vec<char> = content_line.chars().collect();
+    assert_eq!(chars[0], '\u{2502}', "must start with BOX_V");
+    assert_eq!(chars[1], ' ', "char after BOX_V must be HPAD space");
+    assert_eq!(chars[chars.len() - 1], '\u{2502}', "must end with BOX_V");
+    assert_eq!(
+        chars[chars.len() - 2],
+        ' ',
+        "char before BOX_V must be HPAD space"
+    );
+}
+
+// --- U10: comment_box regression (delegates to panel_box, output byte-identical) ---
 
 #[test]
 fn comment_box_returns_empty_when_width_less_than_4() {
@@ -783,155 +1134,10 @@ fn comment_box_multiline_body_each_middle_line_exactly_width() {
     }
 }
 
-#[test]
-fn build_detail_lines_meta_section_present() {
-    let task = json!({
-        "id": 99,
-        "project_id": 10,
-        "project_name": "Acme",
-        "name": "Fix bug",
-        "is_completed": false,
-        "assignee_id": 5,
-        "estimate": 4.0f64,
-        "tracked_time": 2.5f64
-    });
-    let mut user_map = HashMap::new();
-    user_map.insert(5i64, "Alice".to_string());
-    let lines = build_detail_lines(&task, &[], &user_map, 80);
-    let joined = lines.join("\n");
-    assert!(joined.contains("Task:"), "missing Task: {joined}");
-    assert!(joined.contains("10-99"), "missing task ref: {joined}");
-    assert!(joined.contains("Project:"), "missing Project: {joined}");
-    assert!(joined.contains("Acme"), "missing project name: {joined}");
-    assert!(joined.contains("Title:"), "missing Title: {joined}");
-    assert!(joined.contains("Fix bug"), "missing title: {joined}");
-    assert!(joined.contains("Status:"), "missing Status: {joined}");
-    assert!(joined.contains("Open"), "missing status: {joined}");
-    assert!(joined.contains("Assignee:"), "missing Assignee: {joined}");
-    assert!(joined.contains("Alice (5)"), "missing assignee: {joined}");
-}
+// --- U10: build_header_lines (Details panel) ---
 
 #[test]
-fn build_detail_lines_description_present() {
-    let task = json!({ "id": 1, "body": "<p>Some details here</p>" });
-    let lines = build_detail_lines(&task, &[], &HashMap::new(), 80);
-    let joined = lines.join("\n");
-    assert!(
-        joined.contains("Description:"),
-        "missing Description: {joined}"
-    );
-    assert!(
-        joined.contains("Some details here"),
-        "missing body text: {joined}"
-    );
-}
-
-#[test]
-fn build_detail_lines_no_description_fallback() {
-    let task = json!({ "id": 1, "body": null });
-    let lines = build_detail_lines(&task, &[], &HashMap::new(), 80);
-    let joined = lines.join("\n");
-    assert!(
-        joined.contains("(no description)"),
-        "missing fallback: {joined}"
-    );
-}
-
-#[test]
-fn build_detail_lines_no_comment_block_when_empty() {
-    let task = json!({ "id": 1 });
-    let lines = build_detail_lines(&task, &[], &HashMap::new(), 80);
-    let joined = lines.join("\n");
-    assert!(
-        !joined.contains('\u{256D}'),
-        "must not have box corners when no comments: {joined}"
-    );
-}
-
-#[test]
-fn build_detail_lines_comment_boxes_present() {
-    let task = json!({ "id": 1 });
-    let comments = vec![json!({
-        "created_by_name": "Bob",
-        "created_on": 1614556800i64,
-        "body_plain_text": "LGTM!"
-    })];
-    let lines = build_detail_lines(&task, &comments, &HashMap::new(), 60);
-    let joined = lines.join("\n");
-    assert!(
-        joined.contains('\u{256D}'),
-        "must have box top-left corner: {joined}"
-    );
-    assert!(
-        joined.contains("Bob"),
-        "must contain comment author: {joined}"
-    );
-    assert!(
-        joined.contains("LGTM!"),
-        "must contain comment body: {joined}"
-    );
-}
-
-#[test]
-fn build_detail_lines_no_line_exceeds_inner_width() {
-    let task = json!({
-        "id": 99,
-        "project_id": 10,
-        "project_name": "A Very Long Project Name That Could Overflow The Line Width",
-        "name": "A task with an extremely verbose name that also goes long",
-        "body": "<p>Body text that is quite verbose and goes on for a while to test wrapping behavior</p>"
-    });
-    let comments = vec![json!({
-        "created_by_name": "Alice Wonderland",
-        "created_on": 1614556800i64,
-        "body_plain_text": "This is a fairly long comment body that should be word-wrapped to fit within the box"
-    })];
-    let inner_width = 50;
-    let lines = build_detail_lines(&task, &comments, &HashMap::new(), inner_width);
-    for line in &lines {
-        let len = line.chars().count();
-        assert!(
-            len <= inner_width,
-            "line exceeds {inner_width} chars ({len}): {:?}",
-            line
-        );
-    }
-}
-
-#[test]
-fn truncate_cell_shorter_than_width_returns_unchanged() {
-    assert_eq!(truncate_cell("hello", 10), "hello");
-}
-
-#[test]
-fn truncate_cell_equal_to_width_returns_unchanged() {
-    assert_eq!(truncate_cell("hello", 5), "hello");
-}
-
-#[test]
-fn truncate_cell_longer_than_width_ends_with_ellipsis_and_has_exact_char_count() {
-    let result = truncate_cell("abcdefghij", 6);
-    assert_eq!(result.chars().count(), 6, "result must be exactly 6 chars");
-    assert!(
-        result.ends_with('\u{2026}'),
-        "result must end with ellipsis: {result:?}"
-    );
-    assert_eq!(
-        &result[..result.len() - '\u{2026}'.len_utf8()],
-        "abcde",
-        "first max_width-1 chars must be preserved"
-    );
-}
-
-#[test]
-fn truncate_cell_max_width_zero_returns_empty() {
-    assert_eq!(truncate_cell("anything", 0), "");
-}
-
-// --- U6a: build_header_lines ---
-
-#[test]
-fn build_header_lines_returns_only_meta_rows() {
+fn build_header_lines_returns_panel_with_details_label() {
     let task = json!({
         "id": 7,
         "project_id": 3,
@@ -944,16 +1150,44 @@ fn build_header_lines_returns_only_meta_rows() {
     });
     let lines = build_header_lines(&task, &HashMap::new(), 80);
     let joined = lines.join("\n");
-    assert!(joined.contains("Task:"), "missing Task row: {joined}");
+    // Must be a panel with rounded borders
+    assert!(
+        lines[0].starts_with('\u{256D}'),
+        "first line must be panel top border: {:?}",
+        lines[0]
+    );
+    assert!(
+        lines[0].contains("Details"),
+        "panel top must contain 'Details' label: {joined}"
+    );
+    assert!(
+        lines.last().unwrap().starts_with('\u{2570}'),
+        "last line must be panel bottom border"
+    );
+    // Meta rows are inside
+    assert!(joined.contains("Task"), "missing Task row: {joined}");
     assert!(joined.contains("3-7"), "missing task ref: {joined}");
-    assert!(joined.contains("Project:"), "missing Project: {joined}");
+    assert!(joined.contains("Project"), "missing Project: {joined}");
     assert!(joined.contains("Alpha"), "missing project name: {joined}");
-    assert!(joined.contains("Title:"), "missing Title: {joined}");
-    assert!(joined.contains("Do the thing"), "missing title: {joined}");
-    assert!(joined.contains("Status:"), "missing Status: {joined}");
-    assert!(joined.contains("Assignee:"), "missing Assignee: {joined}");
-    assert!(joined.contains("Estimate:"), "missing Estimate: {joined}");
-    assert!(joined.contains("Logged:"), "missing Logged: {joined}");
+    assert!(joined.contains("Status"), "missing Status: {joined}");
+    assert!(joined.contains("Assignee"), "missing Assignee: {joined}");
+    assert!(joined.contains("Estimate"), "missing Estimate: {joined}");
+    assert!(joined.contains("Logged"), "missing Logged: {joined}");
+}
+
+#[test]
+fn build_header_lines_no_title_row() {
+    // Title row must be absent — the title band in build_detail_lines shows the name
+    let task = json!({
+        "id": 1,
+        "name": "Fix bug"
+    });
+    let lines = build_header_lines(&task, &HashMap::new(), 80);
+    let joined = lines.join("\n");
+    assert!(
+        !joined.contains("Title"),
+        "Details panel must NOT include a Title row: {joined}"
+    );
 }
 
 #[test]
@@ -967,10 +1201,6 @@ fn build_header_lines_contains_no_description_or_comment_lines() {
     assert!(
         !joined.contains("Description"),
         "must not include Description: {joined}"
-    );
-    assert!(
-        !joined.contains('\u{256D}'),
-        "must not include comment boxes: {joined}"
     );
     assert!(
         !joined.contains("Some body text"),
@@ -1015,8 +1245,8 @@ fn build_header_lines_optional_dates_included_when_present() {
     });
     let lines = build_header_lines(&task, &HashMap::new(), 80);
     let joined = lines.join("\n");
-    assert!(joined.contains("Start:"), "missing Start: {joined}");
-    assert!(joined.contains("Due:"), "missing Due: {joined}");
+    assert!(joined.contains("Start"), "missing Start: {joined}");
+    assert!(joined.contains("Due"), "missing Due: {joined}");
 }
 
 #[test]
@@ -1024,23 +1254,118 @@ fn build_header_lines_optional_dates_omitted_when_null() {
     let task = json!({ "id": 1, "start_on": null, "due_on": null });
     let lines = build_header_lines(&task, &HashMap::new(), 80);
     let joined = lines.join("\n");
+    // The label "Start" must not appear in a table row (it may appear in truncated label)
+    // We check that date values are absent
     assert!(
-        !joined.contains("Start:"),
-        "Start must be omitted: {joined}"
+        !joined.contains("2021-03-01"),
+        "Start date value must be omitted: {joined}"
     );
-    assert!(!joined.contains("Due:"), "Due must be omitted: {joined}");
+    assert!(
+        !joined.contains("2021-03-02"),
+        "Due date value must be omitted: {joined}"
+    );
 }
 
-// --- U6a: build_body_lines ---
+#[test]
+fn build_header_lines_2_column_alignment() {
+    // All value columns must start at the same horizontal position (2-col aligned table).
+    // Row format: "{label:<label_col$}  {value}" — label padded to label_col, then 2 spaces, then value.
+    // The value start offset = label_col + 2 chars from the inner content start.
+    let task = json!({
+        "id": 42,
+        "project_id": 7,
+        "project_name": "Acme",
+        "name": "My Task",
+        "is_completed": false,
+        "assignee_id": null,
+        "estimate": 8.0f64,
+        "tracked_time": 0.0f64
+    });
+    let lines = build_header_lines(&task, &HashMap::new(), 80);
+    // Collect inner content of body lines (strip BOX_V from start and end, then strip HPAD).
+    // With PANEL_VPAD=1, body lines start at index 2 (skip top border and VPAD blank row)
+    // and end at len-2 (skip VPAD blank row and bottom border). Also skip blank VPAD rows.
+    let body_lines: Vec<Vec<char>> = lines[1..lines.len() - 1]
+        .iter()
+        .filter_map(|line| {
+            let chars: Vec<char> = line.chars().collect();
+            // inner = chars[1..len-1], then strip leading/trailing HPAD (1 space each side)
+            let inner = &chars[1..chars.len() - 1];
+            // Skip blank padding rows (all spaces)
+            if inner.iter().all(|c| *c == ' ') {
+                return None;
+            }
+            // Strip 1 char of HPAD from each side
+            if inner.len() >= 2 {
+                Some(inner[1..inner.len() - 1].to_vec())
+            } else {
+                Some(inner.to_vec())
+            }
+        })
+        .collect();
+
+    // For each row, find the start of the value: scan backward from the first non-space
+    // char's position, finding the transition from all-spaces to non-space-prefix.
+    // Since format is "{label:<N$}  {value}", the value starts immediately after the "  " separator.
+    // We find value_start as the position of the first non-space char AFTER all leading
+    // label+padding+separator spaces — i.e., skip label text, skip all spaces, the next non-space
+    // is the value. The position of that non-space char is the value_start.
+    //
+    // Specifically: scan from position 0, skip non-spaces (label chars), then skip spaces
+    // (padding + separator). The first non-space after that run of spaces is the value start.
+    fn value_start_offset(inner: &[char]) -> Option<usize> {
+        let mut i = 0;
+        // Skip label chars (non-space)
+        while i < inner.len() && inner[i] != ' ' {
+            i += 1;
+        }
+        if i == 0 || i >= inner.len() {
+            return None;
+        }
+        // Skip all spaces (padding + separator)
+        while i < inner.len() && inner[i] == ' ' {
+            i += 1;
+        }
+        Some(i)
+    }
+
+    let value_positions: Vec<usize> = body_lines
+        .iter()
+        .filter_map(|chars| value_start_offset(chars))
+        .collect();
+
+    assert!(
+        !value_positions.is_empty(),
+        "must detect value column positions in body lines"
+    );
+    let first = value_positions[0];
+    for &pos in &value_positions {
+        assert_eq!(
+            pos, first,
+            "all value columns must start at the same offset (2-col alignment): positions={value_positions:?}"
+        );
+    }
+}
+
+// --- U10: build_body_lines (Description panel) ---
 
 #[test]
-fn build_body_lines_contains_description_label() {
+fn build_body_lines_is_panel_with_description_label() {
     let task = json!({ "id": 1, "body": "<p>Hello world</p>" });
     let lines = build_body_lines(&task, 80);
-    let joined = lines.join("\n");
     assert!(
-        joined.contains("Description:"),
-        "missing Description label: {joined}"
+        lines[0].starts_with('\u{256D}'),
+        "first line must be panel top border: {:?}",
+        lines[0]
+    );
+    assert!(
+        lines[0].contains("Description"),
+        "panel top must contain 'Description': {:?}",
+        lines[0]
+    );
+    assert!(
+        lines.last().unwrap().starts_with('\u{2570}'),
+        "last line must be panel bottom border"
     );
 }
 
@@ -1084,10 +1409,6 @@ fn build_body_lines_contains_no_meta_or_comment_lines() {
         !joined.contains("Project:"),
         "must not include Project row: {joined}"
     );
-    assert!(
-        !joined.contains('\u{256D}'),
-        "must not include comment boxes: {joined}"
-    );
 }
 
 #[test]
@@ -1108,7 +1429,7 @@ fn build_body_lines_no_line_exceeds_inner_width() {
     }
 }
 
-// --- U6a: build_comment_lines ---
+// --- U10: build_comment_lines (Comments panel) ---
 
 #[test]
 fn build_comment_lines_empty_for_zero_comments() {
@@ -1121,7 +1442,7 @@ fn build_comment_lines_empty_for_zero_comments() {
 }
 
 #[test]
-fn build_comment_lines_returns_box_for_single_comment() {
+fn build_comment_lines_returns_outer_panel_for_single_comment() {
     let comments = vec![json!({
         "created_by_name": "Alice",
         "created_on": 1614556800i64,
@@ -1129,16 +1450,27 @@ fn build_comment_lines_returns_box_for_single_comment() {
     })];
     let lines = build_comment_lines(&comments, 60);
     let joined = lines.join("\n");
+    // Must be wrapped in an outer panel
     assert!(
-        joined.contains('\u{256D}'),
-        "must have box top-left corner: {joined}"
+        lines[0].starts_with('\u{256D}'),
+        "outer panel top must start with BOX_TL: {:?}",
+        lines[0]
     );
+    assert!(
+        lines[0].contains("Comments"),
+        "outer panel must have 'Comments' label: {joined}"
+    );
+    assert!(
+        lines[0].contains("(1)"),
+        "outer panel must show count (1): {joined}"
+    );
+    // Inner comment card must be present
     assert!(joined.contains("Alice"), "must contain author: {joined}");
     assert!(joined.contains("LGTM!"), "must contain body: {joined}");
 }
 
 #[test]
-fn build_comment_lines_returns_boxes_for_multiple_comments() {
+fn build_comment_lines_returns_outer_panel_for_multiple_comments() {
     let comments = vec![
         json!({
             "created_by_name": "Alice",
@@ -1153,6 +1485,14 @@ fn build_comment_lines_returns_boxes_for_multiple_comments() {
     ];
     let lines = build_comment_lines(&comments, 60);
     let joined = lines.join("\n");
+    assert!(
+        lines[0].contains("Comments"),
+        "outer panel must have 'Comments' label: {joined}"
+    );
+    assert!(
+        lines[0].contains("(2)"),
+        "outer panel must show count (2): {joined}"
+    );
     assert!(
         joined.contains("Alice"),
         "must contain first author: {joined}"
@@ -1188,6 +1528,275 @@ fn build_comment_lines_no_line_exceeds_inner_width() {
             line
         );
     }
+}
+
+// --- U10: build_detail_lines structure ---
+
+#[test]
+fn build_detail_lines_first_line_is_details_panel_top_border() {
+    let task = json!({
+        "id": 99,
+        "project_id": 10,
+        "project_name": "Acme",
+        "name": "Fix bug",
+        "is_completed": false,
+    });
+    let lines = build_detail_lines(&task, &[], &HashMap::new(), 80);
+    assert!(!lines.is_empty(), "must produce lines");
+    let first = &lines[0];
+    assert!(
+        first.starts_with('\u{256D}'),
+        "first line must be the Details panel top border (╭): {:?}",
+        first
+    );
+    assert!(
+        first.contains("Details"),
+        "first line must contain 'Details' panel label: {:?}",
+        first
+    );
+    assert!(
+        !first.contains("Fix bug"),
+        "task name must NOT appear in the scroll body (it is in the frame border): {:?}",
+        first
+    );
+}
+
+#[test]
+fn build_detail_lines_details_panel_is_first() {
+    let task = json!({
+        "id": 5,
+        "project_id": 2,
+        "name": "My Task",
+        "is_completed": false
+    });
+    let lines = build_detail_lines(&task, &[], &HashMap::new(), 60);
+    assert!(
+        !lines.is_empty(),
+        "must have at least one line: {:?}",
+        lines
+    );
+    assert!(
+        lines[0].starts_with('\u{256D}'),
+        "lines[0] must be Details panel top: {:?}",
+        lines[0]
+    );
+    assert!(
+        lines[0].contains("Details"),
+        "Details panel must have 'Details' label: {:?}",
+        lines[0]
+    );
+}
+
+#[test]
+fn build_detail_lines_description_panel_present() {
+    let task = json!({ "id": 1, "name": "T", "body": "<p>Some details here</p>" });
+    let lines = build_detail_lines(&task, &[], &HashMap::new(), 80);
+    let joined = lines.join("\n");
+    assert!(
+        joined.contains("Description"),
+        "must contain Description panel: {joined}"
+    );
+    assert!(
+        joined.contains("Some details here"),
+        "missing body text: {joined}"
+    );
+}
+
+#[test]
+fn build_detail_lines_no_description_fallback() {
+    let task = json!({ "id": 1, "name": "T", "body": null });
+    let lines = build_detail_lines(&task, &[], &HashMap::new(), 80);
+    let joined = lines.join("\n");
+    assert!(
+        joined.contains("(no description)"),
+        "missing fallback: {joined}"
+    );
+}
+
+#[test]
+fn build_detail_lines_no_comments_panel_when_empty() {
+    let task = json!({ "id": 1, "name": "T" });
+    let lines = build_detail_lines(&task, &[], &HashMap::new(), 80);
+    let joined = lines.join("\n");
+    // Comments panel must be absent; Details and Description panels ARE present
+    assert!(
+        !joined.contains("Comments"),
+        "must not have Comments panel when no comments: {joined}"
+    );
+    // But Details panel is present
+    assert!(
+        joined.contains("Details"),
+        "Details panel must be present: {joined}"
+    );
+}
+
+#[test]
+fn build_detail_lines_comments_panel_present_when_non_empty() {
+    let task = json!({ "id": 1, "name": "T" });
+    let comments = vec![json!({
+        "created_by_name": "Bob",
+        "created_on": 1614556800i64,
+        "body_plain_text": "LGTM!"
+    })];
+    let lines = build_detail_lines(&task, &comments, &HashMap::new(), 60);
+    let joined = lines.join("\n");
+    assert!(
+        joined.contains("Comments"),
+        "must have Comments panel when comments present: {joined}"
+    );
+    assert!(
+        joined.contains("Bob"),
+        "must contain comment author: {joined}"
+    );
+    assert!(
+        joined.contains("LGTM!"),
+        "must contain comment body: {joined}"
+    );
+    // Must have box corners (from panels)
+    assert!(
+        joined.contains('\u{256D}'),
+        "must have rounded box corners: {joined}"
+    );
+}
+
+#[test]
+fn build_detail_lines_no_title_row_in_meta() {
+    let task = json!({
+        "id": 1,
+        "name": "My Important Task",
+        "project_id": 5,
+        "project_name": "Acme"
+    });
+    let lines = build_detail_lines(&task, &[], &HashMap::new(), 80);
+    let joined = lines.join("\n");
+    // The title band contains the name; the Details panel must NOT have a "Title" label row
+    assert!(
+        !joined.contains("Title"),
+        "Details panel must NOT contain a Title row: {joined}"
+    );
+}
+
+#[test]
+fn build_detail_lines_no_line_exceeds_inner_width() {
+    let task = json!({
+        "id": 99,
+        "project_id": 10,
+        "project_name": "A Very Long Project Name That Could Overflow The Line Width",
+        "name": "A task with an extremely verbose name that also goes long",
+        "body": "<p>Body text that is quite verbose and goes on for a while to test wrapping behavior</p>"
+    });
+    let comments = vec![json!({
+        "created_by_name": "Alice Wonderland",
+        "created_on": 1614556800i64,
+        "body_plain_text": "This is a fairly long comment body that should be word-wrapped to fit within the box"
+    })];
+    let inner_width = 50;
+    let lines = build_detail_lines(&task, &comments, &HashMap::new(), inner_width);
+    for line in &lines {
+        let len = line.chars().count();
+        assert!(
+            len <= inner_width,
+            "line exceeds {inner_width} chars ({len}): {:?}",
+            line
+        );
+    }
+}
+
+#[test]
+fn build_detail_lines_panels_appear_in_order() {
+    // title band -> blank -> Details -> blank -> Description -> [blank + Comments]
+    let task = json!({
+        "id": 1,
+        "name": "Task Name",
+        "project_id": 3,
+        "project_name": "Proj",
+        "body": "<p>Body text</p>"
+    });
+    let comments = vec![json!({
+        "created_by_name": "Carol",
+        "created_on": 1614556800i64,
+        "body_plain_text": "A comment"
+    })];
+    let lines = build_detail_lines(&task, &comments, &HashMap::new(), 60);
+    let joined = lines.join("\n");
+
+    // Find positions of panel labels
+    let details_pos = joined.find("Details").expect("Details must be present");
+    let desc_pos = joined
+        .find("Description")
+        .expect("Description must be present");
+    let comments_pos = joined.find("Comments").expect("Comments must be present");
+
+    assert!(
+        details_pos < desc_pos,
+        "Details must appear before Description: details_pos={details_pos} desc_pos={desc_pos}"
+    );
+    assert!(
+        desc_pos < comments_pos,
+        "Description must appear before Comments: desc_pos={desc_pos} comments_pos={comments_pos}"
+    );
+}
+
+#[test]
+fn build_detail_lines_multiple_comments_in_outer_panel() {
+    let task = json!({ "id": 1, "name": "T" });
+    let comments = vec![
+        json!({ "created_by_name": "Alice", "created_on": 1614556800i64, "body_plain_text": "First" }),
+        json!({ "created_by_name": "Bob", "created_on": 1614556801i64, "body_plain_text": "Second" }),
+    ];
+    let lines = build_detail_lines(&task, &comments, &HashMap::new(), 50);
+    let joined = lines.join("\n");
+    assert!(
+        joined.contains("Alice"),
+        "must contain first author: {joined}"
+    );
+    assert!(
+        joined.contains("Bob"),
+        "must contain second author: {joined}"
+    );
+    assert!(
+        joined.contains("First"),
+        "must contain first body: {joined}"
+    );
+    assert!(
+        joined.contains("Second"),
+        "must contain second body: {joined}"
+    );
+    // Outer panel shows count
+    assert!(
+        joined.contains("(2)"),
+        "outer Comments panel must show (2): {joined}"
+    );
+}
+
+#[test]
+fn truncate_cell_shorter_than_width_returns_unchanged() {
+    assert_eq!(truncate_cell("hello", 10), "hello");
+}
+
+#[test]
+fn truncate_cell_equal_to_width_returns_unchanged() {
+    assert_eq!(truncate_cell("hello", 5), "hello");
+}
+
+#[test]
+fn truncate_cell_longer_than_width_ends_with_ellipsis_and_has_exact_char_count() {
+    let result = truncate_cell("abcdefghij", 6);
+    assert_eq!(result.chars().count(), 6, "result must be exactly 6 chars");
+    assert!(
+        result.ends_with('\u{2026}'),
+        "result must end with ellipsis: {result:?}"
+    );
+    assert_eq!(
+        &result[..result.len() - '\u{2026}'.len_utf8()],
+        "abcde",
+        "first max_width-1 chars must be preserved"
+    );
+}
+
+#[test]
+fn truncate_cell_max_width_zero_returns_empty() {
+    assert_eq!(truncate_cell("anything", 0), "");
 }
 
 #[test]
@@ -1229,46 +1838,157 @@ fn truncate_cell_cjk_truncates_on_char_boundary_without_panic() {
     );
 }
 
+// --- U11: looks_like_filename and asset_link_line ---
+
 #[test]
-fn build_detail_lines_multiple_comments_separated_by_blank() {
-    let task = json!({ "id": 1 });
-    let comments = vec![
-        json!({ "created_by_name": "Alice", "created_on": 1614556800i64, "body_plain_text": "First" }),
-        json!({ "created_by_name": "Bob", "created_on": 1614556801i64, "body_plain_text": "Second" }),
-    ];
-    let lines = build_detail_lines(&task, &comments, &HashMap::new(), 50);
-    let joined = lines.join("\n");
+fn looks_like_filename_accepts_real_filename() {
     assert!(
-        joined.contains("Alice"),
-        "must contain first author: {joined}"
+        looks_like_filename("report.pdf"),
+        "report.pdf must be a valid filename"
     );
+}
+
+#[test]
+fn looks_like_filename_accepts_short_extension() {
     assert!(
-        joined.contains("Bob"),
-        "must contain second author: {joined}"
+        looks_like_filename("image.png"),
+        "image.png must be a valid filename"
     );
+}
+
+#[test]
+fn looks_like_filename_accepts_six_char_extension() {
     assert!(
-        joined.contains("First"),
-        "must contain first body: {joined}"
+        looks_like_filename("archive.tar123"),
+        "six-char alphanumeric extension must be accepted"
     );
+}
+
+#[test]
+fn looks_like_filename_rejects_empty() {
+    assert!(!looks_like_filename(""), "empty name must be rejected");
+}
+
+#[test]
+fn looks_like_filename_rejects_no_extension() {
     assert!(
-        joined.contains("Second"),
-        "must contain second body: {joined}"
+        !looks_like_filename("a8f3c920-deadbeef"),
+        "name with no dot extension must be rejected"
     );
-    let top_corners: Vec<usize> = lines
-        .iter()
-        .enumerate()
-        .filter(|(_, l)| l.starts_with('\u{256D}'))
-        .map(|(i, _)| i)
-        .collect();
+}
+
+#[test]
+fn looks_like_filename_rejects_extension_too_long() {
+    assert!(
+        !looks_like_filename("file.abcdefg"),
+        "seven-char extension must be rejected"
+    );
+}
+
+#[test]
+fn looks_like_filename_rejects_over_48_chars_even_with_valid_extension() {
+    let long_name = format!("{}.pdf", "a".repeat(46));
+    assert_eq!(long_name.chars().count(), 50);
+    assert!(
+        !looks_like_filename(&long_name),
+        "name longer than 48 chars must be rejected: {long_name:?}"
+    );
+}
+
+#[test]
+fn looks_like_filename_accepts_exactly_48_chars_with_valid_extension() {
+    let name = format!("{}.pdf", "a".repeat(44));
+    assert_eq!(name.chars().count(), 48);
+    assert!(
+        looks_like_filename(&name),
+        "48-char name with valid extension must be accepted: {name:?}"
+    );
+}
+
+#[test]
+fn looks_like_filename_rejects_non_alphanumeric_extension() {
+    assert!(
+        !looks_like_filename("file.tar.gz-sig"),
+        "extension with non-alphanumeric chars after last dot must be rejected"
+    );
+}
+
+#[test]
+fn looks_like_filename_rejects_empty_extension_after_trailing_dot() {
+    assert!(
+        !looks_like_filename("file."),
+        "trailing dot with empty extension must be rejected"
+    );
+}
+
+#[test]
+fn asset_link_line_real_filename_uses_name_as_label() {
+    let asset = Asset {
+        name: "report.pdf".to_owned(),
+        url: "https://example.com/files/report.pdf".to_owned(),
+    };
+    let line = asset_link_line(1, &asset);
     assert_eq!(
-        top_corners.len(),
-        2,
-        "must have 2 comment boxes: lines={:?}",
-        lines
+        line, "[1] \u{2197} report.pdf",
+        "real filename must appear as label: {line:?}"
     );
-    let gap = top_corners[1] - top_corners[0];
+}
+
+#[test]
+fn asset_link_line_ugly_fragment_falls_back_to_open_link() {
+    let asset = Asset {
+        name: "a8f3c920-deadbeef".to_owned(),
+        url: "https://example.com/a8f3c920-deadbeef".to_owned(),
+    };
+    let line = asset_link_line(2, &asset);
+    assert_eq!(
+        line, "[2] \u{2197} Open link",
+        "ugly fragment must fall back to 'Open link': {line:?}"
+    );
+}
+
+#[test]
+fn asset_link_line_empty_name_falls_back_to_open_link() {
+    let asset = Asset {
+        name: String::new(),
+        url: "https://example.com/resource".to_owned(),
+    };
+    let line = asset_link_line(3, &asset);
+    assert_eq!(
+        line, "[3] \u{2197} Open link",
+        "empty name must fall back to 'Open link': {line:?}"
+    );
+}
+
+#[test]
+fn asset_link_line_over_long_name_falls_back_to_open_link() {
+    let long_name = format!("{}.pdf", "x".repeat(46));
+    assert_eq!(long_name.chars().count(), 50);
+    let asset = Asset {
+        name: long_name,
+        url: "https://example.com/long".to_owned(),
+    };
+    let line = asset_link_line(4, &asset);
+    assert_eq!(
+        line, "[4] \u{2197} Open link",
+        "over-long name must fall back to 'Open link': {line:?}"
+    );
+}
+
+#[test]
+fn asset_link_line_index_is_1_based_and_matches_position() {
+    let asset = Asset {
+        name: "doc.docx".to_owned(),
+        url: "https://example.com/doc.docx".to_owned(),
+    };
+    let line_1 = asset_link_line(1, &asset);
+    let line_9 = asset_link_line(9, &asset);
     assert!(
-        gap > 3,
-        "boxes must be separated by at least the first box bottom + blank: gap={gap}"
+        line_1.starts_with("[1]"),
+        "index 1 must appear as [1]: {line_1:?}"
+    );
+    assert!(
+        line_9.starts_with("[9]"),
+        "index 9 must appear as [9]: {line_9:?}"
     );
 }

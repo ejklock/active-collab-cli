@@ -1,51 +1,59 @@
 use ratatui::style::{Color, Modifier, Style};
 
+const NEAR_BLACK: Color = Color::Rgb(13, 13, 13);
+const SOFT_CYAN: Color = Color::Rgb(102, 204, 204);
+const STEEL: Color = Color::Rgb(140, 165, 196);
+const STEEL_BG: Color = Color::Rgb(38, 52, 74);
+const AMBER: Color = Color::Rgb(210, 160, 90);
+const MUTED_GREEN: Color = Color::Rgb(120, 190, 130);
+const LIGHT_GREY: Color = Color::Rgb(208, 216, 224);
+
 /// Prefix rendered before the selected row in a table.
 pub const SELECTION_SYMBOL: &str = "▸ ";
 
-/// Style for the currently selected list/table row.
+/// Selected row — near-black on discreet amber, bold.
 pub fn selection_style() -> Style {
     Style::default()
-        .fg(Color::Black)
-        .bg(Color::LightCyan)
+        .fg(NEAR_BLACK)
+        .bg(AMBER)
         .add_modifier(Modifier::BOLD)
 }
 
-/// Style for column header rows and list block titles.
+/// Column header rows and list block titles — soft cyan, bold.
 pub fn column_header_style() -> Style {
-    Style::default()
-        .fg(Color::LightCyan)
-        .add_modifier(Modifier::BOLD)
+    Style::default().fg(SOFT_CYAN).add_modifier(Modifier::BOLD)
 }
 
-/// Style for the table header row.
+/// Table header row — steel blue, bold.
 pub fn header_style() -> Style {
+    Style::default().fg(STEEL).add_modifier(Modifier::BOLD)
+}
+
+/// Status/hint bar — light grey on steel-blue band, bold.
+pub fn footer_style() -> Style {
     Style::default()
-        .fg(Color::Cyan)
+        .fg(LIGHT_GREY)
+        .bg(STEEL_BG)
         .add_modifier(Modifier::BOLD)
 }
 
-/// Status/hint bar style — white on blue, matching Python pair3 'status'.
-pub fn footer_style() -> Style {
-    Style::default().fg(Color::White).bg(Color::Blue)
-}
-
-/// Style for asset rows in the dedicated Artifacts panel.
+/// Style for asset rows in the dedicated Artifacts panel — muted green, underlined.
 pub fn asset_style() -> Style {
-    Style::default().fg(Color::Yellow)
+    Style::default()
+        .fg(MUTED_GREEN)
+        .add_modifier(Modifier::UNDERLINED)
 }
 
-/// Identity bar at the top of every screen — white on cyan, bold.
+/// Identity bar at the top of every screen — soft cyan on steel-blue band, bold.
 pub fn app_header_style() -> Style {
     Style::default()
-        .fg(Color::White)
-        .bg(Color::Cyan)
+        .fg(SOFT_CYAN)
+        .bg(STEEL_BG)
         .add_modifier(Modifier::BOLD)
 }
 
-/// Badge style for the task-count cell on the Projects screen — magenta, bold.
+/// Badge style (amber, bold) — retained for theme-consistency tests.
+#[allow(dead_code)]
 pub fn badge_style() -> Style {
-    Style::default()
-        .fg(Color::Magenta)
-        .add_modifier(Modifier::BOLD)
+    Style::default().fg(AMBER).add_modifier(Modifier::BOLD)
 }

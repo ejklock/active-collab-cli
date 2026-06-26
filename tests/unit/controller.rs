@@ -858,9 +858,11 @@ async fn load_task_core_assignee_line_shows_id_when_user_map_empty() {
         lines.iter().any(|l| l.contains("comment text")),
         "comments must render fully even without user_map"
     );
+    // The task name is now promoted to the frame border title; it must NOT appear
+    // duplicated in the scroll body produced by build_detail_lines.
     assert!(
-        lines.iter().any(|l| l.contains("Assigned Task")),
-        "task title must appear in rendered lines"
+        !lines.iter().any(|l| l.contains("Assigned Task")),
+        "task name must NOT appear in the scroll body (it lives in the frame border): {lines:?}"
     );
 }
 

@@ -1,6 +1,6 @@
 use crate::i18n::t;
 use crate::tui::model::{Model, Screen};
-use crate::tui::screens::{draw_detail, draw_projects, draw_tasks};
+use crate::tui::screens::{draw_detail, draw_projects, draw_tasks, DetailParams};
 use crate::tui::theme;
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout},
@@ -57,6 +57,7 @@ pub fn view(model: &Model, frame: &mut Frame) {
             draw_tasks(frame, chunks[1], project_name, tasks, *selected, *loading);
         }
         Screen::Detail {
+            task,
             lines,
             assets,
             offset,
@@ -64,7 +65,19 @@ pub fn view(model: &Model, frame: &mut Frame) {
             task_id,
             ..
         } => {
-            draw_detail(frame, chunks[1], lines, assets, *offset, *loading, *task_id);
+            let task_name = task.get("name").and_then(|v| v.as_str()).unwrap_or("");
+            draw_detail(
+                frame,
+                chunks[1],
+                DetailParams {
+                    lines,
+                    assets,
+                    offset: *offset,
+                    loading: *loading,
+                    task_id: *task_id,
+                    task_name,
+                },
+            );
         }
     }
 

@@ -1,11 +1,16 @@
+use crate::i18n::set_language;
 use crate::render::{build_detail_lines, build_header_lines, Asset};
 use crate::store::instances::Instance;
 use crate::tui::model::{Header, ProjectGroup, TaskRow};
-use crate::tui::screens::{draw_detail, draw_projects, draw_tasks};
+use crate::tui::screens::{draw_detail, draw_projects, draw_tasks, DetailParams};
 use crate::tui::theme;
 use ratatui::{backend::TestBackend, layout::Rect, Terminal};
 use serde_json::json;
 use std::collections::HashMap;
+use std::sync::Mutex;
+
+/// Serialize tests that change the global display language.
+static LANG_MUTEX: Mutex<()> = Mutex::new(());
 
 fn make_instance(name: &str, email: &str) -> Instance {
     Instance {
@@ -134,6 +139,17 @@ fn render_detail_to_buf(
     width: u16,
     height: u16,
 ) -> ratatui::buffer::Buffer {
+    render_detail_to_buf_with_name(lines, assets, offset, width, height, "")
+}
+
+fn render_detail_to_buf_with_name(
+    lines: &[String],
+    assets: &[Asset],
+    offset: usize,
+    width: u16,
+    height: u16,
+    task_name: &str,
+) -> ratatui::buffer::Buffer {
     let backend = TestBackend::new(width, height);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
@@ -141,23 +157,197 @@ fn render_detail_to_buf(
             draw_detail(
                 frame,
                 Rect::new(0, 0, width, height),
-                lines,
-                assets,
-                offset,
-                false,
-                42,
+                DetailParams {
+                    lines,
+                    assets,
+                    offset,
+                    loading: false,
+                    task_id: 42,
+                    task_name,
+                },
             );
         })
         .unwrap();
     terminal.backend().buffer().clone()
 }
 
+// V1-A1: Projects list has a single name column — no task-count 'Tarefas'/numeric column.
+// Header shows "Projeto" (pt-BR) and NOT "Tarefas".
+#[test]
+fn draw_projects_single_name_column_no_task_count() {
+    let _guard = LANG_MUTEX.lock().unwrap();
+    set_language("pt_BR");
+    let groups = make_groups(&["My Project"]);
+    let buf = render_projects_to_buf(&groups, 0, 80, 10);
+    set_language("en");
+    let content = buf_to_string(&buf);
+    assert!(
+        content.contains("Projeto"),
+        "header must show translated 'Projeto': {content}"
+    );
+    assert!(
+        !content.contains("Tarefas"),
+        "task-count 'Tarefas' column must be absent: {content}"
+    );
+}
+
+// V1-A1: Tasks list has a single name column — no TASK# column.
+// Header shows "NOME" (pt-BR translation of "NAME") and NOT "TAREFA#".
+#[test]
+fn draw_tasks_single_name_column_no_task_number() {
+    let _guard = LANG_MUTEX.lock().unwrap();
+    set_language("pt_BR");
+    let tasks = make_tasks(&["My Task"]);
+    let buf = render_tasks_to_buf(&tasks, 0, 80, 10);
+    set_language("en");
+    let content = buf_to_string(&buf);
+    assert!(
+        content.contains("NOME"),
+        "header must show translated 'NOME': {content}"
+    );
+    assert!(
+        !content.contains("TAREFA#") && !content.contains("TASK#"),
+        "task-number column must be absent: {content}"
+    );
+}
+
+// V1-A3: Projects title renders in pt-BR as 'Projetos'.
+// The title uses format!(" {} ", t("Projects")) — spaces are added by format, not by the key.
+#[test]
+fn draw_projects_title_renders_in_pt_br() {
+    let _guard = LANG_MUTEX.lock().unwrap();
+    set_language("pt_BR");
+    let groups = make_groups(&["A Project"]);
+    let buf = render_projects_to_buf(&groups, 0, 80, 10);
+    set_language("en");
+    let content = buf_to_string(&buf);
+    assert!(
+        content.contains("Projetos"),
+        "Projects title must render as 'Projetos' (pt-BR): {content}"
+    );
+}
+
+// V1-A3: My Tasks title renders in pt-BR as 'Minhas Tarefas'.
+// mine_model sets project_name = t("My Tasks"); draw_tasks shows it as the window title.
+#[test]
+fn draw_my_tasks_title_renders_in_pt_br() {
+    let _guard = LANG_MUTEX.lock().unwrap();
+    set_language("pt_BR");
+    let title = crate::i18n::t("My Tasks");
+    let tasks = make_tasks(&["A Task"]);
+    let backend = TestBackend::new(80, 10);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|frame| {
+            draw_tasks(frame, Rect::new(0, 0, 80, 10), &title, &tasks, 0, false);
+        })
+        .unwrap();
+    set_language("en");
+    let content = buf_to_string(terminal.backend().buffer());
+    assert!(
+        content.contains("Minhas Tarefas"),
+        "My Tasks title must render as 'Minhas Tarefas' (pt-BR): {content}"
+    );
+}
+
+// V1-A3: pt_BR catalog contains the new "My Tasks" -> "Minhas Tarefas" key.
+#[test]
+fn pt_br_catalog_maps_my_tasks_to_minhas_tarefas() {
+    let raw = include_str!("../../locales/pt_BR.json");
+    let catalog: std::collections::HashMap<String, String> =
+        serde_json::from_str(raw).expect("pt_BR.json must be valid JSON");
+    assert_eq!(
+        catalog.get("My Tasks").map(String::as_str),
+        Some("Minhas Tarefas"),
+        "pt_BR catalog must map \"My Tasks\" -> \"Minhas Tarefas\""
+    );
+}
+
+// V1-A2: A long project name wraps onto a second buffer line on a narrow terminal.
+// At width=20, name_width = 20 - 4 = 16. A name > 16 chars must wrap.
+#[test]
+fn draw_projects_long_name_wraps_on_narrow_terminal() {
+    let long_name = "Alpha Beta Gamma Delta";
+    assert!(
+        long_name.len() > 16,
+        "test name must exceed name_width=16 to trigger wrapping"
+    );
+    let groups = make_groups(&[long_name]);
+    let buf = render_projects_to_buf(&groups, 0, 20, 10);
+    let rows: Vec<String> = buf_to_string(&buf).lines().map(str::to_string).collect();
+    // Row 0: top border; Row 1: header; Row 2: first data line; Row 3: wrapped continuation.
+    // The name must appear across at least two rows (row 2 and row 3).
+    let name_part_in_row2 = rows.get(2).map(|r| r.contains("Alpha")).unwrap_or(false);
+    let name_cont_in_row3 = rows.get(3).map(|r| r.contains("Delta")).unwrap_or(false);
+    assert!(
+        name_part_in_row2,
+        "first word of name must appear on data row (y=2): rows={rows:?}"
+    );
+    assert!(
+        name_cont_in_row3,
+        "wrapped continuation must appear on next row (y=3): rows={rows:?}"
+    );
+}
+
+// V1-A2: A long task name wraps onto a second buffer line on a narrow terminal.
+// At width=20, name_width = 20 - 4 = 16. A name > 16 chars must wrap.
+#[test]
+fn draw_tasks_long_name_wraps_on_narrow_terminal() {
+    let long_name = "Alpha Beta Gamma Delta";
+    assert!(
+        long_name.len() > 16,
+        "test name must exceed name_width=16 to trigger wrapping"
+    );
+    let tasks = make_tasks(&[long_name]);
+    let buf = render_tasks_to_buf(&tasks, 0, 20, 10);
+    let rows: Vec<String> = buf_to_string(&buf).lines().map(str::to_string).collect();
+    let name_part_in_row2 = rows.get(2).map(|r| r.contains("Alpha")).unwrap_or(false);
+    let name_cont_in_row3 = rows.get(3).map(|r| r.contains("Delta")).unwrap_or(false);
+    assert!(
+        name_part_in_row2,
+        "first word of name must appear on data row (y=2): rows={rows:?}"
+    );
+    assert!(
+        name_cont_in_row3,
+        "wrapped continuation must appear on next row (y=3): rows={rows:?}"
+    );
+}
+
+// V1-A2: No ellipsis on narrow terminal — names wrap, not truncate.
+#[test]
+fn draw_projects_no_ellipsis_on_narrow_terminal() {
+    let long_name = "An Extremely Long Project Name That Will Not Fit";
+    let groups = make_groups(&[long_name]);
+    let buf = render_projects_to_buf(&groups, 0, 20, 15);
+    let content = buf_to_string(&buf);
+    assert!(
+        !content.contains('\u{2026}'),
+        "project names must wrap, not truncate with ellipsis: {content}"
+    );
+}
+
+// V1-A2: No ellipsis on narrow terminal — task names wrap, not truncate.
+#[test]
+fn draw_tasks_no_ellipsis_on_narrow_terminal() {
+    let long_name = "An Extremely Long Task Name That Will Not Fit In A Narrow Terminal";
+    let tasks = make_tasks(&[long_name]);
+    let buf = render_tasks_to_buf(&tasks, 0, 20, 15);
+    let content = buf_to_string(&buf);
+    assert!(
+        !content.contains('\u{2026}'),
+        "task names must wrap, not truncate with ellipsis: {content}"
+    );
+}
+
 #[test]
 fn draw_projects_at_width_40_does_not_panic() {
+    let _guard = LANG_MUTEX.lock().unwrap();
+    set_language("pt_BR");
     let groups = make_groups(&["Short Project"]);
     let buf = render_projects_to_buf(&groups, 0, 40, 10);
+    set_language("en");
     let content = buf_to_string(&buf);
-    assert!(content.contains("Project"), "header 'Project' must appear");
+    assert!(content.contains("Projeto"), "header 'Projeto' must appear");
 }
 
 #[test]
@@ -174,13 +364,13 @@ fn draw_projects_at_width_120_shows_full_name() {
 
 #[test]
 fn draw_tasks_at_width_40_does_not_panic() {
+    let _guard = LANG_MUTEX.lock().unwrap();
+    set_language("pt_BR");
     let tasks = make_tasks(&["Short Task"]);
     let buf = render_tasks_to_buf(&tasks, 0, 40, 10);
+    set_language("en");
     let content = buf_to_string(&buf);
-    assert!(
-        content.contains("TASK#") || content.contains("NAME"),
-        "header must appear"
-    );
+    assert!(content.contains("NOME"), "header 'NOME' must appear");
 }
 
 #[test]
@@ -230,41 +420,49 @@ fn draw_projects_selection_symbol_absent_on_non_selected_rows() {
     );
 }
 
+// V1-A1: Projects header is a single column — no 'Tarefas' (Tasks) column.
 #[test]
 fn draw_projects_header_row_present() {
+    let _guard = LANG_MUTEX.lock().unwrap();
+    set_language("pt_BR");
     let groups = make_groups(&["My Project"]);
     let buf = render_projects_to_buf(&groups, 0, 80, 10);
+    set_language("en");
     let content = buf_to_string(&buf);
     assert!(
-        content.contains("Tasks"),
-        "header label 'Tasks' must be present"
+        content.contains("Projeto"),
+        "header label 'Projeto' must be present"
     );
     assert!(
-        content.contains("Project"),
-        "header label 'Project' must be present"
+        !content.contains("Tarefas"),
+        "header label 'Tarefas' must NOT be present (column removed)"
     );
     assert!(
-        content.contains("Instance"),
-        "header label 'Instance' must be present"
+        !content.contains("Instance"),
+        "header label 'Instance' must NOT be present (column removed)"
     );
 }
 
+// V1-A1: Tasks header is a single column — only "NOME" header, no "TAREFA#".
 #[test]
 fn draw_tasks_header_row_present() {
+    let _guard = LANG_MUTEX.lock().unwrap();
+    set_language("pt_BR");
     let tasks = make_tasks(&["My Task"]);
     let buf = render_tasks_to_buf(&tasks, 0, 80, 10);
+    set_language("en");
     let content = buf_to_string(&buf);
     assert!(
-        content.contains("TASK#"),
-        "header label 'TASK#' must be present"
+        content.contains("NOME"),
+        "header label 'NOME' must be present"
     );
     assert!(
-        content.contains("INSTANCE"),
-        "header label 'INSTANCE' must be present"
+        !content.contains("TAREFA#") && !content.contains("TASK#"),
+        "header label 'TASK#' must NOT be present (column removed)"
     );
     assert!(
-        content.contains("NAME"),
-        "header label 'NAME' must be present"
+        !content.contains("INSTANCE"),
+        "header label 'INSTANCE' must NOT be present (column removed)"
     );
 }
 
@@ -343,6 +541,8 @@ fn draw_detail_no_panic_at_wide_width() {
 
 #[test]
 fn draw_detail_with_assets_renders_panel_and_asset_names() {
+    let _guard = LANG_MUTEX.lock().unwrap();
+    set_language("en");
     let lines = vec!["Task description".to_string()];
     let assets = vec![
         Asset {
@@ -357,12 +557,12 @@ fn draw_detail_with_assets_renders_panel_and_asset_names() {
     let buf = render_detail_to_buf(&lines, &assets, 0, 80, 20);
     let content = buf_to_string(&buf);
     assert!(
-        content.contains("Attachment 1: report.pdf"),
-        "first asset must appear as 'Attachment 1: report.pdf': {content}"
+        content.contains("[1]") && content.contains("report.pdf"),
+        "first asset must appear as '[1] ↗ report.pdf': {content}"
     );
     assert!(
-        content.contains("Attachment 2: photo.png"),
-        "second asset must appear as 'Attachment 2: photo.png': {content}"
+        content.contains("[2]") && content.contains("photo.png"),
+        "second asset must appear as '[2] ↗ photo.png': {content}"
     );
     assert!(
         content.contains("Artifacts"),
@@ -370,7 +570,7 @@ fn draw_detail_with_assets_renders_panel_and_asset_names() {
     );
 }
 
-// U2-A1: asset label format is 'Attachment N: <filename>' where N is 1-based
+// U2-A1: asset label format is '[N] ↗ <label>' where N is 1-based
 // and matches the 1-9 open-asset keyboard shortcut.
 #[test]
 fn draw_detail_asset_label_uses_attachment_prefix_with_1based_index() {
@@ -388,16 +588,16 @@ fn draw_detail_asset_label_uses_attachment_prefix_with_1based_index() {
     let buf = render_detail_to_buf(&lines, &assets, 0, 80, 20);
     let content = buf_to_string(&buf);
     assert!(
-        content.contains("Attachment 1"),
-        "first asset must carry label 'Attachment 1': {content}"
+        content.contains("[1]"),
+        "first asset must carry 1-based index '[1]': {content}"
     );
     assert!(
         content.contains("diagram.png"),
         "filename must be retained after the label: {content}"
     );
     assert!(
-        content.contains("Attachment 2"),
-        "second asset must carry label 'Attachment 2': {content}"
+        content.contains("[2]"),
+        "second asset must carry 1-based index '[2]': {content}"
     );
     assert!(
         content.contains("notes.txt"),
@@ -485,68 +685,73 @@ fn build_detail_lines_with_comment_produces_boxed_lines_fitting_width() {
     );
 }
 
-// P3-A1/A2: color parity — theme styles match Python curses color pairs
+// U8-A1: sober cool retro theme — exact Rgb channels + modifiers for every style fn.
 #[test]
-fn footer_style_is_white_on_blue_matching_python_pair3() {
-    use ratatui::style::{Color, Style};
+fn footer_style_is_light_grey_on_steel_bg_bold() {
+    use ratatui::style::{Color, Modifier, Style};
     let style = theme::footer_style();
     assert_eq!(
         style,
-        Style::default().fg(Color::White).bg(Color::Blue),
-        "footer_style must be white-on-blue (Python pair3 'status')"
+        Style::default()
+            .fg(Color::Rgb(208, 216, 224))
+            .bg(Color::Rgb(38, 52, 74))
+            .add_modifier(Modifier::BOLD),
+        "footer_style must be light-grey on steel-blue band, bold (sober palette)"
     );
 }
 
 #[test]
-fn header_style_is_cyan_bold_matching_python_pair1() {
+fn header_style_is_steel_bold() {
     use ratatui::style::{Color, Modifier, Style};
     let style = theme::header_style();
     assert_eq!(
         style,
         Style::default()
-            .fg(Color::Cyan)
+            .fg(Color::Rgb(140, 165, 196))
             .add_modifier(Modifier::BOLD),
-        "header_style must be cyan+bold (Python pair1)"
+        "header_style must be steel-blue+bold (sober palette)"
     );
 }
 
-// U1-A2: selection_style brightened to black-on-light-cyan bold
+// U8-A1: selection_style — near-black on discreet amber, bold.
 #[test]
-fn selection_style_is_black_on_light_cyan_bold() {
+fn selection_style_is_near_black_on_amber_bold() {
     use ratatui::style::{Color, Modifier, Style};
     let style = theme::selection_style();
     assert_eq!(
         style,
         Style::default()
-            .fg(Color::Black)
-            .bg(Color::LightCyan)
+            .fg(Color::Rgb(13, 13, 13))
+            .bg(Color::Rgb(210, 160, 90))
             .add_modifier(Modifier::BOLD),
-        "selection_style must be black-on-light-cyan+bold (U1 vibrant palette)"
+        "selection_style must be near-black on amber+bold (sober palette)"
     );
 }
 
 #[test]
-fn asset_style_is_yellow_matching_python_pair4() {
-    use ratatui::style::{Color, Style};
+fn asset_style_is_muted_green_underlined() {
+    use ratatui::style::{Color, Modifier, Style};
     let style = theme::asset_style();
     assert_eq!(
         style,
-        Style::default().fg(Color::Yellow),
-        "asset_style must be yellow (Python pair4)"
+        Style::default()
+            .fg(Color::Rgb(120, 190, 130))
+            .add_modifier(Modifier::UNDERLINED),
+        "asset_style must be muted-green+underlined (sober palette)"
     );
 }
 
-// U1-A1: column_header_style returns light-cyan fg + bold
+// U8-A1: column_header_style — soft cyan fg + bold.
 #[test]
-fn column_header_style_is_light_cyan_bold() {
+fn column_header_style_is_soft_cyan_bold() {
     use ratatui::style::{Color, Modifier, Style};
     let style = theme::column_header_style();
     assert_eq!(
         style,
         Style::default()
-            .fg(Color::LightCyan)
+            .fg(Color::Rgb(102, 204, 204))
             .add_modifier(Modifier::BOLD),
-        "column_header_style must be light-cyan+bold (U1 vibrant palette)"
+        "column_header_style must be soft-cyan+bold (sober palette)"
     );
 }
 
@@ -560,11 +765,11 @@ fn selection_symbol_is_unchanged() {
     );
 }
 
-// U1-A1: TestBackend confirms column_header_style fg (LightCyan) is applied to the header row
+// U8-A2: TestBackend confirms column_header_style fg (soft cyan Rgb(102,204,204)) is applied to the header row.
 #[test]
 fn render_table_header_row_carries_column_header_style() {
     use ratatui::style::Color;
-    use ratatui::{backend::TestBackend, layout::Constraint, Terminal};
+    use ratatui::{backend::TestBackend, layout::Constraint, text::Text, Terminal};
 
     let backend = TestBackend::new(80, 10);
     let mut terminal = Terminal::new(backend).unwrap();
@@ -572,13 +777,17 @@ fn render_table_header_row_carries_column_header_style() {
     terminal
         .draw(|frame| {
             use crate::tui::drawer::render_table;
-            use ratatui::widgets::Cell;
+            use ratatui::widgets::{Cell, Row};
+            let rows = vec![Row::new(vec![
+                Cell::from(Text::raw("r1c1")),
+                Cell::from(Text::raw("r1c2")),
+            ])];
             render_table(
                 frame,
                 ratatui::layout::Rect::new(0, 0, 80, 10),
                 "Test Title",
                 &["COL A", "COL B"],
-                vec![vec![Cell::from("r1c1"), Cell::from("r1c2")]],
+                rows,
                 &[Constraint::Min(10), Constraint::Min(10)],
                 0,
             );
@@ -590,18 +799,19 @@ fn render_table_header_row_carries_column_header_style() {
 
     // The header row is at y=1 (y=0 is the top border drawn by the Block).
     // Walk all non-space cells in that row and verify at least one carries
-    // LightCyan fg — proof that column_header_style is wired to the header row.
-    let mut found_light_cyan_fg = false;
+    // soft-cyan Rgb(102,204,204) fg — proof that column_header_style is wired to the header row.
+    let soft_cyan = Color::Rgb(102, 204, 204);
+    let mut found_soft_cyan_fg = false;
     for x in 0..area.width {
         let cell = buf.cell((x, 1)).unwrap();
-        if cell.symbol() != " " && cell.style().fg == Some(Color::LightCyan) {
-            found_light_cyan_fg = true;
+        if cell.symbol() != " " && cell.style().fg == Some(soft_cyan) {
+            found_soft_cyan_fg = true;
             break;
         }
     }
     assert!(
-        found_light_cyan_fg,
-        "header row (y=1) must have at least one non-space cell with LightCyan fg — \
+        found_soft_cyan_fg,
+        "header row (y=1) must have at least one non-space cell with soft-cyan Rgb(102,204,204) fg — \
          column_header_style must be wired to the header row"
     );
 }
@@ -679,20 +889,7 @@ mod view_size_guard {
     }
 }
 
-// P4b-A2: draw_tasks truncates over-long name with ellipsis on narrow terminal
-// and shows the full name with no ellipsis on a wide terminal.
-#[test]
-fn draw_tasks_narrow_terminal_long_name_shows_ellipsis() {
-    let long_name = "A Very Long Task Name That Will Definitely Not Fit In A Narrow Terminal";
-    let tasks = make_tasks(&[long_name]);
-    let buf = render_tasks_to_buf(&tasks, 0, 40, 10);
-    let content = buf_to_string(&buf);
-    assert!(
-        content.contains('\u{2026}'),
-        "narrow terminal must truncate long task name with ellipsis: {content}"
-    );
-}
-
+// V1-A1: draw_tasks wide terminal shows full name without ellipsis.
 #[test]
 fn draw_tasks_wide_terminal_short_name_no_ellipsis() {
     let short_name = "Short";
@@ -709,21 +906,7 @@ fn draw_tasks_wide_terminal_short_name_no_ellipsis() {
     );
 }
 
-// P4b-A3: draw_projects truncates over-long project name with ellipsis on a terminal
-// that is wide enough to show some project text but not the full name.
-// At width=50, project_width = 50 - 7 - 18 - 6 = 19, so a long name is truncated.
-#[test]
-fn draw_projects_narrow_terminal_long_name_shows_ellipsis() {
-    let long_name = "An Extremely Long Project Name That Will Not Fit In A Narrow Terminal";
-    let groups = make_groups(&[long_name]);
-    let buf = render_projects_to_buf(&groups, 0, 50, 10);
-    let content = buf_to_string(&buf);
-    assert!(
-        content.contains('\u{2026}'),
-        "narrow terminal must truncate long project name with ellipsis: {content}"
-    );
-}
-
+// V1-A1: draw_projects wide terminal shows full name without ellipsis.
 #[test]
 fn draw_projects_wide_terminal_short_name_no_ellipsis() {
     let short_name = "Acme";
@@ -740,84 +923,42 @@ fn draw_projects_wide_terminal_short_name_no_ellipsis() {
     );
 }
 
-// U4-A2: Projects screen renders three column headers — Tasks, Project, Instance.
+// V1-A1: Projects renders single-column header — no 'Instance' column.
 #[test]
-fn draw_projects_renders_three_column_headers() {
+fn draw_projects_renders_single_column_header() {
+    let _guard = LANG_MUTEX.lock().unwrap();
+    set_language("pt_BR");
     let groups = make_groups_with_instance(&[("Acme Corp", "prod-inst")]);
     let buf = render_projects_to_buf(&groups, 0, 80, 10);
+    set_language("en");
     let content = buf_to_string(&buf);
     assert!(
-        content.contains("Tasks"),
-        "header must contain 'Tasks': {content}"
+        content.contains("Projeto"),
+        "header must contain 'Projeto': {content}"
     );
     assert!(
-        content.contains("Project"),
-        "header must contain 'Project': {content}"
+        !content.contains("Tarefas"),
+        "header must NOT contain 'Tarefas' (task-count column removed): {content}"
     );
     assert!(
-        content.contains("Instance"),
-        "header must contain 'Instance': {content}"
+        !content.contains("Instance"),
+        "header must NOT contain 'Instance' (column removed): {content}"
     );
 }
 
-// U4-A2: Projects screen row shows task count, project name, and instance.
+// V1-A1: Projects screen row shows project name only (no task count, no instance).
 #[test]
-fn draw_projects_row_shows_task_count_project_and_instance() {
+fn draw_projects_row_shows_project_name_only() {
     let groups = make_groups_with_instance(&[("My Project", "staging")]);
     let buf = render_projects_to_buf(&groups, 0, 80, 10);
     let content = buf_to_string(&buf);
-    assert!(
-        content.contains('1'),
-        "row must show task count '1': {content}"
-    );
     assert!(
         content.contains("My Project"),
         "row must show project name: {content}"
     );
     assert!(
-        content.contains("staging"),
-        "row must show instance name: {content}"
-    );
-}
-
-// U4-A3: PROJECT column truncates with ellipsis at narrow width; TASKS and INSTANCE remain intact.
-#[test]
-fn draw_projects_narrow_width_project_truncates_but_instance_and_count_intact() {
-    let long_project = "An Extremely Long Project Name That Cannot Fit";
-    let groups = make_groups_with_instance(&[(long_project, "prod")]);
-    let buf = render_projects_to_buf(&groups, 0, 40, 10);
-    let content = buf_to_string(&buf);
-    assert!(
-        content.contains('\u{2026}'),
-        "narrow terminal must truncate long project name with ellipsis: {content}"
-    );
-    assert!(
-        content.contains("prod"),
-        "instance column 'prod' must remain readable at narrow width: {content}"
-    );
-    assert!(
-        content.contains('1'),
-        "task count must remain readable at narrow width: {content}"
-    );
-}
-
-// U4-A3: At a wide terminal a short project name shows no ellipsis and instance is intact.
-#[test]
-fn draw_projects_wide_width_short_project_and_instance_both_shown() {
-    let groups = make_groups_with_instance(&[("Short", "my-instance")]);
-    let buf = render_projects_to_buf(&groups, 0, 120, 10);
-    let content = buf_to_string(&buf);
-    assert!(
-        content.contains("Short"),
-        "wide terminal must show full project name: {content}"
-    );
-    assert!(
-        content.contains("my-instance"),
-        "wide terminal must show full instance name: {content}"
-    );
-    assert!(
-        !content.contains('\u{2026}'),
-        "wide terminal must NOT show ellipsis for short names: {content}"
+        !content.contains("staging"),
+        "row must NOT show instance name (column removed): {content}"
     );
 }
 
@@ -868,9 +1009,9 @@ fn render_table_to_buf(
 ) -> ratatui::buffer::Buffer {
     use crate::tui::drawer::render_table;
     use ratatui::layout::Constraint;
-    use ratatui::widgets::Cell;
-    let rows: Vec<Vec<Cell<'static>>> = (0..row_count)
-        .map(|i| vec![Cell::from(format!("row{i}"))])
+    use ratatui::widgets::{Cell, Row};
+    let rows: Vec<Row<'static>> = (0..row_count)
+        .map(|i| Row::new(vec![Cell::from(format!("row{i}"))]))
         .collect();
     let backend = ratatui::backend::TestBackend::new(width, height);
     let mut terminal = ratatui::Terminal::new(backend).unwrap();
@@ -978,6 +1119,8 @@ fn build_detail_lines_reflow_at_different_widths_changes_output() {
 // There is exactly ONE top-left corner glyph (┌) for the content block, plus one for Artifacts.
 #[test]
 fn draw_detail_renders_single_global_content_block() {
+    let _guard = LANG_MUTEX.lock().unwrap();
+    set_language("en");
     let task = json!({
         "name": "Test Task",
         "id": 7,
@@ -998,23 +1141,22 @@ fn draw_detail_renders_single_global_content_block() {
         url: "https://example.com/file.pdf".into(),
     }];
 
-    let buf = render_detail_to_buf(&lines, &assets, 0, 80, 40);
+    let buf = render_detail_to_buf_with_name(&lines, &assets, 0, 80, 40, "Test Task");
     let content = buf_to_string(&buf);
 
-    // The single block title contains the task ID
+    // The single block title now shows the task name, not "Task #42"
     assert!(
-        content.contains("Task #42"),
-        "single block title must contain 'Task #42': {content}"
+        content.contains("Test Task"),
+        "single block title must contain the task name 'Test Task': {content}"
+    );
+    assert!(
+        !content.contains("Task #42"),
+        "single block title must NOT contain 'Task #42' (name is now in border): {content}"
     );
     // The Artifacts panel must also appear
     assert!(
         content.contains("Artifacts"),
         "Artifacts panel must appear when assets present: {content}"
-    );
-    // The content block contains the "Test Task" title from build_detail_lines
-    assert!(
-        content.contains("Test Task"),
-        "task name must appear in the unified content block: {content}"
     );
     // Exactly two bordered boxes: content block + Artifacts panel.
     // The top-left corner glyph (┌) appears once per box.
@@ -1022,6 +1164,96 @@ fn draw_detail_renders_single_global_content_block() {
     assert_eq!(
         box_count, 2,
         "exactly 2 bordered boxes must render (content + Artifacts), found {box_count}: {content}"
+    );
+}
+
+// D2-A1: Detail frame border shows task NAME when loaded, falls back to #<id> when empty.
+#[test]
+fn draw_detail_border_shows_task_name_when_loaded() {
+    let lines = vec!["some content".to_string()];
+    let buf = render_detail_to_buf_with_name(&lines, &[], 0, 80, 10, "My Important Task");
+    let content = buf_to_string(&buf);
+    // Top border (row 0) must contain the task name
+    let rows: Vec<&str> = content.lines().collect();
+    let top_border = rows[0];
+    assert!(
+        top_border.contains("My Important Task"),
+        "top border must contain task name 'My Important Task': {top_border}"
+    );
+    assert!(
+        !top_border.contains("Task #") && !top_border.contains("Tarefa #"),
+        "top border must NOT contain 'Task #' / 'Tarefa #' when name is present: {top_border}"
+    );
+}
+
+#[test]
+fn draw_detail_border_falls_back_to_id_when_name_empty() {
+    let lines = vec!["some content".to_string()];
+    let buf = render_detail_to_buf_with_name(&lines, &[], 0, 80, 10, "");
+    let content = buf_to_string(&buf);
+    let rows: Vec<&str> = content.lines().collect();
+    let top_border = rows[0];
+    assert!(
+        top_border.contains("#42"),
+        "top border must contain '#42' as fallback when name is empty: {top_border}"
+    );
+}
+
+#[test]
+fn draw_detail_border_long_name_truncated_with_ellipsis() {
+    let very_long_name =
+        "This Is An Extremely Long Task Name That Does Not Fit In The Border At All";
+    let lines = vec!["content".to_string()];
+    // Use a narrow width to force truncation
+    let buf = render_detail_to_buf_with_name(&lines, &[], 0, 40, 10, very_long_name);
+    let content = buf_to_string(&buf);
+    let rows: Vec<&str> = content.lines().collect();
+    let top_border = rows[0];
+    assert!(
+        top_border.contains('\u{2026}'),
+        "top border must contain ellipsis when name is truncated: {top_border}"
+    );
+    assert!(
+        !top_border.contains("Task #"),
+        "top border must NOT fall back to task id when name is present (even truncated): {top_border}"
+    );
+}
+
+// D2-A3: Over-scroll clamp prevents empty rows below the last content line.
+#[test]
+fn draw_detail_over_scroll_clamp_prevents_empty_rows() {
+    // height=10 → viewport_height = 10 - 2 = 8
+    // 12 content lines → max_offset = 12 - 8 = 4
+    // With offset=9999 the effective offset must clamp to 4
+    let width: u16 = 40;
+    let height: u16 = 10;
+    let viewport_height = (height - 2) as usize;
+    let lines: Vec<String> = (1..=12).map(|i| format!("line {:02}", i)).collect();
+
+    let buf = render_detail_to_buf(&lines, &[], 9999, width, height);
+    let content = buf_to_string(&buf);
+
+    // The last content lines visible must be the tail of `lines`.
+    // With clamp to offset=4 and viewport=8, visible are lines[4..12] = "line 05" .. "line 12".
+    let expected_last = &lines[lines.len() - 1]; // "line 12"
+    assert!(
+        content.contains(expected_last.as_str()),
+        "last content line '{expected_last}' must be visible after over-scroll clamp: {content}"
+    );
+
+    // Also verify: the first visible content line is lines[max_offset] = lines[4] = "line 05"
+    let max_offset = lines.len().saturating_sub(viewport_height);
+    let expected_first_visible = &lines[max_offset]; // "line 05"
+    assert!(
+        content.contains(expected_first_visible.as_str()),
+        "first visible line at clamped offset '{expected_first_visible}' must appear: {content}"
+    );
+
+    // Lines before max_offset must NOT appear (they scrolled off top)
+    // "line 01" is at index 0, which is before max_offset=4 — should not be visible
+    assert!(
+        !content.contains("line 01"),
+        "line before clamped offset must NOT be visible: {content}"
     );
 }
 
@@ -1204,9 +1436,9 @@ fn header_line_with_name_and_extra() {
     assert_eq!(h.header_line(), "Carol <carol@co.io> · co (+2 more)");
 }
 
-// U5a-A2: view() renders header bar on top row with app_header_style (fg White, bg Cyan).
+// U8-A2: view() renders header bar on top row with app_header_style (soft-cyan on steel-blue band, bold).
 #[test]
-fn view_renders_header_on_top_row_with_app_header_style() {
+fn view_renders_header_on_top_row_with_app_header_style_is_soft_cyan_on_steel() {
     use crate::tui::model::{Model, Screen};
     use crate::tui::view::view;
     use ratatui::style::Color;
@@ -1241,17 +1473,19 @@ fn view_renders_header_on_top_row_with_app_header_style() {
         "top row must contain the instance name: {top_row_content}"
     );
 
+    let soft_cyan = Color::Rgb(102, 204, 204);
+    let steel_bg = Color::Rgb(38, 52, 74);
     let mut found_header_style = false;
     for x in 0..80u16 {
         let cell = buf.cell((x, 0)).unwrap();
-        if cell.style().fg == Some(Color::White) && cell.style().bg == Some(Color::Cyan) {
+        if cell.style().fg == Some(soft_cyan) && cell.style().bg == Some(steel_bg) {
             found_header_style = true;
             break;
         }
     }
     assert!(
         found_header_style,
-        "top row must have at least one cell with White fg and Cyan bg (app_header_style)"
+        "top row must have at least one cell with soft-cyan Rgb(102,204,204) fg and steel-bg Rgb(38,52,74) bg (app_header_style)"
     );
 }
 
@@ -1369,68 +1603,91 @@ fn view_too_small_suppresses_header_and_footer() {
     );
 }
 
-// U7-A1/A2: Projects count cell carries badge_style (Magenta+BOLD); project-name cell does not.
-// Layout at width=80: x=0 left border, x=1..2 selection-symbol area, x=3 first digit of count.
-// y=0 top border, y=1 header row, y=2 selected data row (row 0), y=3 non-selected data row (row 1).
-// The non-selected row is tested because the selection highlight overrides fg on the selected row.
+// U8-A1 (theme): badge_style returns amber Rgb(210,160,90) fg + BOLD modifier.
 #[test]
-fn projects_count_cell_is_magenta() {
-    use ratatui::style::{Color, Modifier};
-
-    let groups =
-        make_groups_with_instance(&[("Alpha Project", "inst-a"), ("Beta Project", "inst-b")]);
-    // Select row 0; test the unselected row 1 at y=3 so selection_style does not mask badge_style.
-    let buf = render_projects_to_buf(&groups, 0, 80, 10);
-
-    // Count column: x=3 (border=1 + selection-symbol=2), y=3 (non-selected second data row).
-    // TASKS_WIDTH=7, so count spans x=3..9. Pick x=3 for the digit.
-    let count_cell = buf.cell((3, 3)).unwrap();
-    assert_eq!(
-        count_cell.style().fg,
-        Some(Color::Magenta),
-        "count cell must have Magenta fg — badge_style must be applied: symbol={:?}",
-        count_cell.symbol()
-    );
-    assert!(
-        count_cell.style().add_modifier.contains(Modifier::BOLD),
-        "count cell must have BOLD modifier — badge_style must be applied"
-    );
-
-    // Project-name column starts after count (7) + separator (1) = x=11, so first project char
-    // is at x=11. Use x=12 to stay clearly inside the column (avoids the separator glyph at x=10).
-    let name_cell = buf.cell((12, 3)).unwrap();
-    assert_ne!(
-        name_cell.style().fg,
-        Some(Color::Magenta),
-        "project-name cell must NOT carry Magenta fg — badge must be scoped to count column only"
-    );
-}
-
-// U7-A1 (theme): badge_style returns Magenta fg + BOLD modifier.
-#[test]
-fn badge_style_is_magenta_bold() {
+fn badge_style_is_amber_bold() {
     use ratatui::style::{Color, Modifier, Style};
     let style = theme::badge_style();
     assert_eq!(
         style,
         Style::default()
-            .fg(Color::Magenta)
+            .fg(Color::Rgb(210, 160, 90))
             .add_modifier(Modifier::BOLD),
-        "badge_style must be magenta+bold"
+        "badge_style must be amber Rgb(210,160,90)+bold (sober palette)"
     );
 }
 
-// U5a-A4/A5 (theme): app_header_style is White on Cyan, bold.
+// U8-A1 (theme): app_header_style is soft-cyan on steel-blue band, bold.
 #[test]
-fn app_header_style_is_white_on_cyan_bold() {
+fn app_header_style_is_soft_cyan_on_steel_bold() {
     use ratatui::style::{Color, Modifier, Style};
     let style = theme::app_header_style();
     assert_eq!(
         style,
         Style::default()
-            .fg(Color::White)
-            .bg(Color::Cyan)
+            .fg(Color::Rgb(102, 204, 204))
+            .bg(Color::Rgb(38, 52, 74))
             .add_modifier(Modifier::BOLD),
-        "app_header_style must be white-on-cyan bold"
+        "app_header_style must be soft-cyan on steel-blue band, bold (sober palette)"
+    );
+}
+
+// U9-A1: Projects screen has no Instance header; project name absorbs full width.
+// Render at width=60. name_width = 60 - 4 = 56, so a 40-char name fits without wrapping.
+#[test]
+fn draw_projects_no_instance_header_and_name_fits_full_width() {
+    let name = "A Project Name Exactly Forty Chars LongXX";
+    assert!(
+        name.len() <= 56,
+        "test name must fit in freed name_width=56"
+    );
+    let groups = make_groups_with_instance(&[(name, "some-inst")]);
+    let buf = render_projects_to_buf(&groups, 0, 60, 10);
+    let content = buf_to_string(&buf);
+    assert!(
+        !content.contains("Instance"),
+        "Projects header must NOT contain 'Instance' (U9): {content}"
+    );
+    assert!(
+        content.contains(name),
+        "project name must appear fully at width=60 without truncation (freed width): {content}"
+    );
+}
+
+// U9-A2: Tasks-in-project screen has no INSTANCE header; NAME absorbs full width.
+// Render at width=60. name_width = 60 - 4 = 56, so a 40-char name fits without wrapping.
+#[test]
+fn draw_tasks_no_instance_header_and_name_fits_full_width() {
+    let name = "A Task Name Exactly Forty Characters LongX";
+    assert!(
+        name.len() <= 56,
+        "test name must fit in freed name_width=56"
+    );
+    let tasks = make_tasks(&[name]);
+    let buf = render_tasks_to_buf(&tasks, 0, 60, 10);
+    let content = buf_to_string(&buf);
+    assert!(
+        !content.contains("INSTANCE"),
+        "Tasks header must NOT contain 'INSTANCE' (U9): {content}"
+    );
+    assert!(
+        content.contains(name),
+        "task name must appear fully at width=60 without truncation (freed width): {content}"
+    );
+}
+
+// V1-A1: Responsive — project_name column absorbs all available width (overhead=4 only).
+// A name of 25 chars fits at w=30 (name_width = 30 - 4 = 26 >= 25 chars).
+#[test]
+fn draw_projects_name_column_absorbs_full_width() {
+    let name_25 = "Twenty-Five Character Name";
+    assert_eq!(name_25.len(), 26);
+    let groups = make_groups_with_instance(&[(name_25, "inst")]);
+    // At width=32, new name_width = 32 - 4 = 28 (>= 26 chars, fits on one line).
+    let buf = render_projects_to_buf(&groups, 0, 32, 10);
+    let content = buf_to_string(&buf);
+    assert!(
+        content.contains(name_25),
+        "name must fit fully at width=32 with single-column layout: {content}"
     );
 }

@@ -5,6 +5,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::io::Write;
 use std::sync::OnceLock;
+use unicode_width::UnicodeWidthStr;
 
 /// A displayable asset extracted from a task body or attachments list.
 #[derive(Debug, Clone, PartialEq)]
@@ -74,6 +75,33 @@ fn url_basename(url: &str) -> String {
         .filter(|s| !s.is_empty())
         .unwrap_or(url)
         .to_string()
+}
+
+/// Returns true when `name` looks like a real filename: non-empty, at most 48
+/// chars, and ends with a dot followed by 1–6 ASCII-alphanumeric characters.
+fn looks_like_filename(name: &str) -> bool {
+    if name.is_empty() || name.chars().count() > 48 {
+        return false;
+    }
+    let last_dot = match name.rfind('.') {
+        Some(pos) => pos,
+        None => return false,
+    };
+    let ext = &name[last_dot + 1..];
+    !ext.is_empty() && ext.len() <= 6 && ext.chars().all(|c| c.is_ascii_alphanumeric())
+}
+
+/// Returns the display line for a single asset entry in the Artifacts panel.
+///
+/// Format: `"[{index}] \u{2197} {label}"` where `label` is `asset.name` when it
+/// looks like a real filename, otherwise the locale-aware "Open link" fallback.
+pub fn asset_link_line(index: usize, asset: &Asset) -> String {
+    let label = if looks_like_filename(&asset.name) {
+        asset.name.clone()
+    } else {
+        t("Open link")
+    };
+    format!("[{}] \u{2197} {}", index, label)
 }
 
 /// Extract all assets (images, links, attachments) from a task JSON.
@@ -448,13 +476,51 @@ const BOX_H: &str = "\u{2500}";
 const BOX_V: &str = "\u{2502}";
 const ELLIPSIS: &str = "\u{2026}";
 const MIDDOT: &str = "\u{00B7}";
+const PANEL_HPAD: usize = 1;
+const PANEL_VPAD: usize = 1;
+
+fn display_width(s: &str) -> usize {
+    UnicodeWidthStr::width(s)
+}
+
+fn fit_to_display_width(s: &str, cols: usize) -> String {
+    let w = display_width(s);
+    if w <= cols {
+        let padding = cols - w;
+        let mut out = s.to_string();
+        for _ in 0..padding {
+            out.push(' ');
+        }
+        return out;
+    }
+    let mut acc = 0usize;
+    let mut result = String::new();
+    for ch in s.chars() {
+        let cw = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+        if acc + cw > cols {
+            break;
+        }
+        result.push(ch);
+        acc += cw;
+    }
+    let padding = cols - acc;
+    for _ in 0..padding {
+        result.push(' ');
+    }
+    result
+}
+
+fn panel_content_width(width: usize) -> usize {
+    width.saturating_sub(2 + 2 * PANEL_HPAD)
+}
 
 /// Parity: Python tui.py wrap_text.
 ///
-/// Greedy word-wrap on whitespace to at most `width` columns per line (char count).
-/// A single word longer than `width` is hard-split at `width`. Existing line breaks
-/// in `text` are preserved — each input line is wrapped independently. Empty input
-/// yields an empty Vec (callers use `or vec!["".into()]`).
+/// Greedy word-wrap on whitespace to at most `width` DISPLAY columns per line.
+/// Display width is measured via unicode-width (same crate ratatui uses), so CJK and
+/// combining characters are handled correctly. A single word wider than `width` is
+/// hard-split by accumulated display width. Existing line breaks are preserved —
+/// each input line is wrapped independently. Empty input yields an empty Vec.
 pub fn wrap_text(text: &str, width: usize) -> Vec<String> {
     if text.is_empty() || width == 0 {
         return vec![];
@@ -468,43 +534,43 @@ pub fn wrap_text(text: &str, width: usize) -> Vec<String> {
 
 fn append_word_to_line(
     word: &str,
-    word_len: usize,
+    word_dw: usize,
     width: usize,
     current: &mut String,
-    current_len: &mut usize,
+    current_dw: &mut usize,
     out: &mut Vec<String>,
 ) {
-    if word_len <= width {
+    if word_dw <= width {
         current.push_str(word);
-        *current_len = word_len;
+        *current_dw = word_dw;
     } else {
-        hard_split_word(word, width, current, current_len, out);
+        hard_split_word(word, width, current, current_dw, out);
     }
 }
 
 fn wrap_single_line(line: &str, width: usize, out: &mut Vec<String>) {
     let mut current = String::new();
-    let mut current_len = 0usize;
+    let mut current_dw = 0usize;
 
     for word in line.split_whitespace() {
-        let word_len = word.chars().count();
+        let word_dw = display_width(word);
 
-        if current_len == 0 {
-            append_word_to_line(word, word_len, width, &mut current, &mut current_len, out);
+        if current_dw == 0 {
+            append_word_to_line(word, word_dw, width, &mut current, &mut current_dw, out);
             continue;
         }
 
-        if current_len + 1 + word_len <= width {
+        if current_dw + 1 + word_dw <= width {
             current.push(' ');
             current.push_str(word);
-            current_len += 1 + word_len;
+            current_dw += 1 + word_dw;
             continue;
         }
 
         out.push(current.clone());
         current.clear();
-        current_len = 0;
-        append_word_to_line(word, word_len, width, &mut current, &mut current_len, out);
+        current_dw = 0;
+        append_word_to_line(word, word_dw, width, &mut current, &mut current_dw, out);
     }
 
     if !current.is_empty() || line.chars().next().is_none() {
@@ -516,39 +582,41 @@ fn hard_split_word(
     word: &str,
     width: usize,
     current: &mut String,
-    current_len: &mut usize,
+    current_dw: &mut usize,
     out: &mut Vec<String>,
 ) {
-    let mut chars = word.chars();
-    loop {
-        let chunk: String = chars.by_ref().take(width).collect();
-        if chunk.is_empty() {
-            break;
+    let mut acc = 0usize;
+    let mut chunk = String::new();
+    for ch in word.chars() {
+        let cw = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+        if acc + cw > width {
+            out.push(chunk.clone());
+            chunk.clear();
+            acc = 0;
         }
-        let chunk_len = chunk.chars().count();
-        if chunk_len < width {
-            *current = chunk;
-            *current_len = chunk_len;
-            break;
-        } else {
-            out.push(chunk);
-        }
+        chunk.push(ch);
+        acc += cw;
     }
+    *current = chunk;
+    *current_dw = acc;
 }
 
-/// Parity: Python tui.py _comment_box.
+/// Single rounded-box primitive used by all section panels and comment cards.
 ///
-/// Returns a box of lines each exactly `width` chars wide (char count).
-/// If `width` < 4 returns an empty Vec.
-/// The top border embeds ' {author} {MIDDOT} {when} ' padded/clipped to fit.
-/// A header longer than inner-2 is clipped with ELLIPSIS + space before the tr corner.
-/// Body lines are BOX_V + ljust(inner) + BOX_V. Bottom is BOX_BL + h*inner + BOX_BR.
-pub fn comment_box(author: &str, when: &str, body: &str, width: usize) -> Vec<String> {
+/// Draws a rounded box of exactly `width` DISPLAY columns per line. Returns `vec![]`
+/// when `width` < 4. Adds PANEL_HPAD spaces between each vertical border and content,
+/// and PANEL_VPAD blank rows at the top and bottom of the body. The top border embeds
+/// ` {label} ` clipped with ELLIPSIS when it does not fit. Every returned line is
+/// exactly `width` display columns wide (proven by fit_to_display_width for body lines).
+pub fn panel_box(label: &str, inner_lines: &[String], width: usize) -> Vec<String> {
     if width < 4 {
         return vec![];
     }
     let inner = width - 2;
-    let header_text = format!(" {} {} {} ", author, MIDDOT, when);
+    let content_width = panel_content_width(width);
+    let hpad = " ".repeat(PANEL_HPAD);
+
+    let header_text = format!(" {} ", label);
     let max_header = inner.saturating_sub(2);
     let header_chars: Vec<char> = header_text.chars().collect();
     let header_fitted = if header_chars.len() > max_header {
@@ -559,31 +627,27 @@ pub fn comment_box(author: &str, when: &str, body: &str, width: usize) -> Vec<St
     } else {
         header_text.clone()
     };
-    let fitted_len = header_fitted.chars().count();
-    let h_right = if inner > 1 + fitted_len {
-        BOX_H.repeat(inner - 1 - fitted_len)
+    let fitted_dw = display_width(&header_fitted);
+    let h_right = if inner > 1 + fitted_dw {
+        BOX_H.repeat(inner - 1 - fitted_dw)
     } else {
         String::new()
     };
     let top = format!("{}{}{}{}{}", BOX_TL, BOX_H, header_fitted, h_right, BOX_TR);
 
-    let body_lines = {
-        let wrapped = wrap_text(body, inner);
-        if wrapped.is_empty() {
-            vec![String::new()]
-        } else {
-            wrapped
-        }
-    };
+    let blank_body_line = format!("{}{}{}", BOX_V, " ".repeat(inner), BOX_V);
 
-    let middle: Vec<String> = body_lines
-        .iter()
-        .map(|line| {
-            let line_len = line.chars().count();
-            let padding = inner.saturating_sub(line_len);
-            format!("{}{}{}{}", BOX_V, line, " ".repeat(padding), BOX_V)
-        })
-        .collect();
+    let mut middle: Vec<String> = Vec::new();
+    for _ in 0..PANEL_VPAD {
+        middle.push(blank_body_line.clone());
+    }
+    for line in inner_lines {
+        let fitted = fit_to_display_width(line, content_width);
+        middle.push(format!("{}{}{}{}{}", BOX_V, hpad, fitted, hpad, BOX_V));
+    }
+    for _ in 0..PANEL_VPAD {
+        middle.push(blank_body_line.clone());
+    }
 
     let bottom = format!("{}{}{}", BOX_BL, BOX_H.repeat(inner), BOX_BR);
 
@@ -593,46 +657,94 @@ pub fn comment_box(author: &str, when: &str, body: &str, width: usize) -> Vec<St
     result
 }
 
-/// Returns the meta rows for a task detail view, width-bounded to `inner_width`.
+/// Parity: Python tui.py _comment_box.
 ///
-/// Covers Task/Project/Title/Status/Assignee + optional Start/Due + Estimate/Logged.
-/// No Description or comment lines are included.
+/// Delegates to panel_box with label = "{author} {MIDDOT} {when}".
+/// Body is word-wrapped to panel_content_width(width) by display columns.
+pub fn comment_box(author: &str, when: &str, body: &str, width: usize) -> Vec<String> {
+    let label = format!("{} {} {}", author, MIDDOT, when);
+    let body_lines = {
+        let wrapped = wrap_text(body, panel_content_width(width));
+        if wrapped.is_empty() {
+            vec![String::new()]
+        } else {
+            wrapped
+        }
+    };
+    panel_box(&label, &body_lines, width)
+}
+
+/// Returns the Details panel for a task detail view (a rounded panel with 2-column meta table).
+///
+/// The Title row is omitted — the task name appears in the title band above.
+/// Every produced line is <= `inner_width` chars.
 pub fn build_header_lines(
     task: &Value,
     user_map: &HashMap<i64, String>,
     inner_width: usize,
 ) -> Vec<String> {
-    let mut lines = Vec::new();
-    build_meta_rows(task, user_map, inner_width, &mut lines);
-    lines
+    let meta_rows = build_meta_table_rows(task, user_map, inner_width);
+    panel_box(&t("Details"), &meta_rows, inner_width)
 }
 
-/// Returns the Description label followed by the wrapped body, or the
-/// `(no description)` fallback when the body is empty. Every line is
-/// width-bounded to `inner_width` chars.
+/// Returns the Description panel for a task detail view (a rounded panel with wrapped body).
+///
+/// Falls back to `(no description)` when body is empty. Every line is <= `inner_width` chars.
 pub fn build_body_lines(task: &Value, inner_width: usize) -> Vec<String> {
-    let mut lines = Vec::new();
-    build_description_rows(task, inner_width, &mut lines);
-    lines
+    let body_html = task.get("body").and_then(|v| v.as_str()).unwrap_or("");
+    let text = html_to_text(body_html);
+    let content_width = panel_content_width(inner_width);
+    let body_rows = if text.is_empty() {
+        vec![t("(no description)")]
+    } else {
+        let wrapped = wrap_text(&text, content_width);
+        if wrapped.is_empty() {
+            vec![t("(no description)")]
+        } else {
+            wrapped
+        }
+    };
+    panel_box(&t("Description"), &body_rows, inner_width)
 }
 
-/// Returns the comment boxes for every comment in `comments`, blank-separated.
-/// Returns an empty `Vec` when `comments` is empty.
-/// Every line is width-bounded to `inner_width` chars.
+/// Returns the Comments panel containing nested per-comment cards, or empty when no comments.
+///
+/// When comments are present, wraps all comment cards in an outer panel labelled
+/// "Comments (N)". Each inner card is indented by one space and sized to fit the
+/// outer panel content area. Every line is <= `inner_width` chars.
 pub fn build_comment_lines(comments: &[Value], inner_width: usize) -> Vec<String> {
     if comments.is_empty() {
         return vec![];
     }
-    let mut lines = Vec::new();
-    build_comments_rows(comments, inner_width, &mut lines);
-    lines
+    let outer_content = panel_content_width(inner_width);
+    let card_width = outer_content.saturating_sub(1);
+    let mut nested: Vec<String> = Vec::new();
+    let mut first = true;
+    for comment in comments {
+        if !first {
+            nested.push(String::new());
+        }
+        first = false;
+
+        let author = extract_comment_author(comment);
+        let when = fmt_ts(comment.get("created_on").unwrap_or(&Value::Null));
+        let body = extract_comment_body(comment);
+
+        for line in comment_box(&author, &when, &body, card_width) {
+            nested.push(format!(" {}", line));
+        }
+    }
+
+    let label = format!("{} ({})", t("Comments"), comments.len());
+    panel_box(&label, &nested, inner_width)
 }
 
 /// Parity: Python tui.py build_detail_lines.
 ///
 /// Composes the full detail content at `inner_width`:
-/// (1) meta section, (2) blank, (3) Description + wrapped body,
-/// (4) blank, (5) comment boxes (blank-separated, blank-prefixed).
+/// (1) Details panel, (2) blank, (3) Description panel,
+/// (4) blank + Comments panel when comments non-empty.
+/// The task name is promoted to the frame border title in the TUI layer.
 /// No line exceeds `inner_width` chars. Pure: no I/O, no async.
 pub fn build_detail_lines(
     task: &Value,
@@ -640,7 +752,8 @@ pub fn build_detail_lines(
     user_map: &HashMap<i64, String>,
     inner_width: usize,
 ) -> Vec<String> {
-    let mut lines = build_header_lines(task, user_map, inner_width);
+    let mut lines = vec![];
+    lines.extend(build_header_lines(task, user_map, inner_width));
     lines.push(String::new());
     lines.extend(build_body_lines(task, inner_width));
     if !comments.is_empty() {
@@ -650,12 +763,16 @@ pub fn build_detail_lines(
     lines
 }
 
-fn build_meta_rows(
+/// Builds the 2-column aligned meta table rows for the Details panel.
+///
+/// Pairs are (translated_label, value). The label column width is the max char count
+/// among the present translated labels. Each row is formatted as
+/// `"{label:<width$}  {value}"` then truncated to fit inside the panel inner area.
+fn build_meta_table_rows(
     task: &Value,
     user_map: &HashMap<i64, String>,
     inner_width: usize,
-    lines: &mut Vec<String>,
-) {
+) -> Vec<String> {
     let project_id = task.get("project_id").and_then(|v| v.as_i64()).unwrap_or(0);
     let task_id = task.get("id").and_then(|v| v.as_i64()).unwrap_or(0);
     let project_name = task
@@ -663,7 +780,6 @@ fn build_meta_rows(
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
-    let title = task.get("name").and_then(|v| v.as_str()).unwrap_or("");
     let status = if task
         .get("is_completed")
         .and_then(|v| v.as_bool())
@@ -681,76 +797,76 @@ fn build_meta_rows(
         },
     };
 
-    let meta_entries: &[(&str, String)] = &[
-        ("Task", format!("{}-{}", project_id, task_id)),
-        ("Project", project_name),
-        ("Title", title.to_string()),
-        ("Status", status),
-        ("Assignee", assignee),
-    ];
-
-    for (label, value) in meta_entries {
-        push_truncated(lines, &format!("{}:  {}", t(label), value), inner_width);
-    }
+    let task_label = t("Task");
+    let project_label = t("Project");
+    let status_label = t("Status");
+    let assignee_label = t("Assignee");
+    let estimate_label = t("Estimate");
+    let logged_label = t("Logged");
 
     let start = fmt_date(task.get("start_on").unwrap_or(&Value::Null));
-    if !start.is_empty() {
-        push_truncated(lines, &format!("{}:  {}", t("Start"), start), inner_width);
-    }
     let due = fmt_date(task.get("due_on").unwrap_or(&Value::Null));
+
+    let start_label = t("Start");
+    let due_label = t("Due");
+
+    // Compute max label width among all present labels
+    let mut label_col = [
+        task_label.chars().count(),
+        project_label.chars().count(),
+        status_label.chars().count(),
+        assignee_label.chars().count(),
+        estimate_label.chars().count(),
+        logged_label.chars().count(),
+    ]
+    .into_iter()
+    .max()
+    .unwrap_or(0);
+
+    if !start.is_empty() {
+        label_col = label_col.max(start_label.chars().count());
+    }
     if !due.is_empty() {
-        push_truncated(lines, &format!("{}:  {}", t("Due"), due), inner_width);
+        label_col = label_col.max(due_label.chars().count());
     }
 
-    push_truncated(
-        lines,
-        &format!(
-            "{}:  {}h",
-            t("Estimate"),
+    let mut pairs: Vec<(String, String)> = vec![
+        (task_label, format!("{}-{}", project_id, task_id)),
+        (project_label, project_name),
+        (status_label, status),
+        (assignee_label, assignee),
+    ];
+
+    if !start.is_empty() {
+        pairs.push((start_label, start));
+    }
+    if !due.is_empty() {
+        pairs.push((due_label, due));
+    }
+
+    pairs.push((
+        estimate_label,
+        format!(
+            "{}h",
             fmt_hours(task.get("estimate").unwrap_or(&Value::Null))
         ),
-        inner_width,
-    );
-    push_truncated(
-        lines,
-        &format!(
-            "{}:  {}h",
-            t("Logged"),
+    ));
+    pairs.push((
+        logged_label,
+        format!(
+            "{}h",
             fmt_hours(task.get("tracked_time").unwrap_or(&Value::Null))
         ),
-        inner_width,
-    );
-}
+    ));
 
-fn build_description_rows(task: &Value, inner_width: usize, lines: &mut Vec<String>) {
-    push_truncated(lines, &format!("{}:", t("Description")), inner_width);
-    let body_html = task.get("body").and_then(|v| v.as_str()).unwrap_or("");
-    let text = html_to_text(body_html);
-    if text.is_empty() {
-        push_truncated(lines, &t("(no description)"), inner_width);
-    } else {
-        for wrapped in wrap_text(&text, inner_width) {
-            lines.push(wrapped);
-        }
-    }
-}
-
-fn build_comments_rows(comments: &[Value], inner_width: usize, lines: &mut Vec<String>) {
-    let mut first = true;
-    for comment in comments {
-        if !first {
-            lines.push(String::new());
-        }
-        first = false;
-
-        let author = extract_comment_author(comment);
-        let when = fmt_ts(comment.get("created_on").unwrap_or(&Value::Null));
-        let body = extract_comment_body(comment);
-
-        for line in comment_box(&author, &when, &body, inner_width) {
-            lines.push(line);
-        }
-    }
+    let content_width = panel_content_width(inner_width);
+    pairs
+        .into_iter()
+        .map(|(lbl, val)| {
+            let row = format!("{:<width$}  {}", lbl, val, width = label_col);
+            truncate_cell(&row, content_width)
+        })
+        .collect()
 }
 
 fn extract_comment_author(comment: &Value) -> String {
@@ -779,19 +895,6 @@ fn extract_comment_body(comment: &Value) -> String {
             let html = comment.get("body").and_then(|v| v.as_str()).unwrap_or("");
             html_to_text(html)
         }
-    }
-}
-
-fn push_truncated(lines: &mut Vec<String>, s: &str, max_width: usize) {
-    if max_width == 0 {
-        lines.push(String::new());
-        return;
-    }
-    let chars: Vec<char> = s.chars().collect();
-    if chars.len() <= max_width {
-        lines.push(s.to_string());
-    } else {
-        lines.push(chars[..max_width].iter().collect());
     }
 }
 

@@ -15,6 +15,7 @@ crossterm = { version = "0.28", features = ["event-stream"] }
 dirs = "5"
 html-escape = "0.2"
 ratatui = "0.29"
+unicode-width = "0.2"
 regex = "1"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 rusqlite = { version = "0.31", features = ["bundled"] }

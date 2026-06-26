@@ -1,19 +1,15 @@
 use crate::i18n::t;
-use crate::render::truncate_cell;
 use crate::tui::drawer;
 use crate::tui::model::ProjectGroup;
-use crate::tui::theme;
 use ratatui::{
     layout::Constraint,
-    widgets::{Block, Borders, Cell, Paragraph},
+    text::{Line, Text},
+    widgets::{Block, Borders, Cell, Paragraph, Row},
     Frame,
 };
 
-/// Fixed column widths: TASKS (7) + INSTANCE (18) + 2 borders + selection symbol (2).
-const TASKS_WIDTH: u16 = 7;
-const INSTANCE_WIDTH: u16 = 18;
-/// Borders (2) + selection symbol width (2) + column separators (2 pipes between 3 cols).
-const FIXED_OVERHEAD: u16 = 6;
+/// 2 borders + 2 selection-symbol chars = 4.
+const OVERHEAD: u16 = 4;
 
 /// Draw the Projects screen into `area`.
 pub fn draw_projects(
@@ -23,7 +19,7 @@ pub fn draw_projects(
     selected: usize,
     loading: bool,
 ) {
-    let title = t(" Projects ");
+    let title = format!(" {} ", t("Projects"));
 
     if loading {
         let msg = Paragraph::new(t("Loading tasks…"))
@@ -32,27 +28,27 @@ pub fn draw_projects(
         return;
     }
 
-    let project_width =
-        area.width
-            .saturating_sub(TASKS_WIDTH + INSTANCE_WIDTH + FIXED_OVERHEAD) as usize;
+    let name_width = area.width.saturating_sub(OVERHEAD) as usize;
 
-    let rows: Vec<Vec<Cell<'static>>> = groups
+    let rows: Vec<Row<'static>> = groups
         .iter()
         .map(|g| {
-            vec![
-                Cell::from(format!("{}", g.tasks.len())).style(theme::badge_style()),
-                Cell::from(truncate_cell(&g.project_name, project_width)),
-                Cell::from(truncate_cell(&g.instance, INSTANCE_WIDTH as usize)),
-            ]
+            let lines = crate::render::wrap_text(&g.project_name, name_width.max(1));
+            let lines = if lines.is_empty() {
+                vec![String::new()]
+            } else {
+                lines
+            };
+            let height = lines.len() as u16;
+            let cell = Cell::from(Text::from(
+                lines.into_iter().map(Line::from).collect::<Vec<_>>(),
+            ));
+            Row::new(vec![cell]).height(height)
         })
         .collect();
 
-    let widths = [
-        Constraint::Length(TASKS_WIDTH),
-        Constraint::Min(0),
-        Constraint::Length(INSTANCE_WIDTH),
-    ];
-    let header = [t("Tasks"), t("Project"), t("Instance")];
+    let widths = [Constraint::Min(0)];
+    let header = [t("Project")];
     let header_refs: Vec<&str> = header.iter().map(|s| s.as_str()).collect();
 
     drawer::render_table(frame, area, &title, &header_refs, rows, &widths, selected);
