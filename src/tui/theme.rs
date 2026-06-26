@@ -64,3 +64,18 @@ pub fn link_style() -> Style {
 pub fn badge_style() -> Style {
     Style::default().fg(AMBER).add_modifier(Modifier::BOLD)
 }
+
+/// Selection mode indicator in the footer — near-black on amber, bold.
+///
+/// Matches the row selection palette so the indicator is visually cohesive.
+pub fn selection_indicator_style() -> Style {
+    Style::default()
+        .fg(NEAR_BLACK)
+        .bg(AMBER)
+        .add_modifier(Modifier::BOLD)
+}
+
+/// Inline code spans in rich text — steel, dim.
+pub fn code_style() -> Style {
+    Style::default().fg(STEEL).add_modifier(Modifier::DIM)
+}

@@ -7,16 +7,18 @@ mod http;
 mod i18n;
 mod models;
 mod render;
+mod richtext;
 mod store;
 mod timing;
 mod tui;
 
 use clap::{CommandFactory, Parser};
-use cli::{Cli, Command};
+use cli::{bare_no_command_action, BareNoCommandAction, Cli, Command};
 use commands::{
     current_core, get_core, mine_core, pick_instance, setup_add, setup_language, setup_list,
     setup_remove, setup_test, DisplayFlags, SetupAddFields,
 };
+use std::io::IsTerminal;
 use std::process;
 
 #[tokio::main]
@@ -42,11 +44,19 @@ async fn run(raw_argv: Vec<String>) -> i32 {
     };
 
     let Some(command) = cli.command else {
-        // No subcommand given: print help and exit 2 (mirrors Python behaviour).
-        let mut help_cli = Cli::command();
-        help_cli.print_help().ok();
-        eprintln!();
-        return 2;
+        let is_tty = std::io::stdout().is_terminal() && std::io::stdin().is_terminal();
+        return match bare_no_command_action(is_tty) {
+            BareNoCommandAction::RunMine => {
+                init_language();
+                dispatch(Command::Mine(cli::MineArgs { instance: None })).await
+            }
+            BareNoCommandAction::HelpExit2 => {
+                let mut help_cli = Cli::command();
+                help_cli.print_help().ok();
+                eprintln!();
+                2
+            }
+        };
     };
 
     init_language();
@@ -242,7 +252,6 @@ fn resolve_field(value: Option<String>, label: &str, interactive: bool) -> Optio
 
 /// True when stdin is connected to a terminal.
 fn stdin_is_tty() -> bool {
-    use std::io::IsTerminal;
     std::io::stdin().is_terminal()
 }
 
@@ -354,10 +363,7 @@ async fn dispatch_mine(args: cli::MineArgs) -> i32 {
         }
     };
     let repo = store::instances::InstanceRepository::new(store.conn());
-    let is_tty = {
-        use std::io::IsTerminal;
-        std::io::stdout().is_terminal() && std::io::stdin().is_terminal()
-    };
+    let is_tty = std::io::stdout().is_terminal() && std::io::stdin().is_terminal();
     type TuiCapture = std::sync::Arc<std::sync::Mutex<Option<MineTuiArgs>>>;
     struct MineTuiArgs {
         targets: Vec<store::instances::Instance>,

@@ -34,8 +34,9 @@ flowchart TD
     model --> controller
     controller --> client["client\n(ActiveCollab API)"]
     client --> http["http\n(reqwest + rustls)"]
-    controller --> store["store\n(rusqlite: instances · settings · cache)"]
-    commands --> render["render\ndomain string rendering\n(get/current/mine non-TTY)"]
+    controller --> store["store\n(rusqlite: instances · settings ·\ncache: TaskCache · UserMapCache · ProjectNamesCache)"]
+    commands --> render["render\ndomain string rendering\n(get/current/mine non-TTY)\n+ TUI detail content (panels · style runs)"]
+    render --> richtext["richtext\nHTML → structured rich text\n(TUI detail: lists · headings · emphasis · links)"]
     commands --> i18n["i18n (en · pt-BR)"]
     client --> models["models (serde)"]
 ```
@@ -91,6 +92,16 @@ sequenceDiagram
 
 The refresh path is **single-flight**: a refresh requested while a load is in
 flight is dropped, not queued.
+
+The **browse/mine list load** is **stale-while-revalidate** for the project
+directory ([ADR 0014](/adr/0014-browse-list-project-name-cache-swr.md),
+[BDR 0008](/bdr/0008-browse-list-refresh-cached-directory.md)): per instance,
+`controller::tasks_by_project` **always** fetches the open tasks but serves
+project **names** from the per-instance `ProjectNamesCache` (TTL), issuing
+`list_projects` only on a cache miss or a stale entry. A warm refresh therefore
+hits the network for open tasks alone — the directory fetch is the cached, slow
+call. Fitness: a warm refresh issues **zero** `list_projects` requests
+(gate-checked against the mocked server).
 
 Background results (e.g. `Msg::LoadedTasksByProject`) are delivered over a
 `tokio::sync::mpsc` channel that is a first-class arm of the `tokio::select!`

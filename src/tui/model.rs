@@ -1,5 +1,5 @@
 use crate::i18n::t;
-use crate::render::{Asset, MineTableRow};
+use crate::render::{Asset, MineTableRow, StyleRun};
 use crate::store::instances::Instance;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -110,6 +110,10 @@ pub enum Cmd {
         url: String,
         name: String,
     },
+    /// Enable or disable crossterm mouse capture in the terminal.
+    ///
+    /// true = capture ON (normal browsing); false = capture OFF (native text selection).
+    SetMouseCapture(bool),
 }
 
 /// Structured payload sent by spawn_load_detail phase 1.
@@ -128,7 +132,12 @@ pub struct DetailLoad {
 }
 
 /// A screen on the navigation stack.
+///
+/// The Detail variant is intentionally large — it holds the full render cache
+/// for the open task. The stack is always shallow (≤ 3 elements) so heap
+/// boxing of the large variant would add indirection with no practical benefit.
 #[derive(Debug, Clone, PartialEq)]
+#[allow(clippy::large_enum_variant)]
 pub enum Screen {
     Projects {
         groups: Vec<ProjectGroup>,
@@ -153,6 +162,10 @@ pub enum Screen {
         user_map: HashMap<i64, String>,
         /// Memoized line cache rebuilt by reflow_detail.
         lines: Vec<String>,
+        /// Parallel emphasis-style channel, index-aligned with `lines`.
+        /// Each element holds the `StyleRun`s for the corresponding line.
+        /// Populated exclusively by reflow_detail; initialized empty at construction.
+        line_styles: Vec<Vec<StyleRun>>,
         /// Collected URLs from description + comments in label order (index N-1 = "↗ Link N").
         /// Populated exclusively by reflow_detail; initialized empty at construction.
         body_links: Vec<String>,
@@ -294,6 +307,9 @@ pub struct Model {
     /// ISO wall-clock string (YYYY-MM-DDTHH:MM:SSZ) of when the currently-displayed data was loaded.
     /// None until the first load completes; stamped exclusively by the shell via Msg payloads.
     pub last_loaded: Option<String>,
+    /// When true, mouse capture is OFF so the terminal can perform native text selection.
+    /// Toggled by Msg::ToggleSelection; the shell reacts to Cmd::SetMouseCapture.
+    pub selection_mode: bool,
 }
 
 /// All messages the update function understands.
@@ -329,6 +345,8 @@ pub enum Msg {
     AssetActionResult,
     /// 'd' key: arm the download-next-digit flag on the Detail screen.
     TogglePendingDownload,
+    /// 's' key: toggle selection mode (disables mouse capture for native text selection).
+    ToggleSelection,
     /// Background user directory resolved a display name for the header.
     /// Sets model.header.name when it was previously absent.
     HeaderNameResolved(String),
@@ -348,6 +366,7 @@ impl Model {
             viewport: (0, 0),
             click_targets: vec![],
             last_loaded: None,
+            selection_mode: false,
         }
     }
 
@@ -380,6 +399,7 @@ impl Model {
             comments,
             user_map,
             lines,
+            line_styles,
             body_links,
             rendered_width,
             offset,
@@ -396,6 +416,7 @@ impl Model {
 
         let content = crate::render::build_detail_content(task, comments, user_map, inner_width);
         *lines = content.lines;
+        *line_styles = content.line_styles;
         *body_links = content.links;
         *rendered_width = inner_width;
 
@@ -425,6 +446,7 @@ pub fn update(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
         Msg::UserMapResolved(map) => (handle_user_map_resolved(model, map), vec![]),
         Msg::AssetOpen(digit) => handle_asset_open(model, digit),
         Msg::TogglePendingDownload => (handle_toggle_pending_download(model), vec![]),
+        Msg::ToggleSelection => handle_toggle_selection(model),
         Msg::AssetActionResult => (model, vec![]),
         Msg::HeaderNameResolved(name) => (handle_header_name_resolved(model, name), vec![]),
     }
@@ -665,6 +687,7 @@ fn handle_select(mut model: Model) -> (Model, Vec<Cmd>) {
                     comments: vec![],
                     user_map: HashMap::new(),
                     lines: vec![],
+                    line_styles: vec![],
                     body_links: vec![],
                     assets: vec![],
                     offset: 0,
@@ -755,6 +778,7 @@ fn handle_loaded_detail(mut model: Model, load: DetailLoad) -> Model {
         assets: ref mut a,
         user_map: ref mut um,
         lines: ref mut ls,
+        line_styles: ref mut lss,
         rendered_width: ref mut rw,
         ref mut loading,
         ..
@@ -767,6 +791,7 @@ fn handle_loaded_detail(mut model: Model, load: DetailLoad) -> Model {
         *loading = false;
         // Invalidate line cache so reflow_detail rebuilds at current width.
         *ls = vec![];
+        *lss = vec![];
         *rw = usize::MAX;
     }
     model.last_loaded = Some(load.loaded_at);
@@ -777,6 +802,7 @@ fn handle_user_map_resolved(mut model: Model, map: HashMap<i64, String>) -> Mode
     if let Some(Screen::Detail {
         user_map: ref mut um,
         lines: ref mut ls,
+        line_styles: ref mut lss,
         rendered_width: ref mut rw,
         ..
     }) = model.top_mut()
@@ -784,6 +810,7 @@ fn handle_user_map_resolved(mut model: Model, map: HashMap<i64, String>) -> Mode
         *um = map;
         // Invalidate line cache so the next reflow shows the updated assignee.
         *ls = vec![];
+        *lss = vec![];
         *rw = usize::MAX;
     }
     model
@@ -837,6 +864,12 @@ fn handle_toggle_pending_download(mut model: Model) -> Model {
     model
 }
 
+fn handle_toggle_selection(mut model: Model) -> (Model, Vec<Cmd>) {
+    model.selection_mode = !model.selection_mode;
+    let capture_on = !model.selection_mode;
+    (model, vec![Cmd::SetMouseCapture(capture_on)])
+}
+
 fn handle_header_name_resolved(mut model: Model, name: String) -> Model {
     model.header.name = Some(name);
     model
@@ -880,6 +913,7 @@ pub fn mine_model(rows: Vec<MineTableRow>, header: Header) -> Model {
         viewport: (0, 0),
         click_targets: vec![],
         last_loaded: None,
+        selection_mode: false,
     }
 }
 

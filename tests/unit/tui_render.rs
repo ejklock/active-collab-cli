@@ -1,5 +1,6 @@
 use crate::i18n::set_language;
-use crate::render::{build_detail_lines, build_header_lines, Asset};
+use crate::render::{build_detail_content, build_header_lines, Asset, StyleRun};
+use crate::richtext::RichStyle;
 use crate::store::instances::Instance;
 use crate::tui::model::{Header, ProjectGroup, TaskRow};
 use crate::tui::screens::{draw_detail, draw_projects, draw_tasks, DetailParams};
@@ -154,6 +155,7 @@ fn render_detail_to_buf_with_name(
     height: u16,
     task_name: &str,
 ) -> ratatui::buffer::Buffer {
+    let empty_styles: Vec<Vec<crate::render::StyleRun>> = vec![vec![]; lines.len()];
     let backend = TestBackend::new(width, height);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
@@ -163,6 +165,7 @@ fn render_detail_to_buf_with_name(
                 Rect::new(0, 0, width, height),
                 DetailParams {
                     lines,
+                    line_styles: &empty_styles,
                     assets,
                     offset,
                     loading: false,
@@ -652,7 +655,7 @@ fn draw_detail_without_assets_no_panel_and_no_marker() {
     );
 }
 
-// P2-A1: build_detail_lines produces boxed lines (rounded corners + comment author)
+// P2-A1: build_detail_content produces boxed lines (rounded corners + comment author)
 // each fitting within inner_width, after a reflow at that width.
 #[test]
 fn build_detail_lines_with_comment_produces_boxed_lines_fitting_width() {
@@ -669,7 +672,7 @@ fn build_detail_lines_with_comment_produces_boxed_lines_fitting_width() {
         "body": "<p>This is a test comment body for the box rendering test.</p>"
     });
     let user_map: HashMap<i64, String> = HashMap::new();
-    let lines = build_detail_lines(&task, &[comment], &user_map, inner_width);
+    let lines = build_detail_content(&task, &[comment], &user_map, inner_width).lines;
 
     assert!(!lines.is_empty(), "must produce at least one line");
 
@@ -866,6 +869,7 @@ mod view_size_guard {
             viewport: (0, 0),
             click_targets: vec![],
             last_loaded: None,
+            selection_mode: false,
         }
     }
 
@@ -1103,7 +1107,7 @@ fn render_table_few_rows_tall_area_no_scrollbar_glyph_in_rightmost_column() {
     }
 }
 
-// P2-A1: build_detail_lines at different widths produces different line counts/widths
+// P2-A1: build_detail_content at different widths produces different line counts/widths
 #[test]
 fn build_detail_lines_reflow_at_different_widths_changes_output() {
     let task = json!({
@@ -1121,8 +1125,8 @@ fn build_detail_lines_reflow_at_different_widths_changes_output() {
     let user_map: HashMap<i64, String> = HashMap::new();
 
     let comments = [comment];
-    let lines_80 = build_detail_lines(&task, &comments, &user_map, 80);
-    let lines_40 = build_detail_lines(&task, &comments, &user_map, 40);
+    let lines_80 = build_detail_content(&task, &comments, &user_map, 80).lines;
+    let lines_40 = build_detail_content(&task, &comments, &user_map, 40).lines;
 
     // All lines at width 40 must be at most 40 chars
     for line in &lines_40 {
@@ -1150,7 +1154,7 @@ fn build_detail_lines_reflow_at_different_widths_changes_output() {
 }
 
 // U6c-A1: draw_detail renders a single global content block (no separate header/body/comments boxes).
-// The title block must appear and the content from build_detail_lines must be present.
+// The title block must appear and the content from build_detail_content must be present.
 // There is exactly ONE top-left corner glyph (┌) for the content block, plus one for Artifacts.
 #[test]
 fn draw_detail_renders_single_global_content_block() {
@@ -1169,7 +1173,7 @@ fn draw_detail_renders_single_global_content_block() {
         "body": "<p>A comment on this task.</p>"
     });
     let user_map: HashMap<i64, String> = HashMap::new();
-    let lines = build_detail_lines(&task, &[comment], &user_map, 76);
+    let lines = build_detail_content(&task, &[comment], &user_map, 76).lines;
 
     let assets = vec![Asset {
         name: "file.pdf".into(),
@@ -1321,6 +1325,7 @@ fn view_detail_footer_has_no_tab_switch_hint() {
             comments: vec![],
             user_map,
             lines,
+            line_styles: vec![],
             body_links: vec![],
             assets,
             offset: 0,
@@ -1333,6 +1338,7 @@ fn view_detail_footer_has_no_tab_switch_hint() {
         viewport: (0, 0),
         click_targets: vec![],
         last_loaded: None,
+        selection_mode: false,
     };
 
     let backend = TestBackend::new(80, 24);
@@ -1376,6 +1382,7 @@ fn view_detail_footer_without_assets_has_no_tab_hint() {
             comments: vec![],
             user_map: HashMap::new(),
             lines: vec!["body".into()],
+            line_styles: vec![],
             body_links: vec![],
             assets: vec![],
             offset: 0,
@@ -1388,6 +1395,7 @@ fn view_detail_footer_without_assets_has_no_tab_hint() {
         viewport: (0, 0),
         click_targets: vec![],
         last_loaded: None,
+        selection_mode: false,
     };
 
     let backend = TestBackend::new(80, 24);
@@ -1504,6 +1512,7 @@ fn view_renders_header_on_top_row_with_app_header_style_is_soft_cyan_on_steel() 
         viewport: (0, 0),
         click_targets: vec![],
         last_loaded: None,
+        selection_mode: false,
     };
 
     let backend = TestBackend::new(80, 10);
@@ -1561,6 +1570,7 @@ fn view_content_and_footer_render_below_header() {
         viewport: (0, 0),
         click_targets: vec![],
         last_loaded: None,
+        selection_mode: false,
     };
 
     let height = 10u16;
@@ -1609,6 +1619,7 @@ fn view_multi_instance_header_shows_extra_suffix() {
         viewport: (0, 0),
         click_targets: vec![],
         last_loaded: None,
+        selection_mode: false,
     };
 
     let backend = TestBackend::new(80, 10);
@@ -1649,6 +1660,7 @@ fn view_too_small_suppresses_header_and_footer() {
         viewport: (0, 0),
         click_targets: vec![],
         last_loaded: None,
+        selection_mode: false,
     };
 
     let backend = TestBackend::new(20, 5);
@@ -1883,7 +1895,7 @@ fn draw_detail_border_and_no_url_lines_have_default_style() {
     });
     let user_map: HashMap<i64, String> = HashMap::new();
     let width: u16 = 80;
-    let lines = build_detail_lines(&task, &[], &user_map, (width - 2) as usize);
+    let lines = build_detail_content(&task, &[], &user_map, (width - 2) as usize).lines;
 
     let buf = render_detail_to_buf(&lines, &[], 0, width, 20);
 
@@ -2011,6 +2023,7 @@ mod v2b_click_targets {
             viewport: (30, 15),
             click_targets: vec![],
             last_loaded: None,
+            selection_mode: false,
         };
 
         render_and_capture(&mut model, 30, 15);
@@ -2080,6 +2093,7 @@ mod v2b_click_targets {
             viewport: (80, 15),
             click_targets: vec![],
             last_loaded: None,
+            selection_mode: false,
         };
 
         render_and_capture(&mut model, 80, 15);
@@ -2149,6 +2163,7 @@ mod v2b_click_targets {
             viewport: (80, 20),
             click_targets: vec![],
             last_loaded: None,
+            selection_mode: false,
         };
 
         render_and_capture(&mut model, 80, 20);
@@ -2214,6 +2229,7 @@ mod v2b_click_targets {
             viewport: (80, 6),
             click_targets: vec![],
             last_loaded: None,
+            selection_mode: false,
         };
 
         render_and_capture(&mut model, 80, 6);
@@ -2299,6 +2315,7 @@ mod footer_refresh_hint {
             viewport: (0, 0),
             click_targets: vec![],
             last_loaded,
+            selection_mode: false,
         }
     }
 
@@ -2362,6 +2379,7 @@ mod footer_refresh_hint {
                 comments: vec![],
                 user_map: HashMap::new(),
                 lines: vec!["body".into()],
+                line_styles: vec![],
                 body_links: vec![],
                 assets: vec![],
                 offset: 0,
@@ -2374,6 +2392,7 @@ mod footer_refresh_hint {
             viewport: (0, 0),
             click_targets: vec![],
             last_loaded: None,
+            selection_mode: false,
         };
         let content = render_model(&model);
         set_language("en");
@@ -2398,6 +2417,7 @@ mod footer_refresh_hint {
                 comments: vec![],
                 user_map: HashMap::new(),
                 lines: vec!["body".into()],
+                line_styles: vec![],
                 body_links: vec![],
                 assets: vec![Asset {
                     name: "doc.pdf".into(),
@@ -2413,6 +2433,7 @@ mod footer_refresh_hint {
             viewport: (0, 0),
             click_targets: vec![],
             last_loaded: None,
+            selection_mode: false,
         };
         let content = render_model(&model);
         set_language("en");
@@ -2621,6 +2642,7 @@ mod footer_refresh_hint {
                         ratatui::layout::Rect::new(0, 0, width, height),
                         DetailParams {
                             lines: &lines,
+                            line_styles: &[],
                             assets: &[],
                             offset,
                             loading: false,
@@ -2680,6 +2702,7 @@ mod footer_refresh_hint {
                 comments: vec![],
                 user_map: HashMap::new(),
                 lines: vec![],
+                line_styles: vec![],
                 body_links: vec![],
                 assets: vec![],
                 offset: 0,
@@ -2692,6 +2715,7 @@ mod footer_refresh_hint {
             viewport: (0, 0),
             click_targets: vec![],
             last_loaded: None,
+            selection_mode: false,
         };
         let load = DetailLoad {
             task: serde_json::json!({ "name": "T", "id": 7, "project_id": 1 }),
@@ -2789,5 +2813,514 @@ fn draw_detail_comment_with_long_url_shows_link_label_not_raw_url() {
     assert!(
         found_label_link_cell,
         "↗ arrow cell must carry muted-green+underline link_style"
+    );
+}
+
+// --- V3-A2: selection indicator and hint tests ---
+
+mod selection_mode_view {
+    use crate::i18n::set_language;
+    use crate::tui::model::{Header, Model, Screen};
+    use crate::tui::view::view;
+    use ratatui::{backend::TestBackend, Terminal};
+
+    fn buf_to_string(buf: &ratatui::buffer::Buffer) -> String {
+        let area = buf.area();
+        let mut out = String::new();
+        for y in 0..area.height {
+            for x in 0..area.width {
+                out.push_str(buf.cell((x, y)).unwrap().symbol());
+            }
+            out.push('\n');
+        }
+        out
+    }
+
+    fn render_view(model: &Model) -> String {
+        let backend = TestBackend::new(120, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| view(model, frame, &mut vec![]))
+            .unwrap();
+        buf_to_string(terminal.backend().buffer())
+    }
+
+    fn projects_model_with_selection(selection_mode: bool) -> Model {
+        Model {
+            stack: vec![Screen::Projects {
+                groups: vec![],
+                selected: 0,
+                loading: false,
+            }],
+            should_quit: false,
+            header: Header::from_instances(&[], None),
+            viewport: (0, 0),
+            click_targets: vec![],
+            last_loaded: None,
+            selection_mode,
+        }
+    }
+
+    fn detail_model_with_assets_and_selection(
+        assets: Vec<crate::render::Asset>,
+        selection_mode: bool,
+    ) -> Model {
+        use std::collections::HashMap;
+        Model {
+            stack: vec![Screen::Detail {
+                instance: "inst".into(),
+                project_id: 1,
+                task_id: 1,
+                task: serde_json::Value::Null,
+                comments: vec![],
+                user_map: HashMap::new(),
+                lines: vec!["body".into()],
+                line_styles: vec![],
+                body_links: vec![],
+                assets,
+                offset: 0,
+                loading: false,
+                pending_download: false,
+                rendered_width: 120,
+            }],
+            should_quit: false,
+            header: Header::from_instances(&[], None),
+            viewport: (0, 0),
+            click_targets: vec![],
+            last_loaded: None,
+            selection_mode,
+        }
+    }
+
+    // V3-A2: footer shows SELECTION indicator when selection_mode is true.
+    #[test]
+    fn footer_shows_selection_indicator_when_selection_mode_true() {
+        let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("pt_BR");
+        let model = projects_model_with_selection(true);
+        let content = render_view(&model);
+        set_language("en");
+        assert!(
+            content.contains("SELEÇÃO"),
+            "footer must show 'SELEÇÃO' indicator when selection_mode=true: {content}"
+        );
+    }
+
+    // V3-A2: footer omits SELECTION indicator when selection_mode is false.
+    #[test]
+    fn footer_omits_selection_indicator_when_selection_mode_false() {
+        let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("pt_BR");
+        let model = projects_model_with_selection(false);
+        let content = render_view(&model);
+        set_language("en");
+        assert!(
+            !content.contains("SELEÇÃO"),
+            "footer must NOT show 'SELEÇÃO' indicator when selection_mode=false: {content}"
+        );
+    }
+
+    // V3-A2: 's seleção' hint appears on Projects/Tasks list footer (pt_BR).
+    #[test]
+    fn footer_hint_contains_s_selecao_on_projects_screen_pt_br() {
+        let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("pt_BR");
+        let model = projects_model_with_selection(false);
+        let content = render_view(&model);
+        set_language("en");
+        assert!(
+            content.contains("s seleção"),
+            "Projects footer must contain 's seleção' hint (pt_BR): {content}"
+        );
+    }
+
+    // V3-A2: 's selection' hint appears on Detail footer without assets (en).
+    #[test]
+    fn footer_hint_contains_s_selection_on_detail_no_assets_en() {
+        let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let model = detail_model_with_assets_and_selection(vec![], false);
+        let content = render_view(&model);
+        set_language("en");
+        assert!(
+            content.contains("s selection"),
+            "Detail footer (no assets) must contain 's selection' hint (en): {content}"
+        );
+    }
+
+    // V3-A2: 's selection' hint appears on Detail footer with assets (en).
+    #[test]
+    fn footer_hint_contains_s_selection_on_detail_with_assets_en() {
+        let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let assets = vec![crate::render::Asset {
+            name: "doc.pdf".into(),
+            url: "https://example.com/doc.pdf".into(),
+        }];
+        let model = detail_model_with_assets_and_selection(assets, false);
+        let content = render_view(&model);
+        set_language("en");
+        assert!(
+            content.contains("s selection"),
+            "Detail footer (with assets) must contain 's selection' hint (en): {content}"
+        );
+    }
+}
+
+// --- R3b inline-emphasis style runs ----------------------------------------
+
+fn style_run_matches(run: &StyleRun, expected_style: RichStyle) -> bool {
+    run.style == expected_style
+}
+
+fn find_style_run_for_text<'a>(
+    lines: &'a [String],
+    line_styles: &'a [Vec<StyleRun>],
+    needle: &str,
+    expected_style: RichStyle,
+) -> Option<(usize, &'a StyleRun)> {
+    lines.iter().enumerate().find_map(|(i, line)| {
+        if !line.contains(needle) {
+            return None;
+        }
+        let run = line_styles
+            .get(i)?
+            .iter()
+            .find(|r| style_run_matches(r, expected_style))?;
+        Some((i, run))
+    })
+}
+
+// R3b-A1: <strong> produces a Bold StyleRun on the line containing its text.
+#[test]
+fn strong_tag_produces_bold_style_run() {
+    let task = json!({
+        "name": "Bold test",
+        "id": 1,
+        "project_id": 1,
+        "is_completed": false,
+        "body": "<p>Before <strong>bold word</strong> after.</p>"
+    });
+    let user_map: HashMap<i64, String> = HashMap::new();
+    let content = build_detail_content(&task, &[], &user_map, 80);
+
+    assert_eq!(
+        content.lines.len(),
+        content.line_styles.len(),
+        "lines and line_styles must be index-aligned"
+    );
+
+    let found = find_style_run_for_text(
+        &content.lines,
+        &content.line_styles,
+        "bold word",
+        RichStyle::Bold,
+    );
+    assert!(
+        found.is_some(),
+        "<strong> content must have a Bold StyleRun on the line containing 'bold word': {:#?}",
+        content.lines
+    );
+}
+
+// R3b-A1: <b> produces a Bold StyleRun (alias for <strong>).
+#[test]
+fn b_tag_produces_bold_style_run() {
+    let task = json!({
+        "name": "B tag test",
+        "id": 2,
+        "project_id": 1,
+        "is_completed": false,
+        "body": "<p>Before <b>bolded</b> after.</p>"
+    });
+    let user_map: HashMap<i64, String> = HashMap::new();
+    let content = build_detail_content(&task, &[], &user_map, 80);
+
+    let found = find_style_run_for_text(
+        &content.lines,
+        &content.line_styles,
+        "bolded",
+        RichStyle::Bold,
+    );
+    assert!(
+        found.is_some(),
+        "<b> content must have a Bold StyleRun on the line containing 'bolded': {:#?}",
+        content.lines
+    );
+}
+
+// R3b-A1: <em> produces an Italic StyleRun.
+#[test]
+fn em_tag_produces_italic_style_run() {
+    let task = json!({
+        "name": "Em test",
+        "id": 3,
+        "project_id": 1,
+        "is_completed": false,
+        "body": "<p>See <em>italic text</em> here.</p>"
+    });
+    let user_map: HashMap<i64, String> = HashMap::new();
+    let content = build_detail_content(&task, &[], &user_map, 80);
+
+    let found = find_style_run_for_text(
+        &content.lines,
+        &content.line_styles,
+        "italic text",
+        RichStyle::Italic,
+    );
+    assert!(
+        found.is_some(),
+        "<em> content must have an Italic StyleRun on the line containing 'italic text': {:#?}",
+        content.lines
+    );
+}
+
+// R3b-A1: <i> produces an Italic StyleRun (alias for <em>).
+#[test]
+fn i_tag_produces_italic_style_run() {
+    let task = json!({
+        "name": "I tag test",
+        "id": 4,
+        "project_id": 1,
+        "is_completed": false,
+        "body": "<p>Text <i>slanted</i> end.</p>"
+    });
+    let user_map: HashMap<i64, String> = HashMap::new();
+    let content = build_detail_content(&task, &[], &user_map, 80);
+
+    let found = find_style_run_for_text(
+        &content.lines,
+        &content.line_styles,
+        "slanted",
+        RichStyle::Italic,
+    );
+    assert!(
+        found.is_some(),
+        "<i> content must have an Italic StyleRun on the line containing 'slanted': {:#?}",
+        content.lines
+    );
+}
+
+// R3b-A1: <code> produces a Code StyleRun.
+#[test]
+fn code_tag_produces_code_style_run() {
+    let task = json!({
+        "name": "Code test",
+        "id": 5,
+        "project_id": 1,
+        "is_completed": false,
+        "body": "<p>Run <code>cargo test</code> now.</p>"
+    });
+    let user_map: HashMap<i64, String> = HashMap::new();
+    let content = build_detail_content(&task, &[], &user_map, 80);
+
+    let found = find_style_run_for_text(
+        &content.lines,
+        &content.line_styles,
+        "cargo test",
+        RichStyle::Code,
+    );
+    assert!(
+        found.is_some(),
+        "<code> content must have a Code StyleRun on the line containing 'cargo test': {:#?}",
+        content.lines
+    );
+}
+
+// R3b-A2: <h1> through <h6> produce Bold StyleRuns covering the heading line.
+#[test]
+fn heading_tags_produce_bold_style_runs() {
+    for tag in &["h1", "h2", "h3", "h4", "h5", "h6"] {
+        let html_body = format!("<{tag}>Section Title</{tag}>");
+        let task = json!({
+            "name": "Heading test",
+            "id": 10,
+            "project_id": 1,
+            "is_completed": false,
+            "body": html_body
+        });
+        let user_map: HashMap<i64, String> = HashMap::new();
+        let content = build_detail_content(&task, &[], &user_map, 80);
+
+        let found = find_style_run_for_text(
+            &content.lines,
+            &content.line_styles,
+            "Section Title",
+            RichStyle::Bold,
+        );
+        assert!(
+            found.is_some(),
+            "<{tag}> heading must produce a Bold StyleRun on the heading line: {:#?}",
+            content.lines
+        );
+    }
+}
+
+// R3b-A2: Bold runs from <strong> survive a wrap boundary — text split across
+// lines must each carry a Bold StyleRun on the fragment line.
+#[test]
+fn bold_span_across_wrap_boundary_keeps_style_on_all_fragments() {
+    let long_bold = "word ".repeat(30);
+    let html_body = format!("<p>Before <strong>{long_bold}</strong> after.</p>");
+    let task = json!({
+        "name": "Wrap bold test",
+        "id": 11,
+        "project_id": 1,
+        "is_completed": false,
+        "body": html_body
+    });
+    let user_map: HashMap<i64, String> = HashMap::new();
+    let content = build_detail_content(&task, &[], &user_map, 40);
+
+    let bold_run_count = content
+        .line_styles
+        .iter()
+        .filter(|runs| runs.iter().any(|r| r.style == RichStyle::Bold))
+        .count();
+
+    assert!(
+        bold_run_count >= 2,
+        "a bold span spanning multiple wrapped lines must produce Bold runs on >= 2 lines; got {bold_run_count}: {:#?}",
+        content.lines
+    );
+}
+
+// R3b-A3: line_styles is always index-aligned with lines (no orphan rows).
+#[test]
+fn line_styles_always_aligned_with_lines() {
+    let task = json!({
+        "name": "Alignment check",
+        "id": 20,
+        "project_id": 1,
+        "is_completed": false,
+        "body": "<p>Body with <strong>bold</strong> and <em>italic</em>.</p>"
+    });
+    let comment = json!({
+        "created_by_name": "Alice",
+        "created_on": 1700000000u64,
+        "body": "<p>Comment with <code>code</code> inline.</p>"
+    });
+    let user_map: HashMap<i64, String> = HashMap::new();
+    let content = build_detail_content(&task, &[comment], &user_map, 60);
+
+    assert_eq!(
+        content.lines.len(),
+        content.line_styles.len(),
+        "line_styles must be the same length as lines after processing body+comments"
+    );
+}
+
+// R3b-A3: the structured detail path produces the expected plain-text content for
+// a fixture with emphasis HTML in both body and comment. Verifies that the rich-text
+// pipeline does not drop, duplicate, or corrupt the plain-text values callers observe.
+#[test]
+fn build_detail_content_structured_path_preserves_plain_text() {
+    let task = json!({
+        "name": "Regression check",
+        "id": 21,
+        "project_id": 1,
+        "is_completed": false,
+        "body": "<p>Some <strong>bold</strong> and <em>italic</em> text.</p>"
+    });
+    let comment = json!({
+        "created_by_name": "Bob",
+        "created_on": 1700000000u64,
+        "body": "<p>A <code>coded</code> comment.</p>"
+    });
+    let user_map: HashMap<i64, String> = HashMap::new();
+
+    let content = build_detail_content(&task, &[comment], &user_map, 70);
+    let joined = content.lines.join("\n");
+
+    assert!(
+        !content.lines.is_empty(),
+        "structured path must produce output lines"
+    );
+    assert!(
+        joined.contains("Details"),
+        "must include the Details panel: {joined}"
+    );
+    assert!(
+        joined.contains("Description"),
+        "must include the Description panel: {joined}"
+    );
+    assert!(
+        joined.contains("bold"),
+        "plain text of <strong>bold</strong> must appear in content: {joined}"
+    );
+    assert!(
+        joined.contains("italic"),
+        "plain text of <em>italic</em> must appear in content: {joined}"
+    );
+    assert!(
+        joined.contains("Comments"),
+        "must include the Comments panel for non-empty comments: {joined}"
+    );
+    assert!(
+        joined.contains("Bob"),
+        "comment author must appear in content: {joined}"
+    );
+    assert!(
+        joined.contains("coded"),
+        "plain text of <code>coded</code> must appear in comment body: {joined}"
+    );
+    assert_eq!(
+        content.lines.len(),
+        content.line_styles.len(),
+        "lines and line_styles must remain index-aligned after structured rendering"
+    );
+}
+
+// R3b-A3: Plain lines (no emphasis HTML) produce empty style-run vecs.
+#[test]
+fn plain_body_produces_empty_style_runs_per_line() {
+    let task = json!({
+        "name": "Plain body",
+        "id": 22,
+        "project_id": 1,
+        "is_completed": false,
+        "body": "<p>Just plain text here.</p>"
+    });
+    let user_map: HashMap<i64, String> = HashMap::new();
+    let content = build_detail_content(&task, &[], &user_map, 80);
+
+    let body_lines_with_style_runs: Vec<&str> = content
+        .lines
+        .iter()
+        .zip(&content.line_styles)
+        .filter(|(_, runs)| !runs.is_empty())
+        .map(|(l, _)| l.as_str())
+        .collect();
+
+    assert!(
+        body_lines_with_style_runs.is_empty(),
+        "plain HTML body must produce no non-empty style-run vecs; affected lines: {body_lines_with_style_runs:?}"
+    );
+}
+
+// R3b-A1: StyleRun.start is offset by left chrome (≥ 2 cols) — not column 0.
+#[test]
+fn style_run_start_is_offset_by_chrome() {
+    let task = json!({
+        "name": "Chrome offset test",
+        "id": 23,
+        "project_id": 1,
+        "is_completed": false,
+        "body": "<p><strong>starts bold</strong> rest of line.</p>"
+    });
+    let user_map: HashMap<i64, String> = HashMap::new();
+    let content = build_detail_content(&task, &[], &user_map, 80);
+
+    let bold_run = content
+        .line_styles
+        .iter()
+        .flat_map(|runs| runs.iter())
+        .find(|r| r.style == RichStyle::Bold);
+
+    let run = bold_run.expect("must have at least one Bold run for <strong> at line start");
+    assert!(
+        run.start >= 2,
+        "StyleRun.start must be >= 2 (left chrome = 1 border + 1 hpad), got start={}",
+        run.start
     );
 }

@@ -89,6 +89,10 @@ failed token exchange or HTTP error → **1**; success → **0**.
 `feature/665-75159` resolves to `current`.
 **Scenario 3: no args, no command → help + exit 2** — empty argv with no matching
 branch prints help and exits 2.
+> ⚠ **Amended by [BDR 0007](/bdr/0007-bare-invocation-tty-default.md) (slice C1).**
+> When both stdin and stdout are a TTY, this case now dispatches `mine` instead of
+> help+exit-2; the help+exit-2 contract is retained only for the **non-TTY**
+> (piped/redirected) case. The original behavior above stands for non-TTY use.
 **Scenario 4: unsupported language → exit 2** — `setup language zz` prints the
 unsupported-language error and exits 2.
 **Scenario 5: remove missing instance → exit 2** — `setup remove --name nope`

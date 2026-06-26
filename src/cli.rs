@@ -171,6 +171,23 @@ fn branch_matches_task_pattern(branch: &str) -> bool {
         && right.chars().all(|c| c.is_ascii_digit())
 }
 
+/// Routing decision when `ac` is invoked with no subcommand.
+#[derive(Debug, PartialEq)]
+pub enum BareNoCommandAction {
+    RunMine,
+    HelpExit2,
+}
+
+/// Pure routing function: in a full TTY session launch the personal task view;
+/// in a pipe or script fall back to help output so scripts are unaffected.
+pub fn bare_no_command_action(is_tty: bool) -> BareNoCommandAction {
+    if is_tty {
+        BareNoCommandAction::RunMine
+    } else {
+        BareNoCommandAction::HelpExit2
+    }
+}
+
 #[cfg(test)]
 #[path = "../tests/unit/cli.rs"]
 mod tests;

@@ -228,8 +228,9 @@ fn dispatch_cmds(
                 let targets = targets.to_vec();
                 let http = http.clone();
                 let tx = tx.clone();
+                let db_path = db_path.to_path_buf();
                 tokio::spawn(async move {
-                    let groups = controller::tasks_by_project(&targets, &http).await;
+                    let groups = controller::tasks_by_project(db_path, &targets, &http).await;
                     let loaded_at = crate::store::now_brt_iso();
                     let _ = tx.send(Msg::LoadedTasksByProject { groups, loaded_at });
                 });
@@ -257,6 +258,13 @@ fn dispatch_cmds(
                 name,
             } => {
                 spawn_download_asset(targets, http, &tx, instance, url, name);
+            }
+            Cmd::SetMouseCapture(on) => {
+                if on {
+                    let _ = execute!(io::stdout(), EnableMouseCapture);
+                } else {
+                    let _ = execute!(io::stdout(), DisableMouseCapture);
+                }
             }
         }
     }

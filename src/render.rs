@@ -69,14 +69,30 @@ pub fn replace_urls_with_labels(text: &str, collector: &mut LinkCollector) -> St
     result
 }
 
-/// Produced by `build_detail_content`: the rendered lines and the collected URLs.
+/// An emphasis-style run on a single display-column slice of a rendered line.
 ///
-/// `lines` is identical to what `build_detail_lines` returns, except every URL in
-/// the description and comment bodies has been replaced with a "↗ Link N" label.
+/// `start` and `len` are DISPLAY COLUMNS (not byte offsets) in the final boxed
+/// line string, offset to include the left chrome (border + padding). Only
+/// emphasis kinds (Bold/Italic/Code) are tracked here; link color is handled
+/// separately by the `link_segments` path.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StyleRun {
+    pub start: usize,
+    pub len: usize,
+    pub style: crate::richtext::RichStyle,
+}
+
+/// Produced by `build_detail_content`: the rendered lines, style runs, and collected URLs.
+///
+/// `lines` contains the full detail layout: every URL in the description and comment
+/// bodies has been replaced with a "↗ Link N" label.
+/// `line_styles` is a parallel channel: `line_styles[i]` holds the `StyleRun`s for
+/// `lines[i]`. Both vecs are always the same length.
 /// `links` holds the original URLs in the order the labels were assigned — element
 /// at index N-1 corresponds to label "↗ Link N".
 pub struct DetailContent {
     pub lines: Vec<String>,
+    pub line_styles: Vec<Vec<StyleRun>>,
     pub links: Vec<String>,
 }
 
@@ -192,69 +208,6 @@ pub struct Asset {
     pub url: String,
 }
 
-static IMG_SRC_RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
-static HREF_RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
-
-fn img_src_re() -> &'static Regex {
-    IMG_SRC_RE.get_or_init(|| {
-        Regex::new(r#"(?i)<img\b[^>]*\bsrc=["']([^"']+)["']"#)
-            .expect("img_src_re is a valid pattern")
-    })
-}
-
-fn href_re() -> &'static Regex {
-    HREF_RE.get_or_init(|| {
-        Regex::new(r#"(?i)<a\b[^>]*\bhref=["']([^"']+)["']"#).expect("href_re is a valid pattern")
-    })
-}
-
-fn assets_from_html(html: &str) -> Vec<Asset> {
-    let mut assets = vec![];
-    for cap in img_src_re().captures_iter(html) {
-        let url = cap[1].to_string();
-        let name = url_basename(&url);
-        assets.push(Asset { name, url });
-    }
-    for cap in href_re().captures_iter(html) {
-        let url = cap[1].to_string();
-        let name = url_basename(&url);
-        assets.push(Asset { name, url });
-    }
-    assets
-}
-
-fn assets_from_attachments(attachments: &Value) -> Vec<Asset> {
-    let arr = match attachments.as_array() {
-        Some(a) => a,
-        None => return vec![],
-    };
-    arr.iter()
-        .filter_map(|att| {
-            let url = att
-                .get("url")
-                .or_else(|| att.get("download_url"))
-                .and_then(|v| v.as_str())
-                .filter(|s| !s.is_empty())?
-                .to_string();
-            let name = att
-                .get("name")
-                .and_then(|v| v.as_str())
-                .filter(|s| !s.is_empty())
-                .map(|s| s.to_string())
-                .unwrap_or_else(|| url_basename(&url));
-            Some(Asset { name, url })
-        })
-        .collect()
-}
-
-fn url_basename(url: &str) -> String {
-    url.split('/')
-        .next_back()
-        .filter(|s| !s.is_empty())
-        .unwrap_or(url)
-        .to_string()
-}
-
 /// Returns true when `name` looks like a real filename: non-empty, at most 48
 /// chars, and ends with a dot followed by 1–6 ASCII-alphanumeric characters.
 fn looks_like_filename(name: &str) -> bool {
@@ -280,40 +233,6 @@ pub fn asset_link_line(index: usize, asset: &Asset) -> String {
         t("Open link")
     };
     format!("[{}] \u{2197} {}", index, label)
-}
-
-/// Extract all assets (images, links, attachments) from a task JSON.
-///
-/// Deduplicates by URL, preserving first-seen order.
-pub fn extract_assets(task: &Value, comments: &[Value]) -> Vec<Asset> {
-    let mut seen = std::collections::HashSet::new();
-    let mut result = vec![];
-
-    let mut add = |asset: Asset| {
-        if seen.insert(asset.url.clone()) {
-            result.push(asset);
-        }
-    };
-
-    let body_html = task.get("body").and_then(|v| v.as_str()).unwrap_or("");
-    for asset in assets_from_html(body_html) {
-        add(asset);
-    }
-
-    for comment in comments {
-        let comment_html = comment.get("body").and_then(|v| v.as_str()).unwrap_or("");
-        for asset in assets_from_html(comment_html) {
-            add(asset);
-        }
-    }
-
-    if let Some(attachments) = task.get("attachments") {
-        for asset in assets_from_attachments(attachments) {
-            add(asset);
-        }
-    }
-
-    result
 }
 
 /// Parity: Python tui/view.py is_openable_url.
@@ -779,6 +698,237 @@ fn hard_split_word(
     *current_dw = acc;
 }
 
+/// Greedy word-wrap for a `RichLine`, preserving span emphasis across breaks.
+///
+/// Mirrors `wrap_text`'s greedy display-width algorithm but operates on
+/// `Vec<RichSpan>` so that a span whose style is Bold/Italic/Code carries that
+/// style on every wrapped fragment (BDR S9).  Empty input yields an empty Vec.
+pub fn wrap_rich(line: &crate::richtext::RichLine, width: usize) -> Vec<crate::richtext::RichLine> {
+    use crate::richtext::RichLine;
+    if line.is_empty() || width == 0 {
+        return vec![];
+    }
+    let plain: String = line.iter().map(|s| s.text.as_str()).collect();
+    if plain.is_empty() || plain.chars().all(|c| c.is_ascii_whitespace()) {
+        return vec![line.clone()];
+    }
+
+    let mut result: Vec<RichLine> = Vec::new();
+    let mut current: RichLine = Vec::new();
+    let mut current_dw = 0usize;
+
+    for input_line in plain.split('\n') {
+        if !current.is_empty() {
+            result.push(std::mem::take(&mut current));
+            current_dw = 0;
+        }
+        wrap_rich_single_line(
+            input_line,
+            line,
+            width,
+            &mut result,
+            &mut current,
+            &mut current_dw,
+        );
+    }
+
+    if !current.is_empty() {
+        result.push(current);
+    } else if plain.chars().next().is_none() {
+        result.push(vec![]);
+    }
+
+    result
+}
+
+/// Wrap a single plain-text input line, preserving span styles from the original `RichLine`.
+///
+/// Because the plain text was derived from the rich spans in order, we re-derive
+/// the style for each word by scanning the span sequence proportionally to byte position.
+fn wrap_rich_single_line(
+    plain_line: &str,
+    rich_source: &crate::richtext::RichLine,
+    width: usize,
+    result: &mut Vec<crate::richtext::RichLine>,
+    current: &mut crate::richtext::RichLine,
+    current_dw: &mut usize,
+) {
+    use crate::richtext::RichStyle;
+
+    let style_for_word =
+        |word: &str| -> RichStyle { style_of_word_in_rich_line(word, rich_source) };
+
+    for word in plain_line.split_whitespace() {
+        let word_dw = display_width(word);
+        let word_style = style_for_word(word);
+
+        if *current_dw == 0 {
+            append_rich_word(
+                word, word_dw, word_style, width, current, current_dw, result,
+            );
+            continue;
+        }
+
+        if *current_dw + 1 + word_dw <= width {
+            push_rich_span(current, " ", RichStyle::Plain);
+            push_rich_span(current, word, word_style);
+            *current_dw += 1 + word_dw;
+            continue;
+        }
+
+        result.push(std::mem::take(current));
+        *current_dw = 0;
+        append_rich_word(
+            word, word_dw, word_style, width, current, current_dw, result,
+        );
+    }
+}
+
+/// Find the dominant style for `word` by scanning `rich_source` for an exact text match.
+///
+/// Falls back to Plain when the word is not found (e.g. after normalization).
+fn style_of_word_in_rich_line(
+    word: &str,
+    rich_source: &crate::richtext::RichLine,
+) -> crate::richtext::RichStyle {
+    use crate::richtext::RichStyle;
+    for span in rich_source {
+        if span.text.contains(word) {
+            return span.style;
+        }
+    }
+    RichStyle::Plain
+}
+
+/// Append a word (or hard-split it) to the current rich line being built.
+fn append_rich_word(
+    word: &str,
+    word_dw: usize,
+    style: crate::richtext::RichStyle,
+    width: usize,
+    current: &mut crate::richtext::RichLine,
+    current_dw: &mut usize,
+    result: &mut Vec<crate::richtext::RichLine>,
+) {
+    if word_dw <= width {
+        push_rich_span(current, word, style);
+        *current_dw = word_dw;
+    } else {
+        hard_split_rich_word(word, style, width, current, current_dw, result);
+    }
+}
+
+/// Hard-split a word wider than `width` columns, flushing full chunks as separate lines.
+fn hard_split_rich_word(
+    word: &str,
+    style: crate::richtext::RichStyle,
+    width: usize,
+    current: &mut crate::richtext::RichLine,
+    current_dw: &mut usize,
+    result: &mut Vec<crate::richtext::RichLine>,
+) {
+    let mut acc = 0usize;
+    let mut chunk = String::new();
+    for ch in word.chars() {
+        let cw = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+        if acc + cw > width {
+            push_rich_span(current, &chunk, style);
+            result.push(std::mem::take(current));
+            chunk.clear();
+            acc = 0;
+        }
+        chunk.push(ch);
+        acc += cw;
+    }
+    push_rich_span(current, &chunk, style);
+    *current_dw = acc;
+}
+
+/// Push a text fragment onto a `RichLine`, merging adjacent same-style spans.
+fn push_rich_span(
+    line: &mut crate::richtext::RichLine,
+    text: &str,
+    style: crate::richtext::RichStyle,
+) {
+    use crate::richtext::RichSpan;
+    if text.is_empty() {
+        return;
+    }
+    if let Some(last) = line.last_mut() {
+        if last.style == style {
+            last.text.push_str(text);
+            return;
+        }
+    }
+    line.push(RichSpan {
+        text: text.to_string(),
+        style,
+    });
+}
+
+/// Compute the `StyleRun`s for a content row given its rich spans and the left chrome offset.
+///
+/// Each span's text is measured in display columns. Runs that carry non-Plain styles
+/// are emitted with `start` already offset by `chrome_cols` so callers see final
+/// display-column positions. Plain spans produce no run.
+fn rich_line_to_style_runs(spans: &crate::richtext::RichLine, chrome_cols: usize) -> Vec<StyleRun> {
+    use crate::richtext::RichStyle;
+    let mut runs = Vec::new();
+    let mut col = chrome_cols;
+    for span in spans {
+        let w = display_width(&span.text);
+        if span.style != RichStyle::Plain {
+            runs.push(StyleRun {
+                start: col,
+                len: w,
+                style: span.style,
+            });
+        }
+        col += w;
+    }
+    runs
+}
+
+/// Rounded-box identical to `panel_box` but returns `(plain_string, Vec<StyleRun>)` per row.
+///
+/// Border rows, blank pad rows, and the label row emit empty run vectors.
+/// Content rows emit runs offset by the left chrome (1 border + PANEL_HPAD cols).
+/// Returns empty when `width < 4` (same guard as `panel_box`).
+pub fn panel_box_rich(
+    label: &str,
+    inner: &[crate::richtext::RichLine],
+    width: usize,
+) -> Vec<(String, Vec<StyleRun>)> {
+    if width < 4 {
+        return vec![];
+    }
+    let plain_lines: Vec<String> = inner
+        .iter()
+        .map(|rl| rl.iter().map(|s| s.text.as_str()).collect())
+        .collect();
+    let boxed = panel_box(label, &plain_lines, width);
+    let chrome_cols = 1 + PANEL_HPAD;
+    let content_rows_start = 1 + PANEL_VPAD;
+    let content_rows_end = boxed.len().saturating_sub(1 + PANEL_VPAD);
+
+    boxed
+        .into_iter()
+        .enumerate()
+        .map(|(i, line)| {
+            let runs = if i >= content_rows_start && i < content_rows_end {
+                let rich_idx = i - content_rows_start;
+                inner
+                    .get(rich_idx)
+                    .map(|rl| rich_line_to_style_runs(rl, chrome_cols))
+                    .unwrap_or_default()
+            } else {
+                vec![]
+            };
+            (line, runs)
+        })
+        .collect()
+}
+
 /// Single rounded-box primitive used by all section panels and comment cards.
 ///
 /// Draws a rounded box of exactly `width` DISPLAY columns per line. Returns `vec![]`
@@ -839,6 +989,7 @@ pub fn panel_box(label: &str, inner_lines: &[String], width: usize) -> Vec<Strin
 ///
 /// Delegates to panel_box with label = "{author} {MIDDOT} {when}".
 /// Body is word-wrapped to panel_content_width(width) by display columns.
+#[allow(dead_code)]
 pub fn comment_box(author: &str, when: &str, body: &str, width: usize) -> Vec<String> {
     let label = format!("{} {} {}", author, MIDDOT, when);
     let body_lines = {
@@ -865,98 +1016,220 @@ pub fn build_header_lines(
     panel_box(&t("Details"), &meta_rows, inner_width)
 }
 
-/// Returns the Description panel for a task detail view (a rounded panel with wrapped body).
-///
-/// Falls back to `(no description)` when body is empty. Every line is <= `inner_width` chars.
-#[allow(dead_code)]
-pub fn build_body_lines(task: &Value, inner_width: usize) -> Vec<String> {
-    let mut collector = LinkCollector::new();
-    build_body_lines_with_collector(task, inner_width, &mut collector)
-}
-
 fn build_body_lines_with_collector(
     task: &Value,
     inner_width: usize,
     collector: &mut LinkCollector,
-) -> Vec<String> {
+) -> (Vec<String>, Vec<Vec<StyleRun>>) {
     let body_html = task.get("body").and_then(|v| v.as_str()).unwrap_or("");
-    let text = html_to_text(body_html);
-    let transformed = replace_urls_with_labels(&text, collector);
+    let rich_lines = crate::richtext::structured_rich_with_links(body_html, collector);
     let content_width = panel_content_width(inner_width);
-    let body_rows = if transformed.is_empty() {
-        vec![t("(no description)")]
-    } else {
-        let wrapped = wrap_text(&transformed, content_width);
-        if wrapped.is_empty() {
+    let body_rich = if rich_lines.is_empty() {
+        let fallback_plain = apply_url_labels_to_plain(&t("(no description)"), collector);
+        let fallback_wrapped = wrap_text(&fallback_plain, content_width);
+        plain_lines_to_rich(if fallback_wrapped.is_empty() {
             vec![t("(no description)")]
         } else {
-            wrapped
-        }
+            fallback_wrapped
+        })
+    } else {
+        build_rich_body_rows(rich_lines, content_width, collector)
     };
-    panel_box(&t("Description"), &body_rows, inner_width)
+    let boxed = panel_box_rich(&t("Description"), &body_rich, inner_width);
+    unzip_boxed(boxed)
 }
 
-/// Returns the Comments panel containing nested per-comment cards, or empty when no comments.
-///
-/// When comments are present, wraps all comment cards in an outer panel labelled
-/// "Comments (N)". Each inner card is indented by one space and sized to fit the
-/// outer panel content area. Every line is <= `inner_width` chars.
-#[allow(dead_code)]
-pub fn build_comment_lines(comments: &[Value], inner_width: usize) -> Vec<String> {
-    let mut collector = LinkCollector::new();
-    build_comment_lines_with_collector(comments, inner_width, &mut collector)
+/// Apply URL-label replacement to a plain string, returning the result.
+fn apply_url_labels_to_plain(text: &str, collector: &mut LinkCollector) -> String {
+    replace_urls_with_labels(text, collector)
+}
+
+/// Wrap a set of rich lines to `content_width`, applying URL-label replacement
+/// to any plain spans that contain bare URLs, then return the wrapped rich lines.
+fn build_rich_body_rows(
+    rich_lines: Vec<crate::richtext::RichLine>,
+    content_width: usize,
+    collector: &mut LinkCollector,
+) -> Vec<crate::richtext::RichLine> {
+    use crate::richtext::RichLine;
+    let mut wrapped: Vec<RichLine> = Vec::new();
+    for line in rich_lines {
+        let url_processed = apply_url_labels_to_rich_line(line, collector);
+        let fragments = wrap_rich(&url_processed, content_width);
+        if fragments.is_empty() {
+            wrapped.push(vec![]);
+        } else {
+            wrapped.extend(fragments);
+        }
+    }
+    if wrapped.is_empty() {
+        plain_lines_to_rich(vec![t("(no description)")])
+    } else {
+        wrapped
+    }
+}
+
+/// Replace bare URLs within Plain-style spans of a `RichLine`.
+fn apply_url_labels_to_rich_line(
+    line: crate::richtext::RichLine,
+    collector: &mut LinkCollector,
+) -> crate::richtext::RichLine {
+    use crate::richtext::{RichLine, RichSpan, RichStyle};
+    let mut result: RichLine = Vec::new();
+    for span in line {
+        if span.style == RichStyle::Plain {
+            let replaced = replace_urls_with_labels(&span.text, collector);
+            result.push(RichSpan {
+                text: replaced,
+                style: RichStyle::Plain,
+            });
+        } else {
+            result.push(span);
+        }
+    }
+    result
+}
+
+/// Convert a `Vec<String>` to a `Vec<RichLine>` where every span is Plain.
+fn plain_lines_to_rich(lines: Vec<String>) -> Vec<crate::richtext::RichLine> {
+    use crate::richtext::{RichSpan, RichStyle};
+    lines
+        .into_iter()
+        .map(|s| {
+            vec![RichSpan {
+                text: s,
+                style: RichStyle::Plain,
+            }]
+        })
+        .collect()
+}
+
+/// Unzip `Vec<(String, Vec<StyleRun>)>` into parallel vecs.
+fn unzip_boxed(boxed: Vec<(String, Vec<StyleRun>)>) -> (Vec<String>, Vec<Vec<StyleRun>>) {
+    boxed.into_iter().unzip()
 }
 
 fn build_comment_lines_with_collector(
     comments: &[Value],
     inner_width: usize,
     collector: &mut LinkCollector,
-) -> Vec<String> {
+) -> (Vec<String>, Vec<Vec<StyleRun>>) {
     if comments.is_empty() {
-        return vec![];
+        return (vec![], vec![]);
     }
     let outer_content = panel_content_width(inner_width);
     let card_width = outer_content.saturating_sub(1);
-    let mut nested: Vec<String> = Vec::new();
+    let mut nested_lines: Vec<String> = Vec::new();
+    let mut nested_styles: Vec<Vec<StyleRun>> = Vec::new();
     let mut first = true;
     for comment in comments {
         if !first {
-            nested.push(String::new());
+            nested_lines.push(String::new());
+            nested_styles.push(vec![]);
         }
         first = false;
 
         let author = extract_comment_author(comment);
         let when = fmt_ts(comment.get("created_on").unwrap_or(&Value::Null));
-        let raw_body = extract_comment_body(comment);
-        let body = replace_urls_with_labels(&raw_body, collector);
-
-        for line in comment_box(&author, &when, &body, card_width) {
-            nested.push(format!(" {}", line));
+        let (card_lines, card_styles) =
+            build_comment_card(comment, &author, &when, card_width, collector);
+        for (line, runs) in card_lines.into_iter().zip(card_styles) {
+            nested_lines.push(format!(" {}", line));
+            let indented_runs = indent_style_runs(runs, 1);
+            nested_styles.push(indented_runs);
         }
     }
 
     let label = format!("{} ({})", t("Comments"), comments.len());
-    panel_box(&label, &nested, inner_width)
+    let outer_rich = plain_lines_to_rich(nested_lines.clone());
+    let boxed = panel_box_rich(&label, &outer_rich, inner_width);
+    let (outer_lines, outer_box_styles) = unzip_boxed(boxed);
+
+    let chrome = 1 + PANEL_HPAD;
+    let content_start = 1 + PANEL_VPAD;
+    let content_end = outer_lines.len().saturating_sub(1 + PANEL_VPAD);
+
+    let merged_styles: Vec<Vec<StyleRun>> = outer_lines
+        .iter()
+        .enumerate()
+        .map(|(i, _)| {
+            if i >= content_start && i < content_end {
+                let nested_idx = i - content_start;
+                nested_styles
+                    .get(nested_idx)
+                    .cloned()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|r| StyleRun {
+                        start: r.start + chrome,
+                        len: r.len,
+                        style: r.style,
+                    })
+                    .collect()
+            } else {
+                outer_box_styles.get(i).cloned().unwrap_or_default()
+            }
+        })
+        .collect();
+
+    (outer_lines, merged_styles)
 }
 
-/// Parity: Python tui.py build_detail_lines.
+/// Build a single comment card as a plain `comment_box`, returning (lines, style_runs).
 ///
-/// Composes the full detail content at `inner_width`:
-/// (1) Details panel, (2) blank, (3) Description panel,
-/// (4) blank + Comments panel when comments non-empty.
-/// The task name is promoted to the frame border title in the TUI layer.
-/// No line exceeds `inner_width` chars. Pure: no I/O, no async.
-///
-/// Backward-compatible wrapper over `build_detail_content` that returns only
-/// the rendered lines; existing test callers stay green with no code changes.
-#[allow(dead_code)]
-pub fn build_detail_lines(
-    task: &Value,
-    comments: &[Value],
-    user_map: &HashMap<i64, String>,
-    inner_width: usize,
-) -> Vec<String> {
-    build_detail_content(task, comments, user_map, inner_width).lines
+/// The body is parsed through the rich path so inline emphasis carries through
+/// into the card's content rows. URL labels are applied before wrapping.
+fn build_comment_card(
+    comment: &Value,
+    author: &str,
+    when: &str,
+    card_width: usize,
+    collector: &mut LinkCollector,
+) -> (Vec<String>, Vec<Vec<StyleRun>>) {
+    let rich_body = extract_comment_body_rich(comment, collector);
+    let content_width = panel_content_width(card_width);
+    let body_rich = if rich_body.is_empty() {
+        plain_lines_to_rich(vec![String::new()])
+    } else {
+        build_rich_body_rows(rich_body, content_width, collector)
+    };
+    let label = format!("{} {} {}", author, MIDDOT, when);
+    panel_box_rich(&label, &body_rich, card_width)
+        .into_iter()
+        .unzip()
+}
+
+/// Shift every `StyleRun`'s start column right by `cols`.
+fn indent_style_runs(runs: Vec<StyleRun>, cols: usize) -> Vec<StyleRun> {
+    runs.into_iter()
+        .map(|r| StyleRun {
+            start: r.start + cols,
+            len: r.len,
+            style: r.style,
+        })
+        .collect()
+}
+
+/// Extract comment body as rich lines for the TUI path.
+fn extract_comment_body_rich(
+    comment: &Value,
+    collector: &mut LinkCollector,
+) -> Vec<crate::richtext::RichLine> {
+    use crate::richtext::{RichSpan, RichStyle};
+    let plain = comment
+        .get("body_plain_text")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty());
+    match plain {
+        Some(s) => vec![vec![RichSpan {
+            text: s.to_string(),
+            style: RichStyle::Plain,
+        }]],
+        None => {
+            let html = comment.get("body").and_then(|v| v.as_str()).unwrap_or("");
+            crate::richtext::structured_rich_with_links(html, collector)
+        }
+    }
 }
 
 /// Build the full detail content, replacing every URL in the description and comment
@@ -964,6 +1237,8 @@ pub fn build_detail_lines(
 ///
 /// URL numbering is global: description URLs are assigned indices first, then
 /// comment bodies in order. Each label maps 1:1 to the URL at `links[N-1]`.
+/// `line_styles` is a parallel channel index-aligned with `lines`; both vecs
+/// always have the same length.
 /// Pure: no I/O, no async, no time access.
 pub fn build_detail_content(
     task: &Value,
@@ -972,38 +1247,68 @@ pub fn build_detail_content(
     inner_width: usize,
 ) -> DetailContent {
     let mut collector = LinkCollector::new();
-    let mut lines = vec![];
-    lines.extend(build_header_lines(task, user_map, inner_width));
+    let mut lines: Vec<String> = vec![];
+    let mut line_styles: Vec<Vec<StyleRun>> = vec![];
+
+    let header_lines = build_header_lines(task, user_map, inner_width);
+    let header_count = header_lines.len();
+    lines.extend(header_lines);
+    line_styles.extend(std::iter::repeat_n(vec![], header_count));
+
     lines.push(String::new());
-    lines.extend(build_body_lines_with_collector(
-        task,
-        inner_width,
-        &mut collector,
-    ));
+    line_styles.push(vec![]);
+
+    let (body_lines, body_styles) =
+        build_body_lines_with_collector(task, inner_width, &mut collector);
+    lines.extend(body_lines);
+    line_styles.extend(body_styles);
+
     if !comments.is_empty() {
         lines.push(String::new());
-        lines.extend(build_comment_lines_with_collector(
-            comments,
-            inner_width,
-            &mut collector,
-        ));
+        line_styles.push(vec![]);
+
+        let (comment_lines, comment_styles) =
+            build_comment_lines_with_collector(comments, inner_width, &mut collector);
+        lines.extend(comment_lines);
+        line_styles.extend(comment_styles);
     }
+
+    debug_assert_eq!(
+        lines.len(),
+        line_styles.len(),
+        "lines and line_styles must remain index-aligned"
+    );
+
     DetailContent {
         lines,
+        line_styles,
         links: collector.urls,
     }
 }
 
 /// Builds the 2-column aligned meta table rows for the Details panel.
 ///
-/// Pairs are (translated_label, value). The label column width is the max char count
-/// among the present translated labels. Each row is formatted as
-/// `"{label:<width$}  {value}"` then truncated to fit inside the panel inner area.
+/// Delegates field extraction to `meta_field_pairs`, computes the shared label
+/// column width, then formats each pair via `format_meta_row`.
 fn build_meta_table_rows(
     task: &Value,
     user_map: &HashMap<i64, String>,
     inner_width: usize,
 ) -> Vec<String> {
+    let pairs = meta_field_pairs(task, user_map);
+    let label_col = meta_label_col_width(&pairs);
+    let content_width = panel_content_width(inner_width);
+    pairs
+        .into_iter()
+        .map(|(lbl, val)| format_meta_row(&lbl, &val, label_col, content_width))
+        .collect()
+}
+
+/// Returns the ordered (translated_label, value) pairs for the Details meta table.
+///
+/// Always includes Task, Project, Status, Assignee, Estimate, Logged.
+/// Start and Due are included only when non-empty (i.e. the task has those dates set).
+fn meta_field_pairs(task: &Value, user_map: &HashMap<i64, String>) -> Vec<(String, String)> {
     let project_id = task.get("project_id").and_then(|v| v.as_i64()).unwrap_or(0);
     let task_id = task.get("id").and_then(|v| v.as_i64()).unwrap_or(0);
     let project_name = task
@@ -1011,7 +1316,39 @@ fn build_meta_table_rows(
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
-    let status = if task
+    let status = meta_status_value(task);
+    let assignee = meta_assignee_value(task, user_map);
+    let start = fmt_date(task.get("start_on").unwrap_or(&Value::Null));
+    let due = fmt_date(task.get("due_on").unwrap_or(&Value::Null));
+    let estimate = format!(
+        "{}h",
+        fmt_hours(task.get("estimate").unwrap_or(&Value::Null))
+    );
+    let logged = format!(
+        "{}h",
+        fmt_hours(task.get("tracked_time").unwrap_or(&Value::Null))
+    );
+
+    let mut pairs = vec![
+        (t("Task"), format!("{}-{}", project_id, task_id)),
+        (t("Project"), project_name),
+        (t("Status"), status),
+        (t("Assignee"), assignee),
+    ];
+    if !start.is_empty() {
+        pairs.push((t("Start"), start));
+    }
+    if !due.is_empty() {
+        pairs.push((t("Due"), due));
+    }
+    pairs.push((t("Estimate"), estimate));
+    pairs.push((t("Logged"), logged));
+    pairs
+}
+
+/// Returns the translated completion status string for `task`.
+fn meta_status_value(task: &Value) -> String {
+    if task
         .get("is_completed")
         .and_then(|v| v.as_bool())
         .unwrap_or(false)
@@ -1019,85 +1356,41 @@ fn build_meta_table_rows(
         t("Completed")
     } else {
         t("Open")
-    };
-    let assignee = match task.get("assignee_id").and_then(|v| v.as_i64()) {
+    }
+}
+
+/// Returns the resolved assignee display string for `task`.
+///
+/// Falls back to `(unassigned)` when no assignee_id is present, and to `(id)`
+/// when the id is not found in `user_map`.
+fn meta_assignee_value(task: &Value, user_map: &HashMap<i64, String>) -> String {
+    match task.get("assignee_id").and_then(|v| v.as_i64()) {
         None => t("(unassigned)"),
         Some(id) => match user_map.get(&id) {
             Some(name) => format!("{name} ({id})"),
             None => format!("({id})"),
         },
-    };
-
-    let task_label = t("Task");
-    let project_label = t("Project");
-    let status_label = t("Status");
-    let assignee_label = t("Assignee");
-    let estimate_label = t("Estimate");
-    let logged_label = t("Logged");
-
-    let start = fmt_date(task.get("start_on").unwrap_or(&Value::Null));
-    let due = fmt_date(task.get("due_on").unwrap_or(&Value::Null));
-
-    let start_label = t("Start");
-    let due_label = t("Due");
-
-    // Compute max label width among all present labels
-    let mut label_col = [
-        task_label.chars().count(),
-        project_label.chars().count(),
-        status_label.chars().count(),
-        assignee_label.chars().count(),
-        estimate_label.chars().count(),
-        logged_label.chars().count(),
-    ]
-    .into_iter()
-    .max()
-    .unwrap_or(0);
-
-    if !start.is_empty() {
-        label_col = label_col.max(start_label.chars().count());
     }
-    if !due.is_empty() {
-        label_col = label_col.max(due_label.chars().count());
-    }
+}
 
-    let mut pairs: Vec<(String, String)> = vec![
-        (task_label, format!("{}-{}", project_id, task_id)),
-        (project_label, project_name),
-        (status_label, status),
-        (assignee_label, assignee),
-    ];
-
-    if !start.is_empty() {
-        pairs.push((start_label, start));
-    }
-    if !due.is_empty() {
-        pairs.push((due_label, due));
-    }
-
-    pairs.push((
-        estimate_label,
-        format!(
-            "{}h",
-            fmt_hours(task.get("estimate").unwrap_or(&Value::Null))
-        ),
-    ));
-    pairs.push((
-        logged_label,
-        format!(
-            "{}h",
-            fmt_hours(task.get("tracked_time").unwrap_or(&Value::Null))
-        ),
-    ));
-
-    let content_width = panel_content_width(inner_width);
+/// Returns the maximum char count across all label strings in `pairs`.
+///
+/// This is the shared left-column width used to align the value column.
+fn meta_label_col_width(pairs: &[(String, String)]) -> usize {
     pairs
-        .into_iter()
-        .map(|(lbl, val)| {
-            let row = format!("{:<width$}  {}", lbl, val, width = label_col);
-            truncate_cell(&row, content_width)
-        })
-        .collect()
+        .iter()
+        .map(|(lbl, _)| lbl.chars().count())
+        .max()
+        .unwrap_or(0)
+}
+
+/// Formats a single (label, value) pair as a padded two-column meta row.
+///
+/// `"{label:<label_col$}  {value}"` is truncated to `content_width` chars so the
+/// row always fits inside the panel's inner area.
+fn format_meta_row(label: &str, value: &str, label_col: usize, content_width: usize) -> String {
+    let row = format!("{:<width$}  {}", label, value, width = label_col);
+    truncate_cell(&row, content_width)
 }
 
 fn extract_comment_author(comment: &Value) -> String {
@@ -1113,20 +1406,6 @@ fn extract_comment_author(comment: &Value) -> String {
                 .filter(|s| !s.is_empty() && s != "null")
         })
         .unwrap_or_else(|| t("(unknown)"))
-}
-
-fn extract_comment_body(comment: &Value) -> String {
-    let plain = comment
-        .get("body_plain_text")
-        .and_then(|v| v.as_str())
-        .filter(|s| !s.is_empty());
-    match plain {
-        Some(s) => s.to_string(),
-        None => {
-            let html = comment.get("body").and_then(|v| v.as_str()).unwrap_or("");
-            html_to_text(html)
-        }
-    }
 }
 
 /// Returns `s` truncated to exactly `max_width` chars.

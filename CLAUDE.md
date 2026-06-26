@@ -42,6 +42,10 @@ service mounts `./` and sets `working_dir` to `/app`. Therefore:
    pulls) need the network, so run those specific commands with the sandbox
    disabled (`dangerouslyDisableSandbox: true`) — a legitimate registry fetch.
 
+## Living Docs
+enforcement: strict   # strict | guided | lite
+onboarded: 2026-06-26
+
 ## Maintenance rule
 
 Any structural change updates its doc **and its Mermaid diagram** in the same

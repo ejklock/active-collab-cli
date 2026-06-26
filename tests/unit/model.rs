@@ -30,6 +30,7 @@ fn detail_model_with_assets_and_viewport(
             comments: vec![],
             user_map: HashMap::new(),
             lines: vec![],
+            line_styles: vec![],
             body_links: vec![],
             assets,
             offset: 0,
@@ -42,6 +43,7 @@ fn detail_model_with_assets_and_viewport(
         viewport,
         click_targets: vec![],
         last_loaded: None,
+        selection_mode: false,
     }
 }
 
@@ -59,6 +61,7 @@ fn click_struct_form_accepted_by_update_on_projects_screen() {
         viewport: (80, 24),
         click_targets: vec![],
         last_loaded: None,
+        selection_mode: false,
     };
     let (m, cmds) = update(m, Msg::Click { column: 10, row: 5 });
     assert!(cmds.is_empty());
@@ -382,6 +385,7 @@ fn draw_detail_panel_rows_match_detail_asset_panel_rect_for_multiple_viewports()
                     area,
                     DetailParams {
                         lines: &["body".to_string()],
+                        line_styles: &[],
                         assets: &assets,
                         offset: 0,
                         loading: false,
@@ -418,6 +422,7 @@ fn detail_model_scrollable(lines: Vec<String>, assets: Vec<Asset>, viewport: (u1
             comments: vec![],
             user_map: HashMap::new(),
             lines,
+            line_styles: vec![],
             body_links: vec![],
             assets,
             offset: 0,
@@ -430,6 +435,7 @@ fn detail_model_scrollable(lines: Vec<String>, assets: Vec<Asset>, viewport: (u1
         viewport,
         click_targets: vec![],
         last_loaded: None,
+        selection_mode: false,
     }
 }
 
@@ -656,6 +662,7 @@ fn click_on_projects_screen_with_target_drills_into_tasks() {
         viewport: (80, 24),
         click_targets: vec![],
         last_loaded: None,
+        selection_mode: false,
     };
 
     m.set_click_targets(vec![
@@ -708,6 +715,7 @@ fn detail_model_with_links(
             comments: vec![],
             user_map: HashMap::new(),
             lines,
+            line_styles: vec![],
             body_links,
             assets,
             offset,
@@ -720,6 +728,7 @@ fn detail_model_with_links(
         viewport,
         click_targets: vec![],
         last_loaded: None,
+        selection_mode: false,
     }
 }
 
@@ -884,5 +893,188 @@ fn click_outside_content_text_area_is_noop_when_no_label_row() {
     assert!(
         cmds.is_empty(),
         "click on content top border (row 1) must be a no-op"
+    );
+}
+
+// --- V3-A1: ToggleSelection model tests ---
+
+fn projects_browse_model() -> Model {
+    Model {
+        stack: vec![Screen::Projects {
+            groups: vec![],
+            selected: 0,
+            loading: false,
+        }],
+        should_quit: false,
+        header: empty_header(),
+        viewport: (80, 24),
+        click_targets: vec![],
+        last_loaded: None,
+        selection_mode: false,
+    }
+}
+
+// V3-A1 S5: selection_mode defaults to false on a fresh browse model.
+#[test]
+fn selection_mode_defaults_false_on_browse_model() {
+    use crate::tui::model::init_browse;
+    let (m, _) = init_browse(empty_header());
+    assert!(
+        !m.selection_mode,
+        "selection_mode must default to false on init_browse"
+    );
+}
+
+// V3-A1 S1: pressing 's' (ToggleSelection) flips selection_mode to true and emits
+// exactly one Cmd::SetMouseCapture(false) — capture OFF so the terminal can select text.
+#[test]
+fn toggle_selection_enters_selection_mode_and_emits_set_mouse_capture_false() {
+    let m = projects_browse_model();
+    let (m, cmds) = update(m, Msg::ToggleSelection);
+    assert!(
+        m.selection_mode,
+        "selection_mode must be true after first ToggleSelection"
+    );
+    assert_eq!(
+        cmds.len(),
+        1,
+        "must emit exactly one Cmd after ToggleSelection"
+    );
+    assert_eq!(
+        cmds[0],
+        Cmd::SetMouseCapture(false),
+        "entering selection mode must emit SetMouseCapture(false)"
+    );
+}
+
+// V3-A1 S2: pressing 's' again leaves selection mode and emits SetMouseCapture(true).
+#[test]
+fn toggle_selection_leaves_selection_mode_and_emits_set_mouse_capture_true() {
+    let m = projects_browse_model();
+    let (m, _) = update(m, Msg::ToggleSelection);
+    let (m, cmds) = update(m, Msg::ToggleSelection);
+    assert!(
+        !m.selection_mode,
+        "selection_mode must be false after second ToggleSelection"
+    );
+    assert_eq!(
+        cmds.len(),
+        1,
+        "must emit exactly one Cmd after second ToggleSelection"
+    );
+    assert_eq!(
+        cmds[0],
+        Cmd::SetMouseCapture(true),
+        "leaving selection mode must emit SetMouseCapture(true)"
+    );
+}
+
+// V3-A1 S5: two toggles are idempotent — state and Cmd are the same as the start
+// after an enter+leave pair.
+#[test]
+fn two_toggles_return_to_initial_state() {
+    let m = projects_browse_model();
+    let initial_selection_mode = m.selection_mode;
+    let (m, _) = update(m, Msg::ToggleSelection);
+    let (m, cmds) = update(m, Msg::ToggleSelection);
+    assert_eq!(
+        m.selection_mode, initial_selection_mode,
+        "two toggles must return selection_mode to initial value"
+    );
+    assert_eq!(
+        cmds[0],
+        Cmd::SetMouseCapture(true),
+        "second toggle must re-enable capture"
+    );
+}
+
+// V3-A3: navigation messages produce the same state transitions regardless of selection_mode.
+#[test]
+fn navigation_msgs_behave_identically_in_selection_and_normal_mode() {
+    use crate::tui::model::ProjectGroup;
+
+    let groups = vec![
+        ProjectGroup {
+            project_id: 0,
+            project_name: "P0".into(),
+            instance: "i".into(),
+            tasks: vec![],
+        },
+        ProjectGroup {
+            project_id: 1,
+            project_name: "P1".into(),
+            instance: "i".into(),
+            tasks: vec![],
+        },
+    ];
+
+    let normal_model = Model {
+        stack: vec![Screen::Projects {
+            groups: groups.clone(),
+            selected: 0,
+            loading: false,
+        }],
+        should_quit: false,
+        header: empty_header(),
+        viewport: (80, 24),
+        click_targets: vec![],
+        last_loaded: None,
+        selection_mode: false,
+    };
+    let selection_model = Model {
+        stack: vec![Screen::Projects {
+            groups,
+            selected: 0,
+            loading: false,
+        }],
+        should_quit: false,
+        header: empty_header(),
+        viewport: (80, 24),
+        click_targets: vec![],
+        last_loaded: None,
+        selection_mode: true,
+    };
+
+    let (normal_after, normal_cmds) = update(normal_model, Msg::Down);
+    let (selection_after, selection_cmds) = update(selection_model, Msg::Down);
+
+    assert_eq!(
+        normal_cmds, selection_cmds,
+        "Down must emit identical cmds in both modes"
+    );
+    match (normal_after.top(), selection_after.top()) {
+        (
+            Some(Screen::Projects {
+                selected: n_sel, ..
+            }),
+            Some(Screen::Projects {
+                selected: s_sel, ..
+            }),
+        ) => {
+            assert_eq!(
+                n_sel, s_sel,
+                "Down must advance selection identically in both modes"
+            );
+        }
+        _ => panic!("expected Projects screen in both models"),
+    }
+}
+
+// V3-A3: Quit sets should_quit regardless of selection_mode.
+#[test]
+fn quit_sets_should_quit_regardless_of_selection_mode() {
+    let normal = projects_browse_model();
+    let (normal_after, _) = update(normal, Msg::Quit);
+    assert!(
+        normal_after.should_quit,
+        "Quit must set should_quit in normal mode"
+    );
+
+    let m = projects_browse_model();
+    let (m_in_selection, _) = update(m, Msg::ToggleSelection);
+    let (m_after, _) = update(m_in_selection, Msg::Quit);
+    assert!(
+        m_after.should_quit,
+        "Quit must set should_quit even in selection mode"
     );
 }

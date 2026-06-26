@@ -102,9 +102,11 @@
   "English": "Inglês",
   "Portuguese (Brazil)": "Português (Brasil)",
   "settings": "configurações",
-  "↑/↓ navigate  Enter select  r refresh  Esc/b back  q quit": "↑/↓ navegar  Enter selecionar  r atualizar  Esc/b voltar  q sair",
-  "↑/↓ scroll  r refresh  Esc/b back  q quit  1-9 open asset  d+1-9 download": "↑/↓ rolar  r atualizar  Esc/b voltar  q sair  1-9 abrir anexo  d+1-9 baixar",
-  "↑/↓ scroll  r refresh  Esc/b back  q quit": "↑/↓ rolar  r atualizar  Esc/b voltar  q sair",
+  "↑/↓ navigate  Enter select  r refresh  Esc/b back  q quit  s selection": "↑/↓ navegar  Enter selecionar  r atualizar  Esc/b voltar  q sair  s seleção",
+  "↑/↓ scroll  r refresh  Esc/b back  q quit  1-9 open asset  d+1-9 download  s selection": "↑/↓ rolar  r atualizar  Esc/b voltar  q sair  1-9 abrir anexo  d+1-9 baixar  s seleção",
+  "↑/↓ scroll  r refresh  Esc/b back  q quit  s selection": "↑/↓ rolar  r atualizar  Esc/b voltar  q sair  s seleção",
+  "footer.hint.selection": "s seleção",
+  "footer.selection_indicator": "SELEÇÃO",
   "Updated at": "Atualizado em",
   "Error: instance not found": "Erro: instância não encontrada"
 }

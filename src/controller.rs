@@ -2,22 +2,34 @@ use crate::client::ActiveCollabClient;
 use crate::config::Config;
 use crate::http::Http;
 use crate::models::MineTask;
-use crate::render::{extract_assets, is_openable_url, Asset};
-use crate::store::cache::{TaskCache, UserMapCache};
+use crate::render::{is_openable_url, Asset};
+use crate::store::cache::{ProjectNamesCache, TaskCache, UserMapCache};
 use crate::store::instances::Instance;
 use crate::store::Store;
 use crate::tui::model::{ProjectGroup, TaskRow};
 use anyhow::{anyhow, Context};
+use regex::Regex;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
+
+const PROJECT_NAMES_TTL_SECS: i64 = 24 * 3600;
 
 /// Aggregates open tasks across all target instances, maps project ids to
 /// names, groups tasks by project, and sorts alphabetically.
 ///
+/// Open tasks are always fetched from the network. Project names are served
+/// from `ProjectNamesCache` when fresh; a miss or stale entry triggers one
+/// `list_projects` call and writes the result back to cache.
+///
 /// When `list_projects` fails for an instance, task groups fall back to
 /// using the numeric project id as the name — no crash.
-pub async fn tasks_by_project(targets: &[Instance], http: &Http) -> Vec<ProjectGroup> {
+pub async fn tasks_by_project(
+    db_path: PathBuf,
+    targets: &[Instance],
+    http: &Http,
+) -> Vec<ProjectGroup> {
     let t = std::time::Instant::now();
 
     let mut set: tokio::task::JoinSet<(String, Vec<MineTask>, HashMap<i64, String>)> =
@@ -26,9 +38,12 @@ pub async fn tasks_by_project(targets: &[Instance], http: &Http) -> Vec<ProjectG
     for inst in targets {
         let client = ActiveCollabClient::new(inst.clone(), http.clone());
         let inst_name = inst.name.clone();
+        let db = db_path.clone();
         set.spawn(async move {
-            let (tasks, names) =
-                tokio::join!(client.fetch_open_tasks(), fetch_project_names(&client));
+            let (tasks, names) = tokio::join!(
+                client.fetch_open_tasks(),
+                resolve_project_names(&db, &inst_name, &client)
+            );
             (inst_name, tasks.unwrap_or_default(), names)
         });
     }
@@ -48,6 +63,57 @@ pub async fn tasks_by_project(targets: &[Instance], http: &Http) -> Vec<ProjectG
     let result = build_groups(all_tasks, &project_names);
     crate::timing::record("browse_list_load", t.elapsed());
     result
+}
+
+async fn resolve_project_names(
+    db_path: &Path,
+    instance_name: &str,
+    client: &ActiveCollabClient,
+) -> HashMap<i64, String> {
+    if let Some(names) = fresh_project_names_cache_read(db_path, instance_name) {
+        return names;
+    }
+    let names = fetch_project_names(client).await;
+    if !names.is_empty() {
+        try_project_names_cache_write(db_path, instance_name, &names);
+    }
+    names
+}
+
+fn fresh_project_names_cache_read(
+    db_path: &Path,
+    instance_name: &str,
+) -> Option<HashMap<i64, String>> {
+    let config = Config {
+        db_path: db_path.to_path_buf(),
+        task_cache_ttl_hours: 24,
+    };
+    let store = Store::open(&config).ok()?;
+    let cached = ProjectNamesCache::new(store.conn())
+        .read(instance_name)
+        .ok()??;
+    let age = crate::store::now_epoch_secs() - cached.fetched_at;
+    if age <= PROJECT_NAMES_TTL_SECS {
+        Some(cached.names)
+    } else {
+        None
+    }
+}
+
+fn try_project_names_cache_write(
+    db_path: &Path,
+    instance_name: &str,
+    names: &HashMap<i64, String>,
+) {
+    let config = Config {
+        db_path: db_path.to_path_buf(),
+        task_cache_ttl_hours: 24,
+    };
+    if let Ok(store) = Store::open(&config) {
+        ProjectNamesCache::new(store.conn())
+            .write(instance_name, names)
+            .ok();
+    }
 }
 
 async fn fetch_project_names(client: &ActiveCollabClient) -> HashMap<i64, String> {
@@ -136,6 +202,103 @@ pub struct TaskCore {
     pub task: Value,
     pub comments: Vec<Value>,
     pub assets: Vec<Asset>,
+}
+
+static IMG_SRC_RE: OnceLock<Regex> = OnceLock::new();
+static HREF_RE: OnceLock<Regex> = OnceLock::new();
+
+fn img_src_re() -> &'static Regex {
+    IMG_SRC_RE.get_or_init(|| {
+        Regex::new(r#"(?i)<img\b[^>]*\bsrc=["']([^"']+)["']"#)
+            .expect("img_src_re is a valid pattern")
+    })
+}
+
+fn href_re() -> &'static Regex {
+    HREF_RE.get_or_init(|| {
+        Regex::new(r#"(?i)<a\b[^>]*\bhref=["']([^"']+)["']"#).expect("href_re is a valid pattern")
+    })
+}
+
+fn url_basename(url: &str) -> String {
+    url.split('/')
+        .next_back()
+        .filter(|s| !s.is_empty())
+        .unwrap_or(url)
+        .to_string()
+}
+
+fn assets_from_html(html: &str) -> Vec<Asset> {
+    let mut assets = vec![];
+    for cap in img_src_re().captures_iter(html) {
+        let url = cap[1].to_string();
+        let name = url_basename(&url);
+        assets.push(Asset { name, url });
+    }
+    for cap in href_re().captures_iter(html) {
+        let url = cap[1].to_string();
+        let name = url_basename(&url);
+        assets.push(Asset { name, url });
+    }
+    assets
+}
+
+fn assets_from_attachments(attachments: &Value) -> Vec<Asset> {
+    let arr = match attachments.as_array() {
+        Some(a) => a,
+        None => return vec![],
+    };
+    arr.iter()
+        .filter_map(|att| {
+            let url = att
+                .get("url")
+                .or_else(|| att.get("download_url"))
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())?
+                .to_string();
+            let name = att
+                .get("name")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| url_basename(&url));
+            Some(Asset { name, url })
+        })
+        .collect()
+}
+
+/// Extract all assets (images, links, attachments) from a task JSON.
+///
+/// Deduplicates by URL, preserving first-seen order.
+pub fn extract_assets(task: &Value, comments: &[Value]) -> Vec<Asset> {
+    let mut seen = std::collections::HashSet::new();
+    let mut result = vec![];
+
+    let mut add = |asset: Asset| {
+        if seen.insert(asset.url.clone()) {
+            result.push(asset);
+        }
+    };
+
+    let body_html = task.get("body").and_then(|v| v.as_str()).unwrap_or("");
+    for asset in assets_from_html(body_html) {
+        add(asset);
+    }
+
+    for comment in comments {
+        let comment_html = comment.get("body").and_then(|v| v.as_str()).unwrap_or("");
+        for asset in assets_from_html(comment_html) {
+            add(asset);
+        }
+    }
+
+    if let Some(attachments) = task.get("attachments") {
+        for asset in assets_from_attachments(attachments) {
+            add(asset);
+        }
+    }
+
+    result
 }
 
 /// Fetch or serve from cache task content — no user-directory request.

@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use crate::store::now_iso;
+use crate::store::{now_epoch_secs, now_iso};
 use anyhow::Result;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::Value;
@@ -121,6 +121,65 @@ impl<'a> UserMapCache<'a> {
             "INSERT OR REPLACE INTO user_map_cache (instance, users_json, fetched_at) \
              VALUES (?1, ?2, ?3)",
             params![instance, users_json, now_iso()],
+        )?;
+        Ok(())
+    }
+}
+
+pub struct CachedProjectNames {
+    pub names: HashMap<i64, String>,
+    pub fetched_at: i64,
+}
+
+pub struct ProjectNamesCache<'a> {
+    conn: &'a Connection,
+}
+
+impl<'a> ProjectNamesCache<'a> {
+    pub fn new(conn: &'a Connection) -> Self {
+        ProjectNamesCache { conn }
+    }
+
+    pub fn read(&self, instance: &str) -> Result<Option<CachedProjectNames>> {
+        let row: Option<(String, i64)> = self
+            .conn
+            .query_row(
+                "SELECT names_json, fetched_at FROM project_names_cache WHERE instance=?1",
+                params![instance],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+
+        match row {
+            None => Ok(None),
+            Some((names_json, fetched_at)) => {
+                let raw: HashMap<String, String> = serde_json::from_str(&names_json)?;
+                let names = raw
+                    .into_iter()
+                    .filter_map(|(k, v)| k.parse::<i64>().ok().map(|id| (id, v)))
+                    .collect();
+                Ok(Some(CachedProjectNames { names, fetched_at }))
+            }
+        }
+    }
+
+    pub fn write(&self, instance: &str, names: &HashMap<i64, String>) -> Result<()> {
+        self.write_with_fetched_at(instance, names, now_epoch_secs())
+    }
+
+    pub(crate) fn write_with_fetched_at(
+        &self,
+        instance: &str,
+        names: &HashMap<i64, String>,
+        fetched_at: i64,
+    ) -> Result<()> {
+        let string_keyed: HashMap<String, &String> =
+            names.iter().map(|(k, v)| (k.to_string(), v)).collect();
+        let names_json = serde_json::to_string(&string_keyed)?;
+        self.conn.execute(
+            "INSERT OR REPLACE INTO project_names_cache (instance, names_json, fetched_at) \
+             VALUES (?1, ?2, ?3)",
+            params![instance, names_json, fetched_at],
         )?;
         Ok(())
     }

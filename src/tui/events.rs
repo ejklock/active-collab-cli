@@ -14,6 +14,7 @@ pub fn map_browse_key_event(key: crossterm::event::KeyEvent) -> Option<Msg> {
         KeyCode::PageDown => Some(Msg::PageDown),
         KeyCode::Enter => Some(Msg::Select),
         KeyCode::Char('d') => Some(Msg::TogglePendingDownload),
+        KeyCode::Char('s') => Some(Msg::ToggleSelection),
         KeyCode::Char(c) if c.is_ascii_digit() => Some(Msg::AssetOpen(c)),
         _ => None,
     }

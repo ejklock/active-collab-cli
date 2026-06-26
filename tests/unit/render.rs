@@ -669,52 +669,6 @@ fn render_mine_table_empty_rows_gives_two_lines() {
 }
 
 #[test]
-fn extract_assets_from_body_html() {
-    let task = json!({
-        "id": 1,
-        "body": r#"<img src="https://example.com/img.png"><a href="https://example.com/file.pdf">link</a>"#
-    });
-    let assets = extract_assets(&task, &[]);
-    assert_eq!(assets.len(), 2);
-    assert_eq!(assets[0].name, "img.png");
-    assert_eq!(assets[0].url, "https://example.com/img.png");
-    assert_eq!(assets[1].name, "file.pdf");
-}
-
-#[test]
-fn extract_assets_deduplicates_by_url() {
-    let task = json!({
-        "id": 1,
-        "body": r#"<img src="https://example.com/img.png">"#
-    });
-    let comments = vec![json!({
-        "body": r#"<img src="https://example.com/img.png">"#
-    })];
-    let assets = extract_assets(&task, &comments);
-    assert_eq!(assets.len(), 1, "duplicate URLs must be deduplicated");
-}
-
-#[test]
-fn extract_assets_from_attachments() {
-    let task = json!({
-        "id": 1,
-        "attachments": [
-            { "name": "report.pdf", "url": "https://example.com/report.pdf" }
-        ]
-    });
-    let assets = extract_assets(&task, &[]);
-    assert_eq!(assets.len(), 1);
-    assert_eq!(assets[0].name, "report.pdf");
-}
-
-#[test]
-fn extract_assets_empty_when_no_body_or_attachments() {
-    let task = json!({ "id": 1 });
-    let assets = extract_assets(&task, &[]);
-    assert!(assets.is_empty());
-}
-
-#[test]
 fn wrap_text_empty_input_returns_empty_vec() {
     let result = wrap_text("", 40);
     assert!(
@@ -1313,7 +1267,7 @@ fn build_header_lines_returns_panel_with_details_label() {
 
 #[test]
 fn build_header_lines_no_title_row() {
-    // Title row must be absent — the title band in build_detail_lines shows the name
+    // Title row must be absent — the title band in build_detail_content shows the name
     let task = json!({
         "id": 1,
         "name": "Fix bug"
@@ -1483,12 +1437,13 @@ fn build_header_lines_2_column_alignment() {
     }
 }
 
-// --- U10: build_body_lines (Description panel) ---
+// --- U10: build_body_lines_with_collector (Description panel) ---
 
 #[test]
 fn build_body_lines_is_panel_with_description_label() {
     let task = json!({ "id": 1, "body": "<p>Hello world</p>" });
-    let lines = build_body_lines(&task, 80);
+    let mut collector = LinkCollector::new();
+    let (lines, _) = build_body_lines_with_collector(&task, 80, &mut collector);
     assert!(
         lines[0].starts_with('\u{256D}'),
         "first line must be panel top border: {:?}",
@@ -1508,7 +1463,8 @@ fn build_body_lines_is_panel_with_description_label() {
 #[test]
 fn build_body_lines_includes_wrapped_body_text() {
     let task = json!({ "id": 1, "body": "<p>Some details here</p>" });
-    let lines = build_body_lines(&task, 80);
+    let mut collector = LinkCollector::new();
+    let (lines, _) = build_body_lines_with_collector(&task, 80, &mut collector);
     let joined = lines.join("\n");
     assert!(
         joined.contains("Some details here"),
@@ -1519,7 +1475,8 @@ fn build_body_lines_includes_wrapped_body_text() {
 #[test]
 fn build_body_lines_fallback_when_body_empty() {
     let task = json!({ "id": 1, "body": null });
-    let lines = build_body_lines(&task, 80);
+    let mut collector = LinkCollector::new();
+    let (lines, _) = build_body_lines_with_collector(&task, 80, &mut collector);
     let joined = lines.join("\n");
     assert!(
         joined.contains("(no description)"),
@@ -1535,7 +1492,8 @@ fn build_body_lines_contains_no_meta_or_comment_lines() {
         "name": "My Task",
         "body": "<p>Body content</p>"
     });
-    let lines = build_body_lines(&task, 80);
+    let mut collector = LinkCollector::new();
+    let (lines, _) = build_body_lines_with_collector(&task, 80, &mut collector);
     let joined = lines.join("\n");
     assert!(
         !joined.contains("Task:"),
@@ -1554,7 +1512,8 @@ fn build_body_lines_no_line_exceeds_inner_width() {
         "body": "<p>This is a fairly long body text that should wrap to stay within the width boundary set by the caller</p>"
     });
     let inner_width = 30;
-    let lines = build_body_lines(&task, inner_width);
+    let mut collector = LinkCollector::new();
+    let (lines, _) = build_body_lines_with_collector(&task, inner_width, &mut collector);
     for line in &lines {
         let len = line.chars().count();
         assert!(
@@ -1565,11 +1524,12 @@ fn build_body_lines_no_line_exceeds_inner_width() {
     }
 }
 
-// --- U10: build_comment_lines (Comments panel) ---
+// --- U10: build_comment_lines_with_collector (Comments panel) ---
 
 #[test]
 fn build_comment_lines_empty_for_zero_comments() {
-    let lines = build_comment_lines(&[], 80);
+    let mut collector = LinkCollector::new();
+    let (lines, _) = build_comment_lines_with_collector(&[], 80, &mut collector);
     assert!(
         lines.is_empty(),
         "must return empty vec for no comments: {:?}",
@@ -1584,7 +1544,8 @@ fn build_comment_lines_returns_outer_panel_for_single_comment() {
         "created_on": 1614556800i64,
         "body_plain_text": "LGTM!"
     })];
-    let lines = build_comment_lines(&comments, 60);
+    let mut collector = LinkCollector::new();
+    let (lines, _) = build_comment_lines_with_collector(&comments, 60, &mut collector);
     let joined = lines.join("\n");
     // Must be wrapped in an outer panel
     assert!(
@@ -1619,7 +1580,8 @@ fn build_comment_lines_returns_outer_panel_for_multiple_comments() {
             "body_plain_text": "Second"
         }),
     ];
-    let lines = build_comment_lines(&comments, 60);
+    let mut collector = LinkCollector::new();
+    let (lines, _) = build_comment_lines_with_collector(&comments, 60, &mut collector);
     let joined = lines.join("\n");
     assert!(
         lines[0].contains("Comments"),
@@ -1655,7 +1617,8 @@ fn build_comment_lines_no_line_exceeds_inner_width() {
         "body_plain_text": "A comment body that is quite long and must be wrapped to fit inside the column width"
     })];
     let inner_width = 40;
-    let lines = build_comment_lines(&comments, inner_width);
+    let mut collector = LinkCollector::new();
+    let (lines, _) = build_comment_lines_with_collector(&comments, inner_width, &mut collector);
     for line in &lines {
         let len = line.chars().count();
         assert!(
@@ -1666,7 +1629,7 @@ fn build_comment_lines_no_line_exceeds_inner_width() {
     }
 }
 
-// --- U10: build_detail_lines structure ---
+// --- U10: build_detail_content (full detail layout) ---
 
 #[test]
 fn build_detail_lines_first_line_is_details_panel_top_border() {
@@ -1677,7 +1640,7 @@ fn build_detail_lines_first_line_is_details_panel_top_border() {
         "name": "Fix bug",
         "is_completed": false,
     });
-    let lines = build_detail_lines(&task, &[], &HashMap::new(), 80);
+    let lines = build_detail_content(&task, &[], &HashMap::new(), 80).lines;
     assert!(!lines.is_empty(), "must produce lines");
     let first = &lines[0];
     assert!(
@@ -1705,7 +1668,7 @@ fn build_detail_lines_details_panel_is_first() {
         "name": "My Task",
         "is_completed": false
     });
-    let lines = build_detail_lines(&task, &[], &HashMap::new(), 60);
+    let lines = build_detail_content(&task, &[], &HashMap::new(), 60).lines;
     assert!(
         !lines.is_empty(),
         "must have at least one line: {:?}",
@@ -1726,7 +1689,7 @@ fn build_detail_lines_details_panel_is_first() {
 #[test]
 fn build_detail_lines_description_panel_present() {
     let task = json!({ "id": 1, "name": "T", "body": "<p>Some details here</p>" });
-    let lines = build_detail_lines(&task, &[], &HashMap::new(), 80);
+    let lines = build_detail_content(&task, &[], &HashMap::new(), 80).lines;
     let joined = lines.join("\n");
     assert!(
         joined.contains("Description"),
@@ -1741,7 +1704,7 @@ fn build_detail_lines_description_panel_present() {
 #[test]
 fn build_detail_lines_no_description_fallback() {
     let task = json!({ "id": 1, "name": "T", "body": null });
-    let lines = build_detail_lines(&task, &[], &HashMap::new(), 80);
+    let lines = build_detail_content(&task, &[], &HashMap::new(), 80).lines;
     let joined = lines.join("\n");
     assert!(
         joined.contains("(no description)"),
@@ -1752,7 +1715,7 @@ fn build_detail_lines_no_description_fallback() {
 #[test]
 fn build_detail_lines_no_comments_panel_when_empty() {
     let task = json!({ "id": 1, "name": "T" });
-    let lines = build_detail_lines(&task, &[], &HashMap::new(), 80);
+    let lines = build_detail_content(&task, &[], &HashMap::new(), 80).lines;
     let joined = lines.join("\n");
     // Comments panel must be absent; Details and Description panels ARE present
     assert!(
@@ -1774,7 +1737,7 @@ fn build_detail_lines_comments_panel_present_when_non_empty() {
         "created_on": 1614556800i64,
         "body_plain_text": "LGTM!"
     })];
-    let lines = build_detail_lines(&task, &comments, &HashMap::new(), 60);
+    let lines = build_detail_content(&task, &comments, &HashMap::new(), 60).lines;
     let joined = lines.join("\n");
     assert!(
         joined.contains("Comments"),
@@ -1803,7 +1766,7 @@ fn build_detail_lines_no_title_row_in_meta() {
         "project_id": 5,
         "project_name": "Acme"
     });
-    let lines = build_detail_lines(&task, &[], &HashMap::new(), 80);
+    let lines = build_detail_content(&task, &[], &HashMap::new(), 80).lines;
     let joined = lines.join("\n");
     // The title band contains the name; the Details panel must NOT have a "Title" label row
     assert!(
@@ -1827,7 +1790,7 @@ fn build_detail_lines_no_line_exceeds_inner_width() {
         "body_plain_text": "This is a fairly long comment body that should be word-wrapped to fit within the box"
     })];
     let inner_width = 50;
-    let lines = build_detail_lines(&task, &comments, &HashMap::new(), inner_width);
+    let lines = build_detail_content(&task, &comments, &HashMap::new(), inner_width).lines;
     for line in &lines {
         let len = line.chars().count();
         assert!(
@@ -1853,7 +1816,7 @@ fn build_detail_lines_panels_appear_in_order() {
         "created_on": 1614556800i64,
         "body_plain_text": "A comment"
     })];
-    let lines = build_detail_lines(&task, &comments, &HashMap::new(), 60);
+    let lines = build_detail_content(&task, &comments, &HashMap::new(), 60).lines;
     let joined = lines.join("\n");
 
     // Find positions of panel labels
@@ -1880,7 +1843,7 @@ fn build_detail_lines_multiple_comments_in_outer_panel() {
         json!({ "created_by_name": "Alice", "created_on": 1614556800i64, "body_plain_text": "First" }),
         json!({ "created_by_name": "Bob", "created_on": 1614556801i64, "body_plain_text": "Second" }),
     ];
-    let lines = build_detail_lines(&task, &comments, &HashMap::new(), 50);
+    let lines = build_detail_content(&task, &comments, &HashMap::new(), 50).lines;
     let joined = lines.join("\n");
     assert!(
         joined.contains("Alice"),
@@ -2342,6 +2305,141 @@ fn build_detail_content_long_url_replaced_by_short_label_at_narrow_width() {
             "every line must fit inner_width={inner_width} ({len} chars): {line:?}"
         );
     }
+}
+
+// --- R3a: build_body_lines_with_collector richtext structure (TUI path) ---
+
+#[test]
+fn build_body_lines_ul_produces_bullet_lines() {
+    let task = json!({ "id": 1, "body": "<ul><li>alpha</li><li>beta</li></ul>" });
+    let mut collector = LinkCollector::new();
+    let (lines, _) = build_body_lines_with_collector(&task, 80, &mut collector);
+    let joined = lines.join("\n");
+    assert!(
+        joined.contains("\u{2022} alpha"),
+        "unordered list must produce bullet lines: {joined}"
+    );
+    assert!(
+        joined.contains("\u{2022} beta"),
+        "second bullet item must appear: {joined}"
+    );
+}
+
+#[test]
+fn build_body_lines_ol_produces_numbered_lines() {
+    let task = json!({ "id": 1, "body": "<ol><li>first</li><li>second</li></ol>" });
+    let mut collector = LinkCollector::new();
+    let (lines, _) = build_body_lines_with_collector(&task, 80, &mut collector);
+    let joined = lines.join("\n");
+    assert!(
+        joined.contains("1. first"),
+        "ordered list item 1 must be '1. first': {joined}"
+    );
+    assert!(
+        joined.contains("2. second"),
+        "ordered list item 2 must be '2. second': {joined}"
+    );
+}
+
+#[test]
+fn build_body_lines_blockquote_produces_gt_prefix() {
+    let task = json!({ "id": 1, "body": "<blockquote>quoted text</blockquote>" });
+    let mut collector = LinkCollector::new();
+    let (lines, _) = build_body_lines_with_collector(&task, 80, &mut collector);
+    let joined = lines.join("\n");
+    assert!(
+        joined.contains("> quoted text"),
+        "blockquote must produce '> ' prefix in TUI body: {joined}"
+    );
+}
+
+#[test]
+fn build_body_lines_h2_produces_heading_on_own_line() {
+    let task = json!({ "id": 1, "body": "<h2>Section Title</h2>" });
+    let mut collector = LinkCollector::new();
+    let (lines, _) = build_body_lines_with_collector(&task, 80, &mut collector);
+    let joined = lines.join("\n");
+    assert!(
+        joined.contains("Section Title"),
+        "heading must appear in body lines: {joined}"
+    );
+}
+
+#[test]
+fn build_detail_content_with_list_body_produces_bullet_lines() {
+    let task = json!({
+        "id": 1,
+        "name": "T",
+        "body": "<ul><li>one</li><li>two</li></ul>"
+    });
+    let content = build_detail_content(&task, &[], &HashMap::new(), 80);
+    let joined = content.lines.join("\n");
+    assert!(
+        joined.contains("\u{2022} one"),
+        "detail content must contain bullet 'one': {joined}"
+    );
+    assert!(
+        joined.contains("\u{2022} two"),
+        "detail content must contain bullet 'two': {joined}"
+    );
+}
+
+#[test]
+fn build_detail_content_comment_with_list_body_produces_bullet_lines() {
+    let task = json!({ "id": 1, "name": "T", "body": "" });
+    let comment = json!({
+        "created_by_name": "Alice",
+        "created_on": 1614556800i64,
+        "body": "<ul><li>item A</li><li>item B</li></ul>"
+    });
+    let content = build_detail_content(&task, &[comment], &HashMap::new(), 80);
+    let joined = content.lines.join("\n");
+    assert!(
+        joined.contains("\u{2022} item A"),
+        "comment body list must produce bullets in TUI: {joined}"
+    );
+}
+
+// --- R3a-A4 / BDR 0003: CLI path unchanged ——————————————————————————————
+
+#[test]
+fn render_task_to_str_uses_html_to_text_not_richtext_for_list_body() {
+    // The CLI path must produce the same flat output html_to_text produces —
+    // NOT the structured bullet format of structured_text_with_links.
+    let html = "<ul><li>item one</li><li>item two</li></ul>";
+    let task = json!({ "id": 1, "name": "T", "body": html });
+    let cli_output = render_task_to_str(&task, &[], false, &HashMap::new());
+
+    // CLI flattens html: list items become plain text lines without bullet prefix.
+    // structured_text_with_links would produce "• item one\n• item two".
+    // html_to_text produces "item one\nitem two" (li tag → newline, no prefix).
+    let expected_flat = html_to_text(html);
+    assert!(
+        cli_output.contains(&expected_flat),
+        "CLI output must contain html_to_text flat result, not richtext bullets: {cli_output}"
+    );
+    assert!(
+        !cli_output.contains("\u{2022}"),
+        "CLI output must NOT contain bullet character from richtext: {cli_output}"
+    );
+}
+
+#[test]
+fn render_comments_to_str_uses_html_to_text_not_richtext() {
+    let comment = json!({
+        "created_by_name": "Bob",
+        "created_on": 1614556800i64,
+        "body": "<ul><li>item one</li><li>item two</li></ul>"
+    });
+    let cli_output = render_comments_to_str(&[comment]);
+    assert!(
+        !cli_output.contains("\u{2022}"),
+        "CLI comments output must NOT contain richtext bullet prefix: {cli_output}"
+    );
+    assert!(
+        cli_output.contains("item one"),
+        "CLI comments must still show list item text: {cli_output}"
+    );
 }
 
 // --- V4b-A2: link_index_at ---

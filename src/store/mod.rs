@@ -101,6 +101,11 @@ fn init_schema(conn: &Connection) -> Result<()> {
             instance   TEXT PRIMARY KEY,
             users_json TEXT NOT NULL,
             fetched_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS project_names_cache (
+            instance   TEXT PRIMARY KEY,
+            names_json TEXT NOT NULL,
+            fetched_at INTEGER NOT NULL
         );",
     )?;
     Ok(())
@@ -117,6 +122,14 @@ pub(crate) fn now_iso() -> String {
         "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
         year, month, day, hour, min, sec
     )
+}
+
+pub(crate) fn now_epoch_secs() -> i64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock before epoch")
+        .as_secs() as i64
 }
 
 /// Returns the current wall-clock time in GMT-3 (Brazil / America/Sao_Paulo) as

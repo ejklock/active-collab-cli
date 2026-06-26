@@ -1,8 +1,8 @@
 # Issues
 
-Slices of the Rust rewrite (plan `rust-rewrite`), tracing to
-[PRD 0001](/prd/0001-rust-tui-cli-parity.md) and
-[ADR 0002](/adr/0002-rewrite-in-rust-with-ratatui.md).
+Slices of the Rust rewrite (plan `rust-rewrite`, R0–R8) and the post-parity
+TUI/UX work (V/R/ARCH slices), tracing to
+[PRD 0001](/prd/0001-rust-tui-cli-parity.md) and the ADRs/BDRs each row links.
 
 | # | Slice | Title | Status | Blocked by |
 |---|---|---|---|---|
@@ -15,3 +15,8 @@ Slices of the Rust rewrite (plan `rust-rewrite`), tracing to
 | [0007](/issues/0007-r6-browse-tui-parity.md) | R6 | browse TUI to parity (screens + loader + refresh) | closed | 0006 |
 | [0008](/issues/0008-r7-i18n-assets.md) | R7 | i18n (en + pt-BR) + asset open/download | closed | 0007 |
 | [0009](/issues/0009-r8-cutover.md) | R8 | cutover: promote Rust, remove Python | closed | 0008 |
+| [0010](/issues/0010-v3-text-selection-mode.md) | V3 | selection mode: toggle mouse capture for native text selection | open | — |
+| [0011](/issues/0011-c1-bare-ac-tty-default-mine.md) | C1 | bare `ac` in a TTY defaults to mine | open | — |
+| [0012](/issues/0012-r2-browse-list-project-name-cache.md) | R2 | cache the per-instance project directory (SWR list refresh) | open | — |
+| [0013](/issues/0013-r3-richtext-formatting.md) | R3 | preserve comment/description rich-text via an HTML-subset styled mapper | open | — |
+| [0014](/issues/0014-arch-refactor-render-decompose-relocate.md) | ARCH | refactor render.rs: decompose meta-table, drop dead seams, relocate extract_assets | open | 0010–0013 |

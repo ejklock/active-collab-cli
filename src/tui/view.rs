@@ -84,6 +84,7 @@ pub fn view(model: &Model, frame: &mut Frame, targets: &mut Vec<ClickTarget>) {
         Screen::Detail {
             task,
             lines,
+            line_styles,
             assets,
             offset,
             loading,
@@ -96,6 +97,7 @@ pub fn view(model: &Model, frame: &mut Frame, targets: &mut Vec<ClickTarget>) {
                 chunks[1],
                 DetailParams {
                     lines,
+                    line_styles,
                     assets,
                     offset: *offset,
                     loading: *loading,
@@ -108,10 +110,10 @@ pub fn view(model: &Model, frame: &mut Frame, targets: &mut Vec<ClickTarget>) {
 
     let hint_text = match screen {
         Screen::Detail { assets, .. } if !assets.is_empty() => {
-            t("↑/↓ scroll  r refresh  Esc/b back  q quit  1-9 open asset  d+1-9 download")
+            t("↑/↓ scroll  r refresh  Esc/b back  q quit  1-9 open asset  d+1-9 download  s selection")
         }
-        Screen::Detail { .. } => t("↑/↓ scroll  r refresh  Esc/b back  q quit"),
-        _ => t("↑/↓ navigate  Enter select  r refresh  Esc/b back  q quit"),
+        Screen::Detail { .. } => t("↑/↓ scroll  r refresh  Esc/b back  q quit  s selection"),
+        _ => t("↑/↓ navigate  Enter select  r refresh  Esc/b back  q quit  s selection"),
     };
     let footer_style = theme::footer_style();
 
@@ -120,6 +122,7 @@ pub fn view(model: &Model, frame: &mut Frame, targets: &mut Vec<ClickTarget>) {
         chunks[2],
         hint_text,
         model.last_loaded.as_deref(),
+        model.selection_mode,
         footer_style,
     );
 }
@@ -129,27 +132,44 @@ fn render_footer(
     area: ratatui::layout::Rect,
     hint: String,
     last_loaded: Option<&str>,
+    selection_mode: bool,
     style: ratatui::style::Style,
 ) {
     let timestamp_text = last_loaded
         .and_then(format_br_datetime)
         .map(|formatted| format!("{} {}", t("Updated at"), formatted));
 
-    let Some(ts) = timestamp_text else {
+    let indicator = if selection_mode {
+        Some(t("footer.selection_indicator"))
+    } else {
+        None
+    };
+
+    let right_segments: Vec<String> = [indicator, timestamp_text].into_iter().flatten().collect();
+
+    if right_segments.is_empty() {
         let footer = Paragraph::new(hint).style(style);
         frame.render_widget(footer, area);
         return;
-    };
+    }
 
-    let ts_width = ts.chars().count() as u16;
+    let right_text = right_segments.join("  ");
+    let right_width = right_text.chars().count() as u16;
     let footer_chunks = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Min(0), Constraint::Length(ts_width)])
+        .constraints([Constraint::Min(0), Constraint::Length(right_width)])
         .split(area);
 
     let hint_widget = Paragraph::new(hint).style(style);
     frame.render_widget(hint_widget, footer_chunks[0]);
 
-    let ts_widget = Paragraph::new(ts).style(style).alignment(Alignment::Right);
-    frame.render_widget(ts_widget, footer_chunks[1]);
+    let indicator_style = if selection_mode {
+        theme::selection_indicator_style()
+    } else {
+        style
+    };
+    let right_widget = Paragraph::new(right_text)
+        .style(indicator_style)
+        .alignment(Alignment::Right);
+    frame.render_widget(right_widget, footer_chunks[1]);
 }

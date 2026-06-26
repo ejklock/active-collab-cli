@@ -1,5 +1,5 @@
 use super::*;
-use crate::store::cache::UserMapCache;
+use crate::store::cache::{ProjectNamesCache, UserMapCache};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -65,8 +65,9 @@ async fn tasks_by_project_aggregates_across_two_instances() {
     let inst1 = make_instance("inst1", &server1.uri(), Some(1));
     let inst2 = make_instance("inst2", &server2.uri(), Some(2));
     let http = make_http();
+    let (_dir, db_path) = make_db_path();
 
-    let groups = tasks_by_project(&[inst1, inst2], &http).await;
+    let groups = tasks_by_project(db_path, &[inst1, inst2], &http).await;
 
     assert_eq!(groups.len(), 2);
     assert_eq!(groups[0].project_name, "Acme Project");
@@ -105,7 +106,8 @@ async fn tasks_by_project_groups_sorted_alphabetically() {
 
     let inst = make_instance("inst", &server.uri(), Some(7));
     let http = make_http();
-    let groups = tasks_by_project(&[inst], &http).await;
+    let (_dir, db_path) = make_db_path();
+    let groups = tasks_by_project(db_path, &[inst], &http).await;
 
     assert_eq!(groups.len(), 2);
     assert_eq!(groups[0].project_name, "Alpha");
@@ -135,7 +137,8 @@ async fn tasks_by_project_falls_back_to_numeric_id_when_list_projects_fails() {
 
     let inst = make_instance("inst", &server.uri(), Some(5));
     let http = make_http();
-    let groups = tasks_by_project(&[inst], &http).await;
+    let (_dir, db_path) = make_db_path();
+    let groups = tasks_by_project(db_path, &[inst], &http).await;
 
     assert_eq!(groups.len(), 1);
     assert_eq!(groups[0].project_name, "42");
@@ -160,7 +163,8 @@ async fn tasks_by_project_empty_when_no_tasks() {
 
     let inst = make_instance("inst", &server.uri(), Some(3));
     let http = make_http();
-    let groups = tasks_by_project(&[inst], &http).await;
+    let (_dir, db_path) = make_db_path();
+    let groups = tasks_by_project(db_path, &[inst], &http).await;
 
     assert!(groups.is_empty());
 }
@@ -194,7 +198,8 @@ async fn tasks_within_a_group_sorted_by_task_number() {
 
     let inst = make_instance("inst", &server.uri(), Some(9));
     let http = make_http();
-    let groups = tasks_by_project(&[inst], &http).await;
+    let (_dir, db_path) = make_db_path();
+    let groups = tasks_by_project(db_path, &[inst], &http).await;
 
     assert_eq!(groups.len(), 1);
     let task_names: Vec<&str> = groups[0].tasks.iter().map(|t| t.name.as_str()).collect();
@@ -843,7 +848,8 @@ async fn load_task_core_assignee_line_shows_id_when_user_map_empty() {
     let core = load_task_core(fix.db_path, fix.inst, fix.http, 10, 99, false).await;
 
     let empty_map = std::collections::HashMap::new();
-    let lines = crate::render::build_detail_lines(&core.task, &core.comments, &empty_map, 80);
+    let lines =
+        crate::render::build_detail_content(&core.task, &core.comments, &empty_map, 80).lines;
 
     let assignee_line = lines
         .iter()
@@ -859,7 +865,7 @@ async fn load_task_core_assignee_line_shows_id_when_user_map_empty() {
         "comments must render fully even without user_map"
     );
     // The task name is now promoted to the frame border title; it must NOT appear
-    // duplicated in the scroll body produced by build_detail_lines.
+    // duplicated in the scroll body produced by build_detail_content.
     assert!(
         !lines.iter().any(|l| l.contains("Assigned Task")),
         "task name must NOT appear in the scroll body (it lives in the frame border): {lines:?}"
@@ -1125,8 +1131,9 @@ async fn tasks_by_project_concurrent_aggregates_across_two_instances() {
     let inst1 = make_instance("c-inst1", &server1.uri(), Some(1));
     let inst2 = make_instance("c-inst2", &server2.uri(), Some(2));
     let http = make_http();
+    let (_dir, db_path) = make_db_path();
 
-    let groups = tasks_by_project(&[inst1, inst2], &http).await;
+    let groups = tasks_by_project(db_path, &[inst1, inst2], &http).await;
 
     assert_eq!(groups.len(), 2, "must aggregate tasks from both instances");
 
@@ -1194,8 +1201,9 @@ async fn tasks_by_project_failing_instance_excluded_other_still_present() {
     let inst_ok = make_instance("ok-inst", &server_ok.uri(), Some(1));
     let inst_err = make_instance("err-inst", &server_err.uri(), Some(2));
     let http = make_http();
+    let (_dir, db_path) = make_db_path();
 
-    let groups = tasks_by_project(&[inst_ok, inst_err], &http).await;
+    let groups = tasks_by_project(db_path, &[inst_ok, inst_err], &http).await;
 
     assert_eq!(
         groups.len(),
@@ -1264,4 +1272,281 @@ async fn task_detail_refresh_true_bypasses_user_map_cache() {
         Some("Fresh User"),
         "fresh result must be written back to user_map_cache"
     );
+}
+
+fn seed_project_names_cache(
+    db_path: &std::path::Path,
+    inst_name: &str,
+    names: &std::collections::HashMap<i64, String>,
+) {
+    let config = crate::config::Config {
+        db_path: db_path.to_path_buf(),
+        task_cache_ttl_hours: 24,
+    };
+    let store = crate::store::Store::open(&config).unwrap();
+    ProjectNamesCache::new(store.conn())
+        .write(inst_name, names)
+        .unwrap();
+}
+
+fn seed_project_names_cache_stale(
+    db_path: &std::path::Path,
+    inst_name: &str,
+    names: &std::collections::HashMap<i64, String>,
+) {
+    let config = crate::config::Config {
+        db_path: db_path.to_path_buf(),
+        task_cache_ttl_hours: 24,
+    };
+    let store = crate::store::Store::open(&config).unwrap();
+    let stale_ts = crate::store::now_epoch_secs() - (25 * 3600);
+    ProjectNamesCache::new(store.conn())
+        .write_with_fetched_at(inst_name, names, stale_ts)
+        .unwrap();
+}
+
+fn read_project_names_cache(
+    db_path: &std::path::Path,
+    inst_name: &str,
+) -> Option<std::collections::HashMap<i64, String>> {
+    let config = crate::config::Config {
+        db_path: db_path.to_path_buf(),
+        task_cache_ttl_hours: 24,
+    };
+    let store = crate::store::Store::open(&config).ok()?;
+    ProjectNamesCache::new(store.conn())
+        .read(inst_name)
+        .ok()?
+        .map(|c| c.names)
+}
+
+// R2-A1: warm cache — list_projects NOT called, open-tasks IS called, names from cache
+#[tokio::test]
+async fn tasks_by_project_warm_cache_skips_list_projects() {
+    let server = MockServer::start().await;
+    let (_dir, db_path) = make_db_path();
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/users/1/tasks"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "tasks": [
+                { "id": 10, "task_number": 1, "name": "Warm Task", "project_id": 100,
+                  "is_completed": false, "is_trashed": false }
+            ]
+        })))
+        .mount(&server)
+        .await;
+
+    let names: std::collections::HashMap<i64, String> = [(100i64, "Cached Project".to_string())]
+        .into_iter()
+        .collect();
+    seed_project_names_cache(&db_path, "inst", &names);
+
+    let inst = make_instance("inst", &server.uri(), Some(1));
+    let http = make_http();
+
+    let groups = tasks_by_project(db_path, &[inst], &http).await;
+
+    let reqs = server.received_requests().await.unwrap();
+    let projects_calls: Vec<_> = reqs
+        .iter()
+        .filter(|r| r.url.path() == "/api/v1/projects")
+        .collect();
+    assert!(
+        projects_calls.is_empty(),
+        "warm cache must not call list_projects: got {projects_calls:?}"
+    );
+
+    let tasks_calls: Vec<_> = reqs
+        .iter()
+        .filter(|r| r.url.path().contains("/tasks"))
+        .collect();
+    assert!(!tasks_calls.is_empty(), "open-tasks must always be fetched");
+
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].project_name, "Cached Project");
+    assert_eq!(groups[0].tasks[0].name, "Warm Task");
+}
+
+// R2-A2: cold cache — list_projects called once, written to cache
+#[tokio::test]
+async fn tasks_by_project_cold_cache_fetches_and_writes_project_names() {
+    let server = MockServer::start().await;
+    let (_dir, db_path) = make_db_path();
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/users/1/tasks"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "tasks": [
+                { "id": 10, "task_number": 1, "name": "Cold Task", "project_id": 200,
+                  "is_completed": false, "is_trashed": false }
+            ]
+        })))
+        .mount(&server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/projects"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            { "id": 200, "name": "Fetched Project" }
+        ])))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let inst = make_instance("inst", &server.uri(), Some(1));
+    let http = make_http();
+
+    let groups = tasks_by_project(db_path.clone(), &[inst], &http).await;
+
+    server.verify().await;
+
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].project_name, "Fetched Project");
+
+    let cached = read_project_names_cache(&db_path, "inst");
+    assert!(
+        cached.is_some(),
+        "project names must be written to cache after fetch"
+    );
+    assert_eq!(
+        cached.unwrap().get(&200).map(|s| s.as_str()),
+        Some("Fetched Project"),
+        "cached names must match fetched names"
+    );
+}
+
+// R2-A2 (stale branch): cache entry older than PROJECT_NAMES_TTL_SECS triggers one list_projects
+// re-fetch and writes refreshed names back to the cache.
+#[tokio::test]
+async fn tasks_by_project_stale_cache_refetches_list_projects() {
+    let server = MockServer::start().await;
+    let (_dir, db_path) = make_db_path();
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/users/1/tasks"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "tasks": [
+                { "id": 10, "task_number": 1, "name": "Stale Task", "project_id": 300,
+                  "is_completed": false, "is_trashed": false }
+            ]
+        })))
+        .mount(&server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/projects"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            { "id": 300, "name": "Refreshed Project" }
+        ])))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let stale_names: std::collections::HashMap<i64, String> =
+        [(300i64, "Stale Project".to_string())]
+            .into_iter()
+            .collect();
+    seed_project_names_cache_stale(&db_path, "inst", &stale_names);
+
+    let inst = make_instance("inst", &server.uri(), Some(1));
+    let http = make_http();
+
+    let groups = tasks_by_project(db_path.clone(), &[inst], &http).await;
+
+    server.verify().await;
+
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].project_name, "Refreshed Project");
+
+    let cached = read_project_names_cache(&db_path, "inst");
+    assert!(
+        cached.is_some(),
+        "refreshed project names must be written back to cache after stale re-fetch"
+    );
+    assert_eq!(
+        cached.unwrap().get(&300).map(|s| s.as_str()),
+        Some("Refreshed Project"),
+        "cache must contain the freshly fetched name, not the stale one"
+    );
+}
+
+// R2-A3: open tasks always fetched regardless of cache state
+#[tokio::test]
+async fn tasks_by_project_always_fetches_open_tasks() {
+    let server = MockServer::start().await;
+    let (_dir, db_path) = make_db_path();
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/users/1/tasks"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "tasks": [
+                { "id": 1, "task_number": 1, "name": "Always Fresh", "project_id": 300,
+                  "is_completed": false, "is_trashed": false }
+            ]
+        })))
+        .expect(2)
+        .mount(&server)
+        .await;
+
+    let names: std::collections::HashMap<i64, String> = [(300i64, "Stable Project".to_string())]
+        .into_iter()
+        .collect();
+    seed_project_names_cache(&db_path, "inst", &names);
+
+    let inst = make_instance("inst", &server.uri(), Some(1));
+    let http = make_http();
+
+    tasks_by_project(db_path.clone(), &[inst.clone()], &http).await;
+    tasks_by_project(db_path.clone(), &[inst], &http).await;
+
+    server.verify().await;
+}
+
+// --- extract_assets (moved from render domain to controller domain) ---
+
+#[test]
+fn extract_assets_from_body_html() {
+    let task = serde_json::json!({
+        "id": 1,
+        "body": r#"<img src="https://example.com/img.png"><a href="https://example.com/file.pdf">link</a>"#
+    });
+    let assets = extract_assets(&task, &[]);
+    assert_eq!(assets.len(), 2);
+    assert_eq!(assets[0].name, "img.png");
+    assert_eq!(assets[0].url, "https://example.com/img.png");
+    assert_eq!(assets[1].name, "file.pdf");
+}
+
+#[test]
+fn extract_assets_deduplicates_by_url() {
+    let task = serde_json::json!({
+        "id": 1,
+        "body": r#"<img src="https://example.com/img.png">"#
+    });
+    let comments = vec![serde_json::json!({
+        "body": r#"<img src="https://example.com/img.png">"#
+    })];
+    let assets = extract_assets(&task, &comments);
+    assert_eq!(assets.len(), 1, "duplicate URLs must be deduplicated");
+}
+
+#[test]
+fn extract_assets_from_attachments() {
+    let task = serde_json::json!({
+        "id": 1,
+        "attachments": [
+            { "name": "report.pdf", "url": "https://example.com/report.pdf" }
+        ]
+    });
+    let assets = extract_assets(&task, &[]);
+    assert_eq!(assets.len(), 1);
+    assert_eq!(assets[0].name, "report.pdf");
+}
+
+#[test]
+fn extract_assets_empty_when_no_body_or_attachments() {
+    let task = serde_json::json!({ "id": 1 });
+    let assets = extract_assets(&task, &[]);
+    assert!(assets.is_empty());
 }

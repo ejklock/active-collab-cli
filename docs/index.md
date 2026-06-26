@@ -29,13 +29,35 @@ See [adr/](/adr/index.md).
 
 - [0001](/adr/0001-replace-curses-tui-with-textual.md) — Replace the curses TUI with Textual *(Superseded by 0002)*
 - [0002](/adr/0002-rewrite-in-rust-with-ratatui.md) — Rewrite the application in Rust (ratatui + crossterm), built and shipped via Docker *(Accepted)*
+- [0003](/adr/0003-http-transport-and-mocked-server-testing.md) — HTTP transport + mocked-server testing *(Accepted)*
+- [0004](/adr/0004-tests-in-tests-dir-via-path-include.md) — Unit tests under tests/unit/ via #[path] *(Accepted)*
+- [0005](/adr/0005-i18n-catalog-as-embedded-json.md) — i18n catalog as embedded JSON *(Accepted)*
+- [0006](/adr/0006-promote-crate-to-repo-root.md) — Promote the Rust crate to the repo root, remove Python *(Accepted)*
+- [0007](/adr/0007-tui-module-structure.md) — Layered TUI module tree under src/tui/ *(Accepted)*
+- [0008](/adr/0008-async-event-loop-with-eventstream-and-select.md) — Async event loop (EventStream + tokio::select!) *(Accepted)*
+- [0009](/adr/0009-tui-visual-redesign-vibrant-dashboard.md) — TUI visual redesign — vibrant dashboard *(Accepted)*
+- [0010](/adr/0010-detail-sectioned-panels-focus-scroll.md) — Detail screen as fixed, independently-scrollable sections *(Reverted)*
+- [0012](/adr/0012-mouse-capture-toggle-for-text-selection.md) — Toggle terminal mouse capture for native text selection (V3) *(Accepted)*
+- [0013](/adr/0013-tty-gated-default-subcommand.md) — A bare `ac` invocation in a TTY defaults to `mine` (C1) *(Accepted)*
+- [0014](/adr/0014-browse-list-project-name-cache-swr.md) — Browse-list project-name cache (SWR) (R2) *(Accepted)*
+- [0015](/adr/0015-richtext-html-subset-styled-segments.md) — Render HTML as styled segments over a tag subset (R3) *(Accepted)*
+- [0016](/adr/0016-refactor-render-decompose-relocate.md) — Refactor render.rs: decompose, drop dead seams, relocate (ARCH) *(Accepted)*
 
 ## Behavior Decision Records (BDR)
 
 See [bdr/](/bdr/index.md).
 
 - [0001](/bdr/0001-task-list-navigation.md) — Task list navigation: mouse, scroll, and bounded selection *(Accepted)*
+- [0002](/bdr/0002-token-host-isolation.md) — Token host-isolation *(Accepted)*
+- [0003](/bdr/0003-cli-command-output-parity.md) — CLI command-output parity *(Accepted; §3 amended by 0007)*
+- [0004](/bdr/0004-browse-navigation-screen-stack.md) — Browse navigation: a screen stack with bounded selection *(Accepted)*
+- [0005](/bdr/0005-loader-single-flight-refresh.md) — Loader and single-flight refresh *(Accepted)*
+- [0006](/bdr/0006-selection-mode-mouse-capture-toggle.md) — Selection mode: mouse-capture toggle (V3) *(Accepted)*
+- [0007](/bdr/0007-bare-invocation-tty-default.md) — Bare invocation in a TTY defaults to mine (C1) *(Accepted)*
+- [0008](/bdr/0008-browse-list-refresh-cached-directory.md) — Browse-list refresh: cached project directory (R2) *(Accepted)*
+- [0009](/bdr/0009-richtext-formatting-detail-view.md) — Rich-text formatting in the detail view (R3) *(Accepted)*
 
 ## Issues
 
-See [issues/](/issues/index.md) — slices R0–R8 of the Rust rewrite.
+See [issues/](/issues/index.md) — slices R0–R8 of the Rust rewrite plus the
+post-parity TUI/UX slices (V3, C1, R2, R3, ARCH).

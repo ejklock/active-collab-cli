@@ -277,3 +277,51 @@ fn parse_missing_required_ref_for_get_returns_error() {
     let err = parse(&["get"]);
     assert!(err.is_err());
 }
+
+#[test]
+fn bare_no_command_action_tty_yields_run_mine() {
+    assert_eq!(bare_no_command_action(true), BareNoCommandAction::RunMine);
+}
+
+#[test]
+fn bare_no_command_action_non_tty_yields_help_exit2() {
+    assert_eq!(
+        bare_no_command_action(false),
+        BareNoCommandAction::HelpExit2
+    );
+}
+
+// Verify normalize_argv still takes precedence: a bare ref becomes `get`,
+// never reaching the no-command default.
+#[test]
+fn bare_ref_routes_to_get_before_no_command_default() {
+    let result = normalize_argv(&argv(&["665/75159"]), None);
+    assert_eq!(result.first().map(String::as_str), Some("get"));
+}
+
+// Verify task-branch normalization takes precedence over the no-command default.
+#[test]
+fn task_branch_routes_to_current_before_no_command_default() {
+    let result = normalize_argv(&[], Some("feature/665-75159"));
+    assert_eq!(result, argv(&["current"]));
+}
+
+// Empty argv with a non-task branch leaves argv empty; the TTY function governs what follows.
+#[test]
+fn empty_argv_non_task_branch_leaves_argv_empty_for_tty_decision() {
+    let result = normalize_argv(&[], Some("main"));
+    assert!(result.is_empty());
+}
+
+// Explicit subcommands parse successfully regardless of TTY state.
+#[test]
+fn explicit_mine_subcommand_parses_to_some_command() {
+    let cli = parse(&["mine"]).unwrap();
+    assert!(matches!(cli.command, Some(Command::Mine(_))));
+}
+
+#[test]
+fn explicit_get_subcommand_parses_to_some_command() {
+    let cli = parse(&["get", "1/2"]).unwrap();
+    assert!(matches!(cli.command, Some(Command::Get(_))));
+}
