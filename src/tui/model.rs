@@ -153,6 +153,9 @@ pub enum Screen {
         user_map: HashMap<i64, String>,
         /// Memoized line cache rebuilt by reflow_detail.
         lines: Vec<String>,
+        /// Collected URLs from description + comments in label order (index N-1 = "↗ Link N").
+        /// Populated exclusively by reflow_detail; initialized empty at construction.
+        body_links: Vec<String>,
         assets: Vec<Asset>,
         offset: usize,
         loading: bool,
@@ -377,6 +380,7 @@ impl Model {
             comments,
             user_map,
             lines,
+            body_links,
             rendered_width,
             offset,
             loading,
@@ -390,7 +394,9 @@ impl Model {
             return;
         }
 
-        *lines = crate::render::build_detail_lines(task, comments, user_map, inner_width);
+        let content = crate::render::build_detail_content(task, comments, user_map, inner_width);
+        *lines = content.lines;
+        *body_links = content.links;
         *rendered_width = inner_width;
 
         clamp_offset(offset, lines.len());
@@ -484,9 +490,9 @@ fn handle_page_down(mut model: Model) -> Model {
     model
 }
 
-fn handle_click(model: Model, _column: u16, row: u16) -> (Model, Vec<Cmd>) {
+fn handle_click(model: Model, column: u16, row: u16) -> (Model, Vec<Cmd>) {
     match model.top() {
-        Some(Screen::Detail { .. }) => handle_click_detail(model, row),
+        Some(Screen::Detail { .. }) => handle_click_detail(model, column, row),
         Some(_) => handle_click_list(model, row),
         None => (model, vec![]),
     }
@@ -509,7 +515,64 @@ fn handle_click_list(model: Model, row: u16) -> (Model, Vec<Cmd>) {
     handle_select(model)
 }
 
-fn handle_click_detail(model: Model, row: u16) -> (Model, Vec<Cmd>) {
+fn handle_click_detail(model: Model, column: u16, row: u16) -> (Model, Vec<Cmd>) {
+    if let Some(cmd) = body_link_cmd_at(&model, column, row) {
+        return (model, vec![cmd]);
+    }
+    asset_panel_cmd_at(model, row)
+}
+
+/// Try to resolve a body-link click in the Detail content text area.
+///
+/// Returns a `Cmd::OpenAsset` when the click lands on a "↗ Link N" label
+/// whose index is within `body_links` and whose URL passes `is_openable_url`.
+/// Returns `None` for any other click position (border, padding, plain text,
+/// out-of-range label, or a click that falls outside the text viewport).
+fn body_link_cmd_at(model: &Model, column: u16, row: u16) -> Option<Cmd> {
+    use crate::tui::screens::asset_panel_height;
+
+    let Screen::Detail {
+        instance,
+        assets,
+        lines,
+        body_links,
+        offset,
+        ..
+    } = model.top()?
+    else {
+        return None;
+    };
+
+    let (_viewport_cols, viewport_rows) = model.viewport;
+    let text_top: u16 = 2;
+    let panel_h = asset_panel_height(assets.len());
+    let content_text_height =
+        viewport_rows.saturating_sub(DETAIL_CHROME_ROWS.saturating_add(panel_h));
+
+    if row < text_top || row >= text_top + content_text_height {
+        return None;
+    }
+
+    let logical_line = offset + (row - text_top) as usize;
+    let line = lines.get(logical_line)?;
+    let char_col = (column as usize).saturating_sub(1);
+    let n = crate::render::link_index_at(line, char_col)?;
+    let url = body_links.get(n.checked_sub(1)?)?;
+    if !crate::render::is_openable_url(url) {
+        return None;
+    }
+    Some(Cmd::OpenAsset {
+        instance: instance.clone(),
+        url: url.clone(),
+    })
+}
+
+/// Try to resolve an asset-panel click in the Detail screen.
+///
+/// Returns the appropriate `Cmd` (open or download) when the click lands on
+/// an asset row inside the panel. Returns `(model, vec![])` for any click that
+/// misses the panel or falls on a border row.
+fn asset_panel_cmd_at(model: Model, row: u16) -> (Model, Vec<Cmd>) {
     use crate::tui::screens::detail_asset_panel_rect;
     use ratatui::layout::Rect;
 
@@ -602,6 +665,7 @@ fn handle_select(mut model: Model) -> (Model, Vec<Cmd>) {
                     comments: vec![],
                     user_map: HashMap::new(),
                     lines: vec![],
+                    body_links: vec![],
                     assets: vec![],
                     offset: 0,
                     loading: true,

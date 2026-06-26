@@ -2128,3 +2128,332 @@ fn asset_link_line_index_is_1_based_and_matches_position() {
         "index 9 must appear as [9]: {line_9:?}"
     );
 }
+
+// --- V4a: replace_urls_with_labels ---
+
+#[test]
+fn replace_urls_with_labels_single_url_becomes_link_1_and_is_collected() {
+    let mut col = LinkCollector::new();
+    let result = replace_urls_with_labels("Visit https://example.com/docs for info", &mut col);
+    assert_eq!(result, "Visit \u{2197} Link 1 for info");
+    assert_eq!(col.urls, vec!["https://example.com/docs"]);
+    assert_eq!(col.next_index, 2);
+}
+
+#[test]
+fn replace_urls_with_labels_multiple_urls_get_sequential_indices() {
+    let mut col = LinkCollector::new();
+    let result = replace_urls_with_labels(
+        "See https://first.com and https://second.org for both",
+        &mut col,
+    );
+    assert_eq!(result, "See \u{2197} Link 1 and \u{2197} Link 2 for both");
+    assert_eq!(col.urls, vec!["https://first.com", "https://second.org"]);
+}
+
+#[test]
+fn replace_urls_with_labels_text_with_no_url_is_unchanged_and_collector_empty() {
+    let mut col = LinkCollector::new();
+    let result = replace_urls_with_labels("No links here at all.", &mut col);
+    assert_eq!(result, "No links here at all.");
+    assert!(col.urls.is_empty());
+    assert_eq!(col.next_index, 1);
+}
+
+#[test]
+fn replace_urls_with_labels_empty_text_is_unchanged() {
+    let mut col = LinkCollector::new();
+    let result = replace_urls_with_labels("", &mut col);
+    assert_eq!(result, "");
+    assert!(col.urls.is_empty());
+}
+
+#[test]
+fn replace_urls_with_labels_www_form_is_matched() {
+    let mut col = LinkCollector::new();
+    let result = replace_urls_with_labels("Go to www.example.com now", &mut col);
+    assert_eq!(result, "Go to \u{2197} Link 1 now");
+    assert_eq!(col.urls, vec!["www.example.com"]);
+}
+
+#[test]
+fn replace_urls_with_labels_shared_collector_yields_global_numbering() {
+    let mut col = LinkCollector::new();
+    let desc = replace_urls_with_labels("Desc: https://desc.example.com/page", &mut col);
+    let comment = replace_urls_with_labels("Comment: https://comment.example.com/api", &mut col);
+    assert_eq!(desc, "Desc: \u{2197} Link 1");
+    assert_eq!(comment, "Comment: \u{2197} Link 2");
+    assert_eq!(
+        col.urls,
+        vec![
+            "https://desc.example.com/page",
+            "https://comment.example.com/api"
+        ]
+    );
+}
+
+// --- V4a: build_detail_content ---
+
+#[test]
+fn build_detail_content_url_in_description_becomes_label_and_is_collected() {
+    let task = json!({
+        "id": 1,
+        "name": "T",
+        "body": "<p>See https://example.com/info for details.</p>"
+    });
+    let content = build_detail_content(&task, &[], &HashMap::new(), 80);
+    let joined = content.lines.join("\n");
+    assert!(
+        joined.contains("\u{2197} Link 1"),
+        "label must appear in lines: {joined}"
+    );
+    assert!(
+        !joined.contains("https://"),
+        "raw URL must not appear in lines: {joined}"
+    );
+    assert_eq!(content.links, vec!["https://example.com/info"]);
+}
+
+#[test]
+fn build_detail_content_url_in_comment_body_becomes_label_with_global_index() {
+    let task = json!({ "id": 1, "name": "T", "body": "<p>No URL here.</p>" });
+    let comment = json!({
+        "created_by_name": "Alice",
+        "created_on": 1614556800i64,
+        "body_plain_text": "Ref: https://api.example.com/v1"
+    });
+    let content = build_detail_content(&task, &[comment], &HashMap::new(), 80);
+    let joined = content.lines.join("\n");
+    assert!(
+        joined.contains("\u{2197} Link 1"),
+        "comment URL label must appear: {joined}"
+    );
+    assert_eq!(content.links, vec!["https://api.example.com/v1"]);
+}
+
+#[test]
+fn build_detail_content_desc_and_comment_urls_numbered_globally() {
+    let task = json!({
+        "id": 1,
+        "name": "T",
+        "body": "<p>Visit https://desc.example.com/page first.</p>"
+    });
+    let comment = json!({
+        "created_by_name": "Bob",
+        "created_on": 1614556800i64,
+        "body_plain_text": "Also see https://comment.example.com/api"
+    });
+    let content = build_detail_content(&task, &[comment], &HashMap::new(), 80);
+    let joined = content.lines.join("\n");
+    assert!(
+        joined.contains("\u{2197} Link 1"),
+        "description URL must be Link 1: {joined}"
+    );
+    assert!(
+        joined.contains("\u{2197} Link 2"),
+        "comment URL must be Link 2: {joined}"
+    );
+    assert_eq!(
+        content.links,
+        vec![
+            "https://desc.example.com/page",
+            "https://comment.example.com/api"
+        ]
+    );
+}
+
+#[test]
+fn build_detail_content_no_url_yields_empty_links_vec() {
+    let task = json!({ "id": 1, "name": "T", "body": "<p>No links here.</p>" });
+    let content = build_detail_content(&task, &[], &HashMap::new(), 80);
+    assert!(content.links.is_empty());
+}
+
+// --- V4a: link_segments tags ↗ Link N labels as is_link ---
+
+#[test]
+fn link_segments_link_label_is_tagged_as_link() {
+    let line = "Some text \u{2197} Link 1 and more";
+    let segs = link_segments(line);
+    let link_segs: Vec<_> = segs.iter().filter(|s| s.is_link).collect();
+    assert_eq!(
+        link_segs.len(),
+        1,
+        "label must be one link segment: {segs:?}"
+    );
+    assert_eq!(link_segs[0].text, "\u{2197} Link 1");
+}
+
+#[test]
+fn link_segments_multiple_link_labels_all_tagged() {
+    let line = "\u{2197} Link 1 then \u{2197} Link 2 end";
+    let segs = link_segments(line);
+    let link_segs: Vec<_> = segs.iter().filter(|s| s.is_link).collect();
+    assert_eq!(
+        link_segs.len(),
+        2,
+        "both labels must be link segments: {segs:?}"
+    );
+    assert_eq!(link_segs[0].text, "\u{2197} Link 1");
+    assert_eq!(link_segs[1].text, "\u{2197} Link 2");
+}
+
+#[test]
+fn link_segments_link_label_and_url_in_same_line_both_tagged() {
+    let line = "\u{2197} Link 1 and also https://example.com end";
+    let segs = link_segments(line);
+    let link_segs: Vec<_> = segs.iter().filter(|s| s.is_link).collect();
+    assert_eq!(
+        link_segs.len(),
+        2,
+        "label and URL must both be link segments: {segs:?}"
+    );
+}
+
+// --- V4a: narrow width regression (long URL → single short label, no wrap ---
+
+#[test]
+fn build_detail_content_long_url_replaced_by_short_label_at_narrow_width() {
+    let long_url =
+        "https://very-long-domain-name.example.com/deep/path/to/resource?param=value&other=thing";
+    let task = json!({
+        "id": 1,
+        "name": "T",
+        "body": format!("<p>See {long_url} for info.</p>")
+    });
+    let inner_width = 30usize;
+    let content = build_detail_content(&task, &[], &HashMap::new(), inner_width);
+
+    let joined = content.lines.join("\n");
+    assert!(
+        !joined.contains("https://"),
+        "raw URL must not appear at narrow width: {joined}"
+    );
+    assert!(
+        joined.contains("\u{2197} Link 1"),
+        "short label must appear: {joined}"
+    );
+    assert_eq!(content.links, vec![long_url]);
+
+    for line in &content.lines {
+        let len = line.chars().count();
+        assert!(
+            len <= inner_width,
+            "every line must fit inner_width={inner_width} ({len} chars): {line:?}"
+        );
+    }
+}
+
+// --- V4b-A2: link_index_at ---
+
+#[test]
+fn link_index_at_no_label_returns_none() {
+    let line = "\u{2502} plain text without any link label \u{2502}";
+    assert!(
+        link_index_at(line, 5).is_none(),
+        "line with no label must return None"
+    );
+}
+
+#[test]
+fn link_index_at_bordered_padded_line_returns_correct_index() {
+    // Simulate a panel body line: "│ ↗ Link 1            │"
+    // Border │ is 1 col, space is 1 col (padding), then "↗ Link 1" starts at col 2.
+    // "↗" has display width 1 in unicode-width, so label width = len("↗ Link 1") = 8.
+    // Columns [2, 10) are the label span.
+    let label = "\u{2197} Link 1";
+    let line = format!("\u{2502} {label}            \u{2502}");
+    let col_in_label = 4;
+    assert_eq!(
+        link_index_at(&line, col_in_label),
+        Some(1),
+        "column inside label must return Some(1)"
+    );
+    let col_in_border = 0;
+    assert!(
+        link_index_at(&line, col_in_border).is_none(),
+        "column on the border must return None"
+    );
+    let col_in_padding = 1;
+    assert!(
+        link_index_at(&line, col_in_padding).is_none(),
+        "column in the padding before the label must return None"
+    );
+}
+
+#[test]
+fn link_index_at_two_labels_on_same_line_returns_correct_n() {
+    // Build a line with two labels separated by spaces: "↗ Link 1  ↗ Link 2"
+    // "↗ Link 1" is 8 cols wide (cols 0..8), two spaces, "↗ Link 2" at cols 10..18.
+    let line = "\u{2197} Link 1  \u{2197} Link 2";
+    assert_eq!(link_index_at(line, 3), Some(1), "col 3 is inside Link 1");
+    assert_eq!(link_index_at(line, 8), None, "col 8 is in the space gap");
+    assert_eq!(link_index_at(line, 9), None, "col 9 is in the space gap");
+    assert_eq!(link_index_at(line, 13), Some(2), "col 13 is inside Link 2");
+}
+
+#[test]
+fn link_index_at_col_past_end_of_line_returns_none() {
+    let line = "\u{2197} Link 1";
+    let far_col = 9999;
+    assert!(
+        link_index_at(line, far_col).is_none(),
+        "column past end of line must return None"
+    );
+}
+
+#[test]
+fn link_index_at_wide_glyph_before_label_shifts_col_correctly() {
+    // A CJK character (display width 2) before the label shifts it right by one extra col.
+    // "A" (1 col) + "中" (2 cols) + " " (1 col) = 4 cols before "↗ Link 1" at col 4.
+    let line = "A\u{4E2D} \u{2197} Link 1";
+    // "↗ Link 1" starts at display col 4: A(1) + 中(2) + space(1) = 4.
+    // Label width = 8, so span is [4, 12).
+    assert_eq!(
+        link_index_at(line, 4),
+        Some(1),
+        "wide glyph must push label start right: col 4 should be inside the label"
+    );
+    assert_eq!(
+        link_index_at(line, 11),
+        Some(1),
+        "col 11 is the last column inside the label [4, 12)"
+    );
+    assert!(
+        link_index_at(line, 3).is_none(),
+        "col 3 is the trailing space before the label, not inside it"
+    );
+    assert!(
+        link_index_at(line, 12).is_none(),
+        "col 12 is past the label end"
+    );
+}
+
+#[test]
+fn link_index_at_empty_line_returns_none() {
+    assert!(
+        link_index_at("", 0).is_none(),
+        "empty line must return None"
+    );
+}
+
+#[test]
+fn link_index_at_col_exactly_at_label_start() {
+    let line = "\u{2197} Link 3";
+    assert_eq!(
+        link_index_at(line, 0),
+        Some(3),
+        "col 0 is the first column of the label"
+    );
+}
+
+#[test]
+fn link_index_at_col_exactly_at_label_end_is_none() {
+    // "↗ Link 3" has 8 display cols so cols 0..8 are inside; col 8 is outside.
+    let line = "\u{2197} Link 3";
+    let label_width = unicode_width::UnicodeWidthStr::width("\u{2197} Link 3");
+    assert!(
+        link_index_at(line, label_width).is_none(),
+        "col at label end (exclusive) must return None"
+    );
+}

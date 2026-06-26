@@ -21,29 +21,151 @@ fn body_url_re() -> &'static Regex {
     })
 }
 
+fn link_label_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"\u{2197} Link \d+").expect("link_label_re is a valid pattern"))
+}
+
+/// Accumulates URLs found in body text during URL-to-label replacement.
+///
+/// `next_index` is 1-based and incremented per matched URL. `urls` holds the
+/// original URL strings in the order they were encountered — index N-1 in this
+/// vec corresponds to label "↗ Link N".
+pub struct LinkCollector {
+    pub next_index: usize,
+    pub urls: Vec<String>,
+}
+
+impl LinkCollector {
+    pub fn new() -> Self {
+        LinkCollector {
+            next_index: 1,
+            urls: Vec::new(),
+        }
+    }
+}
+
+/// Replace each URL in `text` with a short sequential label and collect the original URLs.
+///
+/// Each URL matched by the body_url_re (https?:// or www.) is replaced with the label
+/// `"↗ Link N"` where N comes from `collector.next_index` (incremented per match).
+/// The matched URL is pushed into `collector.urls` in the same order. This ensures a
+/// 1:1 mapping between label index and collected URL position.
+///
+/// Text with no URLs is returned unchanged and the collector is unmodified.
+pub fn replace_urls_with_labels(text: &str, collector: &mut LinkCollector) -> String {
+    let mut result = String::with_capacity(text.len());
+    let mut last_byte = 0usize;
+
+    for m in body_url_re().find_iter(text) {
+        result.push_str(&text[last_byte..m.start()]);
+        result.push_str(&format!("\u{2197} Link {}", collector.next_index));
+        collector.urls.push(m.as_str().to_string());
+        collector.next_index += 1;
+        last_byte = m.end();
+    }
+
+    result.push_str(&text[last_byte..]);
+    result
+}
+
+/// Produced by `build_detail_content`: the rendered lines and the collected URLs.
+///
+/// `lines` is identical to what `build_detail_lines` returns, except every URL in
+/// the description and comment bodies has been replaced with a "↗ Link N" label.
+/// `links` holds the original URLs in the order the labels were assigned — element
+/// at index N-1 corresponds to label "↗ Link N".
+pub struct DetailContent {
+    pub lines: Vec<String>,
+    pub links: Vec<String>,
+}
+
+/// Map a display column position to a "↗ Link N" label index within `line`.
+///
+/// Walks `line` character-by-character, accumulating display-column offsets via
+/// unicode-width (the same metric ratatui uses for layout). For every "↗ Link <N>"
+/// match found by `link_label_re`, the function tests whether `target_col` falls
+/// inside the label's [col_start, col_end) display-column span and returns the
+/// parsed N (1-based, as `usize`) for the first match that contains it.
+///
+/// Returns `None` when `target_col` lies in border, padding, plain text, or a
+/// label match whose N cannot be parsed. The function is char-boundary-safe and
+/// pure (no I/O, no async, no time access).
+pub fn link_index_at(line: &str, target_col: usize) -> Option<usize> {
+    let re = link_label_re();
+    for m in re.find_iter(line) {
+        let col_start = display_col_of_byte(line, m.start());
+        let label_width = display_width(m.as_str());
+        let col_end = col_start + label_width;
+        if target_col >= col_start && target_col < col_end {
+            return parse_link_number(m.as_str());
+        }
+    }
+    None
+}
+
+/// Compute the display-column offset of the character at `byte_pos` in `s`.
+///
+/// Walks all characters before `byte_pos`, summing their display widths.
+/// Callers must pass a valid char boundary — the function stops at the first
+/// character whose start byte equals or exceeds `byte_pos`.
+fn display_col_of_byte(s: &str, byte_pos: usize) -> usize {
+    let mut col = 0usize;
+    for (start, ch) in s.char_indices() {
+        if start >= byte_pos {
+            break;
+        }
+        col += unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+    }
+    col
+}
+
+/// Extract the numeric N from a "↗ Link N" match string.
+///
+/// Returns `None` when the suffix after "Link " is not a valid positive integer.
+fn parse_link_number(label: &str) -> Option<usize> {
+    let prefix = "\u{2197} Link ";
+    let digits = label.strip_prefix(prefix)?;
+    digits.parse::<usize>().ok()
+}
+
 /// Split a single rendered panel body line into ordered `LinkSegment`s.
 ///
 /// URL substrings (matched by `https?://…` or `www.…`, stopped at whitespace) are
-/// tagged `is_link: true`; everything else (including leading/trailing `│` border
-/// chars and padding spaces) is tagged `is_link: false`. When the line contains no
-/// URL the function returns a single non-link segment. Slicing is char-boundary-safe
-/// for UTF-8.
+/// tagged `is_link: true`. Link-label substrings (`↗ Link <digits>`) produced by
+/// `replace_urls_with_labels` are also tagged `is_link: true`. Everything else
+/// (including leading/trailing `│` border chars and padding spaces) is tagged
+/// `is_link: false`. When the line contains no URL or label the function returns a
+/// single non-link segment. Slicing is char-boundary-safe for UTF-8.
 pub fn link_segments(line: &str) -> Vec<LinkSegment> {
     let mut segments = Vec::new();
     let mut last_byte = 0usize;
 
-    for m in body_url_re().find_iter(line) {
-        if m.start() > last_byte {
+    let url_re = body_url_re();
+    let label_re = link_label_re();
+
+    let mut matches: Vec<(usize, usize)> = url_re
+        .find_iter(line)
+        .map(|m| (m.start(), m.end()))
+        .chain(label_re.find_iter(line).map(|m| (m.start(), m.end())))
+        .collect();
+    matches.sort_by_key(|(start, _)| *start);
+
+    for (start, end) in matches {
+        if start < last_byte {
+            continue;
+        }
+        if start > last_byte {
             segments.push(LinkSegment {
-                text: line[last_byte..m.start()].to_string(),
+                text: line[last_byte..start].to_string(),
                 is_link: false,
             });
         }
         segments.push(LinkSegment {
-            text: m.as_str().to_string(),
+            text: line[start..end].to_string(),
             is_link: true,
         });
-        last_byte = m.end();
+        last_byte = end;
     }
 
     if last_byte < line.len() {
@@ -746,14 +868,25 @@ pub fn build_header_lines(
 /// Returns the Description panel for a task detail view (a rounded panel with wrapped body).
 ///
 /// Falls back to `(no description)` when body is empty. Every line is <= `inner_width` chars.
+#[allow(dead_code)]
 pub fn build_body_lines(task: &Value, inner_width: usize) -> Vec<String> {
+    let mut collector = LinkCollector::new();
+    build_body_lines_with_collector(task, inner_width, &mut collector)
+}
+
+fn build_body_lines_with_collector(
+    task: &Value,
+    inner_width: usize,
+    collector: &mut LinkCollector,
+) -> Vec<String> {
     let body_html = task.get("body").and_then(|v| v.as_str()).unwrap_or("");
     let text = html_to_text(body_html);
+    let transformed = replace_urls_with_labels(&text, collector);
     let content_width = panel_content_width(inner_width);
-    let body_rows = if text.is_empty() {
+    let body_rows = if transformed.is_empty() {
         vec![t("(no description)")]
     } else {
-        let wrapped = wrap_text(&text, content_width);
+        let wrapped = wrap_text(&transformed, content_width);
         if wrapped.is_empty() {
             vec![t("(no description)")]
         } else {
@@ -768,7 +901,17 @@ pub fn build_body_lines(task: &Value, inner_width: usize) -> Vec<String> {
 /// When comments are present, wraps all comment cards in an outer panel labelled
 /// "Comments (N)". Each inner card is indented by one space and sized to fit the
 /// outer panel content area. Every line is <= `inner_width` chars.
+#[allow(dead_code)]
 pub fn build_comment_lines(comments: &[Value], inner_width: usize) -> Vec<String> {
+    let mut collector = LinkCollector::new();
+    build_comment_lines_with_collector(comments, inner_width, &mut collector)
+}
+
+fn build_comment_lines_with_collector(
+    comments: &[Value],
+    inner_width: usize,
+    collector: &mut LinkCollector,
+) -> Vec<String> {
     if comments.is_empty() {
         return vec![];
     }
@@ -784,7 +927,8 @@ pub fn build_comment_lines(comments: &[Value], inner_width: usize) -> Vec<String
 
         let author = extract_comment_author(comment);
         let when = fmt_ts(comment.get("created_on").unwrap_or(&Value::Null));
-        let body = extract_comment_body(comment);
+        let raw_body = extract_comment_body(comment);
+        let body = replace_urls_with_labels(&raw_body, collector);
 
         for line in comment_box(&author, &when, &body, card_width) {
             nested.push(format!(" {}", line));
@@ -802,21 +946,52 @@ pub fn build_comment_lines(comments: &[Value], inner_width: usize) -> Vec<String
 /// (4) blank + Comments panel when comments non-empty.
 /// The task name is promoted to the frame border title in the TUI layer.
 /// No line exceeds `inner_width` chars. Pure: no I/O, no async.
+///
+/// Backward-compatible wrapper over `build_detail_content` that returns only
+/// the rendered lines; existing test callers stay green with no code changes.
+#[allow(dead_code)]
 pub fn build_detail_lines(
     task: &Value,
     comments: &[Value],
     user_map: &HashMap<i64, String>,
     inner_width: usize,
 ) -> Vec<String> {
+    build_detail_content(task, comments, user_map, inner_width).lines
+}
+
+/// Build the full detail content, replacing every URL in the description and comment
+/// bodies with a sequential "↗ Link N" label and collecting the original URLs.
+///
+/// URL numbering is global: description URLs are assigned indices first, then
+/// comment bodies in order. Each label maps 1:1 to the URL at `links[N-1]`.
+/// Pure: no I/O, no async, no time access.
+pub fn build_detail_content(
+    task: &Value,
+    comments: &[Value],
+    user_map: &HashMap<i64, String>,
+    inner_width: usize,
+) -> DetailContent {
+    let mut collector = LinkCollector::new();
     let mut lines = vec![];
     lines.extend(build_header_lines(task, user_map, inner_width));
     lines.push(String::new());
-    lines.extend(build_body_lines(task, inner_width));
+    lines.extend(build_body_lines_with_collector(
+        task,
+        inner_width,
+        &mut collector,
+    ));
     if !comments.is_empty() {
         lines.push(String::new());
-        lines.extend(build_comment_lines(comments, inner_width));
+        lines.extend(build_comment_lines_with_collector(
+            comments,
+            inner_width,
+            &mut collector,
+        ));
     }
-    lines
+    DetailContent {
+        lines,
+        links: collector.urls,
+    }
 }
 
 /// Builds the 2-column aligned meta table rows for the Details panel.

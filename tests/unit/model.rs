@@ -30,6 +30,7 @@ fn detail_model_with_assets_and_viewport(
             comments: vec![],
             user_map: HashMap::new(),
             lines: vec![],
+            body_links: vec![],
             assets,
             offset: 0,
             loading: false,
@@ -417,6 +418,7 @@ fn detail_model_scrollable(lines: Vec<String>, assets: Vec<Asset>, viewport: (u1
             comments: vec![],
             user_map: HashMap::new(),
             lines,
+            body_links: vec![],
             assets,
             offset: 0,
             loading: false,
@@ -685,4 +687,202 @@ fn click_on_projects_screen_with_target_drills_into_tasks() {
         }
         other => panic!("expected Tasks screen, got {other:?}"),
     }
+}
+
+// --- V4b body-link click tests ---
+
+/// Build a Detail model with specific lines, body_links, assets, offset and viewport.
+fn detail_model_with_links(
+    lines: Vec<String>,
+    body_links: Vec<String>,
+    assets: Vec<Asset>,
+    offset: usize,
+    viewport: (u16, u16),
+) -> Model {
+    Model {
+        stack: vec![Screen::Detail {
+            instance: "inst".into(),
+            project_id: 1,
+            task_id: 1,
+            task: serde_json::Value::Null,
+            comments: vec![],
+            user_map: HashMap::new(),
+            lines,
+            body_links,
+            assets,
+            offset,
+            loading: false,
+            pending_download: false,
+            rendered_width: usize::MAX,
+        }],
+        should_quit: false,
+        header: empty_header(),
+        viewport,
+        click_targets: vec![],
+        last_loaded: None,
+    }
+}
+
+// V4b-A1: A left click on a "↗ Link N" label in the content area emits OpenAsset
+// carrying body_links[N-1] and the correct instance.
+// Viewport 80x24, no assets. text_top=2, content_text_height=24-4=20.
+// The label line is at logical line 0, which maps to row text_top = 2.
+// The label "↗ Link 1" starts at display col 2 (border col 0, padding col 1).
+#[test]
+fn click_body_link_label_emits_open_asset_with_correct_url() {
+    let url = "https://example.com/doc.pdf".to_string();
+    let label_line = "\u{2502} \u{2197} Link 1            \u{2502}".to_string();
+    let m = detail_model_with_links(vec![label_line], vec![url.clone()], vec![], 0, (80, 24));
+
+    let (_m, cmds) = update(m, Msg::Click { column: 3, row: 2 });
+    assert_eq!(cmds.len(), 1, "must emit exactly one cmd");
+    match &cmds[0] {
+        Cmd::OpenAsset {
+            instance,
+            url: cmd_url,
+        } => {
+            assert_eq!(instance, "inst");
+            assert_eq!(cmd_url, &url);
+        }
+        other => panic!("expected OpenAsset for body link, got {other:?}"),
+    }
+}
+
+// V4b-A1: Scroll offset is accounted for: with offset=1, row text_top=2 maps to
+// logical_line = 1 + (2 - 2) = 1. A click at row 2 must open body_links[0]
+// from line 1 (the label line), not line 0.
+#[test]
+fn click_body_link_accounts_for_scroll_offset() {
+    let url = "https://example.com/offset-test".to_string();
+    let plain_line = "\u{2502} plain text \u{2502}".to_string();
+    let label_line = "\u{2502} \u{2197} Link 1 \u{2502}".to_string();
+    let m = detail_model_with_links(
+        vec![plain_line, label_line],
+        vec![url.clone()],
+        vec![],
+        1,
+        (80, 24),
+    );
+
+    let (_m, cmds) = update(m, Msg::Click { column: 3, row: 2 });
+    assert_eq!(cmds.len(), 1);
+    match &cmds[0] {
+        Cmd::OpenAsset { url: cmd_url, .. } => {
+            assert_eq!(cmd_url, &url);
+        }
+        other => panic!("expected OpenAsset for offset body link, got {other:?}"),
+    }
+}
+
+// V4b-A3: A click on a non-label content cell (border or plain text) is a no-op.
+#[test]
+fn click_non_label_content_cell_is_noop() {
+    let label_line = "\u{2502} \u{2197} Link 1 \u{2502}".to_string();
+    let m = detail_model_with_links(
+        vec![label_line],
+        vec!["https://example.com/doc".to_string()],
+        vec![],
+        0,
+        (80, 24),
+    );
+
+    // Column 0 is the "│" border — no label there.
+    let (_m, cmds) = update(m, Msg::Click { column: 0, row: 2 });
+    assert!(cmds.is_empty(), "click on border must be a no-op");
+}
+
+// V4b-A3: A label whose number exceeds body_links length is a safe no-op.
+#[test]
+fn click_body_link_number_beyond_links_length_is_safe_noop() {
+    // Line contains "↗ Link 2" but body_links has only 1 entry (index 0 = Link 1).
+    let label_line = "\u{2502} \u{2197} Link 2 \u{2502}".to_string();
+    let m = detail_model_with_links(
+        vec![label_line],
+        vec!["https://example.com/only-one".to_string()],
+        vec![],
+        0,
+        (80, 24),
+    );
+
+    let (_m, cmds) = update(m, Msg::Click { column: 3, row: 2 });
+    assert!(
+        cmds.is_empty(),
+        "label number beyond body_links length must be a no-op (no panic)"
+    );
+}
+
+// V4b-A3: A URL that does not pass is_openable_url is not opened.
+#[test]
+fn click_body_link_non_openable_url_is_noop() {
+    let label_line = "\u{2502} \u{2197} Link 1 \u{2502}".to_string();
+    let m = detail_model_with_links(
+        vec![label_line],
+        vec!["javascript:alert(1)".to_string()],
+        vec![],
+        0,
+        (80, 24),
+    );
+
+    let (_m, cmds) = update(m, Msg::Click { column: 3, row: 2 });
+    assert!(
+        cmds.is_empty(),
+        "non-http/https URL must not be opened (is_openable_url guard)"
+    );
+}
+
+// V4b-A3 (regression): Asset-panel clicks still work after the body-link change.
+// The content-area check happens first; the asset-panel check falls through for rows
+// outside the text viewport.
+#[test]
+fn click_asset_panel_still_works_after_body_link_change() {
+    let url = "https://example.com/asset.pdf";
+    let assets = vec![make_asset("asset.pdf", url)];
+    let label_line = "\u{2502} \u{2197} Link 1 \u{2502}".to_string();
+    let m = detail_model_with_links(
+        vec![label_line],
+        vec!["https://example.com/body-link".to_string()],
+        assets,
+        0,
+        (80, 24),
+    );
+
+    let area = ratatui::layout::Rect::new(0, 0, 80, 24);
+    let panel = detail_asset_panel_rect(area, 1).expect("panel must exist");
+    let asset_row = panel.y + 1;
+
+    let (_m, cmds) = update(
+        m,
+        Msg::Click {
+            column: 5,
+            row: asset_row,
+        },
+    );
+    assert_eq!(cmds.len(), 1, "asset panel click must emit one cmd");
+    match &cmds[0] {
+        Cmd::OpenAsset { url: cmd_url, .. } => {
+            assert_eq!(cmd_url, url);
+        }
+        other => panic!("expected OpenAsset for asset panel, got {other:?}"),
+    }
+}
+
+// V4b-A1: A click row outside the text viewport (e.g. content border row 1
+// or a row >= text_top + content_text_height) does not emit a body-link cmd.
+#[test]
+fn click_outside_content_text_area_is_noop_when_no_label_row() {
+    let label_line = "\u{2502} \u{2197} Link 1 \u{2502}".to_string();
+    let m = detail_model_with_links(
+        vec![label_line],
+        vec!["https://example.com/doc".to_string()],
+        vec![],
+        0,
+        (80, 24),
+    );
+
+    // Row 1 is the top border of the content block (< text_top=2).
+    let (_m, cmds) = update(m, Msg::Click { column: 3, row: 1 });
+    assert!(
+        cmds.is_empty(),
+        "click on content top border (row 1) must be a no-op"
+    );
 }
