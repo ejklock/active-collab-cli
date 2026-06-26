@@ -11,3 +11,4 @@
 | [0007](/bdr/0007-bare-invocation-tty-default.md) | Bare invocation in a TTY defaults to mine (amends 0003 §3) | Accepted |
 | [0008](/bdr/0008-browse-list-refresh-cached-directory.md) | Browse-list refresh: open tasks always fetched, project directory served from cache | Accepted |
 | [0009](/bdr/0009-richtext-formatting-detail-view.md) | Rich-text detail: comment/description HTML renders with bold, italic, code, headings, lists, quotes, links | Accepted |
+| [0010](/bdr/0010-agent-json-output-contract.md) | Agent JSON output: get/current/mine/browse emit one curated minified line, --json is non-interactive | Accepted |

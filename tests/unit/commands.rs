@@ -1015,15 +1015,25 @@ fn default_flags() -> DisplayFlags {
 }
 
 #[tokio::test]
-async fn do_get_task_json_mode_prints_pretty_json_and_returns_0() {
+async fn do_get_task_json_mode_prints_minified_curated_contract_and_returns_0() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/api/v1/projects/5/tasks/10"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "single": { "id": 10, "name": "Test task" },
+            "single": {
+                "id": 10,
+                "project_id": 5,
+                "project_name": "My Project",
+                "name": "Test task",
+                "is_completed": false,
+                "assignee_id": serde_json::Value::Null,
+                "estimate": 0,
+                "tracked_time": 0,
+                "body": ""
+            },
+            "comments": [],
             "tracked_time": 0
         })))
-        .expect(1)
         .mount(&server)
         .await;
 
@@ -1039,20 +1049,37 @@ async fn do_get_task_json_mode_prints_pretty_json_and_returns_0() {
     };
 
     let code = do_get_task(&inst, &cache, &client, 5, 10, &flags, &mut out, &mut err).await;
-    assert_eq!(code, 0);
+    assert_eq!(code, 0, "exit code must be 0");
     let s = output_str(&out);
-    // Pretty JSON has 2-space indent
-    assert!(s.contains("\"single\""), "got: {s}");
-    assert!(s.contains("  "), "should be pretty-printed: {s}");
+    let trimmed = s.trim_end_matches('\n');
+    assert!(
+        !trimmed.contains('\n'),
+        "output must be a single minified line (no embedded newlines): {s:?}"
+    );
+    assert!(
+        !trimmed.contains("  "),
+        "output must not have 2-space indent (must be minified): {s:?}"
+    );
+    let obj: serde_json::Value = serde_json::from_str(trimmed).expect("output must be valid JSON");
+    assert_eq!(obj["ref"], "5/10", "ref must be project_id/task_id");
+    assert_eq!(obj["status"], "open", "status must be literal 'open'");
+    assert_eq!(obj["name"], "Test task", "name must match");
+    assert!(
+        obj.get("assignee").is_some(),
+        "assignee key must be present"
+    );
+    assert!(
+        obj.get("project_id").is_some(),
+        "project_id key must be present"
+    );
 }
 
 #[tokio::test]
-async fn do_get_task_json_mode_http_error_returns_1_with_message() {
+async fn do_get_task_json_mode_http_error_returns_1() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/api/v1/projects/5/tasks/10"))
         .respond_with(ResponseTemplate::new(404).set_body_string("not found"))
-        .expect(1)
         .mount(&server)
         .await;
 
@@ -1068,10 +1095,7 @@ async fn do_get_task_json_mode_http_error_returns_1_with_message() {
     };
 
     let code = do_get_task(&inst, &cache, &client, 5, 10, &flags, &mut out, &mut err).await;
-    assert_eq!(code, 1);
-    let e = output_str(&err);
-    assert!(e.contains("not found"), "err: {e}");
-    assert!(e.contains("5/10"), "err: {e}");
+    assert_eq!(code, 1, "HTTP 404 on task fetch must return exit code 1");
 }
 
 #[tokio::test]
@@ -1580,6 +1604,7 @@ async fn mine_core_empty_instances_returns_exit2_with_message() {
         &make_http(),
         None,
         false,
+        false,
         &mut out,
         &mut err,
         |_, _| 0,
@@ -1605,6 +1630,7 @@ async fn mine_core_instance_filter_not_found_returns_exit2_with_known() {
         &repo,
         &make_http(),
         Some("nosuch"),
+        false,
         false,
         &mut out,
         &mut err,
@@ -1651,6 +1677,7 @@ async fn mine_core_instance_filter_limits_to_matching_instance() {
         &make_http(),
         Some("work"),
         false,
+        false,
         &mut out,
         &mut err,
         |_, _| 0,
@@ -1696,6 +1723,7 @@ async fn mine_core_non_tty_with_rows_writes_table_and_returns_0() {
         &make_http(),
         None,
         false,
+        false,
         &mut out,
         &mut err,
         |_, _| 99,
@@ -1739,6 +1767,7 @@ async fn mine_core_non_tty_no_rows_writes_no_tasks_message_and_returns_0() {
         &repo,
         &make_http(),
         None,
+        false,
         false,
         &mut out,
         &mut err,
@@ -1784,6 +1813,7 @@ async fn mine_core_tty_invokes_launch_closure_with_rows_not_table() {
         &repo,
         &make_http(),
         None,
+        false,
         true,
         &mut out,
         &mut err,
@@ -1834,6 +1864,7 @@ async fn mine_core_non_tty_writes_render_mine_table_exactly_and_never_calls_laun
         &repo,
         &make_http(),
         None,
+        false,
         false,
         &mut out,
         &mut err,
@@ -1898,4 +1929,123 @@ async fn browse_async_inside_active_runtime_returns_i32_without_panic() {
         code, 1,
         "no-TTY path must return exit code 1 (terminal setup fails)"
     );
+}
+
+// --- J2-A2: mine --json prints minified mine line, never launches TUI, exit 0 ---
+
+#[tokio::test]
+async fn mine_core_json_mode_prints_minified_line_and_never_calls_launch() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/users/42/tasks"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(tasks_response(serde_json::json!([
+            { "id": 55, "task_number": 7, "name": "JSON task", "is_completed": false, "is_trashed": false, "project_id": 99 }
+        ]))))
+        .mount(&server)
+        .await;
+
+    let (_dir, store) = make_store();
+    let inst = Instance {
+        name: "jsoninst".to_owned(),
+        base_url: server.uri(),
+        email: "x@x.com".to_owned(),
+        token: "tok".to_owned(),
+        user_id: Some(42),
+    };
+    InstanceRepository::new(store.conn()).save(&inst).unwrap();
+
+    let repo = InstanceRepository::new(store.conn());
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    let launch_called = std::cell::Cell::new(false);
+
+    let code = mine_core(
+        &repo,
+        &make_http(),
+        None,
+        true,
+        true, // is_tty=true: json must still suppress TUI
+        &mut out,
+        &mut err,
+        |_, _| {
+            launch_called.set(true);
+            99
+        },
+    )
+    .await;
+
+    assert_eq!(code, 0, "json mode must always return 0");
+    assert!(
+        !launch_called.get(),
+        "launch must NOT be called when json=true, even on a TTY"
+    );
+
+    let s = output_str(&out);
+    let trimmed = s.trim_end_matches('\n');
+    assert!(
+        !trimmed.contains('\n'),
+        "output must be a single minified line: {s:?}"
+    );
+    assert!(
+        !trimmed.contains("  "),
+        "output must not have 2-space indent (must be minified): {s:?}"
+    );
+
+    let obj: serde_json::Value = serde_json::from_str(trimmed).expect("output must be valid JSON");
+    assert_eq!(obj["count"], 1, "count must match number of tasks");
+
+    let tasks = obj["tasks"].as_array().expect("tasks must be an array");
+    assert_eq!(tasks.len(), 1, "tasks array must have 1 entry");
+    assert_eq!(tasks[0]["ref"], "99/55", "ref must be project_id/task_id");
+    assert_eq!(tasks[0]["instance"], "jsoninst");
+    assert_eq!(tasks[0]["project_id"], 99);
+    assert_eq!(tasks[0]["task_number"], 7);
+    assert_eq!(tasks[0]["task_id"], 55);
+    assert_eq!(tasks[0]["name"], "JSON task");
+}
+
+#[tokio::test]
+async fn mine_core_json_mode_empty_rows_yields_count_zero_exit_0() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/users/42/tasks"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(tasks_response(serde_json::json!([]))),
+        )
+        .mount(&server)
+        .await;
+
+    let (_dir, store) = make_store();
+    let inst = Instance {
+        name: "emptyinst".to_owned(),
+        base_url: server.uri(),
+        email: "x@x.com".to_owned(),
+        token: "tok".to_owned(),
+        user_id: Some(42),
+    };
+    InstanceRepository::new(store.conn()).save(&inst).unwrap();
+
+    let repo = InstanceRepository::new(store.conn());
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    let code = mine_core(
+        &repo,
+        &make_http(),
+        None,
+        true,
+        false,
+        &mut out,
+        &mut err,
+        |_, _| 99,
+    )
+    .await;
+
+    assert_eq!(code, 0, "json mode must return 0 even with empty rows");
+    let s = output_str(&out);
+    let trimmed = s.trim_end_matches('\n');
+    let obj: serde_json::Value = serde_json::from_str(trimmed).expect("output must be valid JSON");
+    assert_eq!(obj["count"], 0, "empty rows must yield count 0");
+    let tasks = obj["tasks"].as_array().expect("tasks must be an array");
+    assert!(tasks.is_empty(), "tasks array must be empty");
 }

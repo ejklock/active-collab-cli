@@ -12,6 +12,7 @@
 | [0008](/adr/0008-async-event-loop-with-eventstream-and-select.md) | Drive the TUI from an async event loop (EventStream + tokio::select!) | Accepted |
 | [0009](/adr/0009-tui-visual-redesign-vibrant-dashboard.md) | TUI visual redesign — vibrant dashboard (user header, unified lists, scrollbar) | Accepted |
 | [0010](/adr/0010-detail-sectioned-panels-focus-scroll.md) | Detail screen as fixed, independently-scrollable sections (focus + Tab + numeric jump) | Reverted (U6c) |
+| [0011](/adr/0011-agent-json-output-contract.md) | Curated, minified JSON output for agent/LLM consumption (--json contract) (U21) | Accepted |
 | [0012](/adr/0012-mouse-capture-toggle-for-text-selection.md) | Toggle terminal mouse capture for native text selection (V3) | Accepted |
 | [0013](/adr/0013-tty-gated-default-subcommand.md) | A bare `ac` invocation in a TTY defaults to `mine` (C1) | Accepted |
 | [0014](/adr/0014-browse-list-project-name-cache-swr.md) | Browse-list project-name cache (SWR) — stop re-fetching the directory on refresh (R2) | Accepted |

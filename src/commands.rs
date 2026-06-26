@@ -1,3 +1,4 @@
+use crate::agent_json;
 use crate::client::ActiveCollabClient;
 use crate::http::Http;
 use crate::i18n::{t, SUPPORTED};
@@ -563,36 +564,8 @@ pub async fn do_get_task(
     tid: i64,
     flags: &DisplayFlags,
     out: &mut dyn Write,
-    err: &mut dyn Write,
+    _err: &mut dyn Write,
 ) -> i32 {
-    if flags.json {
-        let (status, payload_opt) = match client.fetch_task(pid, tid).await {
-            Ok(r) => r,
-            Err(e) => {
-                writeln!(err, "{}", t(&format!("Error: {e}"))).ok();
-                return 1;
-            }
-        };
-        if status != 200 {
-            writeln!(
-                err,
-                "{}",
-                t(&format!(
-                    "Error: task {p}/{t} not found (HTTP {status}).",
-                    p = pid,
-                    t = tid,
-                    status = status
-                ))
-            )
-            .ok();
-            return 1;
-        }
-        let json_str =
-            serde_json::to_string_pretty(&payload_opt.unwrap_or(Value::Null)).unwrap_or_default();
-        writeln!(out, "{json_str}").ok();
-        return 0;
-    }
-
     let result = load_task(
         cache,
         client,
@@ -608,6 +581,19 @@ pub async fn do_get_task(
         Some(pair) => pair,
         None => return 1,
     };
+
+    if flags.json {
+        let user_map: HashMap<i64, String> = client.fetch_user_map().await.unwrap_or_default();
+        let obj = crate::agent_json::task_object(
+            &task,
+            &comments,
+            &user_map,
+            &inst.base_url,
+            flags.no_comments,
+        );
+        writeln!(out, "{}", serde_json::to_string(&obj).unwrap_or_default()).ok();
+        return 0;
+    }
 
     if flags.short {
         let name = task.get("name").and_then(|v| v.as_str()).unwrap_or("");
@@ -743,11 +729,15 @@ fn mine_task_to_row(task: crate::models::MineTask) -> MineTableRow {
 /// invokes `launch` (TTY path) or writes the table (non-TTY path).
 /// The launch closure receives both the resolved targets (Vec<Instance>) and the
 /// fetched rows so the TUI can open Detail for any task across any instance.
+///
+/// When `json` is true: emits ONE minified JSON line per ADR 0011 and returns 0
+/// without invoking `launch`, regardless of `is_tty`.
 #[allow(clippy::too_many_arguments)]
 pub async fn mine_core(
     repo: &InstanceRepository<'_>,
     http: &Http,
     instance_filter: Option<&str>,
+    json: bool,
     is_tty: bool,
     out: &mut dyn Write,
     err: &mut dyn Write,
@@ -798,6 +788,13 @@ pub async fn mine_core(
     };
 
     let rows = collect_mine_rows(&targets, http).await;
+
+    if json {
+        let line = serde_json::to_string(&agent_json::mine_object(&rows))
+            .unwrap_or_else(|_| String::from("{}"));
+        writeln!(out, "{line}").ok();
+        return 0;
+    }
 
     if is_tty {
         return launch(targets, rows);

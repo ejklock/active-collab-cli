@@ -1,3 +1,4 @@
+mod agent_json;
 mod cli;
 mod client;
 mod commands;
@@ -48,7 +49,11 @@ async fn run(raw_argv: Vec<String>) -> i32 {
         return match bare_no_command_action(is_tty) {
             BareNoCommandAction::RunMine => {
                 init_language();
-                dispatch(Command::Mine(cli::MineArgs { instance: None })).await
+                dispatch(Command::Mine(cli::MineArgs {
+                    instance: None,
+                    json: false,
+                }))
+                .await
             }
             BareNoCommandAction::HelpExit2 => {
                 let mut help_cli = Cli::command();
@@ -377,6 +382,7 @@ async fn dispatch_mine(args: cli::MineArgs) -> i32 {
         &repo,
         &http.clone(),
         args.instance.as_deref(),
+        args.json,
         is_tty,
         &mut std::io::stdout(),
         &mut std::io::stderr(),
@@ -390,8 +396,10 @@ async fn dispatch_mine(args: cli::MineArgs) -> i32 {
     .await;
 
     let tui_launch = captured.lock().ok().and_then(|mut g| g.take());
-    if let Some(args) = tui_launch {
-        return tui::run_mine(args.targets, http, db_path, args.rows).await;
+    if !args.json {
+        if let Some(tui_args) = tui_launch {
+            return tui::run_mine(tui_args.targets, http, db_path, tui_args.rows).await;
+        }
     }
     exit_code
 }
@@ -443,6 +451,15 @@ async fn dispatch_browse(args: cli::BrowseArgs) -> i32 {
     } else {
         instances
     };
+    if args.json {
+        let groups = controller::tasks_by_project(db_path.clone(), &targets, &http).await;
+        println!(
+            "{}",
+            serde_json::to_string(&agent_json::browse_object(&groups))
+                .unwrap_or_else(|_| "{\"projects\":[]}".to_string())
+        );
+        return 0;
+    }
     tui::browse(targets, http, db_path).await
 }
 

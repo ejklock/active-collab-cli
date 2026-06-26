@@ -111,6 +111,9 @@ pub struct MineArgs {
     /// Limit to this instance.
     #[arg(long)]
     pub instance: Option<String>,
+    /// Print curated minified JSON for agent/LLM consumption; never launches the TUI.
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Args, Debug)]
@@ -118,6 +121,9 @@ pub struct BrowseArgs {
     /// Force a named instance.
     #[arg(long)]
     pub instance: Option<String>,
+    /// Print curated minified JSON for agent/LLM consumption; never launches the TUI.
+    #[arg(long)]
+    pub json: bool,
 }
 
 /// Mirror of Python `_normalize_argv`.
