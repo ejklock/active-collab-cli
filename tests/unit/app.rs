@@ -1,14 +1,19 @@
 use super::*;
 use crate::render::MineTableRow;
-use crate::tui::model::DetailLoad;
+use crate::tui::model::{DetailLoad, Header};
 use serde_json::json;
 use std::collections::HashMap;
+
+fn empty_header() -> Header {
+    Header::from_instances(&[], None)
+}
 
 fn make_groups(count: usize) -> Vec<ProjectGroup> {
     (0..count)
         .map(|i| ProjectGroup {
             project_id: i as i64,
             project_name: format!("Project {i}"),
+            instance: "inst".into(),
             tasks: vec![TaskRow {
                 task_id: i as i64,
                 task_number: i as i64,
@@ -40,6 +45,7 @@ fn projects_model(count: usize) -> Model {
             loading: false,
         }],
         should_quit: false,
+        header: empty_header(),
     }
 }
 
@@ -59,6 +65,7 @@ fn tasks_model(count: usize) -> Model {
             },
         ],
         should_quit: false,
+        header: empty_header(),
     }
 }
 
@@ -70,6 +77,7 @@ fn loading_projects_model() -> Model {
             loading: true,
         }],
         should_quit: false,
+        header: empty_header(),
     }
 }
 
@@ -223,6 +231,7 @@ fn empty_list_navigation_never_panics_or_quits_projects() {
             loading: false,
         }],
         should_quit: false,
+        header: empty_header(),
     };
     let (m, _) = update(m, Msg::Down);
     assert!(!m.should_quit);
@@ -253,6 +262,7 @@ fn empty_list_navigation_never_panics_or_quits_tasks() {
             },
         ],
         should_quit: false,
+        header: empty_header(),
     };
     let (m, _) = update(m, Msg::Down);
     assert!(!m.should_quit);
@@ -264,7 +274,7 @@ fn empty_list_navigation_never_panics_or_quits_tasks() {
 
 #[test]
 fn init_browse_emits_load_tasks_by_project_cmd() {
-    let (model, cmds) = init_browse();
+    let (model, cmds) = init_browse(empty_header());
     assert_eq!(cmds, vec![Cmd::LoadTasksByProject]);
     assert!(!model.should_quit);
     assert_eq!(model.stack.len(), 1);
@@ -342,6 +352,7 @@ fn select_on_empty_projects_is_a_noop() {
             loading: false,
         }],
         should_quit: false,
+        header: empty_header(),
     };
     let (m, _) = update(m, Msg::Select);
     assert_eq!(m.stack.len(), 1);
@@ -367,6 +378,7 @@ fn tasks_model_with_project_id(task_count: usize, project_id: i64) -> Model {
                 groups: vec![ProjectGroup {
                     project_id,
                     project_name: "Test Project".into(),
+                    instance: "inst".into(),
                     tasks: make_tasks_with_project_id(task_count, project_id),
                 }],
                 selected: 0,
@@ -380,6 +392,7 @@ fn tasks_model_with_project_id(task_count: usize, project_id: i64) -> Model {
             },
         ],
         should_quit: false,
+        header: empty_header(),
     }
 }
 
@@ -414,6 +427,7 @@ fn detail_model(line_count: usize, offset: usize) -> Model {
             },
         ],
         should_quit: false,
+        header: empty_header(),
     }
 }
 
@@ -447,6 +461,7 @@ fn loading_detail_model() -> Model {
             },
         ],
         should_quit: false,
+        header: empty_header(),
     }
 }
 
@@ -838,6 +853,7 @@ fn detail_model_with_assets(assets: Vec<Asset>, instance: &str) -> Model {
             },
         ],
         should_quit: false,
+        header: empty_header(),
     }
 }
 
@@ -929,6 +945,7 @@ fn asset_open_carries_selected_tasks_instance_not_first_instance() {
                 groups: vec![ProjectGroup {
                     project_id: 1,
                     project_name: "P".into(),
+                    instance: "inst1".into(),
                     tasks: vec![
                         TaskRow {
                             task_id: 10,
@@ -986,6 +1003,7 @@ fn asset_open_carries_selected_tasks_instance_not_first_instance() {
             },
         ],
         should_quit: false,
+        header: empty_header(),
     };
     let (_m, cmds) = update(m, Msg::AssetOpen('1'));
     assert_eq!(cmds.len(), 1);
@@ -1008,6 +1026,7 @@ fn select_on_tasks_threads_instance_into_load_detail_cmd() {
                 groups: vec![ProjectGroup {
                     project_id: 10,
                     project_name: "P".into(),
+                    instance: "second-inst".into(),
                     tasks: vec![TaskRow {
                         task_id: 5,
                         task_number: 1,
@@ -1033,6 +1052,7 @@ fn select_on_tasks_threads_instance_into_load_detail_cmd() {
             },
         ],
         should_quit: false,
+        header: empty_header(),
     };
     let (m, cmds) = update(m, Msg::Select);
     assert_eq!(cmds.len(), 1);
@@ -1098,7 +1118,7 @@ fn mine_select_pushes_detail_with_row_project_id_and_instance() {
         make_mine_row(101, 1, 10, "inst-alpha"),
         make_mine_row(202, 2, 20, "inst-beta"),
     ];
-    let m = mine_model(rows);
+    let m = mine_model(rows, empty_header());
 
     // Verify initial state: Tasks screen, row 0 selected
     assert_eq!(m.stack.len(), 1);
@@ -1155,7 +1175,7 @@ fn mine_select_first_row_uses_its_own_project_id_and_instance() {
         make_mine_row(101, 1, 10, "inst-alpha"),
         make_mine_row(202, 2, 20, "inst-beta"),
     ];
-    let m = mine_model(rows);
+    let m = mine_model(rows, empty_header());
 
     let (_m, cmds) = update(m, Msg::Select);
 
@@ -1183,7 +1203,7 @@ fn mine_click_then_select_opens_clicked_rows_detail() {
         make_mine_row(202, 2, 20, "inst-beta"),
         make_mine_row(303, 3, 30, "inst-gamma"),
     ];
-    let m = mine_model(rows);
+    let m = mine_model(rows, empty_header());
 
     // Click row 2 (inst-gamma, project 30, task 303)
     let (m, _) = update(m, Msg::Click(2));
@@ -1229,7 +1249,7 @@ fn mine_click_row_zero_after_nonzero_selects_first_row() {
         make_mine_row(101, 1, 10, "inst-alpha"),
         make_mine_row(202, 2, 20, "inst-beta"),
     ];
-    let m = mine_model(rows);
+    let m = mine_model(rows, empty_header());
 
     let (m, _) = update(m, Msg::Click(1));
     let (m, _) = update(m, Msg::Click(0));
@@ -1251,7 +1271,7 @@ fn mine_model_produces_tasks_screen_with_all_rows_loaded() {
         make_mine_row(10, 1, 5, "inst-a"),
         make_mine_row(20, 2, 6, "inst-b"),
     ];
-    let m = mine_model(rows);
+    let m = mine_model(rows, empty_header());
 
     assert_eq!(m.stack.len(), 1);
     assert!(!m.should_quit);
@@ -1281,7 +1301,7 @@ fn mine_model_produces_tasks_screen_with_all_rows_loaded() {
     }
 }
 
-// P2-A1 / P2-A3: reflow_detail builds lines at inner_width; is memoized
+// P2-A1 / P2-A3: reflow_detail builds line cache at inner_width; is memoized
 #[test]
 fn reflow_detail_builds_lines_and_is_memoized() {
     let task = json!({
@@ -1306,6 +1326,7 @@ fn reflow_detail_builds_lines_and_is_memoized() {
             rendered_width: usize::MAX,
         }],
         should_quit: false,
+        header: empty_header(),
     };
 
     // First reflow at width 80: lines must be populated, rendered_width updated
@@ -1335,7 +1356,7 @@ fn reflow_detail_builds_lines_and_is_memoized() {
         _ => panic!("expected Detail"),
     }
 
-    // Reflow at a different width: rendered_width must update and lines must remain valid
+    // Reflow at a different width: rendered_width must update and cache must remain valid
     m.reflow_detail(40);
     match m.stack.last() {
         Some(Screen::Detail {
@@ -1352,7 +1373,7 @@ fn reflow_detail_builds_lines_and_is_memoized() {
                 "lines must still be present after second reflow"
             );
             // Every line must fit within the new width
-            for line in lines {
+            for line in lines.iter() {
                 assert!(
                     line.chars().count() <= 40,
                     "line after reflow at 40 must fit 40 chars: {:?}",
@@ -1396,12 +1417,13 @@ fn reflow_detail_lines_fit_inner_width() {
             rendered_width: usize::MAX,
         }],
         should_quit: false,
+        header: empty_header(),
     };
     m.reflow_detail(inner_width);
     match m.stack.last() {
         Some(Screen::Detail { lines, .. }) => {
-            assert!(!lines.is_empty(), "must produce at least one line");
-            for line in lines {
+            assert!(!lines.is_empty(), "lines must produce at least one line");
+            for line in lines.iter() {
                 assert!(
                     line.chars().count() <= inner_width,
                     "line exceeds inner_width={}: {:?}",
@@ -1434,6 +1456,7 @@ fn reflow_detail_rebuilds_on_width_change() {
             rendered_width: usize::MAX,
         }],
         should_quit: false,
+        header: empty_header(),
     };
     m.reflow_detail(80);
     let rw_80 = match m.stack.last() {
@@ -1470,6 +1493,7 @@ fn reflow_detail_is_noop_while_loading() {
             rendered_width: usize::MAX,
         }],
         should_quit: false,
+        header: empty_header(),
     };
     m.reflow_detail(80);
     match m.stack.last() {
@@ -1478,7 +1502,7 @@ fn reflow_detail_is_noop_while_loading() {
             rendered_width,
             ..
         }) => {
-            assert!(lines.is_empty(), "must not build lines while loading");
+            assert!(lines.is_empty(), "must not build cache while loading");
             assert_eq!(
                 *rendered_width,
                 usize::MAX,
@@ -1512,6 +1536,7 @@ fn reflow_detail_clamps_offset_when_content_shortens() {
             rendered_width: usize::MAX,
         }],
         should_quit: false,
+        header: empty_header(),
     };
     m.reflow_detail(80);
     match m.stack.last() {
@@ -1546,7 +1571,7 @@ fn user_map_resolved_updates_map_and_invalidates_cache() {
             task,
             comments: vec![],
             user_map: HashMap::new(),
-            lines: vec!["old line".into()],
+            lines: vec!["old content".into()],
             assets: vec![],
             offset: 0,
             loading: false,
@@ -1554,6 +1579,7 @@ fn user_map_resolved_updates_map_and_invalidates_cache() {
             rendered_width: 80,
         }],
         should_quit: false,
+        header: empty_header(),
     };
 
     let mut new_map = HashMap::new();
@@ -1619,6 +1645,7 @@ fn progressive_paint_assignee_fills_in_after_user_map_resolved() {
             rendered_width: usize::MAX,
         }],
         should_quit: false,
+        header: empty_header(),
     };
     let (m, _) = update(m, Msg::LoadedDetail(load));
 
@@ -1668,4 +1695,94 @@ fn reflow_detail_is_noop_on_projects_screen() {
         other => panic!("expected Projects, got {other:?}"),
     }
     assert!(!m.should_quit);
+}
+
+// U5b-A1: HeaderNameResolved fills model.header.name from None to Some and header_line shows it
+#[test]
+fn header_name_resolved_fills_name_and_header_line_shows_it() {
+    use crate::store::instances::Instance;
+    let inst = Instance {
+        name: "acme".into(),
+        base_url: "https://acme.example.com".into(),
+        email: "user@acme.example.com".into(),
+        token: "tok".into(),
+        user_id: Some(7),
+    };
+    let header = Header::from_instances(&[inst], None);
+    assert!(header.name.is_none(), "header.name must start as None");
+
+    let m = Model {
+        stack: vec![Screen::Projects {
+            groups: vec![],
+            selected: 0,
+            loading: false,
+        }],
+        should_quit: false,
+        header,
+    };
+    let stack_len_before = m.stack.len();
+
+    let (m, cmds) = update(m, Msg::HeaderNameResolved("Alice".into()));
+
+    assert!(cmds.is_empty(), "HeaderNameResolved must emit no Cmds");
+    assert_eq!(
+        m.header.name,
+        Some("Alice".to_string()),
+        "header.name must become Some(Alice)"
+    );
+    assert!(
+        m.header.header_line().contains("Alice"),
+        "header_line must contain the resolved name; got: {}",
+        m.header.header_line()
+    );
+    assert_eq!(
+        m.stack.len(),
+        stack_len_before,
+        "screen stack must be unchanged"
+    );
+    assert!(!m.should_quit);
+}
+
+// U6c-A2: single global offset scrolls entire content; no Tab/focus cycling
+#[test]
+fn detail_global_scroll_offset_advances_through_all_content() {
+    let lines: Vec<String> = (0..20).map(|i| format!("line {i}")).collect();
+    let m = Model {
+        stack: vec![Screen::Detail {
+            instance: "inst".into(),
+            project_id: 1,
+            task_id: 1,
+            task: serde_json::Value::Null,
+            comments: vec![],
+            user_map: HashMap::new(),
+            lines,
+            assets: vec![],
+            offset: 0,
+            loading: false,
+            pending_download: false,
+            rendered_width: 80,
+        }],
+        should_quit: false,
+        header: empty_header(),
+    };
+
+    let (m, _) = update(m, Msg::Down);
+    let (m, _) = update(m, Msg::Down);
+    match m.stack.last() {
+        Some(Screen::Detail { offset, .. }) => {
+            assert_eq!(
+                *offset, 2,
+                "two Down presses must advance single offset to 2"
+            );
+        }
+        _ => panic!("expected Detail"),
+    }
+
+    let (m, _) = update(m, Msg::Up);
+    match m.stack.last() {
+        Some(Screen::Detail { offset, .. }) => {
+            assert_eq!(*offset, 1, "Up must decrement single offset");
+        }
+        _ => panic!("expected Detail"),
+    }
 }

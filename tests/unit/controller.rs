@@ -215,6 +215,133 @@ fn build_groups_uses_numeric_fallback_for_unknown_project() {
     let groups = build_groups(vec![(task, "inst".into())], &HashMap::new());
     assert_eq!(groups.len(), 1);
     assert_eq!(groups[0].project_name, "999");
+    assert_eq!(groups[0].instance, "inst");
+}
+
+#[test]
+fn build_groups_same_project_id_on_two_instances_produces_two_groups() {
+    let task_a = MineTask {
+        id: 10,
+        task_number: Some(1),
+        name: "Task A".into(),
+        is_completed: false,
+        is_trashed: false,
+        project_id: Some(100),
+        instance_name: "alpha".into(),
+    };
+    let task_b = MineTask {
+        id: 20,
+        task_number: Some(2),
+        name: "Task B".into(),
+        is_completed: false,
+        is_trashed: false,
+        project_id: Some(100),
+        instance_name: "beta".into(),
+    };
+    let mut names = HashMap::new();
+    names.insert(100i64, "Shared Project".to_string());
+
+    let groups = build_groups(
+        vec![(task_a, "alpha".into()), (task_b, "beta".into())],
+        &names,
+    );
+
+    assert_eq!(
+        groups.len(),
+        2,
+        "same project_id on two instances must produce two separate groups"
+    );
+
+    let alpha = groups
+        .iter()
+        .find(|g| g.instance == "alpha")
+        .expect("alpha group must exist");
+    let beta = groups
+        .iter()
+        .find(|g| g.instance == "beta")
+        .expect("beta group must exist");
+
+    assert_eq!(alpha.project_name, "Shared Project");
+    assert_eq!(alpha.tasks.len(), 1);
+    assert_eq!(alpha.tasks[0].name, "Task A");
+
+    assert_eq!(beta.project_name, "Shared Project");
+    assert_eq!(beta.tasks.len(), 1);
+    assert_eq!(beta.tasks[0].name, "Task B");
+}
+
+#[test]
+fn build_groups_instance_field_matches_task_instance() {
+    let task = MineTask {
+        id: 5,
+        task_number: Some(5),
+        name: "My Task".into(),
+        is_completed: false,
+        is_trashed: false,
+        project_id: Some(42),
+        instance_name: "prod".into(),
+    };
+    let mut names = HashMap::new();
+    names.insert(42i64, "Production Project".to_string());
+
+    let groups = build_groups(vec![(task, "prod".into())], &names);
+
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].instance, "prod");
+    assert_eq!(groups[0].project_name, "Production Project");
+}
+
+#[test]
+fn build_groups_sorted_by_project_name_then_instance() {
+    let task_b_z = MineTask {
+        id: 1,
+        task_number: Some(1),
+        name: "T1".into(),
+        is_completed: false,
+        is_trashed: false,
+        project_id: Some(1),
+        instance_name: "z-inst".into(),
+    };
+    let task_b_a = MineTask {
+        id: 2,
+        task_number: Some(2),
+        name: "T2".into(),
+        is_completed: false,
+        is_trashed: false,
+        project_id: Some(1),
+        instance_name: "a-inst".into(),
+    };
+    let task_a = MineTask {
+        id: 3,
+        task_number: Some(3),
+        name: "T3".into(),
+        is_completed: false,
+        is_trashed: false,
+        project_id: Some(2),
+        instance_name: "m-inst".into(),
+    };
+    let mut names = HashMap::new();
+    names.insert(1i64, "Beta Project".to_string());
+    names.insert(2i64, "Alpha Project".to_string());
+
+    let groups = build_groups(
+        vec![
+            (task_b_z, "z-inst".into()),
+            (task_b_a, "a-inst".into()),
+            (task_a, "m-inst".into()),
+        ],
+        &names,
+    );
+
+    assert_eq!(groups.len(), 3);
+    assert_eq!(groups[0].project_name, "Alpha Project");
+    assert_eq!(groups[1].project_name, "Beta Project");
+    assert_eq!(
+        groups[1].instance, "a-inst",
+        "same project_name sorted by instance asc"
+    );
+    assert_eq!(groups[2].project_name, "Beta Project");
+    assert_eq!(groups[2].instance, "z-inst");
 }
 
 fn make_store() -> (tempfile::TempDir, crate::store::Store) {

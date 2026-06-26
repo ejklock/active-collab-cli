@@ -1,7 +1,61 @@
 use crate::i18n::t;
 use crate::render::{Asset, MineTableRow};
+use crate::store::instances::Instance;
 use serde_json::Value;
 use std::collections::HashMap;
+
+/// Identity bar shown at the top of every screen.
+///
+/// Built once at startup from the active instance list and the cached user
+/// directory; name may be None when user_id is absent or not yet in the cache.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Header {
+    pub name: Option<String>,
+    pub email: String,
+    pub instance: String,
+    pub extra: usize,
+}
+
+impl Header {
+    /// Build a Header from the active instance list and an optional display name.
+    ///
+    /// The first element is treated as the primary (active) instance.
+    /// `extra` is the number of additional instances beyond the first.
+    /// An empty slice produces empty strings with `extra = 0`.
+    pub fn from_instances(instances: &[Instance], name: Option<String>) -> Header {
+        match instances.first() {
+            Some(inst) => Header {
+                name,
+                email: inst.email.clone(),
+                instance: inst.name.clone(),
+                extra: instances.len().saturating_sub(1),
+            },
+            None => Header {
+                name,
+                email: String::new(),
+                instance: String::new(),
+                extra: 0,
+            },
+        }
+    }
+
+    /// Format the identity line for rendering in the header bar.
+    ///
+    /// Produces `"NAME <email> · instance"` when name is Some, or
+    /// `"<email> · instance"` when name is None.
+    /// Appends `" (+N more)"` when extra > 0.
+    pub fn header_line(&self) -> String {
+        let base = match &self.name {
+            Some(n) => format!("{} <{}> · {}", n, self.email, self.instance),
+            None => format!("<{}> · {}", self.email, self.instance),
+        };
+        if self.extra > 0 {
+            format!("{} (+{} more)", base, self.extra)
+        } else {
+            base
+        }
+    }
+}
 
 /// A row in the task list (shared by Projects and Tasks screens).
 #[derive(Debug, Clone, PartialEq)]
@@ -18,6 +72,7 @@ pub struct TaskRow {
 pub struct ProjectGroup {
     pub project_id: i64,
     pub project_name: String,
+    pub instance: String,
     pub tasks: Vec<TaskRow>,
 }
 
@@ -79,16 +134,13 @@ pub enum Screen {
         comments: Vec<Value>,
         /// User id→name map, updated on phase-2 resolution.
         user_map: HashMap<i64, String>,
-        /// Memoized rendered cache rebuilt by reflow_detail.
-        ///
-        /// Starts as vec![] and rendered_width = usize::MAX (not yet rendered at
-        /// any real width). The shell calls reflow_detail before each draw.
+        /// Memoized line cache rebuilt by reflow_detail.
         lines: Vec<String>,
         assets: Vec<Asset>,
         offset: usize,
         loading: bool,
         pending_download: bool,
-        /// Width at which `lines` was last built; usize::MAX means "not yet built".
+        /// Width at which the cache was last built; usize::MAX means "not yet built".
         rendered_width: usize,
     },
 }
@@ -129,6 +181,13 @@ impl Screen {
 
 /// Page size for Detail screen scroll (PageUp/PageDown).
 pub const PAGE_SIZE: usize = 10;
+
+fn clamp_offset(offset: &mut usize, len: usize) {
+    let max = len.saturating_sub(1);
+    if *offset > max {
+        *offset = max;
+    }
+}
 
 enum SelectAction {
     PushTasks {
@@ -180,6 +239,7 @@ fn digit_to_asset_index(c: char) -> Option<usize> {
 pub struct Model {
     pub stack: Vec<Screen>,
     pub should_quit: bool,
+    pub header: Header,
 }
 
 /// All messages the update function understands.
@@ -208,11 +268,14 @@ pub enum Msg {
     AssetActionResult,
     /// 'd' key: arm the download-next-digit flag on the Detail screen.
     TogglePendingDownload,
+    /// Background user directory resolved a display name for the header.
+    /// Sets model.header.name when it was previously absent.
+    HeaderNameResolved(String),
 }
 
 impl Model {
     /// Build the initial browse model: Projects screen in loading state.
-    pub fn browse() -> Self {
+    pub fn browse(header: Header) -> Self {
         Model {
             stack: vec![Screen::Projects {
                 groups: vec![],
@@ -220,6 +283,7 @@ impl Model {
                 loading: true,
             }],
             should_quit: false,
+            header,
         }
     }
 
@@ -231,15 +295,13 @@ impl Model {
         self.stack.last_mut()
     }
 
-    /// Rebuild the Detail screen's rendered line cache if the width changed.
+    /// Rebuild the Detail screen's line cache if the width changed.
     ///
-    /// Guard clauses ensure this is a no-op when:
-    /// - the top screen is not Detail
-    /// - the Detail is still loading
-    /// - the cache is already current for `inner_width`
+    /// Guard clauses ensure this is a no-op when the top screen is not Detail,
+    /// is still loading, or the cache is already current for `inner_width`.
     ///
-    /// After a rebuild, `offset` is clamped so a resize that shortens content
-    /// keeps the scroll position in range.
+    /// After a rebuild, `offset` is clamped to `lines.len().saturating_sub(1)`
+    /// so a resize that shortens content keeps the scroll position in range.
     pub fn reflow_detail(&mut self, inner_width: usize) {
         let Some(Screen::Detail {
             task,
@@ -255,21 +317,14 @@ impl Model {
             return;
         };
 
-        if *loading {
-            return;
-        }
-
-        if *rendered_width == inner_width {
+        if *loading || *rendered_width == inner_width {
             return;
         }
 
         *lines = crate::render::build_detail_lines(task, comments, user_map, inner_width);
         *rendered_width = inner_width;
 
-        let max_offset = lines.len().saturating_sub(1);
-        if *offset > max_offset {
-            *offset = max_offset;
-        }
+        clamp_offset(offset, lines.len());
     }
 }
 
@@ -294,6 +349,7 @@ pub fn update(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
         Msg::AssetOpen(digit) => handle_asset_open(model, digit),
         Msg::TogglePendingDownload => (handle_toggle_pending_download(model), vec![]),
         Msg::AssetActionResult => (model, vec![]),
+        Msg::HeaderNameResolved(name) => (handle_header_name_resolved(model, name), vec![]),
     }
 }
 
@@ -314,8 +370,8 @@ fn handle_up(mut model: Model) -> Model {
 fn handle_down(mut model: Model) -> Model {
     match model.top_mut() {
         Some(Screen::Detail { offset, lines, .. }) => {
-            let max_offset = lines.len().saturating_sub(1);
-            *offset = (*offset + 1).min(max_offset);
+            let max = lines.len().saturating_sub(1);
+            *offset = (*offset + 1).min(max);
         }
         Some(screen) => {
             let count = screen.row_count();
@@ -338,8 +394,8 @@ fn handle_page_up(mut model: Model) -> Model {
 
 fn handle_page_down(mut model: Model) -> Model {
     if let Some(Screen::Detail { offset, lines, .. }) = model.top_mut() {
-        let max_offset = lines.len().saturating_sub(1);
-        *offset = (*offset + PAGE_SIZE).min(max_offset);
+        let max = lines.len().saturating_sub(1);
+        *offset = (*offset + PAGE_SIZE).min(max);
     }
     model
 }
@@ -479,7 +535,7 @@ fn handle_loaded_detail(mut model: Model, load: DetailLoad) -> Model {
         comments: ref mut c,
         assets: ref mut a,
         user_map: ref mut um,
-        lines: ref mut l,
+        lines: ref mut ls,
         rendered_width: ref mut rw,
         ref mut loading,
         ..
@@ -490,8 +546,8 @@ fn handle_loaded_detail(mut model: Model, load: DetailLoad) -> Model {
         *a = load.assets;
         *um = load.user_map;
         *loading = false;
-        // Invalidate the render cache so reflow_detail rebuilds at current width.
-        *l = vec![];
+        // Invalidate line cache so reflow_detail rebuilds at current width.
+        *ls = vec![];
         *rw = usize::MAX;
     }
     model
@@ -500,14 +556,14 @@ fn handle_loaded_detail(mut model: Model, load: DetailLoad) -> Model {
 fn handle_user_map_resolved(mut model: Model, map: HashMap<i64, String>) -> Model {
     if let Some(Screen::Detail {
         user_map: ref mut um,
-        lines: ref mut l,
+        lines: ref mut ls,
         rendered_width: ref mut rw,
         ..
     }) = model.top_mut()
     {
         *um = map;
-        // Invalidate the render cache so the next reflow shows the updated assignee.
-        *l = vec![];
+        // Invalidate line cache so the next reflow shows the updated assignee.
+        *ls = vec![];
         *rw = usize::MAX;
     }
     model
@@ -561,12 +617,17 @@ fn handle_toggle_pending_download(mut model: Model) -> Model {
     model
 }
 
+fn handle_header_name_resolved(mut model: Model, name: String) -> Model {
+    model.header.name = Some(name);
+    model
+}
+
 /// Initial browse boot: emits Cmd::LoadTasksByProject and marks loading.
 ///
 /// Called by the shell once at startup, not on every event — keeps the
 /// shell minimal while the effect intent is declared in the pure layer.
-pub fn init_browse() -> (Model, Vec<Cmd>) {
-    let model = Model::browse();
+pub fn init_browse(header: Header) -> (Model, Vec<Cmd>) {
+    let model = Model::browse(header);
     (model, vec![Cmd::LoadTasksByProject])
 }
 
@@ -575,7 +636,7 @@ pub fn init_browse() -> (Model, Vec<Cmd>) {
 /// Rows are mapped directly to TaskRow; no LoadTasksByProject is emitted
 /// because the caller already has the data. This seeds the shared TEA core
 /// at the Tasks screen so Enter/click opens Detail exactly like browse.
-pub fn mine_model(rows: Vec<MineTableRow>) -> Model {
+pub fn mine_model(rows: Vec<MineTableRow>, header: Header) -> Model {
     let tasks: Vec<TaskRow> = rows
         .into_iter()
         .map(|r| TaskRow {
@@ -595,6 +656,7 @@ pub fn mine_model(rows: Vec<MineTableRow>) -> Model {
             loading: false,
         }],
         should_quit: false,
+        header,
     }
 }
 

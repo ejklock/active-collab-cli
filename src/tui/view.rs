@@ -28,8 +28,15 @@ pub fn view(model: &Model, frame: &mut Frame) {
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(0), Constraint::Length(1)])
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Min(0),
+            Constraint::Length(1),
+        ])
         .split(area);
+
+    let header = Paragraph::new(model.header.header_line()).style(theme::app_header_style());
+    frame.render_widget(header, chunks[0]);
 
     match screen {
         Screen::Projects {
@@ -38,7 +45,7 @@ pub fn view(model: &Model, frame: &mut Frame) {
             loading,
             ..
         } => {
-            draw_projects(frame, chunks[0], groups, *selected, *loading);
+            draw_projects(frame, chunks[1], groups, *selected, *loading);
         }
         Screen::Tasks {
             project_name,
@@ -47,7 +54,7 @@ pub fn view(model: &Model, frame: &mut Frame) {
             loading,
             ..
         } => {
-            draw_tasks(frame, chunks[0], project_name, tasks, *selected, *loading);
+            draw_tasks(frame, chunks[1], project_name, tasks, *selected, *loading);
         }
         Screen::Detail {
             lines,
@@ -57,7 +64,7 @@ pub fn view(model: &Model, frame: &mut Frame) {
             task_id,
             ..
         } => {
-            draw_detail(frame, chunks[0], lines, assets, *offset, *loading, *task_id);
+            draw_detail(frame, chunks[1], lines, assets, *offset, *loading, *task_id);
         }
     }
 
@@ -65,8 +72,9 @@ pub fn view(model: &Model, frame: &mut Frame) {
         Screen::Detail { assets, .. } if !assets.is_empty() => {
             t("↑/↓ scroll  Esc/b back  q quit  1-9 open asset  d+1-9 download")
         }
+        Screen::Detail { .. } => t("↑/↓ scroll  Esc/b back  q quit"),
         _ => t("↑/↓ navigate  Enter select  Esc/b back  q quit"),
     };
     let footer = Paragraph::new(footer_text).style(theme::footer_style());
-    frame.render_widget(footer, chunks[1]);
+    frame.render_widget(footer, chunks[2]);
 }

@@ -81,7 +81,7 @@ fn build_groups(
     tasks: Vec<(MineTask, String)>,
     project_names: &HashMap<i64, String>,
 ) -> Vec<ProjectGroup> {
-    let mut groups: HashMap<i64, ProjectGroup> = HashMap::new();
+    let mut groups: HashMap<(String, i64), ProjectGroup> = HashMap::new();
 
     for (task, instance_name) in tasks {
         let pid = task.project_id.unwrap_or(0);
@@ -90,9 +90,11 @@ fn build_groups(
             .cloned()
             .unwrap_or_else(|| pid.to_string());
 
-        let group = groups.entry(pid).or_insert_with(|| ProjectGroup {
+        let key = (instance_name.clone(), pid);
+        let group = groups.entry(key).or_insert_with(|| ProjectGroup {
             project_id: pid,
             project_name,
+            instance: instance_name.clone(),
             tasks: vec![],
         });
 
@@ -106,7 +108,11 @@ fn build_groups(
     }
 
     let mut sorted: Vec<ProjectGroup> = groups.into_values().collect();
-    sorted.sort_by(|a, b| a.project_name.cmp(&b.project_name));
+    sorted.sort_by(|a, b| {
+        a.project_name
+            .cmp(&b.project_name)
+            .then_with(|| a.instance.cmp(&b.instance))
+    });
     for group in &mut sorted {
         group.tasks.sort_by_key(|t| t.task_number);
     }

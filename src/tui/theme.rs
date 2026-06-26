@@ -7,7 +7,14 @@ pub const SELECTION_SYMBOL: &str = "▸ ";
 pub fn selection_style() -> Style {
     Style::default()
         .fg(Color::Black)
-        .bg(Color::Cyan)
+        .bg(Color::LightCyan)
+        .add_modifier(Modifier::BOLD)
+}
+
+/// Style for column header rows and list block titles.
+pub fn column_header_style() -> Style {
+    Style::default()
+        .fg(Color::LightCyan)
         .add_modifier(Modifier::BOLD)
 }
 
@@ -26,4 +33,19 @@ pub fn footer_style() -> Style {
 /// Style for asset rows in the dedicated Artifacts panel.
 pub fn asset_style() -> Style {
     Style::default().fg(Color::Yellow)
+}
+
+/// Identity bar at the top of every screen — white on cyan, bold.
+pub fn app_header_style() -> Style {
+    Style::default()
+        .fg(Color::White)
+        .bg(Color::Cyan)
+        .add_modifier(Modifier::BOLD)
+}
+
+/// Badge style for the task-count cell on the Projects screen — magenta, bold.
+pub fn badge_style() -> Style {
+    Style::default()
+        .fg(Color::Magenta)
+        .add_modifier(Modifier::BOLD)
 }

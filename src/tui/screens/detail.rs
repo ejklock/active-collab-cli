@@ -4,11 +4,16 @@ use crate::tui::theme;
 use ratatui::{
     layout::{Constraint, Direction, Layout},
     text::{Line, Text},
-    widgets::{Block, Borders, Paragraph, Wrap},
+    widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap},
     Frame,
 };
 
-/// Draw the Detail screen (task body + scroll + optional assets panel) into `area`.
+/// Draw the Detail screen as a single scrollable content block with an optional
+/// fixed Artifacts panel below.
+///
+/// When `assets` is non-empty the area is split vertically into a content chunk
+/// (Min(0)) and a fixed panel chunk (Length capped at 8). Otherwise the full
+/// area goes to content.
 pub fn draw_detail(
     frame: &mut Frame,
     area: ratatui::layout::Rect,
@@ -30,12 +35,11 @@ pub fn draw_detail(
     if assets.is_empty() {
         render_content(frame, area, lines, offset, title);
     } else {
-        let panel_height = (assets.len() + 2).min(8) as u16;
+        let panel_height = (assets.len() as u16 + 2).min(8);
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Min(0), Constraint::Length(panel_height)])
             .split(area);
-
         render_content(frame, chunks[0], lines, offset, title);
         render_assets_panel(frame, chunks[1], assets);
     }
@@ -55,12 +59,21 @@ fn render_content(
             .collect::<Vec<_>>(),
     );
 
+    let block = Block::default().borders(Borders::ALL).title(title);
     let paragraph = Paragraph::new(text)
-        .block(Block::default().borders(Borders::ALL).title(title))
+        .block(block)
         .wrap(Wrap { trim: false })
         .scroll((offset as u16, 0));
 
     frame.render_widget(paragraph, area);
+
+    let viewport_height = area.height.saturating_sub(2) as usize;
+    let total_content = lines.len();
+    if total_content > viewport_height {
+        let mut scrollbar_state = ScrollbarState::new(total_content).position(offset);
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight);
+        frame.render_stateful_widget(scrollbar, area, &mut scrollbar_state);
+    }
 }
 
 fn render_assets_panel(frame: &mut Frame, area: ratatui::layout::Rect, assets: &[Asset]) {
@@ -68,7 +81,12 @@ fn render_assets_panel(frame: &mut Frame, area: ratatui::layout::Rect, assets: &
     let rows: Vec<Line> = assets
         .iter()
         .enumerate()
-        .map(|(i, asset)| Line::styled(format!("[{}] {}", i + 1, asset.name), theme::asset_style()))
+        .map(|(i, asset)| {
+            Line::styled(
+                format!("{} {}: {}", t("Attachment"), i + 1, asset.name),
+                theme::asset_style(),
+            )
+        })
         .collect();
 
     let panel = Paragraph::new(rows).block(

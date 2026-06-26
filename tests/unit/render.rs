@@ -928,6 +928,268 @@ fn truncate_cell_max_width_zero_returns_empty() {
     assert_eq!(truncate_cell("anything", 0), "");
 }
 
+// --- U6a: build_header_lines ---
+
+#[test]
+fn build_header_lines_returns_only_meta_rows() {
+    let task = json!({
+        "id": 7,
+        "project_id": 3,
+        "project_name": "Alpha",
+        "name": "Do the thing",
+        "is_completed": false,
+        "assignee_id": null,
+        "estimate": 2.0f64,
+        "tracked_time": 1.0f64
+    });
+    let lines = build_header_lines(&task, &HashMap::new(), 80);
+    let joined = lines.join("\n");
+    assert!(joined.contains("Task:"), "missing Task row: {joined}");
+    assert!(joined.contains("3-7"), "missing task ref: {joined}");
+    assert!(joined.contains("Project:"), "missing Project: {joined}");
+    assert!(joined.contains("Alpha"), "missing project name: {joined}");
+    assert!(joined.contains("Title:"), "missing Title: {joined}");
+    assert!(joined.contains("Do the thing"), "missing title: {joined}");
+    assert!(joined.contains("Status:"), "missing Status: {joined}");
+    assert!(joined.contains("Assignee:"), "missing Assignee: {joined}");
+    assert!(joined.contains("Estimate:"), "missing Estimate: {joined}");
+    assert!(joined.contains("Logged:"), "missing Logged: {joined}");
+}
+
+#[test]
+fn build_header_lines_contains_no_description_or_comment_lines() {
+    let task = json!({
+        "id": 1,
+        "body": "<p>Some body text</p>"
+    });
+    let lines = build_header_lines(&task, &HashMap::new(), 80);
+    let joined = lines.join("\n");
+    assert!(
+        !joined.contains("Description"),
+        "must not include Description: {joined}"
+    );
+    assert!(
+        !joined.contains('\u{256D}'),
+        "must not include comment boxes: {joined}"
+    );
+    assert!(
+        !joined.contains("Some body text"),
+        "must not include body text: {joined}"
+    );
+}
+
+#[test]
+fn build_header_lines_no_line_exceeds_inner_width() {
+    let task = json!({
+        "id": 99,
+        "project_id": 10,
+        "project_name": "A Very Long Project Name That Could Overflow The Line Width",
+        "name": "A task with an extremely verbose name that also goes on too long",
+        "is_completed": true,
+        "assignee_id": 42,
+        "start_on": 1614556800i64,
+        "due_on": 1614643200i64,
+        "estimate": 100.0f64,
+        "tracked_time": 50.5f64
+    });
+    let mut user_map = HashMap::new();
+    user_map.insert(42i64, "Josephine Longname".to_string());
+    let inner_width = 40;
+    let lines = build_header_lines(&task, &user_map, inner_width);
+    for line in &lines {
+        let len = line.chars().count();
+        assert!(
+            len <= inner_width,
+            "line exceeds {inner_width} chars ({len}): {:?}",
+            line
+        );
+    }
+}
+
+#[test]
+fn build_header_lines_optional_dates_included_when_present() {
+    let task = json!({
+        "id": 1,
+        "start_on": 1614556800i64,
+        "due_on": 1614643200i64
+    });
+    let lines = build_header_lines(&task, &HashMap::new(), 80);
+    let joined = lines.join("\n");
+    assert!(joined.contains("Start:"), "missing Start: {joined}");
+    assert!(joined.contains("Due:"), "missing Due: {joined}");
+}
+
+#[test]
+fn build_header_lines_optional_dates_omitted_when_null() {
+    let task = json!({ "id": 1, "start_on": null, "due_on": null });
+    let lines = build_header_lines(&task, &HashMap::new(), 80);
+    let joined = lines.join("\n");
+    assert!(
+        !joined.contains("Start:"),
+        "Start must be omitted: {joined}"
+    );
+    assert!(!joined.contains("Due:"), "Due must be omitted: {joined}");
+}
+
+// --- U6a: build_body_lines ---
+
+#[test]
+fn build_body_lines_contains_description_label() {
+    let task = json!({ "id": 1, "body": "<p>Hello world</p>" });
+    let lines = build_body_lines(&task, 80);
+    let joined = lines.join("\n");
+    assert!(
+        joined.contains("Description:"),
+        "missing Description label: {joined}"
+    );
+}
+
+#[test]
+fn build_body_lines_includes_wrapped_body_text() {
+    let task = json!({ "id": 1, "body": "<p>Some details here</p>" });
+    let lines = build_body_lines(&task, 80);
+    let joined = lines.join("\n");
+    assert!(
+        joined.contains("Some details here"),
+        "missing body text: {joined}"
+    );
+}
+
+#[test]
+fn build_body_lines_fallback_when_body_empty() {
+    let task = json!({ "id": 1, "body": null });
+    let lines = build_body_lines(&task, 80);
+    let joined = lines.join("\n");
+    assert!(
+        joined.contains("(no description)"),
+        "missing fallback: {joined}"
+    );
+}
+
+#[test]
+fn build_body_lines_contains_no_meta_or_comment_lines() {
+    let task = json!({
+        "id": 42,
+        "project_name": "MyProject",
+        "name": "My Task",
+        "body": "<p>Body content</p>"
+    });
+    let lines = build_body_lines(&task, 80);
+    let joined = lines.join("\n");
+    assert!(
+        !joined.contains("Task:"),
+        "must not include Task row: {joined}"
+    );
+    assert!(
+        !joined.contains("Project:"),
+        "must not include Project row: {joined}"
+    );
+    assert!(
+        !joined.contains('\u{256D}'),
+        "must not include comment boxes: {joined}"
+    );
+}
+
+#[test]
+fn build_body_lines_no_line_exceeds_inner_width() {
+    let task = json!({
+        "id": 1,
+        "body": "<p>This is a fairly long body text that should wrap to stay within the width boundary set by the caller</p>"
+    });
+    let inner_width = 30;
+    let lines = build_body_lines(&task, inner_width);
+    for line in &lines {
+        let len = line.chars().count();
+        assert!(
+            len <= inner_width,
+            "line exceeds {inner_width} chars ({len}): {:?}",
+            line
+        );
+    }
+}
+
+// --- U6a: build_comment_lines ---
+
+#[test]
+fn build_comment_lines_empty_for_zero_comments() {
+    let lines = build_comment_lines(&[], 80);
+    assert!(
+        lines.is_empty(),
+        "must return empty vec for no comments: {:?}",
+        lines
+    );
+}
+
+#[test]
+fn build_comment_lines_returns_box_for_single_comment() {
+    let comments = vec![json!({
+        "created_by_name": "Alice",
+        "created_on": 1614556800i64,
+        "body_plain_text": "LGTM!"
+    })];
+    let lines = build_comment_lines(&comments, 60);
+    let joined = lines.join("\n");
+    assert!(
+        joined.contains('\u{256D}'),
+        "must have box top-left corner: {joined}"
+    );
+    assert!(joined.contains("Alice"), "must contain author: {joined}");
+    assert!(joined.contains("LGTM!"), "must contain body: {joined}");
+}
+
+#[test]
+fn build_comment_lines_returns_boxes_for_multiple_comments() {
+    let comments = vec![
+        json!({
+            "created_by_name": "Alice",
+            "created_on": 1614556800i64,
+            "body_plain_text": "First"
+        }),
+        json!({
+            "created_by_name": "Bob",
+            "created_on": 1614556801i64,
+            "body_plain_text": "Second"
+        }),
+    ];
+    let lines = build_comment_lines(&comments, 60);
+    let joined = lines.join("\n");
+    assert!(
+        joined.contains("Alice"),
+        "must contain first author: {joined}"
+    );
+    assert!(
+        joined.contains("Bob"),
+        "must contain second author: {joined}"
+    );
+    assert!(
+        joined.contains("First"),
+        "must contain first body: {joined}"
+    );
+    assert!(
+        joined.contains("Second"),
+        "must contain second body: {joined}"
+    );
+}
+
+#[test]
+fn build_comment_lines_no_line_exceeds_inner_width() {
+    let comments = vec![json!({
+        "created_by_name": "Josephine With A Very Long Name",
+        "created_on": 1614556800i64,
+        "body_plain_text": "A comment body that is quite long and must be wrapped to fit inside the column width"
+    })];
+    let inner_width = 40;
+    let lines = build_comment_lines(&comments, inner_width);
+    for line in &lines {
+        let len = line.chars().count();
+        assert!(
+            len <= inner_width,
+            "line exceeds {inner_width} chars ({len}): {:?}",
+            line
+        );
+    }
+}
+
 #[test]
 fn truncate_cell_max_width_one_returns_only_ellipsis() {
     let result = truncate_cell("abc", 1);

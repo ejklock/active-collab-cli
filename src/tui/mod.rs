@@ -124,6 +124,7 @@ async fn run_app(
     };
 
     dispatch_cmds(init_cmds, &targets, &http, &db_path, tx.clone());
+    spawn_header_name_resolution(&targets, &http, &db_path, &model.header, &tx);
 
     let mut events = crossterm::event::EventStream::new();
     let mut heartbeat = tokio::time::interval(FRAME_PERIOD);
@@ -174,7 +175,8 @@ async fn run_app(
 
 /// Run the browse TUI. Async — awaited directly on the main runtime.
 pub async fn browse(targets: Vec<Instance>, http: Http, db_path: PathBuf) -> i32 {
-    let (model, init_cmds) = init_browse();
+    let header = build_header(&targets, &db_path);
+    let (model, init_cmds) = init_browse(header);
     run_app(targets, http, db_path, model, init_cmds).await
 }
 
@@ -189,8 +191,20 @@ pub async fn run_mine(
     db_path: PathBuf,
     rows: Vec<MineTableRow>,
 ) -> i32 {
-    let model = mine_model(rows);
+    let header = build_header(&targets, &db_path);
+    let model = mine_model(rows, header);
     run_app(targets, http, db_path, model, vec![]).await
+}
+
+/// Resolve the cached display name for the first instance's user_id and
+/// build the Header value. Pure data threading — no network call.
+fn build_header(targets: &[Instance], db_path: &std::path::Path) -> model::Header {
+    let name = targets.first().and_then(|inst| {
+        inst.user_id.and_then(|id| {
+            controller::cached_user_map(db_path, inst).and_then(|m| m.get(&id).cloned())
+        })
+    });
+    model::Header::from_instances(targets, name)
 }
 
 struct DetailRequest {
@@ -244,6 +258,33 @@ fn dispatch_cmds(
             }
         }
     }
+}
+
+fn spawn_header_name_resolution(
+    targets: &[Instance],
+    http: &Http,
+    db_path: &Path,
+    header: &model::Header,
+    tx: &mpsc::UnboundedSender<Msg>,
+) {
+    if header.name.is_some() {
+        return;
+    }
+    let Some(inst) = targets.first().cloned() else {
+        return;
+    };
+    let Some(user_id) = inst.user_id else {
+        return;
+    };
+    let http = http.clone();
+    let db_path = db_path.to_path_buf();
+    let tx = tx.clone();
+    tokio::spawn(async move {
+        let map = controller::refresh_user_map(db_path, inst, http).await;
+        if let Some(name) = map.get(&user_id).cloned() {
+            let _ = tx.send(Msg::HeaderNameResolved(name));
+        }
+    });
 }
 
 fn spawn_load_detail(

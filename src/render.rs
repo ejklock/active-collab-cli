@@ -593,6 +593,41 @@ pub fn comment_box(author: &str, when: &str, body: &str, width: usize) -> Vec<St
     result
 }
 
+/// Returns the meta rows for a task detail view, width-bounded to `inner_width`.
+///
+/// Covers Task/Project/Title/Status/Assignee + optional Start/Due + Estimate/Logged.
+/// No Description or comment lines are included.
+pub fn build_header_lines(
+    task: &Value,
+    user_map: &HashMap<i64, String>,
+    inner_width: usize,
+) -> Vec<String> {
+    let mut lines = Vec::new();
+    build_meta_rows(task, user_map, inner_width, &mut lines);
+    lines
+}
+
+/// Returns the Description label followed by the wrapped body, or the
+/// `(no description)` fallback when the body is empty. Every line is
+/// width-bounded to `inner_width` chars.
+pub fn build_body_lines(task: &Value, inner_width: usize) -> Vec<String> {
+    let mut lines = Vec::new();
+    build_description_rows(task, inner_width, &mut lines);
+    lines
+}
+
+/// Returns the comment boxes for every comment in `comments`, blank-separated.
+/// Returns an empty `Vec` when `comments` is empty.
+/// Every line is width-bounded to `inner_width` chars.
+pub fn build_comment_lines(comments: &[Value], inner_width: usize) -> Vec<String> {
+    if comments.is_empty() {
+        return vec![];
+    }
+    let mut lines = Vec::new();
+    build_comments_rows(comments, inner_width, &mut lines);
+    lines
+}
+
 /// Parity: Python tui.py build_detail_lines.
 ///
 /// Composes the full detail content at `inner_width`:
@@ -605,13 +640,12 @@ pub fn build_detail_lines(
     user_map: &HashMap<i64, String>,
     inner_width: usize,
 ) -> Vec<String> {
-    let mut lines: Vec<String> = Vec::new();
-    build_meta_rows(task, user_map, inner_width, &mut lines);
+    let mut lines = build_header_lines(task, user_map, inner_width);
     lines.push(String::new());
-    build_description_rows(task, inner_width, &mut lines);
+    lines.extend(build_body_lines(task, inner_width));
     if !comments.is_empty() {
         lines.push(String::new());
-        build_comments_rows(comments, inner_width, &mut lines);
+        lines.extend(build_comment_lines(comments, inner_width));
     }
     lines
 }

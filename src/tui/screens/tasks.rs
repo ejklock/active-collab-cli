@@ -4,7 +4,7 @@ use crate::tui::drawer;
 use crate::tui::model::TaskRow;
 use ratatui::{
     layout::Constraint,
-    widgets::{Block, Borders, Paragraph},
+    widgets::{Block, Borders, Cell, Paragraph},
     Frame,
 };
 
@@ -28,13 +28,13 @@ pub fn draw_tasks(
 
     let name_width = area.width.saturating_sub(30) as usize;
 
-    let rows: Vec<Vec<String>> = tasks
+    let rows: Vec<Vec<Cell<'static>>> = tasks
         .iter()
         .map(|row| {
             vec![
-                format!("{}", row.task_number),
-                row.instance.clone(),
-                truncate_cell(&row.name, name_width),
+                Cell::from(format!("{}", row.task_number)),
+                Cell::from(row.instance.clone()),
+                Cell::from(truncate_cell(&row.name, name_width)),
             ]
         })
         .collect();

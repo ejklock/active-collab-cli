@@ -22,7 +22,7 @@ flowchart TD
     main["shell (main.rs)\ntokio + crossterm lifecycle"] --> tui["tui/mod.rs\nrun_app (async select!)\nbrowse · run_mine"]
     tui --> model["tui/model.rs\nModel · Msg · Cmd · Screen · update\nmine_model · init_browse · TaskRow (project_id)"]
     tui --> events["tui/events.rs\ncrossterm Event → Msg mapping"]
-    tui --> view["tui/view.rs\nview()\nframe Layout split + footer"]
+    tui --> view["tui/view.rs\nview()\nframe Layout split: header + content + footer"]
     view --> screens["tui/screens/\nprojects.rs · tasks.rs · detail.rs\neach owns its draw_* fn\n(responsive Table · detail wraps text + assets panel)"]
     view --> drawer["tui/drawer.rs\nshared widget builders (render_table)"]
     view --> theme["tui/theme.rs\ncentralized Style / Color constants"]
@@ -50,8 +50,12 @@ flowchart TD
 - **mine and browse share one TEA core**: `run_app` (async) seeds from `mine_model`
   (rows already fetched, no init_cmds) or `init_browse` (LoadTasksByProject on start).
   Enter/click on the mine Tasks screen opens Detail through the same `update` path.
-- **the view layer is responsive and theme-centralized**: list screens render a
-  ratatui `Table` driven by width `Constraint`s (no fixed-width truncation) with a
+- **the view layer is responsive and theme-centralized**: `view()` splits the frame
+  vertically into three regions — a one-line identity header (`app_header_style`:
+  white on cyan, bold), a variable-height content area, and a one-line footer.  The
+  too-small guard (width < 24 or height < 6) bypasses all three and renders only a
+  centered `"Terminal too small"` message.  List screens render a ratatui `Table`
+  driven by width `Constraint`s (no fixed-width truncation) with a
   `TableState`-driven selection highlight; the detail screen wraps long lines and
   renders assets in a dedicated panel. All colors live in `theme.rs` — no inline
   `Color`/`Style` literals in the screen or drawer modules.
