@@ -84,12 +84,14 @@ fn render_projects_to_buf(
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
         .draw(|frame| {
+            let mut targets = vec![];
             draw_projects(
                 frame,
                 Rect::new(0, 0, width, height),
                 groups,
                 selected,
                 false,
+                &mut targets,
             );
         })
         .unwrap();
@@ -106,6 +108,7 @@ fn render_tasks_to_buf(
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
         .draw(|frame| {
+            let mut targets = vec![];
             draw_tasks(
                 frame,
                 Rect::new(0, 0, width, height),
@@ -113,6 +116,7 @@ fn render_tasks_to_buf(
                 tasks,
                 selected,
                 false,
+                &mut targets,
             );
         })
         .unwrap();
@@ -239,7 +243,16 @@ fn draw_my_tasks_title_renders_in_pt_br() {
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
         .draw(|frame| {
-            draw_tasks(frame, Rect::new(0, 0, 80, 10), &title, &tasks, 0, false);
+            let mut targets = vec![];
+            draw_tasks(
+                frame,
+                Rect::new(0, 0, 80, 10),
+                &title,
+                &tasks,
+                0,
+                false,
+                &mut targets,
+            );
         })
         .unwrap();
     set_language("en");
@@ -473,7 +486,8 @@ fn draw_projects_loading_shows_paragraph_not_table() {
     terminal
         .draw(|frame| {
             let area = Rect::new(0, 0, 80, 10);
-            draw_projects(frame, area, &[], 0, true);
+            let mut targets = vec![];
+            draw_projects(frame, area, &[], 0, true, &mut targets);
         })
         .unwrap();
     let content = buf_to_string(terminal.backend().buffer());
@@ -490,7 +504,8 @@ fn draw_tasks_loading_shows_paragraph_not_table() {
     terminal
         .draw(|frame| {
             let area = Rect::new(0, 0, 80, 10);
-            draw_tasks(frame, area, "Project A", &[], 0, true);
+            let mut targets = vec![];
+            draw_tasks(frame, area, "Project A", &[], 0, true, &mut targets);
         })
         .unwrap();
     let content = buf_to_string(terminal.backend().buffer());
@@ -782,6 +797,7 @@ fn render_table_header_row_carries_column_header_style() {
                 Cell::from(Text::raw("r1c1")),
                 Cell::from(Text::raw("r1c2")),
             ])];
+            let mut targets = vec![];
             render_table(
                 frame,
                 ratatui::layout::Rect::new(0, 0, 80, 10),
@@ -790,6 +806,8 @@ fn render_table_header_row_carries_column_header_style() {
                 rows,
                 &[Constraint::Min(10), Constraint::Min(10)],
                 0,
+                &[1],
+                &mut targets,
             );
         })
         .unwrap();
@@ -845,15 +863,23 @@ mod view_size_guard {
             }],
             should_quit: false,
             header: Header::from_instances(&[], None),
+            viewport: (0, 0),
+            click_targets: vec![],
+            last_loaded: None,
         }
     }
 
     #[test]
     fn viewport_below_threshold_renders_only_too_small_message() {
+        use crate::i18n::set_language;
+        let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
         let backend = TestBackend::new(20, 5);
         let mut terminal = Terminal::new(backend).unwrap();
         let model = projects_model();
-        terminal.draw(|frame| view(&model, frame)).unwrap();
+        terminal
+            .draw(|frame| view(&model, frame, &mut vec![]))
+            .unwrap();
         let content = buf_to_string(terminal.backend().buffer());
 
         assert!(
@@ -872,10 +898,15 @@ mod view_size_guard {
 
     #[test]
     fn viewport_at_or_above_threshold_renders_normal_screen_without_guard_message() {
+        use crate::i18n::set_language;
+        let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
         let backend = TestBackend::new(80, 24);
         let mut terminal = Terminal::new(backend).unwrap();
         let model = projects_model();
-        terminal.draw(|frame| view(&model, frame)).unwrap();
+        terminal
+            .draw(|frame| view(&model, frame, &mut vec![]))
+            .unwrap();
         let content = buf_to_string(terminal.backend().buffer());
 
         assert!(
@@ -1013,10 +1044,12 @@ fn render_table_to_buf(
     let rows: Vec<Row<'static>> = (0..row_count)
         .map(|i| Row::new(vec![Cell::from(format!("row{i}"))]))
         .collect();
+    let row_heights: Vec<u16> = vec![1u16; row_count];
     let backend = ratatui::backend::TestBackend::new(width, height);
     let mut terminal = ratatui::Terminal::new(backend).unwrap();
     terminal
         .draw(|frame| {
+            let mut targets = vec![];
             render_table(
                 frame,
                 ratatui::layout::Rect::new(0, 0, width, height),
@@ -1025,6 +1058,8 @@ fn render_table_to_buf(
                 rows,
                 &[Constraint::Min(0)],
                 selected,
+                &row_heights,
+                &mut targets,
             );
         })
         .unwrap();
@@ -1294,11 +1329,16 @@ fn view_detail_footer_has_no_tab_switch_hint() {
         }],
         should_quit: false,
         header: Header::from_instances(&[], None),
+        viewport: (0, 0),
+        click_targets: vec![],
+        last_loaded: None,
     };
 
     let backend = TestBackend::new(80, 24);
     let mut terminal = Terminal::new(backend).unwrap();
-    terminal.draw(|frame| view(&model, frame)).unwrap();
+    terminal
+        .draw(|frame| view(&model, frame, &mut vec![]))
+        .unwrap();
     let content = buf_to_string(terminal.backend().buffer());
 
     assert!(
@@ -1343,11 +1383,16 @@ fn view_detail_footer_without_assets_has_no_tab_hint() {
         }],
         should_quit: false,
         header: Header::from_instances(&[], None),
+        viewport: (0, 0),
+        click_targets: vec![],
+        last_loaded: None,
     };
 
     let backend = TestBackend::new(80, 24);
     let mut terminal = Terminal::new(backend).unwrap();
-    terminal.draw(|frame| view(&model, frame)).unwrap();
+    terminal
+        .draw(|frame| view(&model, frame, &mut vec![]))
+        .unwrap();
     let content = buf_to_string(terminal.backend().buffer());
 
     assert!(
@@ -1454,11 +1499,16 @@ fn view_renders_header_on_top_row_with_app_header_style_is_soft_cyan_on_steel() 
         }],
         should_quit: false,
         header,
+        viewport: (0, 0),
+        click_targets: vec![],
+        last_loaded: None,
     };
 
     let backend = TestBackend::new(80, 10);
     let mut terminal = Terminal::new(backend).unwrap();
-    terminal.draw(|frame| view(&model, frame)).unwrap();
+    terminal
+        .draw(|frame| view(&model, frame, &mut vec![]))
+        .unwrap();
     let buf = terminal.backend().buffer();
 
     let top_row_content: String = (0..80u16)
@@ -1506,12 +1556,17 @@ fn view_content_and_footer_render_below_header() {
         }],
         should_quit: false,
         header,
+        viewport: (0, 0),
+        click_targets: vec![],
+        last_loaded: None,
     };
 
     let height = 10u16;
     let backend = TestBackend::new(80, height);
     let mut terminal = Terminal::new(backend).unwrap();
-    terminal.draw(|frame| view(&model, frame)).unwrap();
+    terminal
+        .draw(|frame| view(&model, frame, &mut vec![]))
+        .unwrap();
     let buf = terminal.backend().buffer();
 
     let last_row: String = (0..80u16)
@@ -1549,11 +1604,16 @@ fn view_multi_instance_header_shows_extra_suffix() {
         }],
         should_quit: false,
         header,
+        viewport: (0, 0),
+        click_targets: vec![],
+        last_loaded: None,
     };
 
     let backend = TestBackend::new(80, 10);
     let mut terminal = Terminal::new(backend).unwrap();
-    terminal.draw(|frame| view(&model, frame)).unwrap();
+    terminal
+        .draw(|frame| view(&model, frame, &mut vec![]))
+        .unwrap();
     let buf = terminal.backend().buffer();
 
     let top_row: String = (0..80u16)
@@ -1568,6 +1628,8 @@ fn view_multi_instance_header_shows_extra_suffix() {
 // U5a-A3: too-small guard still suppresses header+footer at sub-minimum sizes.
 #[test]
 fn view_too_small_suppresses_header_and_footer() {
+    let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+    set_language("en");
     use crate::tui::model::{Model, Screen};
     use crate::tui::view::view;
 
@@ -1582,11 +1644,16 @@ fn view_too_small_suppresses_header_and_footer() {
         }],
         should_quit: false,
         header,
+        viewport: (0, 0),
+        click_targets: vec![],
+        last_loaded: None,
     };
 
     let backend = TestBackend::new(20, 5);
     let mut terminal = Terminal::new(backend).unwrap();
-    terminal.draw(|frame| view(&model, frame)).unwrap();
+    terminal
+        .draw(|frame| view(&model, frame, &mut vec![]))
+        .unwrap();
     let content = buf_to_string(terminal.backend().buffer());
 
     assert!(
@@ -1676,6 +1743,164 @@ fn draw_tasks_no_instance_header_and_name_fits_full_width() {
     );
 }
 
+// D3-A1 checks that a URL in Description body is rendered with link_style in muted green underline
+// while surrounding text keeps default style.
+#[test]
+fn draw_detail_url_in_description_body_has_link_style() {
+    use ratatui::style::{Color, Modifier};
+
+    let task = json!({
+        "id": 1,
+        "name": "Task With Link",
+        "body": "<p>Visit https://example.com/docs for more info.</p>"
+    });
+    let user_map: HashMap<i64, String> = HashMap::new();
+    let width: u16 = 80;
+    let lines = build_detail_lines(&task, &[], &user_map, (width - 2) as usize);
+
+    let buf = render_detail_to_buf(&lines, &[], 0, width, 30);
+
+    let muted_green = Color::Rgb(120, 190, 130);
+    let underline = Modifier::UNDERLINED;
+
+    let mut found_link_cell = false;
+    let mut found_normal_cell = false;
+    let area = buf.area();
+
+    for y in 0..area.height {
+        for x in 0..area.width {
+            let cell = buf.cell((x, y)).unwrap();
+            let sym = cell.symbol();
+            let is_url_char = sym == "h" || sym == "t" || sym == "p" || sym == "s" || sym == ":";
+            if is_url_char
+                && cell.style().fg == Some(muted_green)
+                && cell.style().add_modifier.contains(underline)
+            {
+                found_link_cell = true;
+            }
+            let is_plain_char = sym == "V" || sym == "i" || sym == "s" || sym == "t";
+            if is_plain_char && cell.style().fg != Some(muted_green) {
+                found_normal_cell = true;
+            }
+        }
+    }
+
+    assert!(
+        found_link_cell,
+        "URL cells in Description body must carry muted-green+underline link_style"
+    );
+    assert!(
+        found_normal_cell,
+        "Non-URL text cells must NOT carry link_style"
+    );
+}
+
+// D3-A1: URL in a Comment body is rendered with link_style.
+#[test]
+fn draw_detail_url_in_comment_body_has_link_style() {
+    use ratatui::style::{Color, Modifier};
+
+    let task = json!({
+        "id": 1,
+        "name": "Task",
+        "body": "<p>Description</p>"
+    });
+    let comment = json!({
+        "created_by_name": "Alice",
+        "created_on": 1614556800i64,
+        "body_plain_text": "See https://docs.example.com/guide for reference"
+    });
+    let user_map: HashMap<i64, String> = HashMap::new();
+    let width: u16 = 80;
+    let lines = build_detail_lines(&task, &[comment], &user_map, (width - 2) as usize);
+
+    let buf = render_detail_to_buf(&lines, &[], 0, width, 40);
+
+    let muted_green = Color::Rgb(120, 190, 130);
+    let underline = Modifier::UNDERLINED;
+
+    let mut found_link_cell = false;
+    let area = buf.area();
+
+    for y in 0..area.height {
+        for x in 0..area.width {
+            let cell = buf.cell((x, y)).unwrap();
+            if cell.style().fg == Some(muted_green) && cell.style().add_modifier.contains(underline)
+            {
+                found_link_cell = true;
+                break;
+            }
+        }
+        if found_link_cell {
+            break;
+        }
+    }
+
+    assert!(
+        found_link_cell,
+        "URL cells in Comment body must carry muted-green+underline link_style"
+    );
+}
+
+// D3-A2: Border chars │ are never styled as links; a no-URL line renders without link_style.
+#[test]
+fn draw_detail_border_and_no_url_lines_have_default_style() {
+    use ratatui::style::{Color, Modifier};
+
+    let task = json!({
+        "id": 1,
+        "name": "Task",
+        "body": "<p>No links here at all.</p>"
+    });
+    let user_map: HashMap<i64, String> = HashMap::new();
+    let width: u16 = 80;
+    let lines = build_detail_lines(&task, &[], &user_map, (width - 2) as usize);
+
+    let buf = render_detail_to_buf(&lines, &[], 0, width, 20);
+
+    let muted_green = Color::Rgb(120, 190, 130);
+    let underline = Modifier::UNDERLINED;
+    let area = buf.area();
+
+    for y in 0..area.height {
+        for x in 0..area.width {
+            let cell = buf.cell((x, y)).unwrap();
+            let sym = cell.symbol();
+            // │ border chars must never carry link_style
+            if sym == "\u{2502}" {
+                assert!(
+                    cell.style().fg != Some(muted_green),
+                    "│ border at ({x},{y}) must NOT carry link fg color"
+                );
+                assert!(
+                    !cell.style().add_modifier.contains(underline),
+                    "│ border at ({x},{y}) must NOT carry underline modifier"
+                );
+            }
+            // No cell should carry link style in a no-URL description
+            assert!(
+                !(cell.style().fg == Some(muted_green)
+                    && cell.style().add_modifier.contains(underline)),
+                "cell ({x},{y}) sym={sym:?} must NOT carry link_style when no URL present"
+            );
+        }
+    }
+}
+
+// D3-A1: link_style fn returns muted green + underline.
+#[test]
+fn link_style_is_muted_green_underlined() {
+    use ratatui::style::{Color, Modifier, Style};
+    let style = theme::link_style();
+    assert_eq!(
+        style,
+        Style::default()
+            .fg(Color::Rgb(120, 190, 130))
+            .add_modifier(Modifier::UNDERLINED),
+        "link_style must be muted-green+underlined matching asset_style color"
+    );
+}
+
 // V1-A1: Responsive — project_name column absorbs all available width (overhead=4 only).
 // A name of 25 chars fits at w=30 (name_width = 30 - 4 = 26 >= 25 chars).
 #[test]
@@ -1690,4 +1915,769 @@ fn draw_projects_name_column_absorbs_full_width() {
         content.contains(name_25),
         "name must fit fully at width=32 with single-column layout: {content}"
     );
+}
+
+// V2b click-target tests — verifies the renderer-recorded hit-map drives drill-in correctly.
+mod v2b_click_targets {
+    use crate::tui::model::{update, Header, Model, Msg, ProjectGroup, Screen, TaskRow};
+    use crate::tui::view::view;
+    use ratatui::{backend::TestBackend, Terminal};
+
+    fn empty_header() -> Header {
+        Header::from_instances(&[], None)
+    }
+
+    fn make_task(id: i64, name: &str) -> TaskRow {
+        TaskRow {
+            task_id: id,
+            task_number: id,
+            name: name.to_string(),
+            instance: "inst".into(),
+            project_id: 0,
+        }
+    }
+
+    fn render_and_capture(model: &mut Model, width: u16, height: u16) {
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut targets = vec![];
+        terminal
+            .draw(|frame| view(model, frame, &mut targets))
+            .unwrap();
+        model.set_click_targets(targets);
+    }
+
+    // V2b-A1 projects case: a long project name wraps across 2 terminal rows.
+    // Clicking anywhere within those 2 rows drills into that project's tasks at the correct index.
+    // At width=30 the name_width is 30-4=26; "Alpha Beta Gamma Delta Extra" wraps.
+    // Terminal layout: row0=app_header, row1=top_border, row2=column_header,
+    // row3=first_data_row, row4=wrap_continuation. Clicking y=4 must resolve to index 0.
+    #[test]
+    fn click_on_wrapped_projects_row_drills_into_correct_project() {
+        let long_name = "Alpha Beta Gamma Delta Extra";
+        assert!(long_name.len() > 26, "name must wrap at name_width=26");
+        let groups = vec![
+            ProjectGroup {
+                project_id: 0,
+                project_name: long_name.to_string(),
+                instance: "inst".into(),
+                tasks: vec![make_task(10, "Task A")],
+            },
+            ProjectGroup {
+                project_id: 1,
+                project_name: "ShortB".to_string(),
+                instance: "inst".into(),
+                tasks: vec![make_task(20, "Task B")],
+            },
+        ];
+
+        let mut model = Model {
+            stack: vec![Screen::Projects {
+                groups,
+                selected: 0,
+                loading: false,
+            }],
+            should_quit: false,
+            header: empty_header(),
+            viewport: (30, 15),
+            click_targets: vec![],
+            last_loaded: None,
+        };
+
+        render_and_capture(&mut model, 30, 15);
+
+        let targets = model.click_targets.clone();
+        assert!(
+            !targets.is_empty(),
+            "hit-map must be populated after render"
+        );
+
+        // The first target (index=0) covers the wrapped row, so its y_end > y_start+1.
+        let first_target = targets
+            .iter()
+            .find(|t| t.index == 0)
+            .expect("index 0 must exist");
+        assert!(
+            first_target.y_end > first_target.y_start + 1,
+            "wrapped row must span more than one terminal line: {first_target:?}"
+        );
+
+        // Click on the continuation line (y_start + 1, inside the wrap) must resolve to index 0.
+        let click_y = first_target.y_start + 1;
+        let (model_after, cmds) = update(
+            model,
+            Msg::Click {
+                column: 5,
+                row: click_y,
+            },
+        );
+        assert!(cmds.is_empty(), "PushTasks must not emit async cmds");
+        match model_after.top() {
+            Some(Screen::Tasks {
+                project_name,
+                tasks,
+                ..
+            }) => {
+                assert_eq!(
+                    project_name, long_name,
+                    "clicked project (index 0) must push Tasks for '{long_name}'"
+                );
+                assert_eq!(tasks.len(), 1, "project 0 has 1 task");
+                assert_eq!(tasks[0].task_id, 10, "task_id must match project 0's task");
+            }
+            other => panic!("expected Tasks screen, got {other:?}"),
+        }
+    }
+
+    // V2b-A1 (tasks → detail): clicking a task row pushes a Detail screen (same as Enter).
+    // Uses a 1-line-height row so the geometry is unambiguous.
+    #[test]
+    fn click_on_tasks_row_pushes_detail_screen() {
+        let tasks = vec![
+            make_task(100, "First Task"),
+            make_task(200, "Second Task"),
+            make_task(300, "Third Task"),
+        ];
+
+        let mut model = Model {
+            stack: vec![Screen::Tasks {
+                project_name: "Proj".into(),
+                tasks,
+                selected: 0,
+                loading: false,
+            }],
+            should_quit: false,
+            header: empty_header(),
+            viewport: (80, 15),
+            click_targets: vec![],
+            last_loaded: None,
+        };
+
+        render_and_capture(&mut model, 80, 15);
+
+        let targets = model.click_targets.clone();
+        assert!(
+            !targets.is_empty(),
+            "hit-map must be populated after render"
+        );
+
+        // Click on the second task (index 1).
+        let target = targets
+            .iter()
+            .find(|t| t.index == 1)
+            .expect("index 1 must exist");
+        let click_y = target.y_start;
+
+        let (model_after, cmds) = update(
+            model,
+            Msg::Click {
+                column: 5,
+                row: click_y,
+            },
+        );
+        assert_eq!(cmds.len(), 1, "clicking a task must emit LoadDetail");
+        match model_after.top() {
+            Some(Screen::Detail {
+                task_id, loading, ..
+            }) => {
+                assert_eq!(
+                    *task_id, 200,
+                    "Detail must open task with task_id=200 (index 1)"
+                );
+                assert!(*loading, "Detail must start in loading state");
+            }
+            other => panic!("expected Detail screen, got {other:?}"),
+        }
+    }
+
+    // V2b-A2 (empty space no-op): clicking below the last visible row is a no-op.
+    // Renders 2 rows in a tall terminal; any y below the second row's y_end is a no-op.
+    #[test]
+    fn click_below_last_row_is_noop() {
+        let groups = vec![
+            ProjectGroup {
+                project_id: 0,
+                project_name: "Alpha".into(),
+                instance: "i".into(),
+                tasks: vec![make_task(1, "T1")],
+            },
+            ProjectGroup {
+                project_id: 1,
+                project_name: "Beta".into(),
+                instance: "i".into(),
+                tasks: vec![make_task(2, "T2")],
+            },
+        ];
+
+        let mut model = Model {
+            stack: vec![Screen::Projects {
+                groups,
+                selected: 0,
+                loading: false,
+            }],
+            should_quit: false,
+            header: empty_header(),
+            viewport: (80, 20),
+            click_targets: vec![],
+            last_loaded: None,
+        };
+
+        render_and_capture(&mut model, 80, 20);
+
+        let targets = model.click_targets.clone();
+        assert!(!targets.is_empty(), "hit-map must be populated");
+
+        // Find a y that is beyond all recorded targets.
+        let max_y_end = targets.iter().map(|t| t.y_end).max().unwrap_or(0);
+        let below_y = max_y_end + 2;
+
+        let stack_depth_before = model.stack.len();
+        let selected_before = match model.top() {
+            Some(Screen::Projects { selected, .. }) => *selected,
+            _ => panic!("expected Projects"),
+        };
+
+        let (model_after, cmds) = update(
+            model,
+            Msg::Click {
+                column: 5,
+                row: below_y,
+            },
+        );
+        assert!(cmds.is_empty(), "click below all rows must emit no cmds");
+        assert_eq!(
+            model_after.stack.len(),
+            stack_depth_before,
+            "click below all rows must not push a new screen"
+        );
+        match model_after.top() {
+            Some(Screen::Projects { selected, .. }) => {
+                assert_eq!(
+                    *selected, selected_before,
+                    "click below all rows must not change selection"
+                );
+            }
+            other => panic!("expected Projects, got {other:?}"),
+        }
+    }
+
+    // V2b-A2 (scroll offset): after the list has scrolled (offset>0), the hit-map
+    // records the correct visible rows so clicks resolve to the right (scrolled) index.
+    // Uses a narrow height to force scrolling.
+    #[test]
+    fn click_resolves_correct_index_after_scroll() {
+        let tasks: Vec<TaskRow> = (0..10)
+            .map(|i| make_task(i as i64, &format!("Task {i:02}")))
+            .collect();
+
+        // height=6 → 1 header bar + 1 top border + 1 col header + 3 data rows = 6.
+        // ratatui will scroll to keep the selected row visible.
+        // Select row 7 so the widget scrolls, offset > 0.
+        let mut model = Model {
+            stack: vec![Screen::Tasks {
+                project_name: "Proj".into(),
+                tasks,
+                selected: 7,
+                loading: false,
+            }],
+            should_quit: false,
+            header: empty_header(),
+            viewport: (80, 6),
+            click_targets: vec![],
+            last_loaded: None,
+        };
+
+        render_and_capture(&mut model, 80, 6);
+
+        let targets = model.click_targets.clone();
+        assert!(
+            !targets.is_empty(),
+            "hit-map must be populated after scroll"
+        );
+
+        // Every target index must be >= the scroll offset (i.e. not a hidden row).
+        let min_idx = targets.iter().map(|t| t.index).min().unwrap_or(0);
+        assert!(
+            min_idx > 0,
+            "after scrolling to row 7, all visible targets must have index > 0 (got min_idx={min_idx})"
+        );
+
+        // Clicking the first visible target's y_start must drill into THAT task (not index 0).
+        let first_visible = targets.iter().min_by_key(|t| t.y_start).unwrap().clone();
+        let expected_task_id = first_visible.index as i64;
+        let click_y = first_visible.y_start;
+
+        let (model_after, cmds) = update(
+            model,
+            Msg::Click {
+                column: 5,
+                row: click_y,
+            },
+        );
+        assert_eq!(cmds.len(), 1, "must emit LoadDetail cmd");
+        match model_after.top() {
+            Some(Screen::Detail { task_id, .. }) => {
+                assert_eq!(
+                    *task_id, expected_task_id,
+                    "Detail must open the task at the clicked (scrolled) index={}",
+                    first_visible.index
+                );
+            }
+            other => panic!("expected Detail screen, got {other:?}"),
+        }
+    }
+}
+
+mod footer_refresh_hint {
+    use crate::i18n::set_language;
+    use crate::tui::model::{DetailLoad, Header, Model, Msg, ProjectGroup, Screen, TaskRow};
+    use crate::tui::view::view;
+    use ratatui::{backend::TestBackend, Terminal};
+    use std::collections::HashMap;
+
+    fn buf_to_string(buf: &ratatui::buffer::Buffer) -> String {
+        let area = buf.area();
+        let mut out = String::new();
+        for y in 0..area.height {
+            for x in 0..area.width {
+                out.push_str(buf.cell((x, y)).unwrap().symbol());
+            }
+            out.push('\n');
+        }
+        out
+    }
+
+    fn projects_model_with_last_loaded(last_loaded: Option<String>) -> Model {
+        Model {
+            stack: vec![Screen::Projects {
+                groups: vec![ProjectGroup {
+                    project_id: 0,
+                    project_name: "A Project".into(),
+                    instance: "inst".into(),
+                    tasks: vec![TaskRow {
+                        task_id: 0,
+                        task_number: 1,
+                        name: "Task 0".into(),
+                        instance: "inst".into(),
+                        project_id: 0,
+                    }],
+                }],
+                selected: 0,
+                loading: false,
+            }],
+            should_quit: false,
+            header: Header::from_instances(&[], None),
+            viewport: (0, 0),
+            click_targets: vec![],
+            last_loaded,
+        }
+    }
+
+    fn render_model(model: &Model) -> String {
+        let backend = TestBackend::new(80, 10);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| view(model, frame, &mut vec![]))
+            .unwrap();
+        buf_to_string(terminal.backend().buffer())
+    }
+
+    // R1-A1: footer on a Projects screen (last_loaded=None) shows 'r refresh' (en)
+    // and does NOT show any 'Updated at' text.
+    #[test]
+    fn projects_footer_shows_refresh_token_in_en_when_last_loaded_none() {
+        let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let model = projects_model_with_last_loaded(None);
+        let content = render_model(&model);
+        set_language("en");
+        assert!(
+            content.contains("r refresh"),
+            "footer must contain 'r refresh' (en) when last_loaded=None: {content}"
+        );
+        assert!(
+            !content.contains("Updated at"),
+            "footer must NOT contain 'Updated at' when last_loaded=None: {content}"
+        );
+    }
+
+    // R1-A1: footer on a Projects screen (last_loaded=None) shows 'r atualizar' in pt_BR.
+    #[test]
+    fn projects_footer_shows_refresh_token_in_pt_br_when_last_loaded_none() {
+        let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("pt_BR");
+        let model = projects_model_with_last_loaded(None);
+        let content = render_model(&model);
+        set_language("en");
+        assert!(
+            content.contains("r atualizar"),
+            "footer must contain 'r atualizar' (pt_BR) when last_loaded=None: {content}"
+        );
+        assert!(
+            !content.contains("Atualizado"),
+            "footer must NOT contain 'Atualizado' when last_loaded=None: {content}"
+        );
+    }
+
+    // R1-A1: footer on a Detail screen without assets shows 'r refresh'.
+    #[test]
+    fn detail_footer_without_assets_shows_refresh_token() {
+        let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let model = Model {
+            stack: vec![Screen::Detail {
+                instance: "inst".into(),
+                project_id: 1,
+                task_id: 7,
+                task: serde_json::Value::Null,
+                comments: vec![],
+                user_map: HashMap::new(),
+                lines: vec!["body".into()],
+                assets: vec![],
+                offset: 0,
+                loading: false,
+                pending_download: false,
+                rendered_width: 80,
+            }],
+            should_quit: false,
+            header: Header::from_instances(&[], None),
+            viewport: (0, 0),
+            click_targets: vec![],
+            last_loaded: None,
+        };
+        let content = render_model(&model);
+        set_language("en");
+        assert!(
+            content.contains("r refresh"),
+            "Detail footer (no assets) must contain 'r refresh': {content}"
+        );
+    }
+
+    // R1-A1: footer on a Detail screen with assets shows 'r refresh'.
+    #[test]
+    fn detail_footer_with_assets_shows_refresh_token() {
+        use crate::render::Asset;
+        let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let model = Model {
+            stack: vec![Screen::Detail {
+                instance: "inst".into(),
+                project_id: 1,
+                task_id: 7,
+                task: serde_json::Value::Null,
+                comments: vec![],
+                user_map: HashMap::new(),
+                lines: vec!["body".into()],
+                assets: vec![Asset {
+                    name: "doc.pdf".into(),
+                    url: "https://example.com/doc.pdf".into(),
+                }],
+                offset: 0,
+                loading: false,
+                pending_download: false,
+                rendered_width: 80,
+            }],
+            should_quit: false,
+            header: Header::from_instances(&[], None),
+            viewport: (0, 0),
+            click_targets: vec![],
+            last_loaded: None,
+        };
+        let content = render_model(&model);
+        set_language("en");
+        assert!(
+            content.contains("r refresh"),
+            "Detail footer (with assets) must contain 'r refresh': {content}"
+        );
+    }
+
+    // R1b-A1: after a LoadedTasksByProject msg with BRT loaded_at, footer shows date+time DD/MM/YYYY HH:MM.
+    #[test]
+    fn footer_shows_date_and_time_after_load_msg_en() {
+        use crate::tui::model::update;
+        let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let model = projects_model_with_last_loaded(None);
+        let (model, _) = update(
+            model,
+            Msg::LoadedTasksByProject {
+                groups: vec![ProjectGroup {
+                    project_id: 0,
+                    project_name: "A Project".into(),
+                    instance: "inst".into(),
+                    tasks: vec![],
+                }],
+                loaded_at: "2026-06-25T11:07:03".into(),
+            },
+        );
+        let content = render_model(&model);
+        set_language("en");
+        assert!(
+            content.contains("Updated at"),
+            "footer must contain 'Updated at' after load: {content}"
+        );
+        assert!(
+            content.contains("25/06/2026 11:07"),
+            "footer must show date+time '25/06/2026 11:07' (DD/MM/YYYY HH:MM): {content}"
+        );
+    }
+
+    // R1b-A1: in pt_BR the timestamp shows 'Atualizado em DD/MM/YYYY HH:MM'.
+    #[test]
+    fn footer_shows_atualizado_em_date_time_in_pt_br() {
+        use crate::tui::model::update;
+        let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("pt_BR");
+        let model = projects_model_with_last_loaded(None);
+        let (model, _) = update(
+            model,
+            Msg::LoadedTasksByProject {
+                groups: vec![],
+                loaded_at: "2026-06-25T09:30:00".into(),
+            },
+        );
+        let content = render_model(&model);
+        set_language("en");
+        assert!(
+            content.contains("Atualizado em"),
+            "footer must contain 'Atualizado em' (pt_BR) after load: {content}"
+        );
+        assert!(
+            content.contains("25/06/2026 09:30"),
+            "footer must show date+time '25/06/2026 09:30' in pt_BR: {content}"
+        );
+    }
+
+    // R1-A2: when last_loaded is None, no 'Updated at' or timestamp appears in the footer.
+    #[test]
+    fn footer_no_timestamp_text_when_last_loaded_none() {
+        let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let model = projects_model_with_last_loaded(None);
+        let content = render_model(&model);
+        set_language("en");
+        assert!(
+            !content.contains("Updated at"),
+            "footer must NOT contain 'Updated at' when last_loaded=None: {content}"
+        );
+        assert!(
+            !content.contains("Atualizado"),
+            "footer must NOT contain 'Atualizado' when last_loaded=None: {content}"
+        );
+    }
+
+    // R1b-A1: dispatching two loads in sequence updates the footer date+time.
+    #[test]
+    fn footer_datetime_updates_after_second_load() {
+        use crate::tui::model::update;
+        let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+
+        let model = projects_model_with_last_loaded(None);
+
+        let (model, _) = update(
+            model,
+            Msg::LoadedTasksByProject {
+                groups: vec![],
+                loaded_at: "2026-06-25T10:00:00".into(),
+            },
+        );
+        let content_first = render_model(&model);
+
+        let (model, _) = update(
+            model,
+            Msg::LoadedTasksByProject {
+                groups: vec![],
+                loaded_at: "2026-06-25T11:45:00".into(),
+            },
+        );
+        let content_second = render_model(&model);
+        set_language("en");
+
+        assert!(
+            content_first.contains("25/06/2026 10:00"),
+            "first load must show '25/06/2026 10:00': {content_first}"
+        );
+        assert!(
+            content_second.contains("25/06/2026 11:45"),
+            "second load must update footer to '25/06/2026 11:45': {content_second}"
+        );
+        assert!(
+            !content_second.contains("10:00"),
+            "second footer must NOT show the old time '10:00': {content_second}"
+        );
+    }
+
+    // R1b-A2: format_br_datetime converts BRT ISO string to DD/MM/YYYY HH:MM.
+    #[test]
+    fn format_br_datetime_valid_produces_dd_mm_yyyy_hhmm() {
+        use crate::tui::view::format_br_datetime;
+        assert_eq!(
+            format_br_datetime("2026-06-25T11:07:03"),
+            Some("25/06/2026 11:07".to_string()),
+            "valid BRT ISO must produce DD/MM/YYYY HH:MM"
+        );
+    }
+
+    // R1b-A2: format_br_datetime returns None for a string shorter than 16 chars.
+    #[test]
+    fn format_br_datetime_short_input_returns_none() {
+        use crate::tui::view::format_br_datetime;
+        assert_eq!(
+            format_br_datetime("2026-06"),
+            None,
+            "input shorter than 16 chars must return None"
+        );
+        assert_eq!(format_br_datetime(""), None, "empty input must return None");
+    }
+
+    // R1b-A2: format_br_datetime handles minimum-length input (exactly 16 chars).
+    #[test]
+    fn format_br_datetime_minimum_length_input_produces_result() {
+        use crate::tui::view::format_br_datetime;
+        assert_eq!(
+            format_br_datetime("2026-06-25T11:07"),
+            Some("25/06/2026 11:07".to_string()),
+            "exactly 16-char input must produce DD/MM/YYYY HH:MM"
+        );
+    }
+
+    // R1b-A2: now_brt_iso returns a no-Z timestamp in YYYY-MM-DDTHH:MM:SS format.
+    #[test]
+    fn now_brt_iso_returns_no_z_timestamp() {
+        let ts = crate::store::now_brt_iso();
+        assert!(
+            !ts.ends_with('Z'),
+            "now_brt_iso must NOT end with 'Z' (it is not UTC): {ts}"
+        );
+        assert_eq!(
+            ts.len(),
+            19,
+            "now_brt_iso must be 19 chars (YYYY-MM-DDTHH:MM:SS): {ts}"
+        );
+        assert_eq!(&ts[4..5], "-", "separator at index 4 must be '-': {ts}");
+        assert_eq!(&ts[7..8], "-", "separator at index 7 must be '-': {ts}");
+        assert_eq!(&ts[10..11], "T", "separator at index 10 must be 'T': {ts}");
+        assert_eq!(&ts[13..14], ":", "separator at index 13 must be ':': {ts}");
+        assert_eq!(&ts[16..17], ":", "separator at index 16 must be ':': {ts}");
+    }
+
+    // V5-A2: scrollbar thumb position at max_offset vs at offset 0.
+    // Render Detail (draw_detail directly, not view) so area equals the full passed rect.
+    // With width=40, height=22, 50 lines, no assets:
+    //   render_content viewport_height = 22-2 = 20
+    //   max_offset = 50 - 20 = 30
+    // At offset=30 the thumb must be in the bottom half of the rightmost column.
+    // At offset=0 the thumb must NOT be in the bottom half.
+    #[test]
+    fn scrollbar_thumb_reaches_bottom_at_max_offset_and_not_at_offset_zero() {
+        use crate::tui::screens::detail::draw_detail;
+        use crate::tui::screens::DetailParams;
+
+        let width: u16 = 40;
+        let height: u16 = 22;
+        let lines: Vec<String> = (1..=50).map(|i| format!("line {i:02}")).collect();
+        let viewport_height = (height - 2) as usize;
+        let max_offset = lines.len().saturating_sub(viewport_height);
+
+        let render = |offset: usize| -> ratatui::buffer::Buffer {
+            let backend = TestBackend::new(width, height);
+            let mut terminal = Terminal::new(backend).unwrap();
+            terminal
+                .draw(|frame| {
+                    draw_detail(
+                        frame,
+                        ratatui::layout::Rect::new(0, 0, width, height),
+                        DetailParams {
+                            lines: &lines,
+                            assets: &[],
+                            offset,
+                            loading: false,
+                            task_id: 1,
+                            task_name: "T",
+                        },
+                    );
+                })
+                .unwrap();
+            terminal.backend().buffer().clone()
+        };
+
+        let buf_max = render(max_offset);
+        let buf_top = render(0);
+
+        let rightmost_x = width - 1;
+        // The scrollbar track occupies the inner rows of the rightmost column
+        // (ratatui renders ↑/↓ arrows at the very top/bottom of the widget area).
+        // Check the bottom quarter of the area for the thumb glyph.
+        let bottom_start = height * 3 / 4;
+
+        let thumb_in_bottom_at_max = (bottom_start..height).any(|y| {
+            buf_max
+                .cell((rightmost_x, y))
+                .map(|c| c.symbol() == "█")
+                .unwrap_or(false)
+        });
+        let thumb_in_bottom_at_top = (bottom_start..height).any(|y| {
+            buf_top
+                .cell((rightmost_x, y))
+                .map(|c| c.symbol() == "█")
+                .unwrap_or(false)
+        });
+
+        assert!(
+            thumb_in_bottom_at_max,
+            "scrollbar thumb must appear in the bottom quarter of the rightmost column when offset=max_offset={max_offset}"
+        );
+        assert!(
+            !thumb_in_bottom_at_top,
+            "scrollbar thumb must NOT be in the bottom quarter when offset=0 (50 lines, vh={viewport_height})"
+        );
+    }
+
+    // R1b-A1: LoadedDetail msg also stamps last_loaded and appears in footer as date+time.
+    #[test]
+    fn footer_shows_date_time_after_loaded_detail_msg() {
+        use crate::tui::model::update;
+        let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let model = Model {
+            stack: vec![Screen::Detail {
+                instance: "inst".into(),
+                project_id: 1,
+                task_id: 7,
+                task: serde_json::Value::Null,
+                comments: vec![],
+                user_map: HashMap::new(),
+                lines: vec![],
+                assets: vec![],
+                offset: 0,
+                loading: true,
+                pending_download: false,
+                rendered_width: usize::MAX,
+            }],
+            should_quit: false,
+            header: Header::from_instances(&[], None),
+            viewport: (0, 0),
+            click_targets: vec![],
+            last_loaded: None,
+        };
+        let load = DetailLoad {
+            task: serde_json::json!({ "name": "T", "id": 7, "project_id": 1 }),
+            comments: vec![],
+            assets: vec![],
+            user_map: HashMap::new(),
+            loaded_at: "2026-06-25T16:22:00".into(),
+        };
+        let (model, _) = update(model, Msg::LoadedDetail(load));
+        let content = render_model(&model);
+        set_language("en");
+        assert!(
+            content.contains("25/06/2026 16:22"),
+            "footer must show '25/06/2026 16:22' (DD/MM/YYYY HH:MM) after LoadedDetail: {content}"
+        );
+        assert!(
+            content.contains("Updated at"),
+            "footer must contain 'Updated at' after LoadedDetail: {content}"
+        );
+    }
 }

@@ -102,7 +102,9 @@
   "English": "Inglês",
   "Portuguese (Brazil)": "Português (Brasil)",
   "settings": "configurações",
-  "↑/↓ navigate  Enter select  Esc/b back  q quit": "↑/↓ navegar  Enter selecionar  Esc/b voltar  q sair",
-  "↑/↓ scroll  Esc/b back  q quit  1-9 open asset  d+1-9 download": "↑/↓ rolar  Esc/b voltar  q sair  1-9 abrir anexo  d+1-9 baixar",
+  "↑/↓ navigate  Enter select  r refresh  Esc/b back  q quit": "↑/↓ navegar  Enter selecionar  r atualizar  Esc/b voltar  q sair",
+  "↑/↓ scroll  r refresh  Esc/b back  q quit  1-9 open asset  d+1-9 download": "↑/↓ rolar  r atualizar  Esc/b voltar  q sair  1-9 abrir anexo  d+1-9 baixar",
+  "↑/↓ scroll  r refresh  Esc/b back  q quit": "↑/↓ rolar  r atualizar  Esc/b voltar  q sair",
+  "Updated at": "Atualizado em",
   "Error: instance not found": "Erro: instância não encontrada"
 }

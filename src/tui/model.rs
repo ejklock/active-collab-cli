@@ -76,6 +76,21 @@ pub struct ProjectGroup {
     pub tasks: Vec<TaskRow>,
 }
 
+/// A y-range record mapping a rendered terminal row span to a list index.
+///
+/// Populated by `render_table` each frame and stored in the model so that
+/// `handle_click_list` can resolve a click terminal-row → list index without
+/// re-running geometry logic outside the render pass.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClickTarget {
+    /// First terminal row of this list item (inclusive).
+    pub y_start: u16,
+    /// One past the last terminal row of this list item (exclusive).
+    pub y_end: u16,
+    /// Zero-based index into the data list.
+    pub index: usize,
+}
+
 /// Elm-style effect: what the shell should do after a pure update.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Cmd {
@@ -108,6 +123,8 @@ pub struct DetailLoad {
     pub comments: Vec<Value>,
     pub assets: Vec<Asset>,
     pub user_map: HashMap<i64, String>,
+    /// ISO wall-clock string (YYYY-MM-DDTHH:MM:SSZ) stamped by the shell when the load completes.
+    pub loaded_at: String,
 }
 
 /// A screen on the navigation stack.
@@ -182,6 +199,29 @@ impl Screen {
 /// Page size for Detail screen scroll (PageUp/PageDown).
 pub const PAGE_SIZE: usize = 10;
 
+/// Rows consumed by the Detail content block's chrome that are not scrollable text.
+/// Breakdown: 1 top border + 1 bottom border + 1 header bar row + 1 footer bar row.
+const DETAIL_CHROME_ROWS: u16 = 4;
+
+/// True maximum scroll offset for the Detail screen.
+///
+/// Reads only its arguments — no terminal, time, or async sources — so it is
+/// safe to call from the pure TEA update loop.
+///
+/// When the viewport is too small to show any text rows the function clamps
+/// text_viewport_height to 1 (guaranteeing max = lines_len - 1), which is
+/// the least surprising bound and keeps model-only tests (viewport=(0,0))
+/// consistent with render behaviour.
+pub fn detail_max_offset(viewport_rows: u16, lines_len: usize, assets_len: usize) -> usize {
+    use crate::tui::screens::asset_panel_height;
+    let panel_h = asset_panel_height(assets_len);
+    let raw = viewport_rows
+        .saturating_sub(DETAIL_CHROME_ROWS)
+        .saturating_sub(panel_h) as usize;
+    let text_viewport_height = raw.max(1);
+    lines_len.saturating_sub(text_viewport_height)
+}
+
 fn clamp_offset(offset: &mut usize, len: usize) {
     let max = len.saturating_sub(1);
     if *offset > max {
@@ -240,6 +280,17 @@ pub struct Model {
     pub stack: Vec<Screen>,
     pub should_quit: bool,
     pub header: Header,
+    /// Terminal viewport size (cols, rows) written by the shell each frame before drawing.
+    pub viewport: (u16, u16),
+    /// Hit-map from the last render pass, written by the shell after `terminal.draw`.
+    ///
+    /// Each entry records the terminal y-range and list index of a visible data row.
+    /// Empty until the first draw; stale during the frame that produces it (acceptable
+    /// because clicks arrive in the following event loop iteration).
+    pub click_targets: Vec<ClickTarget>,
+    /// ISO wall-clock string (YYYY-MM-DDTHH:MM:SSZ) of when the currently-displayed data was loaded.
+    /// None until the first load completes; stamped exclusively by the shell via Msg payloads.
+    pub last_loaded: Option<String>,
 }
 
 /// All messages the update function understands.
@@ -250,12 +301,19 @@ pub enum Msg {
     ScrollDown,
     PageUp,
     PageDown,
-    Click(usize),
+    Click {
+        column: u16,
+        row: u16,
+    },
     Select,
     Back,
     Quit,
     Refresh,
-    LoadedTasksByProject(Vec<ProjectGroup>),
+    LoadedTasksByProject {
+        groups: Vec<ProjectGroup>,
+        /// ISO wall-clock string stamped by the shell when the load completed.
+        loaded_at: String,
+    },
     /// Phase-1 load: structured data + cached (or empty) user_map.
     /// The shell calls reflow_detail before drawing to materialise lines.
     LoadedDetail(DetailLoad),
@@ -284,7 +342,18 @@ impl Model {
             }],
             should_quit: false,
             header,
+            viewport: (0, 0),
+            click_targets: vec![],
+            last_loaded: None,
         }
+    }
+
+    /// Replace the hit-map recorded by the last render pass.
+    ///
+    /// Called by the shell after `terminal.draw` completes, mirroring the
+    /// `viewport` write pattern. Only the shell touches this field.
+    pub fn set_click_targets(&mut self, targets: Vec<ClickTarget>) {
+        self.click_targets = targets;
     }
 
     pub fn top(&self) -> Option<&Screen> {
@@ -338,12 +407,14 @@ pub fn update(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
         Msg::Down | Msg::ScrollDown => (handle_down(model), vec![]),
         Msg::PageUp => (handle_page_up(model), vec![]),
         Msg::PageDown => (handle_page_down(model), vec![]),
-        Msg::Click(row) => (handle_click(model, row), vec![]),
+        Msg::Click { column, row } => handle_click(model, column, row),
         Msg::Select => handle_select(model),
         Msg::Back => (handle_back(model), vec![]),
         Msg::Quit => (handle_quit(model), vec![]),
         Msg::Refresh => handle_refresh(model),
-        Msg::LoadedTasksByProject(groups) => (handle_loaded_tasks(model, groups), vec![]),
+        Msg::LoadedTasksByProject { groups, loaded_at } => {
+            (handle_loaded_tasks(model, groups, loaded_at), vec![])
+        }
         Msg::LoadedDetail(load) => (handle_loaded_detail(model, load), vec![]),
         Msg::UserMapResolved(map) => (handle_user_map_resolved(model, map), vec![]),
         Msg::AssetOpen(digit) => handle_asset_open(model, digit),
@@ -368,9 +439,15 @@ fn handle_up(mut model: Model) -> Model {
 }
 
 fn handle_down(mut model: Model) -> Model {
+    let viewport_rows = model.viewport.1;
     match model.top_mut() {
-        Some(Screen::Detail { offset, lines, .. }) => {
-            let max = lines.len().saturating_sub(1);
+        Some(Screen::Detail {
+            offset,
+            lines,
+            assets,
+            ..
+        }) => {
+            let max = detail_max_offset(viewport_rows, lines.len(), assets.len());
             *offset = (*offset + 1).min(max);
         }
         Some(screen) => {
@@ -393,25 +470,102 @@ fn handle_page_up(mut model: Model) -> Model {
 }
 
 fn handle_page_down(mut model: Model) -> Model {
-    if let Some(Screen::Detail { offset, lines, .. }) = model.top_mut() {
-        let max = lines.len().saturating_sub(1);
+    let viewport_rows = model.viewport.1;
+    if let Some(Screen::Detail {
+        offset,
+        lines,
+        assets,
+        ..
+    }) = model.top_mut()
+    {
+        let max = detail_max_offset(viewport_rows, lines.len(), assets.len());
         *offset = (*offset + PAGE_SIZE).min(max);
     }
     model
 }
 
-fn handle_click(mut model: Model, row: usize) -> Model {
-    match model.top_mut() {
-        Some(Screen::Detail { .. }) => {}
-        Some(screen) => {
-            let count = screen.row_count();
-            if count > 0 {
-                screen.set_selected(row.min(count - 1));
-            }
-        }
-        None => {}
+fn handle_click(model: Model, _column: u16, row: u16) -> (Model, Vec<Cmd>) {
+    match model.top() {
+        Some(Screen::Detail { .. }) => handle_click_detail(model, row),
+        Some(_) => handle_click_list(model, row),
+        None => (model, vec![]),
     }
-    model
+}
+
+fn handle_click_list(model: Model, row: u16) -> (Model, Vec<Cmd>) {
+    let Some(target) = model
+        .click_targets
+        .iter()
+        .find(|t| row >= t.y_start && row < t.y_end)
+        .cloned()
+    else {
+        return (model, vec![]);
+    };
+
+    let mut model = model;
+    if let Some(screen) = model.top_mut() {
+        screen.set_selected(target.index);
+    }
+    handle_select(model)
+}
+
+fn handle_click_detail(model: Model, row: u16) -> (Model, Vec<Cmd>) {
+    use crate::tui::screens::detail_asset_panel_rect;
+    use ratatui::layout::Rect;
+
+    let (viewport_cols, viewport_rows) = model.viewport;
+    let area = Rect::new(0, 0, viewport_cols, viewport_rows);
+
+    let Some(Screen::Detail {
+        instance,
+        assets,
+        pending_download,
+        ..
+    }) = model.top()
+    else {
+        return (model, vec![]);
+    };
+
+    let assets_len = assets.len();
+    let Some(panel_rect) = detail_asset_panel_rect(area, assets_len) else {
+        return (model, vec![]);
+    };
+
+    let panel_top = panel_rect.y;
+    let first_asset_row = panel_top + 1;
+    let last_asset_row = panel_top + panel_rect.height - 2;
+
+    if row < first_asset_row || row > last_asset_row {
+        return (model, vec![]);
+    }
+
+    let asset_idx = (row - first_asset_row) as usize;
+    let Some(asset) = assets.get(asset_idx) else {
+        return (model, vec![]);
+    };
+
+    let cmd = if *pending_download {
+        Cmd::DownloadAsset {
+            instance: instance.clone(),
+            url: asset.url.clone(),
+            name: asset.name.clone(),
+        }
+    } else {
+        Cmd::OpenAsset {
+            instance: instance.clone(),
+            url: asset.url.clone(),
+        }
+    };
+
+    let mut model = model;
+    if let Some(Screen::Detail {
+        pending_download, ..
+    }) = model.top_mut()
+    {
+        *pending_download = false;
+    }
+
+    (model, vec![cmd])
 }
 
 fn handle_select(mut model: Model) -> (Model, Vec<Cmd>) {
@@ -516,7 +670,7 @@ fn handle_refresh(mut model: Model) -> (Model, Vec<Cmd>) {
     (model, cmds)
 }
 
-fn handle_loaded_tasks(mut model: Model, groups: Vec<ProjectGroup>) -> Model {
+fn handle_loaded_tasks(mut model: Model, groups: Vec<ProjectGroup>, loaded_at: String) -> Model {
     if let Some(Screen::Projects {
         groups: ref mut g,
         loading: ref mut l,
@@ -526,6 +680,7 @@ fn handle_loaded_tasks(mut model: Model, groups: Vec<ProjectGroup>) -> Model {
         *g = groups;
         *l = false;
     }
+    model.last_loaded = Some(loaded_at);
     model
 }
 
@@ -550,6 +705,7 @@ fn handle_loaded_detail(mut model: Model, load: DetailLoad) -> Model {
         *ls = vec![];
         *rw = usize::MAX;
     }
+    model.last_loaded = Some(load.loaded_at);
     model
 }
 
@@ -657,9 +813,16 @@ pub fn mine_model(rows: Vec<MineTableRow>, header: Header) -> Model {
         }],
         should_quit: false,
         header,
+        viewport: (0, 0),
+        click_targets: vec![],
+        last_loaded: None,
     }
 }
 
 #[cfg(test)]
 #[path = "../../tests/unit/app.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "../../tests/unit/model.rs"]
+mod model_tests;

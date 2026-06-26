@@ -46,6 +46,9 @@ fn projects_model(count: usize) -> Model {
         }],
         should_quit: false,
         header: empty_header(),
+        viewport: (0, 0),
+        click_targets: vec![],
+        last_loaded: None,
     }
 }
 
@@ -66,6 +69,9 @@ fn tasks_model(count: usize) -> Model {
         ],
         should_quit: false,
         header: empty_header(),
+        viewport: (0, 0),
+        click_targets: vec![],
+        last_loaded: None,
     }
 }
 
@@ -78,6 +84,9 @@ fn loading_projects_model() -> Model {
         }],
         should_quit: false,
         header: empty_header(),
+        viewport: (0, 0),
+        click_targets: vec![],
+        last_loaded: None,
     }
 }
 
@@ -180,19 +189,25 @@ fn scroll_down_at_last_row_clamps_projects() {
     assert!(!m.should_quit);
 }
 
+// V2b: click with empty hit-map (no targets populated) is a no-op.
 #[test]
-fn click_clamps_to_last_row_projects() {
+fn click_with_empty_targets_is_noop_projects() {
     let m = projects_model(3);
-    let (m, _) = update(m, Msg::Click(99));
-    assert_eq!(m.stack.last().unwrap().selected(), 2);
+    let sel_before = m.stack.last().unwrap().selected();
+    let (m, cmds) = update(m, Msg::Click { column: 0, row: 99 });
+    assert_eq!(m.stack.last().unwrap().selected(), sel_before);
+    assert!(cmds.is_empty());
     assert!(!m.should_quit);
 }
 
+// V2b: click with empty hit-map (no targets populated) is a no-op on Tasks screen.
 #[test]
-fn click_clamps_to_last_row_tasks() {
+fn click_with_empty_targets_is_noop_tasks() {
     let m = tasks_model(3);
-    let (m, _) = update(m, Msg::Click(99));
-    assert_eq!(m.stack.last().unwrap().selected(), 2);
+    let sel_before = m.stack.last().unwrap().selected();
+    let (m, cmds) = update(m, Msg::Click { column: 0, row: 99 });
+    assert_eq!(m.stack.last().unwrap().selected(), sel_before);
+    assert!(cmds.is_empty());
     assert!(!m.should_quit);
 }
 
@@ -232,12 +247,15 @@ fn empty_list_navigation_never_panics_or_quits_projects() {
         }],
         should_quit: false,
         header: empty_header(),
+        viewport: (0, 0),
+        click_targets: vec![],
+        last_loaded: None,
     };
     let (m, _) = update(m, Msg::Down);
     assert!(!m.should_quit);
     let (m, _) = update(m, Msg::Up);
     assert!(!m.should_quit);
-    let (m, _) = update(m, Msg::Click(0));
+    let (m, _) = update(m, Msg::Click { column: 0, row: 0 });
     assert!(!m.should_quit);
     let (m, _) = update(m, Msg::ScrollDown);
     assert!(!m.should_quit);
@@ -263,12 +281,15 @@ fn empty_list_navigation_never_panics_or_quits_tasks() {
         ],
         should_quit: false,
         header: empty_header(),
+        viewport: (0, 0),
+        click_targets: vec![],
+        last_loaded: None,
     };
     let (m, _) = update(m, Msg::Down);
     assert!(!m.should_quit);
     let (m, _) = update(m, Msg::Up);
     assert!(!m.should_quit);
-    let (m, _) = update(m, Msg::Click(0));
+    let (m, _) = update(m, Msg::Click { column: 0, row: 0 });
     assert!(!m.should_quit);
 }
 
@@ -288,7 +309,13 @@ fn init_browse_emits_load_tasks_by_project_cmd() {
 fn loaded_tasks_stores_groups_and_clears_loading() {
     let m = loading_projects_model();
     let groups = make_groups(2);
-    let (m, cmds) = update(m, Msg::LoadedTasksByProject(groups.clone()));
+    let (m, cmds) = update(
+        m,
+        Msg::LoadedTasksByProject {
+            groups: groups.clone(),
+            loaded_at: "2026-06-25T14:00:00Z".into(),
+        },
+    );
     assert!(cmds.is_empty());
     assert!(!m.should_quit);
     if let Some(Screen::Projects {
@@ -312,7 +339,7 @@ fn non_quit_msgs_do_not_set_should_quit() {
         || Msg::Down,
         || Msg::ScrollUp,
         || Msg::ScrollDown,
-        || Msg::Click(0),
+        || Msg::Click { column: 0, row: 0 },
     ];
     for make_msg in msgs {
         let m = projects_model(3);
@@ -353,6 +380,9 @@ fn select_on_empty_projects_is_a_noop() {
         }],
         should_quit: false,
         header: empty_header(),
+        viewport: (0, 0),
+        click_targets: vec![],
+        last_loaded: None,
     };
     let (m, _) = update(m, Msg::Select);
     assert_eq!(m.stack.len(), 1);
@@ -393,6 +423,9 @@ fn tasks_model_with_project_id(task_count: usize, project_id: i64) -> Model {
         ],
         should_quit: false,
         header: empty_header(),
+        viewport: (0, 0),
+        click_targets: vec![],
+        last_loaded: None,
     }
 }
 
@@ -428,6 +461,9 @@ fn detail_model(line_count: usize, offset: usize) -> Model {
         ],
         should_quit: false,
         header: empty_header(),
+        viewport: (0, 0),
+        click_targets: vec![],
+        last_loaded: None,
     }
 }
 
@@ -462,6 +498,9 @@ fn loading_detail_model() -> Model {
         ],
         should_quit: false,
         header: empty_header(),
+        viewport: (0, 0),
+        click_targets: vec![],
+        last_loaded: None,
     }
 }
 
@@ -512,6 +551,7 @@ fn make_detail_load(task: serde_json::Value, user_map: HashMap<i64, String>) -> 
         comments: vec![],
         assets: vec![],
         user_map,
+        loaded_at: "2026-06-25T14:00:00Z".into(),
     }
 }
 
@@ -683,7 +723,13 @@ fn detail_over_scroll_never_sets_should_quit_or_panics() {
 #[test]
 fn detail_click_does_not_change_state_or_quit() {
     let m = detail_model(5, 2);
-    let (m, cmds) = update(m, Msg::Click(100));
+    let (m, cmds) = update(
+        m,
+        Msg::Click {
+            column: 0,
+            row: 100,
+        },
+    );
     assert!(!m.should_quit);
     assert!(cmds.is_empty());
     match m.stack.last() {
@@ -789,7 +835,13 @@ fn detail_wheel_scroll_never_sets_should_quit() {
 #[test]
 fn detail_click_below_last_row_does_not_quit() {
     let m = detail_model(3, 0);
-    let (m, _) = update(m, Msg::Click(999));
+    let (m, _) = update(
+        m,
+        Msg::Click {
+            column: 0,
+            row: 255,
+        },
+    );
     assert!(!m.should_quit);
 }
 
@@ -801,7 +853,13 @@ fn projects_mouse_scroll_and_click_beyond_bounds_never_quit() {
     let (m, _) = update(m, Msg::ScrollDown);
     assert!(!m.should_quit);
     let m2 = projects_model(2);
-    let (m2, _) = update(m2, Msg::Click(999));
+    let (m2, _) = update(
+        m2,
+        Msg::Click {
+            column: 0,
+            row: 255,
+        },
+    );
     assert!(!m2.should_quit);
 }
 
@@ -813,7 +871,13 @@ fn tasks_mouse_scroll_and_click_beyond_bounds_never_quit() {
     let (m, _) = update(m, Msg::ScrollDown);
     assert!(!m.should_quit);
     let m2 = tasks_model(2);
-    let (m2, _) = update(m2, Msg::Click(999));
+    let (m2, _) = update(
+        m2,
+        Msg::Click {
+            column: 0,
+            row: 255,
+        },
+    );
     assert!(!m2.should_quit);
 }
 
@@ -854,6 +918,9 @@ fn detail_model_with_assets(assets: Vec<Asset>, instance: &str) -> Model {
         ],
         should_quit: false,
         header: empty_header(),
+        viewport: (0, 0),
+        click_targets: vec![],
+        last_loaded: None,
     }
 }
 
@@ -1004,6 +1071,9 @@ fn asset_open_carries_selected_tasks_instance_not_first_instance() {
         ],
         should_quit: false,
         header: empty_header(),
+        viewport: (0, 0),
+        click_targets: vec![],
+        last_loaded: None,
     };
     let (_m, cmds) = update(m, Msg::AssetOpen('1'));
     assert_eq!(cmds.len(), 1);
@@ -1053,6 +1123,9 @@ fn select_on_tasks_threads_instance_into_load_detail_cmd() {
         ],
         should_quit: false,
         header: empty_header(),
+        viewport: (0, 0),
+        click_targets: vec![],
+        last_loaded: None,
     };
     let (m, cmds) = update(m, Msg::Select);
     assert_eq!(cmds.len(), 1);
@@ -1082,6 +1155,7 @@ fn loaded_detail_stores_assets_on_screen() {
         comments: vec![],
         assets: assets.clone(),
         user_map: HashMap::new(),
+        loaded_at: "2026-06-25T14:00:00Z".into(),
     };
     let (m, _) = update(m, Msg::LoadedDetail(load));
     match m.stack.last() {
@@ -1195,25 +1269,40 @@ fn mine_select_first_row_uses_its_own_project_id_and_instance() {
     }
 }
 
-// S3-A2: Click selects the clicked row; subsequent Select opens THAT row's detail
+// S3-A2 / V2b: a click on a row with a matching hit-map target drills into that row's Detail
+// directly (no separate Select needed), resolving the correct index from click_targets.
 #[test]
-fn mine_click_then_select_opens_clicked_rows_detail() {
+fn mine_click_with_target_drills_into_clicked_rows_detail() {
+    use crate::tui::model::ClickTarget;
     let rows = vec![
         make_mine_row(101, 1, 10, "inst-alpha"),
         make_mine_row(202, 2, 20, "inst-beta"),
         make_mine_row(303, 3, 30, "inst-gamma"),
     ];
-    let m = mine_model(rows, empty_header());
+    let mut m = mine_model(rows, empty_header());
 
-    // Click row 2 (inst-gamma, project 30, task 303)
-    let (m, _) = update(m, Msg::Click(2));
-    match m.stack.last() {
-        Some(Screen::Tasks { selected, .. }) => assert_eq!(*selected, 2),
-        other => panic!("expected Tasks screen, got {other:?}"),
-    }
+    // Simulate the shell writing a hit-map for row index 2 at terminal y=4.
+    m.set_click_targets(vec![
+        ClickTarget {
+            y_start: 2,
+            y_end: 3,
+            index: 0,
+        },
+        ClickTarget {
+            y_start: 3,
+            y_end: 4,
+            index: 1,
+        },
+        ClickTarget {
+            y_start: 4,
+            y_end: 5,
+            index: 2,
+        },
+    ]);
 
-    let (m, cmds) = update(m, Msg::Select);
-    assert_eq!(cmds.len(), 1);
+    // Click at y=4 → index 2 → inst-gamma, project 30, task 303
+    let (m, cmds) = update(m, Msg::Click { column: 0, row: 4 });
+    assert_eq!(cmds.len(), 1, "click must emit one Cmd::LoadDetail");
     match &cmds[0] {
         Cmd::LoadDetail {
             instance,
@@ -1242,26 +1331,35 @@ fn mine_click_then_select_opens_clicked_rows_detail() {
     }
 }
 
-// S3-A2 variant: click row 0 after clicking row 2 — selection switches back
+// S3-A2 variant / V2b: click in empty space below all targets is a no-op.
 #[test]
-fn mine_click_row_zero_after_nonzero_selects_first_row() {
+fn mine_click_below_last_target_is_noop() {
+    use crate::tui::model::ClickTarget;
     let rows = vec![
         make_mine_row(101, 1, 10, "inst-alpha"),
         make_mine_row(202, 2, 20, "inst-beta"),
     ];
-    let m = mine_model(rows, empty_header());
+    let mut m = mine_model(rows, empty_header());
+    let sel_before = m.stack.last().unwrap().selected();
 
-    let (m, _) = update(m, Msg::Click(1));
-    let (m, _) = update(m, Msg::Click(0));
-    match m.stack.last() {
-        Some(Screen::Tasks { selected, .. }) => assert_eq!(*selected, 0),
-        other => panic!("expected Tasks, got {other:?}"),
-    }
-    let (_, cmds) = update(m, Msg::Select);
-    match &cmds[0] {
-        Cmd::LoadDetail { task_id, .. } => assert_eq!(*task_id, 101),
-        other => panic!("expected LoadDetail, got {other:?}"),
-    }
+    m.set_click_targets(vec![
+        ClickTarget {
+            y_start: 2,
+            y_end: 3,
+            index: 0,
+        },
+        ClickTarget {
+            y_start: 3,
+            y_end: 4,
+            index: 1,
+        },
+    ]);
+
+    // Click at y=10 is below all targets → no-op
+    let (m, cmds) = update(m, Msg::Click { column: 0, row: 10 });
+    assert!(cmds.is_empty(), "click below targets must emit no cmd");
+    assert_eq!(m.stack.last().unwrap().selected(), sel_before);
+    assert!(!m.should_quit);
 }
 
 // Verify mine_model produces a single Tasks screen at loading:false with rows mapped
@@ -1327,6 +1425,9 @@ fn reflow_detail_builds_lines_and_is_memoized() {
         }],
         should_quit: false,
         header: empty_header(),
+        viewport: (0, 0),
+        click_targets: vec![],
+        last_loaded: None,
     };
 
     // First reflow at width 80: lines must be populated, rendered_width updated
@@ -1418,6 +1519,9 @@ fn reflow_detail_lines_fit_inner_width() {
         }],
         should_quit: false,
         header: empty_header(),
+        viewport: (0, 0),
+        click_targets: vec![],
+        last_loaded: None,
     };
     m.reflow_detail(inner_width);
     match m.stack.last() {
@@ -1457,6 +1561,9 @@ fn reflow_detail_rebuilds_on_width_change() {
         }],
         should_quit: false,
         header: empty_header(),
+        viewport: (0, 0),
+        click_targets: vec![],
+        last_loaded: None,
     };
     m.reflow_detail(80);
     let rw_80 = match m.stack.last() {
@@ -1494,6 +1601,9 @@ fn reflow_detail_is_noop_while_loading() {
         }],
         should_quit: false,
         header: empty_header(),
+        viewport: (0, 0),
+        click_targets: vec![],
+        last_loaded: None,
     };
     m.reflow_detail(80);
     match m.stack.last() {
@@ -1537,6 +1647,9 @@ fn reflow_detail_clamps_offset_when_content_shortens() {
         }],
         should_quit: false,
         header: empty_header(),
+        viewport: (0, 0),
+        click_targets: vec![],
+        last_loaded: None,
     };
     m.reflow_detail(80);
     match m.stack.last() {
@@ -1580,6 +1693,9 @@ fn user_map_resolved_updates_map_and_invalidates_cache() {
         }],
         should_quit: false,
         header: empty_header(),
+        viewport: (0, 0),
+        click_targets: vec![],
+        last_loaded: None,
     };
 
     let mut new_map = HashMap::new();
@@ -1628,6 +1744,7 @@ fn progressive_paint_assignee_fills_in_after_user_map_resolved() {
         comments: vec![],
         assets: vec![],
         user_map: HashMap::new(),
+        loaded_at: "2026-06-25T14:00:00Z".into(),
     };
     let m = Model {
         stack: vec![Screen::Detail {
@@ -1646,6 +1763,9 @@ fn progressive_paint_assignee_fills_in_after_user_map_resolved() {
         }],
         should_quit: false,
         header: empty_header(),
+        viewport: (0, 0),
+        click_targets: vec![],
+        last_loaded: None,
     };
     let (m, _) = update(m, Msg::LoadedDetail(load));
 
@@ -1719,6 +1839,9 @@ fn header_name_resolved_fills_name_and_header_line_shows_it() {
         }],
         should_quit: false,
         header,
+        viewport: (0, 0),
+        click_targets: vec![],
+        last_loaded: None,
     };
     let stack_len_before = m.stack.len();
 
@@ -1764,6 +1887,9 @@ fn detail_global_scroll_offset_advances_through_all_content() {
         }],
         should_quit: false,
         header: empty_header(),
+        viewport: (0, 0),
+        click_targets: vec![],
+        last_loaded: None,
     };
 
     let (m, _) = update(m, Msg::Down);

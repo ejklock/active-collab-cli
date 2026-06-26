@@ -52,6 +52,13 @@ pub fn app_header_style() -> Style {
         .add_modifier(Modifier::BOLD)
 }
 
+/// URL links embedded in Description and Comment body text — muted green, underlined.
+pub fn link_style() -> Style {
+    Style::default()
+        .fg(MUTED_GREEN)
+        .add_modifier(Modifier::UNDERLINED)
+}
+
 /// Badge style (amber, bold) — retained for theme-consistency tests.
 #[allow(dead_code)]
 pub fn badge_style() -> Style {

@@ -7,6 +7,62 @@ use std::io::Write;
 use std::sync::OnceLock;
 use unicode_width::UnicodeWidthStr;
 
+/// A contiguous segment of a rendered panel body line, tagged by whether it is a URL.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LinkSegment {
+    pub text: String,
+    pub is_link: bool,
+}
+
+fn body_url_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"https?://[^\s]+|www\.[^\s]+").expect("body_url_re is a valid pattern")
+    })
+}
+
+/// Split a single rendered panel body line into ordered `LinkSegment`s.
+///
+/// URL substrings (matched by `https?://…` or `www.…`, stopped at whitespace) are
+/// tagged `is_link: true`; everything else (including leading/trailing `│` border
+/// chars and padding spaces) is tagged `is_link: false`. When the line contains no
+/// URL the function returns a single non-link segment. Slicing is char-boundary-safe
+/// for UTF-8.
+pub fn link_segments(line: &str) -> Vec<LinkSegment> {
+    let mut segments = Vec::new();
+    let mut last_byte = 0usize;
+
+    for m in body_url_re().find_iter(line) {
+        if m.start() > last_byte {
+            segments.push(LinkSegment {
+                text: line[last_byte..m.start()].to_string(),
+                is_link: false,
+            });
+        }
+        segments.push(LinkSegment {
+            text: m.as_str().to_string(),
+            is_link: true,
+        });
+        last_byte = m.end();
+    }
+
+    if last_byte < line.len() {
+        segments.push(LinkSegment {
+            text: line[last_byte..].to_string(),
+            is_link: false,
+        });
+    }
+
+    if segments.is_empty() {
+        segments.push(LinkSegment {
+            text: line.to_string(),
+            is_link: false,
+        });
+    }
+
+    segments
+}
+
 /// A displayable asset extracted from a task body or attachments list.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Asset {

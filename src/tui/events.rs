@@ -1,4 +1,4 @@
-use crossterm::event::{KeyCode, KeyModifiers, MouseEventKind};
+use crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEventKind};
 
 use super::model::Msg;
 
@@ -23,7 +23,10 @@ pub fn map_browse_mouse_event(mouse: crossterm::event::MouseEvent) -> Option<Msg
     match mouse.kind {
         MouseEventKind::ScrollUp => Some(Msg::ScrollUp),
         MouseEventKind::ScrollDown => Some(Msg::ScrollDown),
-        MouseEventKind::Down(_) => Some(Msg::Click(mouse.row as usize)),
+        MouseEventKind::Down(MouseButton::Left) => Some(Msg::Click {
+            column: mouse.column,
+            row: mouse.row,
+        }),
         _ => None,
     }
 }

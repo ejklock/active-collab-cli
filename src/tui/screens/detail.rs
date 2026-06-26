@@ -1,9 +1,9 @@
 use crate::i18n::t;
-use crate::render::Asset;
+use crate::render::{link_segments, Asset};
 use crate::tui::theme;
 use ratatui::{
-    layout::{Constraint, Direction, Layout},
-    text::{Line, Text},
+    layout::{Constraint, Direction, Layout, Rect},
+    text::{Line, Span, Text},
     widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap},
     Frame,
 };
@@ -18,6 +18,34 @@ pub struct DetailParams<'a> {
     pub task_name: &'a str,
 }
 
+/// Height of the Artifacts panel for a given asset count.
+///
+/// Returns 0 when there are no assets (no panel is drawn).
+/// Otherwise: 1 row per asset plus 2 border rows, capped at 8.
+pub fn asset_panel_height(assets_len: usize) -> u16 {
+    if assets_len == 0 {
+        return 0;
+    }
+    (assets_len as u16 + 2).min(8)
+}
+
+/// Compute the Rect occupied by the Artifacts panel within `area`.
+///
+/// Returns `None` when `assets_len` is 0 (no panel is drawn).
+/// Delegates all height arithmetic to `asset_panel_height` so the
+/// formula lives in exactly one place.
+pub fn detail_asset_panel_rect(area: Rect, assets_len: usize) -> Option<Rect> {
+    let panel_height = asset_panel_height(assets_len);
+    if panel_height == 0 {
+        return None;
+    }
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(0), Constraint::Length(panel_height)])
+        .split(area);
+    Some(chunks[1])
+}
+
 /// Draw the Detail screen as a single scrollable content block with an optional
 /// fixed Artifacts panel below.
 ///
@@ -27,7 +55,7 @@ pub struct DetailParams<'a> {
 /// When `assets` is non-empty the area is split vertically into a content chunk
 /// (Min(0)) and a fixed panel chunk (Length capped at 8). Otherwise the full
 /// area goes to content.
-pub fn draw_detail(frame: &mut Frame, area: ratatui::layout::Rect, params: DetailParams<'_>) {
+pub fn draw_detail(frame: &mut Frame, area: Rect, params: DetailParams<'_>) {
     let inner_width = area.width.saturating_sub(2) as usize;
     let title = build_frame_title(params.task_name, params.task_id, inner_width);
 
@@ -38,16 +66,13 @@ pub fn draw_detail(frame: &mut Frame, area: ratatui::layout::Rect, params: Detai
         return;
     }
 
-    if params.assets.is_empty() {
-        render_content(frame, area, params.lines, params.offset, title);
-    } else {
-        let panel_height = (params.assets.len() as u16 + 2).min(8);
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Min(0), Constraint::Length(panel_height)])
-            .split(area);
-        render_content(frame, chunks[0], params.lines, params.offset, title);
-        render_assets_panel(frame, chunks[1], params.assets);
+    match detail_asset_panel_rect(area, params.assets.len()) {
+        None => render_content(frame, area, params.lines, params.offset, title),
+        Some(panel_rect) => {
+            let content_rect = Rect::new(area.x, area.y, area.width, panel_rect.y - area.y);
+            render_content(frame, content_rect, params.lines, params.offset, title);
+            render_assets_panel(frame, panel_rect, params.assets);
+        }
     }
 }
 
@@ -94,6 +119,21 @@ fn truncate_title_to_fit(label: &str, max_display_cols: usize) -> String {
     result
 }
 
+fn styled_line(line: &str) -> Line<'static> {
+    let segs = link_segments(line);
+    let spans: Vec<Span<'static>> = segs
+        .into_iter()
+        .map(|seg| {
+            if seg.is_link {
+                Span::styled(seg.text, theme::link_style())
+            } else {
+                Span::raw(seg.text)
+            }
+        })
+        .collect();
+    Line::from(spans)
+}
+
 fn render_content(
     frame: &mut Frame,
     area: ratatui::layout::Rect,
@@ -101,12 +141,7 @@ fn render_content(
     offset: usize,
     title: String,
 ) {
-    let text: Text = Text::from(
-        lines
-            .iter()
-            .map(|l| Line::from(l.clone()))
-            .collect::<Vec<_>>(),
-    );
+    let text: Text = Text::from(lines.iter().map(|l| styled_line(l)).collect::<Vec<_>>());
 
     let viewport_height = area.height.saturating_sub(2) as usize;
     let max_offset = lines.len().saturating_sub(viewport_height);
@@ -122,7 +157,13 @@ fn render_content(
 
     let total_content = lines.len();
     if total_content > viewport_height {
-        let mut scrollbar_state = ScrollbarState::new(total_content).position(eff);
+        // Scrollbar content_length = max_offset + 1 maps the scroll range [0, max_offset]
+        // to ratatui's [0, content-1] so the thumb reaches the track bottom exactly
+        // when eff == max_offset. viewport_content_length sizes the thumb proportionally.
+        let sb_content = max_offset + 1;
+        let mut scrollbar_state = ScrollbarState::new(sb_content)
+            .viewport_content_length(viewport_height)
+            .position(eff);
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight);
         frame.render_stateful_widget(scrollbar, area, &mut scrollbar_state);
     }

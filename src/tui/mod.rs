@@ -5,7 +5,7 @@ pub mod screens;
 pub mod theme;
 pub mod view;
 
-pub use model::{init_browse, mine_model, update, Cmd, DetailLoad, Model, Msg};
+pub use model::{init_browse, mine_model, update, ClickTarget, Cmd, DetailLoad, Model, Msg};
 pub use view::view;
 
 use crate::controller;
@@ -132,17 +132,18 @@ async fn run_app(
     loop {
         // Reflow the Detail render cache to the current terminal width before drawing.
         // The Detail block has a 1-col border each side, so inner = terminal width - 2.
-        let inner_width = terminal
-            .size()
-            .map(|s| s.width.saturating_sub(2) as usize)
-            .unwrap_or(0);
-        model.reflow_detail(inner_width);
+        if let Ok(size) = terminal.size() {
+            model.viewport = (size.width, size.height);
+            model.reflow_detail(size.width.saturating_sub(2) as usize);
+        }
 
-        if let Err(e) = terminal.draw(|f| view(&model, f)) {
+        let mut frame_targets: Vec<ClickTarget> = Vec::new();
+        if let Err(e) = terminal.draw(|f| view(&model, f, &mut frame_targets)) {
             guard.restore();
             eprintln!("Error drawing frame: {e}");
             return 1;
         }
+        model.set_click_targets(frame_targets);
 
         if model.should_quit {
             break;
@@ -229,7 +230,8 @@ fn dispatch_cmds(
                 let tx = tx.clone();
                 tokio::spawn(async move {
                     let groups = controller::tasks_by_project(&targets, &http).await;
-                    let _ = tx.send(Msg::LoadedTasksByProject(groups));
+                    let loaded_at = crate::store::now_brt_iso();
+                    let _ = tx.send(Msg::LoadedTasksByProject { groups, loaded_at });
                 });
             }
             Cmd::LoadDetail {
@@ -308,11 +310,13 @@ fn spawn_load_detail(
         let inst = match inst {
             Some(i) => i,
             None => {
+                let loaded_at = crate::store::now_brt_iso();
                 let _ = tx.send(Msg::LoadedDetail(DetailLoad {
                     task: serde_json::Value::Null,
                     comments: vec![],
                     assets: vec![],
                     user_map: std::collections::HashMap::new(),
+                    loaded_at,
                 }));
                 return;
             }
@@ -331,11 +335,13 @@ fn spawn_load_detail(
         )
         .await;
 
+        let loaded_at = crate::store::now_brt_iso();
         let _ = tx.send(Msg::LoadedDetail(DetailLoad {
             task: core.task.clone(),
             comments: core.comments.clone(),
             assets: core.assets.clone(),
             user_map: cached_map,
+            loaded_at,
         }));
 
         // Phase 2: refresh user directory in the background; send UserMapResolved

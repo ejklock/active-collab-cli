@@ -119,6 +119,25 @@ pub(crate) fn now_iso() -> String {
     )
 }
 
+/// Returns the current wall-clock time in GMT-3 (Brazil / America/Sao_Paulo) as
+/// `YYYY-MM-DDTHH:MM:SS` with no trailing Z — it is not UTC.
+/// Used only for footer display; storage timestamps keep using now_iso() (UTC, Z-suffixed).
+pub(crate) fn now_brt_iso() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    const BRT_OFFSET_SECS: u64 = 3 * 3600;
+    let utc_secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock before epoch")
+        .as_secs();
+    // Shift epoch backwards by 3 hours so secs_to_utc_parts produces BRT wall-clock fields.
+    let brt_secs = utc_secs.saturating_sub(BRT_OFFSET_SECS);
+    let (year, month, day, hour, min, sec) = secs_to_utc_parts(brt_secs);
+    format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}",
+        year, month, day, hour, min, sec
+    )
+}
+
 pub(crate) fn secs_to_utc_parts(secs: u64) -> (u64, u64, u64, u64, u64, u64) {
     let sec = secs % 60;
     let mins = secs / 60;

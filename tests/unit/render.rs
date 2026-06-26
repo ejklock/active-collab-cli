@@ -2,6 +2,142 @@ use super::*;
 use serde_json::json;
 use unicode_width::UnicodeWidthStr;
 
+// --- D3: link_segments ---
+
+#[test]
+fn link_segments_no_url_returns_single_non_link_segment() {
+    let segs = link_segments("plain text with no URL");
+    assert_eq!(segs.len(), 1);
+    assert!(!segs[0].is_link);
+    assert_eq!(segs[0].text, "plain text with no URL");
+}
+
+#[test]
+fn link_segments_https_url_splits_into_three_ordered_segments() {
+    let line = "See https://example.com/path for details";
+    let segs = link_segments(line);
+    assert_eq!(segs.len(), 3, "expected [before][url][after]: {segs:?}");
+    assert!(!segs[0].is_link, "prefix must be non-link: {segs:?}");
+    assert!(segs[1].is_link, "url must be link: {segs:?}");
+    assert!(!segs[2].is_link, "suffix must be non-link: {segs:?}");
+    assert_eq!(segs[0].text, "See ");
+    assert_eq!(segs[1].text, "https://example.com/path");
+    assert_eq!(segs[2].text, " for details");
+}
+
+#[test]
+fn link_segments_http_url_is_detected() {
+    let line = "Visit http://example.com now";
+    let segs = link_segments(line);
+    let link_segs: Vec<_> = segs.iter().filter(|s| s.is_link).collect();
+    assert_eq!(link_segs.len(), 1, "expected one link segment: {segs:?}");
+    assert_eq!(link_segs[0].text, "http://example.com");
+}
+
+#[test]
+fn link_segments_bare_www_url_is_detected() {
+    let line = "Go to www.example.com for info";
+    let segs = link_segments(line);
+    let link_segs: Vec<_> = segs.iter().filter(|s| s.is_link).collect();
+    assert_eq!(
+        link_segs.len(),
+        1,
+        "bare www. URL must be detected: {segs:?}"
+    );
+    assert_eq!(link_segs[0].text, "www.example.com");
+}
+
+#[test]
+fn link_segments_border_chars_and_padding_are_not_links() {
+    // Simulate a panel body line: │ {hpad}content with https://url.com{hpad} │
+    let line = "\u{2502} some text https://url.com/path more \u{2502}";
+    let segs = link_segments(line);
+    // The leading │ and spaces must be non-link
+    assert!(
+        !segs[0].is_link,
+        "leading border+padding must be non-link: {:?}",
+        segs[0]
+    );
+    assert!(
+        segs[0].text.starts_with('\u{2502}'),
+        "first segment must start with │"
+    );
+    // The trailing │ must be non-link
+    let last = segs.last().unwrap();
+    assert!(
+        !last.is_link,
+        "trailing border must be non-link: {:?}",
+        last
+    );
+    assert!(
+        last.text.ends_with('\u{2502}'),
+        "last segment must end with │"
+    );
+}
+
+#[test]
+fn link_segments_url_stops_at_whitespace_not_including_trailing_border() {
+    // URL must end before the space before │, so │ is not included in the link text
+    let line = "\u{2502} https://example.com/page \u{2502}";
+    let segs = link_segments(line);
+    let link_segs: Vec<_> = segs.iter().filter(|s| s.is_link).collect();
+    assert_eq!(link_segs.len(), 1);
+    let url_text = &link_segs[0].text;
+    assert!(
+        !url_text.contains('\u{2502}'),
+        "URL must not include │ border: {url_text:?}"
+    );
+    assert!(
+        !url_text.ends_with(' '),
+        "URL must not include trailing space: {url_text:?}"
+    );
+}
+
+#[test]
+fn link_segments_accented_text_adjacent_to_url_does_not_panic() {
+    // Char-boundary safety: UTF-8 multibyte chars before and after a URL must not cause panic
+    let line = "Ação: https://example.com/ação see também";
+    let segs = link_segments(line);
+    let all_text: String = segs.iter().map(|s| s.text.as_str()).collect();
+    assert_eq!(
+        all_text, line,
+        "segments must reconstruct original line: {segs:?}"
+    );
+}
+
+#[test]
+fn link_segments_empty_line_returns_single_non_link_segment() {
+    let segs = link_segments("");
+    assert_eq!(segs.len(), 1);
+    assert!(!segs[0].is_link);
+    assert_eq!(segs[0].text, "");
+}
+
+#[test]
+fn link_segments_multiple_urls_all_tagged() {
+    let line = "A https://first.com B https://second.org C";
+    let segs = link_segments(line);
+    let link_segs: Vec<_> = segs.iter().filter(|s| s.is_link).collect();
+    assert_eq!(
+        link_segs.len(),
+        2,
+        "two URLs must produce two link segments: {segs:?}"
+    );
+    assert_eq!(link_segs[0].text, "https://first.com");
+    assert_eq!(link_segs[1].text, "https://second.org");
+}
+
+#[test]
+fn link_segments_segments_reconstruct_original_line() {
+    let line = "Before https://example.com/foo after";
+    let segs = link_segments(line);
+    let reconstructed: String = segs.iter().map(|s| s.text.as_str()).collect();
+    assert_eq!(
+        reconstructed, line,
+        "concatenated segments must equal original line"
+    );
+}
+
 #[test]
 fn is_openable_url_accepts_http() {
     assert!(is_openable_url("http://example.com/file.pdf"));

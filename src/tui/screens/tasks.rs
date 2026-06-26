@@ -1,6 +1,6 @@
 use crate::i18n::t;
 use crate::tui::drawer;
-use crate::tui::model::TaskRow;
+use crate::tui::model::{ClickTarget, TaskRow};
 use ratatui::{
     layout::Constraint,
     text::{Line, Text},
@@ -19,6 +19,7 @@ pub fn draw_tasks(
     tasks: &[TaskRow],
     selected: usize,
     loading: bool,
+    targets: &mut Vec<ClickTarget>,
 ) {
     let title = format!(" {} ", project_name);
 
@@ -31,6 +32,7 @@ pub fn draw_tasks(
 
     let name_width = area.width.saturating_sub(OVERHEAD) as usize;
 
+    let mut row_heights: Vec<u16> = Vec::with_capacity(tasks.len());
     let rows: Vec<Row<'static>> = tasks
         .iter()
         .map(|row| {
@@ -41,6 +43,7 @@ pub fn draw_tasks(
                 lines
             };
             let height = lines.len() as u16;
+            row_heights.push(height);
             let cell = Cell::from(Text::from(
                 lines.into_iter().map(Line::from).collect::<Vec<_>>(),
             ));
@@ -52,5 +55,15 @@ pub fn draw_tasks(
     let header = [t("NAME")];
     let header_refs: Vec<&str> = header.iter().map(|s| s.as_str()).collect();
 
-    drawer::render_table(frame, area, &title, &header_refs, rows, &widths, selected);
+    drawer::render_table(
+        frame,
+        area,
+        &title,
+        &header_refs,
+        rows,
+        &widths,
+        selected,
+        &row_heights,
+        targets,
+    );
 }

@@ -1,6 +1,6 @@
 use crate::i18n::t;
 use crate::tui::drawer;
-use crate::tui::model::ProjectGroup;
+use crate::tui::model::{ClickTarget, ProjectGroup};
 use ratatui::{
     layout::Constraint,
     text::{Line, Text},
@@ -18,6 +18,7 @@ pub fn draw_projects(
     groups: &[ProjectGroup],
     selected: usize,
     loading: bool,
+    targets: &mut Vec<ClickTarget>,
 ) {
     let title = format!(" {} ", t("Projects"));
 
@@ -30,6 +31,7 @@ pub fn draw_projects(
 
     let name_width = area.width.saturating_sub(OVERHEAD) as usize;
 
+    let mut row_heights: Vec<u16> = Vec::with_capacity(groups.len());
     let rows: Vec<Row<'static>> = groups
         .iter()
         .map(|g| {
@@ -40,6 +42,7 @@ pub fn draw_projects(
                 lines
             };
             let height = lines.len() as u16;
+            row_heights.push(height);
             let cell = Cell::from(Text::from(
                 lines.into_iter().map(Line::from).collect::<Vec<_>>(),
             ));
@@ -51,5 +54,15 @@ pub fn draw_projects(
     let header = [t("Project")];
     let header_refs: Vec<&str> = header.iter().map(|s| s.as_str()).collect();
 
-    drawer::render_table(frame, area, &title, &header_refs, rows, &widths, selected);
+    drawer::render_table(
+        frame,
+        area,
+        &title,
+        &header_refs,
+        rows,
+        &widths,
+        selected,
+        &row_heights,
+        targets,
+    );
 }
