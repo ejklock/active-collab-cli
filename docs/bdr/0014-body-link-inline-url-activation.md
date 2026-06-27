@@ -50,9 +50,11 @@ In the **TUI detail view**:
   clicks). A bracketed e-mail address opens via `mailto:`.
 - The URL text is on screen, so it is selectable/copyable (BDR 0015) and terminals
   with URL detection make it Cmd/Ctrl+clickable natively. A URL long enough to wrap
-  across lines stays fully visible and copyable; click-activation targets the
-  unwrapped token, and the terminal's native Cmd/Ctrl+click reconstructs a wrapped
-  URL where supported.
+  across lines stays fully visible and copyable. **Amended (D1c):** an app-side click
+  on **any wrapped fragment** of that URL opens the **full** URL — the click maps to
+  the pre-wrap logical line before the URL token is resolved (V5 resolved only a click
+  on a single unwrapped line; real-terminal use showed the terminal-native fallback was
+  not enough).
 - The `↗ Link N` label and the separate URL list are **gone for body links**.
 
 The **CLI / non-TTY** path is unchanged.
@@ -79,8 +81,12 @@ for `mailto:a@b.com`.
 
 **Scenario 6: long URL stays visible and copyable** — Given a URL long enough to wrap,
 When the body renders, Then the full URL is on screen across the wrapped lines
-(selectable/copyable); click-activation targets the unwrapped token and the terminal's
-native Cmd/Ctrl+click handles a wrapped URL where supported.
+(selectable/copyable).
+
+**Scenario 7 (D1c): click on a wrapped fragment opens the full URL** — Given a body URL
+long enough to wrap across two or more rendered lines, When a click lands on **any** of
+those wrapped fragments, Then the open `Cmd` for the **complete** URL is emitted (the
+click maps to the pre-wrap logical line, where the whole token is resolvable).
 
 ## Test Design
 
@@ -95,6 +101,7 @@ pure `body_link_cmd_at` against rendered geometry. Each row names what it proves
 | Click opens | unit | 4 | URL-token click → open Cmd with URL | url-from-click (no index) |
 | Mailto | unit | 5 | `mail [a@b.com]` + open Cmd `mailto:a@b.com` | mailto handling |
 | Long URL visible | unit | 6 | full URL present across wrapped lines | URL always visible/copyable |
+| Wrapped click (D1c) | unit | 7 | click on a wrapped fragment → open Cmd with the FULL url | pre-wrap logical-line click mapping |
 
 ## Related
 

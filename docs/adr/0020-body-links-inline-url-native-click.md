@@ -66,8 +66,13 @@ raw URL printed in the body) under the click, and the app opens it directly. No
 index, no separate URL list: the open target is whatever URL is visibly clicked
 (a bracketed e-mail opens via `mailto:`). Because the URL is on screen, the mapping
 is direct and robust — eliminating the fragile correlation. A URL long enough to wrap
-stays fully visible/copyable; click-activation targets the unwrapped token and the
-terminal's native Cmd/Ctrl+click handles a wrapped URL where supported. Asset/"Anexo N"
+stays fully visible/copyable.
+
+**Amended (D1c, issue 0022):** the V5 scanner resolved a click only against a single
+rendered line, so a click on a **wrapped** URL fragment (where the `[url]` token is split
+across lines) was a no-op and the terminal-native fallback proved insufficient in real
+use. The click now maps to the **pre-wrap logical line** before `url_at` runs, so a click
+on **any** fragment of a wrapped URL resolves the **whole** token. Asset/"Anexo N"
 affordances are unchanged (separate panel).
 
 ### 3. Terminal-native + optional OSC 8

@@ -45,6 +45,8 @@ See [adr/](/adr/index.md).
 - [0019](/adr/0019-richtext-full-activecollab-tag-coverage.md) — Extend the rich-text mapper to the full ActiveCollab allowed-tag set (R4) *(Accepted)*
 - [0020](/adr/0020-body-links-inline-url-native-click.md) — Body links inline as text + visible URL, clickable from the visible region (V5) *(Accepted)*
 - [0021](/adr/0021-app-managed-text-selection-clipboard.md) — App-managed text selection with drawn highlight + clipboard copy (V6) *(Accepted)*
+- [0022](/adr/0022-detail-title-as-meta-row.md) — Task title as a Título row inside the Detalhes panel, not a loose header (D1a) *(Accepted)*
+- [0023](/adr/0023-asset-label-derivation.md) — Anexos/Artefatos label from anchor text → real filename → host (D1b) *(Accepted)*
 
 ## Behavior Decision Records (BDR)
 
@@ -62,6 +64,8 @@ See [bdr/](/bdr/index.md).
 - [0013](/bdr/0013-richtext-full-tag-coverage.md) — Rich-text: tables, strike/del, underline, preformatted blocks (R4) *(Accepted)*
 - [0014](/bdr/0014-body-link-inline-url-activation.md) — Body links inline as text + visible URL, activate from visible region (V5) *(Accepted)*
 - [0015](/bdr/0015-app-managed-text-selection.md) — App-managed text selection: drag highlights, copies to clipboard (V6) *(Accepted)*
+- [0016](/bdr/0016-detail-title-row-project-name.md) — Detail Título row + populated Projeto row (D1a) *(Accepted)*
+- [0017](/bdr/0017-asset-label-derivation.md) — Anexos/Artefatos labels: anchor text, real filename, or host (D1b) *(Accepted)*
 
 ## Research
 
@@ -72,4 +76,4 @@ See [research/](/research/index.md).
 ## Issues
 
 See [issues/](/issues/index.md) — slices R0–R8 of the Rust rewrite plus the
-post-parity TUI/UX slices (V3, C1, R2, R3, ARCH, R4, V5, V6).
+post-parity TUI/UX slices (V3, C1, R2, R3, ARCH, R4, V5, V6, D1).

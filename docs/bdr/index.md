@@ -17,3 +17,5 @@
 | [0013](/bdr/0013-richtext-full-tag-coverage.md) | Rich-text detail: tables, strikethrough, underline, and preformatted blocks render with structure (R4) | Accepted |
 | [0014](/bdr/0014-body-link-inline-url-activation.md) | Body links render inline as text + visible URL and activate from the visible region (V5) | Accepted |
 | [0015](/bdr/0015-app-managed-text-selection.md) | App-managed text selection: drag highlights text and copies it to the clipboard with feedback (V6) | Accepted |
+| [0016](/bdr/0016-detail-title-row-project-name.md) | Detail view shows the title as a Título row and a populated Projeto row (D1a) | Accepted |
+| [0017](/bdr/0017-asset-label-derivation.md) | Anexos/Artefatos labels read as anchor text, a real filename, or the host (D1b) | Accepted |

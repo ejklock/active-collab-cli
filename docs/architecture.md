@@ -103,6 +103,14 @@ hits the network for open tasks alone — the directory fetch is the cached, slo
 call. Fitness: a warm refresh issues **zero** `list_projects` requests
 (gate-checked against the mocked server).
 
+The **detail load** enriches the task with its **project name** before rendering
+([ADR 0022](/adr/0022-detail-title-as-meta-row.md),
+[BDR 0016](/bdr/0016-detail-title-row-project-name.md)): the task JSON carries only
+`project_id`, so the load path resolves the name from the **same** per-instance
+`ProjectNamesCache` the browse/mine list uses and injects `project_name`, which the
+`Detalhes` panel renders in the `Projeto` row (with a fallback on a cache miss). No new
+network call — the name comes from the existing cache.
+
 Background results (e.g. `Msg::LoadedTasksByProject`) are delivered over a
 `tokio::sync::mpsc` channel that is a first-class arm of the `tokio::select!`
 loop. The model is updated and the screen repainted as soon as the result

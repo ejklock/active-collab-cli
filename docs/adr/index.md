@@ -23,3 +23,5 @@
 | [0019](/adr/0019-richtext-full-activecollab-tag-coverage.md) | Extend the rich-text mapper to the full ActiveCollab allowed-tag set (tables, strike/del, underline, pre) (R4) | Accepted |
 | [0020](/adr/0020-body-links-inline-url-native-click.md) | Body links render inline as text + visible URL, clickable from the visible region (V5) | Accepted |
 | [0021](/adr/0021-app-managed-text-selection-clipboard.md) | App-managed text selection with a drawn highlight and clipboard copy (V6) | Accepted |
+| [0022](/adr/0022-detail-title-as-meta-row.md) | The task title renders as a Título row inside the Detalhes panel, not a loose header (D1a) | Accepted |
+| [0023](/adr/0023-asset-label-derivation.md) | Derive the Anexos/Artefatos label from anchor text, then a real filename, then the host (D1b) | Accepted |
