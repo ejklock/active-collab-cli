@@ -1497,7 +1497,7 @@ async fn tasks_by_project_always_fetches_open_tasks() {
     let inst = make_instance("inst", &server.uri(), Some(1));
     let http = make_http();
 
-    tasks_by_project(db_path.clone(), &[inst.clone()], &http).await;
+    tasks_by_project(db_path.clone(), std::slice::from_ref(&inst), &http).await;
     tasks_by_project(db_path.clone(), &[inst], &http).await;
 
     server.verify().await;

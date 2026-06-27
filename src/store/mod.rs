@@ -106,6 +106,13 @@ fn init_schema(conn: &Connection) -> Result<()> {
             instance   TEXT PRIMARY KEY,
             names_json TEXT NOT NULL,
             fetched_at INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS task_list_cache (
+            scope         TEXT NOT NULL,
+            instances_key TEXT NOT NULL,
+            list_json     TEXT NOT NULL,
+            fetched_at    INTEGER NOT NULL,
+            PRIMARY KEY (scope, instances_key)
         );",
     )?;
     Ok(())

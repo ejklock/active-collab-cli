@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+use crate::store::instances::Instance;
 use crate::store::{now_epoch_secs, now_iso};
 use anyhow::Result;
 use rusqlite::{params, Connection, OptionalExtension};
@@ -183,6 +184,77 @@ impl<'a> ProjectNamesCache<'a> {
         )?;
         Ok(())
     }
+}
+
+pub struct TaskListCache<'a> {
+    conn: &'a Connection,
+}
+
+impl<'a> TaskListCache<'a> {
+    pub fn new(conn: &'a Connection) -> Self {
+        TaskListCache { conn }
+    }
+
+    pub fn read(
+        &self,
+        scope: &str,
+        instances_key: &str,
+        max_age_secs: i64,
+    ) -> Result<Option<String>> {
+        let row: Option<(String, i64)> = self
+            .conn
+            .query_row(
+                "SELECT list_json, fetched_at FROM task_list_cache \
+                 WHERE scope=?1 AND instances_key=?2",
+                params![scope, instances_key],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+
+        match row {
+            None => Ok(None),
+            Some((list_json, fetched_at)) => {
+                let age = now_epoch_secs() - fetched_at;
+                if age <= max_age_secs {
+                    Ok(Some(list_json))
+                } else {
+                    Ok(None)
+                }
+            }
+        }
+    }
+
+    pub fn write(&self, scope: &str, instances_key: &str, list_json: &str) -> Result<()> {
+        self.write_with_fetched_at(scope, instances_key, list_json, now_epoch_secs())
+    }
+
+    /// Visible for testing: write with an explicit fetched_at so tests can
+    /// control the age without sleeping.
+    pub(crate) fn write_with_fetched_at(
+        &self,
+        scope: &str,
+        instances_key: &str,
+        list_json: &str,
+        fetched_at: i64,
+    ) -> Result<()> {
+        self.conn.execute(
+            "INSERT OR REPLACE INTO task_list_cache \
+             (scope, instances_key, list_json, fetched_at) \
+             VALUES (?1, ?2, ?3, ?4)",
+            params![scope, instances_key, list_json, fetched_at],
+        )?;
+        Ok(())
+    }
+}
+
+/// Returns a stable, order-independent key for a set of instances.
+///
+/// Sorts instance names before joining so that callers passing the same
+/// instances in different orders always get the same key.
+pub fn instances_key(targets: &[Instance]) -> String {
+    let mut names: Vec<&str> = targets.iter().map(|i| i.name.as_str()).collect();
+    names.sort_unstable();
+    names.join("|")
 }
 
 #[cfg(test)]

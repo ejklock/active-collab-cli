@@ -5,12 +5,13 @@ pub mod screens;
 pub mod theme;
 pub mod view;
 
-pub use model::{init_browse, mine_model, update, ClickTarget, Cmd, DetailLoad, Model, Msg};
+pub use model::{init_browse, init_mine, update, ClickTarget, Cmd, DetailLoad, Model, Msg};
 pub use view::view;
 
 use crate::controller;
 use crate::http::Http;
 use crate::render::MineTableRow;
+use crate::store::cache::{instances_key, TaskListCache};
 use crate::store::instances::Instance;
 use crossterm::{
     event::{DisableMouseCapture, EnableMouseCapture, Event},
@@ -98,6 +99,67 @@ fn handle_channel_msg(
     new_model
 }
 
+/// Handle a background Msg in browse context, writing the task-list snapshot after a load lands.
+fn handle_channel_msg_browse(
+    msg: Msg,
+    model: Model,
+    targets: &[Instance],
+    http: &Http,
+    db_path: &Path,
+    tx: &mpsc::UnboundedSender<Msg>,
+) -> Model {
+    let is_loaded_tasks = matches!(msg, Msg::LoadedTasksByProject { .. });
+    let new_model = handle_channel_msg(msg, model, targets, http, db_path, tx);
+    if is_loaded_tasks {
+        write_browse_snapshot(&new_model, targets, db_path);
+    }
+    new_model
+}
+
+/// Handle a background Msg in mine context, writing the mine snapshot after LoadedMineTasks lands.
+fn handle_channel_msg_mine(
+    msg: Msg,
+    model: Model,
+    targets: &[Instance],
+    http: &Http,
+    db_path: &Path,
+    tx: &mpsc::UnboundedSender<Msg>,
+) -> Model {
+    let is_loaded_mine = matches!(msg, Msg::LoadedMineTasks { .. });
+    let new_model = handle_channel_msg(msg, model, targets, http, db_path, tx);
+    if is_loaded_mine {
+        write_mine_snapshot(&new_model, targets, db_path);
+    }
+    new_model
+}
+
+/// Serialize the current Projects groups and write them to the task_list_cache.
+/// Silently ignores errors so a cache write failure never crashes the TUI.
+fn write_browse_snapshot(model: &Model, targets: &[Instance], db_path: &Path) {
+    use crate::config::Config;
+    use crate::store::Store;
+    use crate::tui::model::Screen;
+    let Some(Screen::Projects { groups, .. }) = model.top() else {
+        return;
+    };
+    let Ok(list_json) = serde_json::to_string(groups) else {
+        return;
+    };
+    let key = instances_key(targets);
+    let config = Config {
+        db_path: db_path.to_path_buf(),
+        task_cache_ttl_hours: 24,
+    };
+    if let Ok(store) = Store::open(&config) {
+        let _ = TaskListCache::new(store.conn()).write("browse", &key, &list_json);
+    }
+}
+
+enum AppMode {
+    Browse,
+    Mine,
+}
+
 /// Async TEA loop driven by tokio::select! over three sources:
 ///   - crossterm EventStream  (keyboard / mouse input)
 ///   - tokio::sync::mpsc receiver  (background network results)
@@ -106,12 +168,17 @@ fn handle_channel_msg(
 /// A Msg arriving on the channel updates the model and repaints on the next
 /// loop iteration without requiring any input event — this is the fix for
 /// "primeiro load demora".
+///
+/// The `mode` controls which snapshot write-back path runs after a load lands:
+///   - `Browse`: writes scope="browse" after LoadedTasksByProject
+///   - `Mine`: writes scope="mine" after LoadedMineTasks
 async fn run_app(
     targets: Vec<Instance>,
     http: Http,
     db_path: PathBuf,
     mut model: Model,
     init_cmds: Vec<Cmd>,
+    mode: AppMode,
 ) -> i32 {
     let (tx, mut rx) = mpsc::unbounded_channel::<Msg>();
 
@@ -164,7 +231,14 @@ async fn run_app(
                 }
             }
             Some(msg) = rx.recv() => {
-                model = handle_channel_msg(msg, model, &targets, &http, &db_path, &tx);
+                model = match mode {
+                    AppMode::Browse => {
+                        handle_channel_msg_browse(msg, model, &targets, &http, &db_path, &tx)
+                    }
+                    AppMode::Mine => {
+                        handle_channel_msg_mine(msg, model, &targets, &http, &db_path, &tx)
+                    }
+                };
             }
             _ = heartbeat.tick() => {}
         }
@@ -175,26 +249,104 @@ async fn run_app(
 }
 
 /// Run the browse TUI. Async — awaited directly on the main runtime.
+///
+/// On entry, reads a snapshot from TaskListCache and passes it as a seed so
+/// the Projects list paints immediately while the revalidation fetch runs in
+/// the background (SWR).  A cold cache falls back to the loading placeholder.
 pub async fn browse(targets: Vec<Instance>, http: Http, db_path: PathBuf) -> i32 {
+    let seed = read_browse_snapshot(&targets, &db_path);
     let header = build_header(&targets, &db_path);
-    let (model, init_cmds) = init_browse(header);
-    run_app(targets, http, db_path, model, init_cmds).await
+    let (model, init_cmds) = init_browse(header, seed);
+    run_app(targets, http, db_path, model, init_cmds, AppMode::Browse).await
 }
 
-/// Run the mine TUI with rows that are already fetched.
+/// Read the cached task list snapshot for the current set of instances.
+/// Returns None on any error or cache miss.
+fn read_browse_snapshot(
+    targets: &[Instance],
+    db_path: &std::path::Path,
+) -> Option<Vec<model::ProjectGroup>> {
+    use crate::config::Config;
+    use crate::store::Store;
+    const BROWSE_SNAPSHOT_MAX_AGE_SECS: i64 = 24 * 3600;
+    let config = Config {
+        db_path: db_path.to_path_buf(),
+        task_cache_ttl_hours: 24,
+    };
+    let store = Store::open(&config).ok()?;
+    let key = instances_key(targets);
+    let list_json = TaskListCache::new(store.conn())
+        .read("browse", &key, BROWSE_SNAPSHOT_MAX_AGE_SECS)
+        .ok()??;
+    serde_json::from_str(&list_json).ok()
+}
+
+/// Run the mine TUI.
 ///
-/// No init_cmds are emitted — the model is fully seeded from the provided rows.
-/// Enter/click on a task opens the Detail screen through the shared TEA core,
-/// fetching task detail over the network or cache exactly like browse.
-pub async fn run_mine(
-    targets: Vec<Instance>,
-    http: Http,
-    db_path: PathBuf,
-    rows: Vec<MineTableRow>,
-) -> i32 {
+/// On entry, reads the mine snapshot from TaskListCache and uses it as a seed
+/// so the task list paints immediately while the revalidation fetch runs in
+/// the background (SWR, scope="mine").  A cold cache falls back to the loading
+/// placeholder.  The caller must NOT block on a synchronous collect_mine_rows
+/// before this call — revalidation runs inside the TUI loop via Cmd::LoadMineTasks.
+pub async fn run_mine(targets: Vec<Instance>, http: Http, db_path: PathBuf) -> i32 {
+    let seed = read_mine_snapshot(&targets, &db_path);
     let header = build_header(&targets, &db_path);
-    let model = mine_model(rows, header);
-    run_app(targets, http, db_path, model, vec![]).await
+    let (model, init_cmds) = init_mine(header, seed);
+    run_app(targets, http, db_path, model, init_cmds, AppMode::Mine).await
+}
+
+const MINE_SNAPSHOT_MAX_AGE_SECS: i64 = 24 * 3600;
+
+/// Read the cached mine task list snapshot for the current set of instances.
+/// Returns None on any error or cache miss.
+fn read_mine_snapshot(
+    targets: &[Instance],
+    db_path: &std::path::Path,
+) -> Option<Vec<MineTableRow>> {
+    use crate::config::Config;
+    use crate::store::Store;
+    let config = Config {
+        db_path: db_path.to_path_buf(),
+        task_cache_ttl_hours: 24,
+    };
+    let store = Store::open(&config).ok()?;
+    let key = instances_key(targets);
+    let list_json = TaskListCache::new(store.conn())
+        .read("mine", &key, MINE_SNAPSHOT_MAX_AGE_SECS)
+        .ok()??;
+    serde_json::from_str(&list_json).ok()
+}
+
+/// Serialize the current mine tasks and write them to the task_list_cache.
+/// Silently ignores errors so a cache write failure never crashes the TUI.
+fn write_mine_snapshot(model: &Model, targets: &[Instance], db_path: &Path) {
+    use crate::config::Config;
+    use crate::store::Store;
+    use crate::tui::model::Screen;
+    let Some(Screen::Tasks { tasks, .. }) = model.top() else {
+        return;
+    };
+    let rows: Vec<MineTableRow> = tasks
+        .iter()
+        .map(|t| MineTableRow {
+            instance: t.instance.clone(),
+            project_id: t.project_id,
+            task_number: t.task_number,
+            task_id: t.task_id,
+            name: t.name.clone(),
+        })
+        .collect();
+    let Ok(list_json) = serde_json::to_string(&rows) else {
+        return;
+    };
+    let key = instances_key(targets);
+    let config = Config {
+        db_path: db_path.to_path_buf(),
+        task_cache_ttl_hours: 24,
+    };
+    if let Ok(store) = Store::open(&config) {
+        let _ = TaskListCache::new(store.conn()).write("mine", &key, &list_json);
+    }
 }
 
 /// Resolve the cached display name for the first instance's user_id and
@@ -233,6 +385,16 @@ fn dispatch_cmds(
                     let groups = controller::tasks_by_project(db_path, &targets, &http).await;
                     let loaded_at = crate::store::now_brt_iso();
                     let _ = tx.send(Msg::LoadedTasksByProject { groups, loaded_at });
+                });
+            }
+            Cmd::LoadMineTasks => {
+                let targets = targets.to_vec();
+                let http = http.clone();
+                let tx = tx.clone();
+                tokio::spawn(async move {
+                    let rows = crate::commands::collect_mine_rows(&targets, &http).await;
+                    let loaded_at = crate::store::now_brt_iso();
+                    let _ = tx.send(Msg::LoadedMineTasks { rows, loaded_at });
                 });
             }
             Cmd::LoadDetail {

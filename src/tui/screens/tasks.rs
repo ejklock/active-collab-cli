@@ -12,6 +12,7 @@ use ratatui::{
 const OVERHEAD: u16 = 4;
 
 /// Draw the Tasks screen (project task list) into `area`.
+#[allow(clippy::too_many_arguments)]
 pub fn draw_tasks(
     frame: &mut Frame,
     area: ratatui::layout::Rect,
@@ -19,9 +20,14 @@ pub fn draw_tasks(
     tasks: &[TaskRow],
     selected: usize,
     loading: bool,
+    revalidating: bool,
     targets: &mut Vec<ClickTarget>,
 ) {
-    let title = format!(" {} ", project_name);
+    let title = if revalidating {
+        format!(" {} ↻ ", project_name)
+    } else {
+        format!(" {} ", project_name)
+    };
 
     if loading {
         let msg = Paragraph::new(t("Loading…"))

@@ -12,3 +12,5 @@
 | [0008](/bdr/0008-browse-list-refresh-cached-directory.md) | Browse-list refresh: open tasks always fetched, project directory served from cache | Accepted |
 | [0009](/bdr/0009-richtext-formatting-detail-view.md) | Rich-text detail: comment/description HTML renders with bold, italic, code, headings, lists, quotes, links | Accepted |
 | [0010](/bdr/0010-agent-json-output-contract.md) | Agent JSON output: get/current/mine/browse emit one curated minified line, --json is non-interactive | Accepted |
+| [0011](/bdr/0011-task-list-first-paint-swr-entry.md) | Task-list first-paint SWR on entry: paint the cached list instantly, always revalidate | Accepted |
+| [0012](/bdr/0012-detail-chrome-responsive-wrap.md) | Detail chrome responsiveness: header, task title, footer, and artifacts wrap on narrow widths | Accepted |

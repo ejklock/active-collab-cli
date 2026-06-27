@@ -1,5 +1,5 @@
 use crate::i18n::t;
-use crate::render::{link_segments, Asset, StyleRun};
+use crate::render::{asset_row_lines, link_segments, Asset, StyleRun};
 use crate::richtext::RichStyle;
 use crate::tui::theme;
 use ratatui::{
@@ -21,119 +21,79 @@ pub struct DetailParams<'a> {
     pub task_name: &'a str,
 }
 
-/// Height of the Artifacts panel for a given asset count.
+/// Wrapped panel height shared by the render and model paths.
 ///
-/// Returns 0 when there are no assets (no panel is drawn).
-/// Otherwise: 1 row per asset plus 2 border rows, capped at 8.
-pub fn asset_panel_height(assets_len: usize) -> u16 {
-    if assets_len == 0 {
+/// Counts the number of terminal rows each asset label occupies (including
+/// continuation lines when a label wraps at `inner_width`) and adds 2 for
+/// the panel borders, capped at 8.  `inner_width` is the outer content-block
+/// inner width (i.e. `viewport_cols - 2`); the function internally subtracts
+/// another 2 for the asset-panel border before calling `asset_row_lines`.
+///
+/// This is the authoritative wrapped-height computation reused by both the
+/// renderer (`draw_detail`) and the model hit-test helpers so that no second
+/// divergent count can exist.
+pub fn asset_panel_render_height(assets: &[Asset], inner_width: usize) -> u16 {
+    if assets.is_empty() {
         return 0;
     }
-    (assets_len as u16 + 2).min(8)
-}
-
-/// Compute the Rect occupied by the Artifacts panel within `area`.
-///
-/// Returns `None` when `assets_len` is 0 (no panel is drawn).
-/// Delegates all height arithmetic to `asset_panel_height` so the
-/// formula lives in exactly one place.
-pub fn detail_asset_panel_rect(area: Rect, assets_len: usize) -> Option<Rect> {
-    let panel_height = asset_panel_height(assets_len);
-    if panel_height == 0 {
-        return None;
-    }
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Min(0), Constraint::Length(panel_height)])
-        .split(area);
-    Some(chunks[1])
+    let panel_inner = inner_width.saturating_sub(2);
+    let row_count: usize = assets
+        .iter()
+        .enumerate()
+        .map(|(i, asset)| asset_row_lines(i + 1, asset, panel_inner).len())
+        .sum();
+    (row_count as u16 + 2).min(8)
 }
 
 /// Draw the Detail screen as a single scrollable content block with an optional
 /// fixed Artifacts panel below.
 ///
-/// The frame border title shows `task_name` (truncated with an ellipsis when
-/// it does not fit), or falls back to `#<task_id>` when the name is empty.
-///
+/// The task name is rendered as a wrapped bold header inside the content block,
+/// above the body.  The Block border has no title.
 /// When `assets` is non-empty the area is split vertically into a content chunk
-/// (Min(0)) and a fixed panel chunk (Length capped at 8). Otherwise the full
-/// area goes to content.
+/// (Min(0)) and a fixed panel chunk whose height counts wrapped asset rows (capped 8).
 pub fn draw_detail(frame: &mut Frame, area: Rect, params: DetailParams<'_>) {
     let inner_width = area.width.saturating_sub(2) as usize;
-    let title = build_frame_title(params.task_name, params.task_id, inner_width);
 
     if params.loading {
+        let fallback_title = if params.task_name.is_empty() {
+            format!(" #{} ", params.task_id)
+        } else {
+            format!(" {} ", params.task_name)
+        };
         let msg = Paragraph::new(t("Loading…"))
-            .block(Block::default().borders(Borders::ALL).title(title));
+            .block(Block::default().borders(Borders::ALL).title(fallback_title));
         frame.render_widget(msg, area);
         return;
     }
 
-    match detail_asset_panel_rect(area, params.assets.len()) {
-        None => render_content(
+    let panel_height = asset_panel_render_height(params.assets, inner_width);
+
+    match panel_height {
+        0 => render_content(
             frame,
             area,
             params.lines,
             params.line_styles,
             params.offset,
-            title,
+            params.task_name,
         ),
-        Some(panel_rect) => {
-            let content_rect = Rect::new(area.x, area.y, area.width, panel_rect.y - area.y);
+        ph => {
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Min(0), Constraint::Length(ph)])
+                .split(area);
             render_content(
                 frame,
-                content_rect,
+                chunks[0],
                 params.lines,
                 params.line_styles,
                 params.offset,
-                title,
+                params.task_name,
             );
-            render_assets_panel(frame, panel_rect, params.assets);
+            render_assets_panel(frame, chunks[1], params.assets);
         }
     }
-}
-
-/// Build the frame border title from the task name, truncating with an ellipsis
-/// when the name exceeds the available inner width. Falls back to `" #<id> "`
-/// when the name is empty (e.g. still loading).
-fn build_frame_title(task_name: &str, task_id: i64, inner_width: usize) -> String {
-    if task_name.is_empty() {
-        return format!(" #{} ", task_id);
-    }
-    let label = format!(" {} ", task_name);
-    truncate_title_to_fit(&label, inner_width)
-}
-
-/// Truncate `label` to fit within `max_display_cols` display columns.
-///
-/// When the label fits, it is returned unchanged. When it is too wide, the
-/// label is clipped at a character boundary and an ELLIPSIS + trailing space
-/// is appended so the result stays within `max_display_cols`.
-fn truncate_title_to_fit(label: &str, max_display_cols: usize) -> String {
-    use unicode_width::UnicodeWidthChar;
-    use unicode_width::UnicodeWidthStr;
-
-    let label_dw = UnicodeWidthStr::width(label);
-    if label_dw <= max_display_cols {
-        return label.to_string();
-    }
-    let ellipsis = '\u{2026}';
-    let ellipsis_w = UnicodeWidthChar::width(ellipsis).unwrap_or(1);
-    // Reserve room for ellipsis + trailing space (already part of format " name ")
-    let budget = max_display_cols.saturating_sub(ellipsis_w + 1);
-    let mut acc = 1usize; // leading space already contributes 1 col
-    let mut result = String::from(" ");
-    for ch in label.chars().skip(1) {
-        let cw = UnicodeWidthChar::width(ch).unwrap_or(0);
-        if acc + cw > budget {
-            break;
-        }
-        result.push(ch);
-        acc += cw;
-    }
-    result.push(ellipsis);
-    result.push(' ');
-    result
 }
 
 /// Build a ratatui `Style` for the given `RichStyle` emphasis kind.
@@ -276,8 +236,42 @@ fn render_content(
     lines: &[String],
     line_styles: &[Vec<StyleRun>],
     offset: usize,
-    title: String,
+    task_name: &str,
 ) {
+    let bold = Style::default().add_modifier(Modifier::BOLD);
+    let inner_width = area.width.saturating_sub(2) as usize;
+    let name_wrapped = crate::render::wrap_text(task_name, inner_width);
+    let name_line_count = if task_name.is_empty() {
+        0usize
+    } else {
+        name_wrapped.len().max(1)
+    };
+
+    let block = Block::default().borders(Borders::ALL);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    if inner.height == 0 || inner.width == 0 {
+        return;
+    }
+
+    let name_rows = (name_line_count as u16).min(inner.height);
+    let body_rows = inner.height.saturating_sub(name_rows);
+
+    let (name_rect, body_rect) = split_inner_for_name(inner, name_rows, body_rows);
+
+    if let Some(nr) = name_rect {
+        let name_lines: Vec<Line<'static>> = name_wrapped
+            .iter()
+            .map(|l| Line::styled(l.clone(), bold))
+            .collect();
+        frame.render_widget(Paragraph::new(name_lines), nr);
+    }
+
+    if body_rect.height == 0 {
+        return;
+    }
+
     let text: Text = Text::from(
         lines
             .iter()
@@ -289,23 +283,19 @@ fn render_content(
             .collect::<Vec<_>>(),
     );
 
-    let viewport_height = area.height.saturating_sub(2) as usize;
+    let viewport_height = body_rect.height as usize;
     let max_offset = lines.len().saturating_sub(viewport_height);
     let eff = offset.min(max_offset);
 
-    let block = Block::default().borders(Borders::ALL).title(title);
-    let paragraph = Paragraph::new(text)
-        .block(block)
-        .wrap(Wrap { trim: false })
-        .scroll((eff as u16, 0));
-
-    frame.render_widget(paragraph, area);
+    frame.render_widget(
+        Paragraph::new(text)
+            .wrap(Wrap { trim: false })
+            .scroll((eff as u16, 0)),
+        body_rect,
+    );
 
     let total_content = lines.len();
     if total_content > viewport_height {
-        // Scrollbar content_length = max_offset + 1 maps the scroll range [0, max_offset]
-        // to ratatui's [0, content-1] so the thumb reaches the track bottom exactly
-        // when eff == max_offset. viewport_content_length sizes the thumb proportionally.
         let sb_content = max_offset + 1;
         let mut scrollbar_state = ScrollbarState::new(sb_content)
             .viewport_content_length(viewport_height)
@@ -315,16 +305,34 @@ fn render_content(
     }
 }
 
+fn split_inner_for_name(inner: Rect, name_rows: u16, body_rows: u16) -> (Option<Rect>, Rect) {
+    if name_rows > 0 && body_rows > 0 {
+        let splits = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(name_rows), Constraint::Min(0)])
+            .split(inner);
+        (Some(splits[0]), splits[1])
+    } else if name_rows > 0 {
+        (
+            Some(inner),
+            Rect::new(inner.x, inner.y + inner.height, inner.width, 0),
+        )
+    } else {
+        (None, inner)
+    }
+}
+
 fn render_assets_panel(frame: &mut Frame, area: ratatui::layout::Rect, assets: &[Asset]) {
     let panel_title = format!(" {} ", t("Artifacts"));
+    let panel_inner_width = area.width.saturating_sub(2) as usize;
     let rows: Vec<Line> = assets
         .iter()
         .enumerate()
-        .map(|(i, asset)| {
-            Line::styled(
-                crate::render::asset_link_line(i + 1, asset),
-                theme::asset_style(),
-            )
+        .flat_map(|(i, asset)| {
+            asset_row_lines(i + 1, asset, panel_inner_width)
+                .into_iter()
+                .map(|row_text| Line::styled(row_text, theme::asset_style()))
+                .collect::<Vec<_>>()
         })
         .collect();
 

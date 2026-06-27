@@ -723,16 +723,24 @@ fn mine_task_to_row(task: crate::models::MineTask) -> MineTableRow {
     }
 }
 
+/// The outcome of `mine_core` for the caller to act on.
+pub enum MineOutcome {
+    /// The caller should launch the interactive mine TUI for these instances.
+    /// No rows are pre-fetched; the TUI reads its own snapshot and revalidates.
+    TuiLaunch { targets: Vec<Instance> },
+    /// All work completed inside mine_core; caller returns this exit code.
+    Done(i32),
+}
+
 /// Parity: Python cmd_mine (testable core).
 ///
-/// Loads instances, applies optional instance filter, aggregates rows, then either
-/// invokes `launch` (TTY path) or writes the table (non-TTY path).
-/// The launch closure receives both the resolved targets (Vec<Instance>) and the
-/// fetched rows so the TUI can open Detail for any task across any instance.
-///
-/// When `json` is true: emits ONE minified JSON line per ADR 0011 and returns 0
-/// without invoking `launch`, regardless of `is_tty`.
-#[allow(clippy::too_many_arguments)]
+/// Loads instances, applies optional instance filter, then:
+///   - `json=true`: fetches rows, emits JSON, returns `Done(0)`.
+///   - `is_tty=true, json=false`: returns `TuiLaunch` so the caller opens the
+///     interactive mine TUI.  Rows are NOT pre-fetched here — the TUI reads its
+///     own snapshot and revalidates via `Cmd::LoadMineTasks`.
+///   - `is_tty=false, json=false`: fetches rows, writes the plain-text table,
+///     returns `Done(0)`.
 pub async fn mine_core(
     repo: &InstanceRepository<'_>,
     http: &Http,
@@ -741,13 +749,12 @@ pub async fn mine_core(
     is_tty: bool,
     out: &mut dyn Write,
     err: &mut dyn Write,
-    launch: impl FnOnce(Vec<Instance>, Vec<MineTableRow>) -> i32,
-) -> i32 {
+) -> MineOutcome {
     let instances = match repo.load_all() {
         Ok(v) => v,
         Err(e) => {
             writeln!(err, "Error loading instances: {e}").ok();
-            return 1;
+            return MineOutcome::Done(1);
         }
     };
 
@@ -758,7 +765,7 @@ pub async fn mine_core(
             t("Error: no instances configured. Run: active_collab.py setup add")
         )
         .ok();
-        return 2;
+        return MineOutcome::Done(2);
     }
 
     let targets: Vec<Instance> = if let Some(name) = instance_filter {
@@ -780,12 +787,16 @@ pub async fn mine_core(
                 ))
             )
             .ok();
-            return 2;
+            return MineOutcome::Done(2);
         }
         matches
     } else {
         instances
     };
+
+    if is_tty && !json {
+        return MineOutcome::TuiLaunch { targets };
+    }
 
     let rows = collect_mine_rows(&targets, http).await;
 
@@ -793,20 +804,16 @@ pub async fn mine_core(
         let line = serde_json::to_string(&agent_json::mine_object(&rows))
             .unwrap_or_else(|_| String::from("{}"));
         writeln!(out, "{line}").ok();
-        return 0;
-    }
-
-    if is_tty {
-        return launch(targets, rows);
+        return MineOutcome::Done(0);
     }
 
     if rows.is_empty() {
         writeln!(out, "{}", t("No open tasks assigned to you.")).ok();
-        return 0;
+        return MineOutcome::Done(0);
     }
 
     writeln!(out, "{}", render::render_mine_table(&rows)).ok();
-    0
+    MineOutcome::Done(0)
 }
 
 #[cfg(test)]

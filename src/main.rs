@@ -17,7 +17,7 @@ use clap::{CommandFactory, Parser};
 use cli::{bare_no_command_action, BareNoCommandAction, Cli, Command};
 use commands::{
     current_core, get_core, mine_core, pick_instance, setup_add, setup_language, setup_list,
-    setup_remove, setup_test, DisplayFlags, SetupAddFields,
+    setup_remove, setup_test, DisplayFlags, MineOutcome, SetupAddFields,
 };
 use std::io::IsTerminal;
 use std::process;
@@ -369,16 +369,8 @@ async fn dispatch_mine(args: cli::MineArgs) -> i32 {
     };
     let repo = store::instances::InstanceRepository::new(store.conn());
     let is_tty = std::io::stdout().is_terminal() && std::io::stdin().is_terminal();
-    type TuiCapture = std::sync::Arc<std::sync::Mutex<Option<MineTuiArgs>>>;
-    struct MineTuiArgs {
-        targets: Vec<store::instances::Instance>,
-        rows: Vec<crate::render::MineTableRow>,
-    }
 
-    let captured: TuiCapture = std::sync::Arc::new(std::sync::Mutex::new(None));
-    let captured_for_closure = captured.clone();
-
-    let exit_code = mine_core(
+    let outcome = mine_core(
         &repo,
         &http.clone(),
         args.instance.as_deref(),
@@ -386,22 +378,13 @@ async fn dispatch_mine(args: cli::MineArgs) -> i32 {
         is_tty,
         &mut std::io::stdout(),
         &mut std::io::stderr(),
-        move |targets, rows| {
-            if let Ok(mut guard) = captured_for_closure.lock() {
-                *guard = Some(MineTuiArgs { targets, rows });
-            }
-            0
-        },
     )
     .await;
 
-    let tui_launch = captured.lock().ok().and_then(|mut g| g.take());
-    if !args.json {
-        if let Some(tui_args) = tui_launch {
-            return tui::run_mine(tui_args.targets, http, db_path, tui_args.rows).await;
-        }
+    match outcome {
+        MineOutcome::TuiLaunch { targets } => tui::run_mine(targets, http, db_path).await,
+        MineOutcome::Done(code) => code,
     }
-    exit_code
 }
 
 async fn dispatch_browse(args: cli::BrowseArgs) -> i32 {

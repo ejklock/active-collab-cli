@@ -18,3 +18,5 @@
 | [0014](/adr/0014-browse-list-project-name-cache-swr.md) | Browse-list project-name cache (SWR) — stop re-fetching the directory on refresh (R2) | Accepted |
 | [0015](/adr/0015-richtext-html-subset-styled-segments.md) | Render comment/description HTML as styled segments over a known tag subset (R3) | Accepted |
 | [0016](/adr/0016-refactor-render-decompose-relocate.md) | Refactor render.rs — decompose the meta-table god function, drop dead seams, relocate asset extraction (ARCH) | Accepted |
+| [0017](/adr/0017-task-list-first-paint-cache-swr-entry.md) | First-paint-from-cache SWR on browse/mine entry (task-list snapshot cache) (S8) | Accepted |
+| [0018](/adr/0018-detail-chrome-dynamic-height-wrap.md) | Detail chrome wraps via dynamic region heights; task name moves off the un-wrappable frame title | Accepted |

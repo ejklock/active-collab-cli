@@ -43,6 +43,7 @@ fn projects_model(count: usize) -> Model {
             groups: make_groups(count),
             selected: 0,
             loading: false,
+            revalidating: false,
         }],
         should_quit: false,
         header: empty_header(),
@@ -60,12 +61,14 @@ fn tasks_model(count: usize) -> Model {
                 groups: make_groups(2),
                 selected: 0,
                 loading: false,
+                revalidating: false,
             },
             Screen::Tasks {
                 project_name: "Project 0".into(),
                 tasks: make_tasks(count),
                 selected: 0,
                 loading: false,
+                revalidating: false,
             },
         ],
         should_quit: false,
@@ -83,6 +86,7 @@ fn loading_projects_model() -> Model {
             groups: vec![],
             selected: 0,
             loading: true,
+            revalidating: false,
         }],
         should_quit: false,
         header: empty_header(),
@@ -247,6 +251,7 @@ fn empty_list_navigation_never_panics_or_quits_projects() {
             groups: vec![],
             selected: 0,
             loading: false,
+            revalidating: false,
         }],
         should_quit: false,
         header: empty_header(),
@@ -275,12 +280,14 @@ fn empty_list_navigation_never_panics_or_quits_tasks() {
                 groups: make_groups(1),
                 selected: 0,
                 loading: false,
+                revalidating: false,
             },
             Screen::Tasks {
                 project_name: "P".into(),
                 tasks: vec![],
                 selected: 0,
                 loading: false,
+                revalidating: false,
             },
         ],
         should_quit: false,
@@ -300,7 +307,7 @@ fn empty_list_navigation_never_panics_or_quits_tasks() {
 
 #[test]
 fn init_browse_emits_load_tasks_by_project_cmd() {
-    let (model, cmds) = init_browse(empty_header());
+    let (model, cmds) = init_browse(empty_header(), None);
     assert_eq!(cmds, vec![Cmd::LoadTasksByProject]);
     assert!(!model.should_quit);
     assert_eq!(model.stack.len(), 1);
@@ -382,6 +389,7 @@ fn select_on_empty_projects_is_a_noop() {
             groups: vec![],
             selected: 0,
             loading: false,
+            revalidating: false,
         }],
         should_quit: false,
         header: empty_header(),
@@ -419,12 +427,14 @@ fn tasks_model_with_project_id(task_count: usize, project_id: i64) -> Model {
                 }],
                 selected: 0,
                 loading: false,
+                revalidating: false,
             },
             Screen::Tasks {
                 project_name: "Test Project".into(),
                 tasks: make_tasks_with_project_id(task_count, project_id),
                 selected: 0,
                 loading: false,
+                revalidating: false,
             },
         ],
         should_quit: false,
@@ -444,12 +454,14 @@ fn detail_model(line_count: usize, offset: usize) -> Model {
                 groups: make_groups(1),
                 selected: 0,
                 loading: false,
+                revalidating: false,
             },
             Screen::Tasks {
                 project_name: "P".into(),
                 tasks: make_tasks(1),
                 selected: 0,
                 loading: false,
+                revalidating: false,
             },
             Screen::Detail {
                 instance: "inst".into(),
@@ -484,12 +496,14 @@ fn loading_detail_model() -> Model {
                 groups: make_groups(1),
                 selected: 0,
                 loading: false,
+                revalidating: false,
             },
             Screen::Tasks {
                 project_name: "P".into(),
                 tasks: make_tasks(1),
                 selected: 0,
                 loading: false,
+                revalidating: false,
             },
             Screen::Detail {
                 instance: "inst".into(),
@@ -901,6 +915,7 @@ fn detail_model_with_assets(assets: Vec<Asset>, instance: &str) -> Model {
                 groups: make_groups(1),
                 selected: 0,
                 loading: false,
+                revalidating: false,
             },
             Screen::Tasks {
                 project_name: "P".into(),
@@ -913,6 +928,7 @@ fn detail_model_with_assets(assets: Vec<Asset>, instance: &str) -> Model {
                 }],
                 selected: 0,
                 loading: false,
+                revalidating: false,
             },
             Screen::Detail {
                 instance: instance.into(),
@@ -1048,6 +1064,7 @@ fn asset_open_carries_selected_tasks_instance_not_first_instance() {
                 }],
                 selected: 0,
                 loading: false,
+                revalidating: false,
             },
             Screen::Tasks {
                 project_name: "P".into(),
@@ -1069,6 +1086,7 @@ fn asset_open_carries_selected_tasks_instance_not_first_instance() {
                 ],
                 selected: 1,
                 loading: false,
+                revalidating: false,
             },
             Screen::Detail {
                 instance: "inst2".into(),
@@ -1126,6 +1144,7 @@ fn select_on_tasks_threads_instance_into_load_detail_cmd() {
                 }],
                 selected: 0,
                 loading: false,
+                revalidating: false,
             },
             Screen::Tasks {
                 project_name: "P".into(),
@@ -1138,6 +1157,7 @@ fn select_on_tasks_threads_instance_into_load_detail_cmd() {
                 }],
                 selected: 0,
                 loading: false,
+                revalidating: false,
             },
         ],
         should_quit: false,
@@ -1212,7 +1232,7 @@ fn mine_select_pushes_detail_with_row_project_id_and_instance() {
         make_mine_row(101, 1, 10, "inst-alpha"),
         make_mine_row(202, 2, 20, "inst-beta"),
     ];
-    let m = mine_model(rows, empty_header());
+    let m = init_mine(empty_header(), Some(rows)).0;
 
     // Verify initial state: Tasks screen, row 0 selected
     assert_eq!(m.stack.len(), 1);
@@ -1269,7 +1289,7 @@ fn mine_select_first_row_uses_its_own_project_id_and_instance() {
         make_mine_row(101, 1, 10, "inst-alpha"),
         make_mine_row(202, 2, 20, "inst-beta"),
     ];
-    let m = mine_model(rows, empty_header());
+    let m = init_mine(empty_header(), Some(rows)).0;
 
     let (_m, cmds) = update(m, Msg::Select);
 
@@ -1299,7 +1319,7 @@ fn mine_click_with_target_drills_into_clicked_rows_detail() {
         make_mine_row(202, 2, 20, "inst-beta"),
         make_mine_row(303, 3, 30, "inst-gamma"),
     ];
-    let mut m = mine_model(rows, empty_header());
+    let mut m = init_mine(empty_header(), Some(rows)).0;
 
     // Simulate the shell writing a hit-map for row index 2 at terminal y=4.
     m.set_click_targets(vec![
@@ -1359,7 +1379,7 @@ fn mine_click_below_last_target_is_noop() {
         make_mine_row(101, 1, 10, "inst-alpha"),
         make_mine_row(202, 2, 20, "inst-beta"),
     ];
-    let mut m = mine_model(rows, empty_header());
+    let mut m = init_mine(empty_header(), Some(rows)).0;
     let sel_before = m.stack.last().unwrap().selected();
 
     m.set_click_targets(vec![
@@ -1389,7 +1409,7 @@ fn mine_model_produces_tasks_screen_with_all_rows_loaded() {
         make_mine_row(10, 1, 5, "inst-a"),
         make_mine_row(20, 2, 6, "inst-b"),
     ];
-    let m = mine_model(rows, empty_header());
+    let m = init_mine(empty_header(), Some(rows)).0;
 
     assert_eq!(m.stack.len(), 1);
     assert!(!m.should_quit);
@@ -1877,6 +1897,7 @@ fn header_name_resolved_fills_name_and_header_line_shows_it() {
             groups: vec![],
             selected: 0,
             loading: false,
+            revalidating: false,
         }],
         should_quit: false,
         header,

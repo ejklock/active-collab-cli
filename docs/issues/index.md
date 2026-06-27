@@ -20,4 +20,6 @@ TUI/UX work (V/R/ARCH slices), tracing to
 | [0012](/issues/0012-r2-browse-list-project-name-cache.md) | R2 | cache the per-instance project directory (SWR list refresh) | open | — |
 | [0013](/issues/0013-r3-richtext-formatting.md) | R3 | preserve comment/description rich-text via an HTML-subset styled mapper | open | — |
 | [0014](/issues/0014-arch-refactor-render-decompose-relocate.md) | ARCH | refactor render.rs: decompose meta-table, drop dead seams, relocate extract_assets | open | 0010–0013 |
-| [0015](/issues/0015-u21-agent-json-output.md) | U21 | curated minified --json contract for get/current/mine/browse + agent skill | open | — |
+| [0015](/issues/0015-u21-agent-json-output.md) | U21 | curated minified --json contract for get/current/mine/browse + agent skill | closed | — |
+| [0016](/issues/0016-s8-task-list-first-paint-swr.md) | S8 | task-list first-paint-from-cache SWR on browse/mine entry | closed | — |
+| [0017](/issues/0017-detail-chrome-responsive-wrap.md) | DW | Detail chrome responsiveness — wrap header, task title, footer, artifacts | closed | — |

@@ -34,7 +34,7 @@ flowchart TD
     model --> controller
     controller --> client["client\n(ActiveCollab API)"]
     client --> http["http\n(reqwest + rustls)"]
-    controller --> store["store\n(rusqlite: instances · settings ·\ncache: TaskCache · UserMapCache · ProjectNamesCache)"]
+    controller --> store["store\n(rusqlite: instances · settings ·\ncache: TaskCache · UserMapCache · ProjectNamesCache · TaskListCache)"]
     commands --> render["render\ndomain string rendering\n(get/current/mine non-TTY)\n+ TUI detail content (panels · style runs)"]
     render --> richtext["richtext\nHTML → structured rich text\n(TUI detail: lists · headings · emphasis · links)"]
     commands --> i18n["i18n (en · pt-BR)"]

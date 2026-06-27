@@ -8,6 +8,13 @@ use tempfile::TempDir;
 use wiremock::matchers::{body_json, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
+fn mine_outcome_code(outcome: MineOutcome) -> i32 {
+    match outcome {
+        MineOutcome::Done(code) => code,
+        MineOutcome::TuiLaunch { .. } => panic!("expected Done, got TuiLaunch"),
+    }
+}
+
 static LANG_MUTEX: Mutex<()> = Mutex::new(());
 
 fn make_store() -> (TempDir, Store) {
@@ -1599,17 +1606,8 @@ async fn mine_core_empty_instances_returns_exit2_with_message() {
     let mut out = Vec::new();
     let mut err = Vec::new();
 
-    let code = mine_core(
-        &repo,
-        &make_http(),
-        None,
-        false,
-        false,
-        &mut out,
-        &mut err,
-        |_, _| 0,
-    )
-    .await;
+    let outcome = mine_core(&repo, &make_http(), None, false, false, &mut out, &mut err).await;
+    let code = mine_outcome_code(outcome);
 
     assert_eq!(code, 2);
     let e = output_str(&err);
@@ -1626,7 +1624,7 @@ async fn mine_core_instance_filter_not_found_returns_exit2_with_known() {
     let mut out = Vec::new();
     let mut err = Vec::new();
 
-    let code = mine_core(
+    let outcome = mine_core(
         &repo,
         &make_http(),
         Some("nosuch"),
@@ -1634,9 +1632,9 @@ async fn mine_core_instance_filter_not_found_returns_exit2_with_known() {
         false,
         &mut out,
         &mut err,
-        |_, _| 0,
     )
     .await;
+    let code = mine_outcome_code(outcome);
 
     assert_eq!(code, 2);
     let e = output_str(&err);
@@ -1672,7 +1670,7 @@ async fn mine_core_instance_filter_limits_to_matching_instance() {
     let mut out = Vec::new();
     let mut err = Vec::new();
 
-    let code = mine_core(
+    let outcome = mine_core(
         &repo,
         &make_http(),
         Some("work"),
@@ -1680,9 +1678,9 @@ async fn mine_core_instance_filter_limits_to_matching_instance() {
         false,
         &mut out,
         &mut err,
-        |_, _| 0,
     )
     .await;
+    let code = mine_outcome_code(outcome);
 
     assert_eq!(code, 0);
     let s = output_str(&out);
@@ -1718,17 +1716,8 @@ async fn mine_core_non_tty_with_rows_writes_table_and_returns_0() {
     let mut out = Vec::new();
     let mut err = Vec::new();
 
-    let code = mine_core(
-        &repo,
-        &make_http(),
-        None,
-        false,
-        false,
-        &mut out,
-        &mut err,
-        |_, _| 99,
-    )
-    .await;
+    let outcome = mine_core(&repo, &make_http(), None, false, false, &mut out, &mut err).await;
+    let code = mine_outcome_code(outcome);
 
     assert_eq!(code, 0);
     let s = output_str(&out);
@@ -1763,17 +1752,8 @@ async fn mine_core_non_tty_no_rows_writes_no_tasks_message_and_returns_0() {
     let mut out = Vec::new();
     let mut err = Vec::new();
 
-    let code = mine_core(
-        &repo,
-        &make_http(),
-        None,
-        false,
-        false,
-        &mut out,
-        &mut err,
-        |_, _| 99,
-    )
-    .await;
+    let outcome = mine_core(&repo, &make_http(), None, false, false, &mut out, &mut err).await;
+    let code = mine_outcome_code(outcome);
 
     assert_eq!(code, 0);
     let s = output_str(&out);
@@ -1783,21 +1763,14 @@ async fn mine_core_non_tty_no_rows_writes_no_tasks_message_and_returns_0() {
     );
 }
 
+// S8c-A4: TTY interactive path returns TuiLaunch (no row pre-fetch, no table output).
+// The network is NOT hit — rows are fetched lazily inside the TUI via Cmd::LoadMineTasks.
 #[tokio::test]
-async fn mine_core_tty_invokes_launch_closure_with_rows_not_table() {
-    let server = MockServer::start().await;
-    Mock::given(method("GET"))
-        .and(path("/api/v1/users/42/tasks"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(tasks_response(serde_json::json!([
-            { "id": 5, "task_number": 2, "name": "TUI task", "is_completed": false, "is_trashed": false, "project_id": 3 }
-        ]))))
-        .mount(&server)
-        .await;
-
+async fn mine_core_tty_returns_tui_launch_without_fetching_rows() {
     let (_dir, store) = make_store();
     let inst = Instance {
         name: "tui-inst".to_owned(),
-        base_url: server.uri(),
+        base_url: "http://127.0.0.1:1".to_owned(),
         email: "x@x.com".to_owned(),
         token: "tok".to_owned(),
         user_id: Some(42),
@@ -1807,25 +1780,18 @@ async fn mine_core_tty_invokes_launch_closure_with_rows_not_table() {
     let repo = InstanceRepository::new(store.conn());
     let mut out = Vec::new();
     let mut err = Vec::new();
-    let received_rows = std::cell::Cell::new(0usize);
 
-    let code = mine_core(
-        &repo,
-        &make_http(),
-        None,
-        false,
-        true,
-        &mut out,
-        &mut err,
-        |_targets, rows| {
-            received_rows.set(rows.len());
-            42
-        },
-    )
-    .await;
+    let outcome = mine_core(&repo, &make_http(), None, false, true, &mut out, &mut err).await;
 
-    assert_eq!(code, 42, "should return launch closure exit code");
-    assert_eq!(received_rows.get(), 1, "launch should receive 1 row");
+    match outcome {
+        MineOutcome::TuiLaunch { targets } => {
+            assert_eq!(targets.len(), 1, "must carry the resolved instance");
+            assert_eq!(targets[0].name, "tui-inst");
+        }
+        MineOutcome::Done(code) => {
+            panic!("expected TuiLaunch for TTY path, got Done({code})");
+        }
+    }
     let s = output_str(&out);
     assert!(
         !s.contains("INSTANCE"),
@@ -1833,9 +1799,9 @@ async fn mine_core_tty_invokes_launch_closure_with_rows_not_table() {
     );
 }
 
-// S3-A3: Non-TTY mine path writes render_mine_table byte-for-byte; launch is NOT invoked
+// S3-A3: Non-TTY mine path writes render_mine_table byte-for-byte; returns Done (no TuiLaunch).
 #[tokio::test]
-async fn mine_core_non_tty_writes_render_mine_table_exactly_and_never_calls_launch() {
+async fn mine_core_non_tty_writes_render_mine_table_exactly_and_returns_done() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/api/v1/users/42/tasks"))
@@ -1858,28 +1824,15 @@ async fn mine_core_non_tty_writes_render_mine_table_exactly_and_never_calls_laun
     let repo = InstanceRepository::new(store.conn());
     let mut out = Vec::new();
     let mut err = Vec::new();
-    let launch_called = std::cell::Cell::new(false);
 
-    let code = mine_core(
-        &repo,
-        &make_http(),
-        None,
-        false,
-        false,
-        &mut out,
-        &mut err,
-        |_, _| {
-            launch_called.set(true);
-            0
-        },
-    )
-    .await;
+    let outcome = mine_core(&repo, &make_http(), None, false, false, &mut out, &mut err).await;
 
+    match &outcome {
+        MineOutcome::TuiLaunch { .. } => panic!("non-TTY path must NOT return TuiLaunch"),
+        MineOutcome::Done(_) => {}
+    }
+    let code = mine_outcome_code(outcome);
     assert_eq!(code, 0);
-    assert!(
-        !launch_called.get(),
-        "launch must NOT be called on non-TTY path"
-    );
 
     let expected = render::render_mine_table(&[render::MineTableRow {
         instance: "s3inst".to_owned(),
@@ -1957,9 +1910,8 @@ async fn mine_core_json_mode_prints_minified_line_and_never_calls_launch() {
     let repo = InstanceRepository::new(store.conn());
     let mut out = Vec::new();
     let mut err = Vec::new();
-    let launch_called = std::cell::Cell::new(false);
 
-    let code = mine_core(
+    let outcome = mine_core(
         &repo,
         &make_http(),
         None,
@@ -1967,18 +1919,11 @@ async fn mine_core_json_mode_prints_minified_line_and_never_calls_launch() {
         true, // is_tty=true: json must still suppress TUI
         &mut out,
         &mut err,
-        |_, _| {
-            launch_called.set(true);
-            99
-        },
     )
     .await;
+    let code = mine_outcome_code(outcome);
 
     assert_eq!(code, 0, "json mode must always return 0");
-    assert!(
-        !launch_called.get(),
-        "launch must NOT be called when json=true, even on a TTY"
-    );
 
     let s = output_str(&out);
     let trimmed = s.trim_end_matches('\n');
@@ -2029,17 +1974,8 @@ async fn mine_core_json_mode_empty_rows_yields_count_zero_exit_0() {
     let mut out = Vec::new();
     let mut err = Vec::new();
 
-    let code = mine_core(
-        &repo,
-        &make_http(),
-        None,
-        true,
-        false,
-        &mut out,
-        &mut err,
-        |_, _| 99,
-    )
-    .await;
+    let outcome = mine_core(&repo, &make_http(), None, true, false, &mut out, &mut err).await;
+    let code = mine_outcome_code(outcome);
 
     assert_eq!(code, 0, "json mode must return 0 even with empty rows");
     let s = output_str(&out);

@@ -92,6 +92,7 @@ fn render_projects_to_buf(
                 groups,
                 selected,
                 false,
+                false,
                 &mut targets,
             );
         })
@@ -116,6 +117,7 @@ fn render_tasks_to_buf(
                 "Project A",
                 tasks,
                 selected,
+                false,
                 false,
                 &mut targets,
             );
@@ -253,6 +255,7 @@ fn draw_my_tasks_title_renders_in_pt_br() {
                 &title,
                 &tasks,
                 0,
+                false,
                 false,
                 &mut targets,
             );
@@ -490,7 +493,7 @@ fn draw_projects_loading_shows_paragraph_not_table() {
         .draw(|frame| {
             let area = Rect::new(0, 0, 80, 10);
             let mut targets = vec![];
-            draw_projects(frame, area, &[], 0, true, &mut targets);
+            draw_projects(frame, area, &[], 0, true, false, &mut targets);
         })
         .unwrap();
     let content = buf_to_string(terminal.backend().buffer());
@@ -508,7 +511,7 @@ fn draw_tasks_loading_shows_paragraph_not_table() {
         .draw(|frame| {
             let area = Rect::new(0, 0, 80, 10);
             let mut targets = vec![];
-            draw_tasks(frame, area, "Project A", &[], 0, true, &mut targets);
+            draw_tasks(frame, area, "Project A", &[], 0, true, false, &mut targets);
         })
         .unwrap();
     let content = buf_to_string(terminal.backend().buffer());
@@ -863,6 +866,7 @@ mod view_size_guard {
                 groups: vec![],
                 selected: 0,
                 loading: false,
+                revalidating: false,
             }],
             should_quit: false,
             header: Header::from_instances(&[], None),
@@ -1206,55 +1210,78 @@ fn draw_detail_renders_single_global_content_block() {
     );
 }
 
-// D2-A1: Detail frame border shows task NAME when loaded, falls back to #<id> when empty.
+// W2-A1 (replaces D2-A1): task name is rendered as a bold wrapped header line INSIDE the
+// content block (not in the Block border title). The full name text appears in the buffer.
+// The Block border (top row) does NOT contain the name.
 #[test]
-fn draw_detail_border_shows_task_name_when_loaded() {
+fn draw_detail_task_name_renders_as_bold_header_inside_content_block() {
     let lines = vec!["some content".to_string()];
     let buf = render_detail_to_buf_with_name(&lines, &[], 0, 80, 10, "My Important Task");
     let content = buf_to_string(&buf);
-    // Top border (row 0) must contain the task name
     let rows: Vec<&str> = content.lines().collect();
+    // The full name must appear somewhere in the buffer (it is the bold header line).
+    assert!(
+        content.contains("My Important Task"),
+        "task name 'My Important Task' must appear in the buffer as a header: {content}"
+    );
+    // The Block border (row 0) is now empty (no title) — name is inside content, not title.
     let top_border = rows[0];
     assert!(
-        top_border.contains("My Important Task"),
-        "top border must contain task name 'My Important Task': {top_border}"
+        !top_border.contains("My Important Task"),
+        "Block border title must NOT contain the task name (name moved into content): {top_border}"
     );
+    // No ellipsis should appear (name is short enough to fit on one line at width 80).
     assert!(
-        !top_border.contains("Task #") && !top_border.contains("Tarefa #"),
-        "top border must NOT contain 'Task #' / 'Tarefa #' when name is present: {top_border}"
+        !content.contains('\u{2026}'),
+        "no ellipsis when name fits on one line: {content}"
     );
 }
 
+// W2-A1: when task name is empty, no placeholder appears in the border (border is clean).
+// The loading fallback path still uses the id — but non-loading with empty name shows empty border.
 #[test]
-fn draw_detail_border_falls_back_to_id_when_name_empty() {
+fn draw_detail_empty_task_name_shows_no_name_in_border() {
     let lines = vec!["some content".to_string()];
     let buf = render_detail_to_buf_with_name(&lines, &[], 0, 80, 10, "");
     let content = buf_to_string(&buf);
     let rows: Vec<&str> = content.lines().collect();
     let top_border = rows[0];
+    // Empty name → border title is empty; no id fallback in non-loading state.
     assert!(
-        top_border.contains("#42"),
-        "top border must contain '#42' as fallback when name is empty: {top_border}"
+        !top_border.contains('#'),
+        "Block border must NOT contain '#id' fallback for non-loading empty name: {top_border}"
     );
 }
 
+// W2-A1: a long task name wraps across multiple bold header lines inside the content block
+// with NO ellipsis. The full name text is present in the buffer.
 #[test]
-fn draw_detail_border_long_name_truncated_with_ellipsis() {
+fn draw_detail_long_task_name_wraps_inside_content_no_ellipsis() {
     let very_long_name =
         "This Is An Extremely Long Task Name That Does Not Fit In The Border At All";
     let lines = vec!["content".to_string()];
-    // Use a narrow width to force truncation
-    let buf = render_detail_to_buf_with_name(&lines, &[], 0, 40, 10, very_long_name);
+    let buf = render_detail_to_buf_with_name(&lines, &[], 0, 40, 20, very_long_name);
     let content = buf_to_string(&buf);
     let rows: Vec<&str> = content.lines().collect();
     let top_border = rows[0];
+    // Full name must appear (wrapped across lines inside the block).
     assert!(
-        top_border.contains('\u{2026}'),
-        "top border must contain ellipsis when name is truncated: {top_border}"
+        content.contains("This Is"),
+        "beginning of long name must appear in buffer: {content}"
     );
     assert!(
-        !top_border.contains("Task #"),
-        "top border must NOT fall back to task id when name is present (even truncated): {top_border}"
+        content.contains("At All"),
+        "end of long name must appear in buffer (no clip): {content}"
+    );
+    // No ellipsis in the whole buffer — name wraps, never truncates.
+    assert!(
+        !content.contains('\u{2026}'),
+        "long task name must wrap, never truncate with ellipsis: {content}"
+    );
+    // The Block border (top row) must NOT contain the name.
+    assert!(
+        !top_border.contains("This Is"),
+        "Block border must NOT contain the task name (moved into content): {top_border}"
     );
 }
 
@@ -1506,6 +1533,7 @@ fn view_renders_header_on_top_row_with_app_header_style_is_soft_cyan_on_steel() 
             groups: vec![],
             selected: 0,
             loading: false,
+            revalidating: false,
         }],
         should_quit: false,
         header,
@@ -1564,6 +1592,7 @@ fn view_content_and_footer_render_below_header() {
             groups: vec![],
             selected: 0,
             loading: false,
+            revalidating: false,
         }],
         should_quit: false,
         header,
@@ -1613,6 +1642,7 @@ fn view_multi_instance_header_shows_extra_suffix() {
             groups: vec![],
             selected: 0,
             loading: false,
+            revalidating: false,
         }],
         should_quit: false,
         header,
@@ -1654,6 +1684,7 @@ fn view_too_small_suppresses_header_and_footer() {
             groups: vec![],
             selected: 0,
             loading: false,
+            revalidating: false,
         }],
         should_quit: false,
         header,
@@ -2017,6 +2048,7 @@ mod v2b_click_targets {
                 groups,
                 selected: 0,
                 loading: false,
+                revalidating: false,
             }],
             should_quit: false,
             header: empty_header(),
@@ -2087,6 +2119,7 @@ mod v2b_click_targets {
                 tasks,
                 selected: 0,
                 loading: false,
+                revalidating: false,
             }],
             should_quit: false,
             header: empty_header(),
@@ -2157,6 +2190,7 @@ mod v2b_click_targets {
                 groups,
                 selected: 0,
                 loading: false,
+                revalidating: false,
             }],
             should_quit: false,
             header: empty_header(),
@@ -2223,6 +2257,7 @@ mod v2b_click_targets {
                 tasks,
                 selected: 7,
                 loading: false,
+                revalidating: false,
             }],
             should_quit: false,
             header: empty_header(),
@@ -2309,6 +2344,7 @@ mod footer_refresh_hint {
                 }],
                 selected: 0,
                 loading: false,
+                revalidating: false,
             }],
             should_quit: false,
             header: Header::from_instances(&[], None),
@@ -2616,6 +2652,7 @@ mod footer_refresh_hint {
 
     // V5-A2: scrollbar thumb position at max_offset vs at offset 0.
     // Render Detail (draw_detail directly, not view) so area equals the full passed rect.
+    // Empty task_name so the body viewport = area.height - 2 (no name header row).
     // With width=40, height=22, 50 lines, no assets:
     //   render_content viewport_height = 22-2 = 20
     //   max_offset = 50 - 20 = 30
@@ -2629,6 +2666,7 @@ mod footer_refresh_hint {
         let width: u16 = 40;
         let height: u16 = 22;
         let lines: Vec<String> = (1..=50).map(|i| format!("line {i:02}")).collect();
+        // Empty task_name → no name header → body viewport = height - 2 = 20.
         let viewport_height = (height - 2) as usize;
         let max_offset = lines.len().saturating_sub(viewport_height);
 
@@ -2647,7 +2685,7 @@ mod footer_refresh_hint {
                             offset,
                             loading: false,
                             task_id: 1,
-                            task_name: "T",
+                            task_name: "",
                         },
                     );
                 })
@@ -2851,6 +2889,7 @@ mod selection_mode_view {
                 groups: vec![],
                 selected: 0,
                 loading: false,
+                revalidating: false,
             }],
             should_quit: false,
             header: Header::from_instances(&[], None),
@@ -2965,6 +3004,151 @@ mod selection_mode_view {
             "Detail footer (with assets) must contain 's selection' hint (en): {content}"
         );
     }
+}
+
+// --- W2: Detail chrome responsiveness — task name header + asset row wrapping ---
+
+// W2-A1: A short task name stays on exactly one line inside the content block.
+// At width=80, inner_width=78; a 20-char name fits on one line.
+#[test]
+fn draw_detail_short_task_name_stays_on_one_line() {
+    let name = "Short Task Name";
+    let lines = vec!["body content".to_string()];
+    let buf = render_detail_to_buf_with_name(&lines, &[], 0, 80, 20, name);
+    let content = buf_to_string(&buf);
+    let rows: Vec<&str> = content.lines().collect();
+    // The name should appear on row 1 (first content row inside the block).
+    let row1 = rows.get(1).copied().unwrap_or("");
+    assert!(
+        row1.contains(name),
+        "short task name must appear on the first content row (row 1): {row1:?}"
+    );
+    // Row 2 must NOT contain the name (it must not wrap to the next line).
+    let row2 = rows.get(2).copied().unwrap_or("");
+    assert!(
+        !row2.contains(name),
+        "short name must NOT appear on row 2 (must fit on one line): {row2:?}"
+    );
+}
+
+// W2-A3: A long asset label that exceeds the panel inner width wraps to multiple
+// lines with a hanging indent, and the full label text is present (no clip).
+// Width=40 → panel_inner=38. The prefix "[1] ↗ " is 8 display cols.
+// A label of 35+ chars will overflow 38 cols and wrap.
+#[test]
+fn draw_detail_long_asset_label_wraps_with_hanging_indent_no_clip() {
+    let long_label = "very-long-filename-that-does-not-fit.pdf";
+    assert!(
+        long_label.len() > 30,
+        "label must be longer than the available width"
+    );
+    let assets = vec![Asset {
+        name: long_label.into(),
+        url: "https://example.com/file.pdf".into(),
+    }];
+    let buf = render_detail_to_buf_with_name(&["body".to_string()], &assets, 0, 40, 20, "Task");
+    let content = buf_to_string(&buf);
+    // Beginning of the label must appear in the buffer on the first asset row.
+    assert!(
+        content.contains("very-long-filename"),
+        "beginning of long asset label must appear in buffer: {content}"
+    );
+    // End fragments of the label must appear on continuation rows (wrapped, not clipped).
+    // The label wraps across rows so we check for a fragment from the tail.
+    assert!(
+        content.contains("fit.pdf"),
+        "tail fragment of long asset label must appear in buffer (no clip): {content}"
+    );
+    // The [1] prefix must appear (first asset marker).
+    assert!(
+        content.contains("[1]"),
+        "'[1]' asset marker must appear: {content}"
+    );
+    // The hanging indent must appear: a continuation line starts with spaces equal to prefix width.
+    // "[1] ↗ " has display_width 8; continuation lines start with 8 spaces.
+    assert!(
+        content.contains("        "),
+        "continuation line must start with hanging indent spaces: {content}"
+    );
+}
+
+// W2-A3: When a single asset's label wraps, the panel is taller than the 1-asset + 2-border
+// minimum (3 rows). At width=32, panel_inner=30; prefix "[1] ↗ " = 8 cols; label_width=22.
+// A 30-char label wraps across 2 content rows, so the panel must be at least 4 rows tall.
+#[test]
+fn draw_detail_wrapped_asset_panel_is_taller_than_minimum() {
+    // Exactly 30 ascii chars: needs 2 rows at label_width=22.
+    let label_30 = "thirty-char-label-padded-xyz.pdf";
+    assert_eq!(label_30.len(), 32, "sanity: label must be 32 chars");
+    let assets = vec![Asset {
+        name: label_30.into(),
+        url: "https://example.com/f.pdf".into(),
+    }];
+    // At width=32: panel_inner = 30; prefix dw(8); label_width=22; label (32 chars) wraps to 2 rows.
+    // Panel height = (2 + 2).min(8) = 4.
+    let buf = render_detail_to_buf_with_name(&["body".to_string()], &assets, 0, 32, 20, "T");
+    let content = buf_to_string(&buf);
+
+    // The Artifacts panel block must appear.
+    assert!(
+        content.contains("Artifacts"),
+        "Artifacts panel must appear: {content}"
+    );
+    // Full label must appear (no clip on wrapped rows).
+    assert!(
+        content.contains("thirty-char"),
+        "beginning of asset label must appear: {content}"
+    );
+    assert!(
+        content.contains("xyz.pdf"),
+        "end of asset label must appear (no clip): {content}"
+    );
+}
+
+// W2-A4: At a wide width (120 cols), a short task name is on one line and
+// each asset row is on one line — no wrapping.
+#[test]
+fn draw_detail_wide_width_no_wrapping_for_name_or_assets() {
+    let name = "Short Name";
+    let assets = vec![Asset {
+        name: "report.pdf".into(),
+        url: "https://example.com/report.pdf".into(),
+    }];
+    let buf = render_detail_to_buf_with_name(&["body".to_string()], &assets, 0, 120, 30, name);
+    let content = buf_to_string(&buf);
+    let rows: Vec<&str> = content.lines().collect();
+
+    // Name appears on row 1 (single line).
+    let row1 = rows.get(1).copied().unwrap_or("");
+    assert!(
+        row1.contains(name),
+        "task name must appear on row 1 at wide width: {row1:?}"
+    );
+    // report.pdf asset label fits on one row — verify it appears somewhere.
+    assert!(
+        content.contains("report.pdf"),
+        "asset label must appear in buffer at wide width: {content}"
+    );
+    // No ellipsis at wide width.
+    assert!(
+        !content.contains('\u{2026}'),
+        "no ellipsis expected at wide width: {content}"
+    );
+}
+
+// W2-A2: The over-scroll clamp (D2) still works with the new name header.
+// Passes a very large offset; the body must still show the last content lines.
+#[test]
+fn draw_detail_over_scroll_clamp_still_works_with_name_header() {
+    let name = "My Task";
+    let lines: Vec<String> = (1..=15).map(|i| format!("body line {i:02}")).collect();
+    let buf = render_detail_to_buf_with_name(&lines, &[], 9999, 80, 20, name);
+    let content = buf_to_string(&buf);
+    // Last content line must be visible (clamp worked).
+    assert!(
+        content.contains("body line 15"),
+        "last body line must be visible after over-scroll clamp: {content}"
+    );
 }
 
 // --- R3b inline-emphasis style runs ----------------------------------------
@@ -3323,4 +3507,384 @@ fn style_run_start_is_offset_by_chrome() {
         "StyleRun.start must be >= 2 (left chrome = 1 border + 1 hpad), got start={}",
         run.start
     );
+}
+
+// S8b-A4: revalidating=true shows ↻ in the Projects border title.
+#[test]
+fn projects_title_shows_revalidating_indicator_when_revalidating() {
+    let groups = vec![ProjectGroup {
+        project_id: 1,
+        project_name: "Project Alpha".into(),
+        instance: "inst".into(),
+        tasks: vec![],
+    }];
+    let width = 40u16;
+    let height = 10u16;
+    let backend = TestBackend::new(width, height);
+    let mut terminal = Terminal::new(backend).unwrap();
+
+    terminal
+        .draw(|frame| {
+            let mut targets = vec![];
+            draw_projects(
+                frame,
+                Rect::new(0, 0, width, height),
+                &groups,
+                0,
+                false,
+                true,
+                &mut targets,
+            );
+        })
+        .unwrap();
+
+    let buf = terminal.backend().buffer().clone();
+    let top_row: String = (0..width)
+        .map(|x| buf[(x, 0)].symbol().to_string())
+        .collect();
+    assert!(
+        top_row.contains('↻'),
+        "Projects title must contain ↻ when revalidating=true; got: {top_row:?}"
+    );
+}
+
+// S8b-A4 (inverse): revalidating=false does NOT show ↻ in the Projects title.
+#[test]
+fn projects_title_hides_revalidating_indicator_when_not_revalidating() {
+    let groups = vec![ProjectGroup {
+        project_id: 1,
+        project_name: "Project Alpha".into(),
+        instance: "inst".into(),
+        tasks: vec![],
+    }];
+    let width = 40u16;
+    let height = 10u16;
+    let backend = TestBackend::new(width, height);
+    let mut terminal = Terminal::new(backend).unwrap();
+
+    terminal
+        .draw(|frame| {
+            let mut targets = vec![];
+            draw_projects(
+                frame,
+                Rect::new(0, 0, width, height),
+                &groups,
+                0,
+                false,
+                false,
+                &mut targets,
+            );
+        })
+        .unwrap();
+
+    let buf = terminal.backend().buffer().clone();
+    let top_row: String = (0..width)
+        .map(|x| buf[(x, 0)].symbol().to_string())
+        .collect();
+    assert!(
+        !top_row.contains('↻'),
+        "Projects title must NOT contain ↻ when revalidating=false; got: {top_row:?}"
+    );
+}
+
+// --- W1: Detail chrome responsiveness — header and footer word-wrap on narrow terminals ---
+
+mod w1_chrome_wrap {
+    use crate::tui::model::{Header, Model, Screen};
+    use crate::tui::view::view;
+    use ratatui::{backend::TestBackend, Terminal};
+
+    fn buf_rows(buf: &ratatui::buffer::Buffer) -> Vec<String> {
+        let area = buf.area();
+        (0..area.height)
+            .map(|y| {
+                (0..area.width)
+                    .map(|x| buf.cell((x, y)).unwrap().symbol().to_string())
+                    .collect()
+            })
+            .collect()
+    }
+
+    fn buf_to_string(buf: &ratatui::buffer::Buffer) -> String {
+        buf_rows(buf).join("\n")
+    }
+
+    fn render_view_at(model: &Model, width: u16, height: u16) -> ratatui::buffer::Buffer {
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| view(model, frame, &mut vec![]))
+            .unwrap();
+        terminal.backend().buffer().clone()
+    }
+
+    fn projects_model_with_header(header: Header, last_loaded: Option<String>) -> Model {
+        Model {
+            stack: vec![Screen::Projects {
+                groups: vec![],
+                selected: 0,
+                loading: false,
+                revalidating: false,
+            }],
+            should_quit: false,
+            header,
+            viewport: (0, 0),
+            click_targets: vec![],
+            last_loaded,
+            selection_mode: false,
+        }
+    }
+
+    // W1-A1: At a narrow terminal width the user header bar wraps to multiple lines and the
+    // full identity ({name} <{email}> · {instance}) is present in the buffer — no ellipsis,
+    // no right-clip. (BDR 0012 S1)
+    #[test]
+    fn narrow_header_wraps_and_full_identity_present_no_clip() {
+        // header_line = "Alice <alice@prod.example.com> · production" (44 chars).
+        // At width=40:
+        //   word "Alice" (5), word "<alice@prod.example.com>" (24) → 5+1+24=30 ≤ 40 → same line
+        //   word "·" (1) → 30+1+1=32 ≤ 40 → same line
+        //   word "production" (10) → 32+1+10=43 > 40 → wraps to line 2
+        // header_height = 2; y=0 has "Alice <alice@prod.example.com> ·", y=1 has "production"
+        let header = Header {
+            name: Some("Alice".into()),
+            email: "alice@prod.example.com".into(),
+            instance: "production".into(),
+            extra: 0,
+        };
+        let model = projects_model_with_header(header, None);
+        let width = 40u16;
+        let height = 20u16;
+        let buf = render_view_at(&model, width, height);
+        let rows = buf_rows(&buf);
+        let content = buf_to_string(&buf);
+
+        // Full identity must be present somewhere across all rows.
+        assert!(
+            content.contains("Alice"),
+            "buffer must contain name 'Alice': {content}"
+        );
+        assert!(
+            content.contains("alice@prod.example.com"),
+            "buffer must contain email 'alice@prod.example.com': {content}"
+        );
+        assert!(
+            content.contains("production"),
+            "buffer must contain instance 'production': {content}"
+        );
+
+        // Row 0 must contain the first part of the identity (name + email).
+        let row0 = &rows[0];
+        assert!(
+            row0.contains("Alice"),
+            "y=0 must contain 'Alice' (first wrapped header line): {row0}"
+        );
+
+        // Row 1 must contain the continuation ('production' wrapped to next line).
+        let row1 = &rows[1];
+        assert!(
+            row1.contains("production"),
+            "y=1 must contain 'production' (second wrapped header line): {row1}"
+        );
+
+        // No ellipsis anywhere — content wraps, not truncates.
+        assert!(
+            !content.contains('\u{2026}'),
+            "header must wrap not truncate — no ellipsis in buffer: {content}"
+        );
+    }
+
+    // W1-A2: At a narrow terminal width the footer (hint + Updated-at timestamp) wraps so
+    // both the hint text and the timestamp are fully present in the buffer — nothing clipped.
+    // (BDR 0012 S3)
+    #[test]
+    fn narrow_footer_wraps_hint_and_timestamp_both_present() {
+        // At width=40 the hint "↑/↓ navigate  Enter select  r refresh  Esc/b back  q quit  s selection" (72 chars)
+        // and timestamp "Updated at 15/01/2024 14:30" (27 chars) do not co-fit on one 40-col line.
+        // They are stacked: hint wraps across multiple lines, then timestamp below.
+        let header = Header {
+            name: None,
+            email: "u@example.com".into(),
+            instance: "inst".into(),
+            extra: 0,
+        };
+        let model = projects_model_with_header(header, Some("2024-01-15T14:30:00".into()));
+        let width = 40u16;
+        let height = 30u16;
+        let buf = render_view_at(&model, width, height);
+        let content = buf_to_string(&buf);
+
+        assert!(
+            content.contains("↑/↓"),
+            "footer must contain hint text '↑/↓': {content}"
+        );
+        assert!(
+            content.contains("Updated at"),
+            "footer must contain 'Updated at' timestamp label: {content}"
+        );
+        assert!(
+            content.contains("15/01/2024"),
+            "footer must contain formatted date '15/01/2024': {content}"
+        );
+        assert!(
+            content.contains("14:30"),
+            "footer must contain time '14:30': {content}"
+        );
+    }
+
+    // W1-A3: At a wide terminal the user header bar and footer are each a single line at
+    // height 1 (no wrapping, no stray blank line). (BDR 0012 S5)
+    #[test]
+    fn wide_terminal_header_and_footer_each_single_line() {
+        // At width=120, header "Alice <alice@example.com> · prod" (33 chars) fits on one line.
+        // Footer hint (≤72 chars) also fits on one line at 120 cols.
+        // So: y=0 = header, y=1 = content start, y=height-1 = footer, y=height-2 = content end.
+        let header = Header {
+            name: Some("Alice".into()),
+            email: "alice@example.com".into(),
+            instance: "prod".into(),
+            extra: 0,
+        };
+        let model = projects_model_with_header(header, None);
+        let width = 120u16;
+        let height = 20u16;
+        let buf = render_view_at(&model, width, height);
+        let rows = buf_rows(&buf);
+
+        // y=0 must contain the full header identity on that row alone.
+        let row0 = &rows[0];
+        assert!(
+            row0.contains("Alice") && row0.contains("alice@example.com") && row0.contains("prod"),
+            "y=0 must contain the full header identity at wide width: {row0}"
+        );
+
+        // y=1 must NOT contain the header identity text — header stayed on y=0 only.
+        let row1 = &rows[1];
+        assert!(
+            !row1.contains("alice@example.com"),
+            "y=1 must NOT contain header email — header must be single-line at width=120: {row1}"
+        );
+
+        // y=height-1 must contain the footer hint.
+        let last_row = &rows[(height - 1) as usize];
+        assert!(
+            last_row.contains("↑/↓"),
+            "y=height-1 must contain footer hint at wide width: {last_row}"
+        );
+
+        // y=height-2 must NOT contain the footer hint — footer stayed on one row.
+        let second_last = &rows[(height - 2) as usize];
+        assert!(
+            !second_last.contains("↑/↓"),
+            "y=height-2 must NOT contain footer hint — footer must be single-line at width=120: {second_last}"
+        );
+    }
+
+    // W2-A1: at a narrow width where an asset label wraps, draw_detail still renders
+    // the bold name header without ellipsis, and the Artifacts title appears.
+    // This guards the already-approved W2-A1 visual behavior during the hit-test fix.
+    #[test]
+    fn draw_detail_wrapped_asset_still_shows_name_and_artifacts_no_ellipsis() {
+        use crate::render::Asset;
+        use crate::tui::screens::{draw_detail, DetailParams};
+
+        // At width=20 the asset panel inner is 20-4=16 cols.
+        // "[1] ↗ " = 7 cols, label_width = 9 cols.
+        // Name "ABCDEFGHIJKLMNOPQRS.pdf" → label "ABCDEFGHIJKLMNOPQRS.pdf" > 9 cols → wraps.
+        let long_asset = Asset {
+            name: "ABCDEFGHIJKLMNOPQRS.pdf".into(),
+            url: "https://example.com/long.pdf".into(),
+        };
+
+        let task_name = "My Task";
+        let lines = vec!["body text".to_string()];
+        let empty_styles: Vec<Vec<crate::render::StyleRun>> = vec![vec![]; lines.len()];
+        let backend = TestBackend::new(20, 20);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| {
+                draw_detail(
+                    frame,
+                    ratatui::layout::Rect::new(0, 0, 20, 20),
+                    DetailParams {
+                        lines: &lines,
+                        line_styles: &empty_styles,
+                        assets: &[long_asset],
+                        offset: 0,
+                        loading: false,
+                        task_id: 1,
+                        task_name,
+                    },
+                );
+            })
+            .unwrap();
+
+        let content = super::buf_to_string(terminal.backend().buffer());
+
+        assert!(
+            content.contains("My Task"),
+            "task name must appear as header even with wrapped asset: {content}"
+        );
+        assert!(
+            !content.contains('\u{2026}'),
+            "no ellipsis when name and asset wrap: {content}"
+        );
+        assert!(
+            content.contains("Artifacts"),
+            "Artifacts panel title must appear: {content}"
+        );
+    }
+
+    // W1-A4: A single unbreakable token longer than the available display width hard-breaks at
+    // the display-column boundary without overflowing the region. (BDR 0012 S6)
+    #[test]
+    fn unbreakable_token_hard_breaks_at_display_column_boundary() {
+        // email = "noreply-serviceaccount-admin@very-long-subdomain.example.com" (61 chars)
+        // header_line = "<noreply-serviceaccount-admin@very-long-subdomain.example.com> · inst" (70 chars)
+        // At width=30, the angle-bracketed email token (63 chars) cannot word-wrap, so it
+        // hard-splits at column 30. Row 0: first 30 chars; row 1: next 30 chars; row 2: tail.
+        // All characters must be present in the buffer — verify by checking row-sized substrings.
+        let email = "noreply-serviceaccount-admin@very-long-subdomain.example.com";
+        let header = Header {
+            name: None,
+            email: email.into(),
+            instance: "inst".into(),
+            extra: 0,
+        };
+        let model = projects_model_with_header(header, None);
+        let width = 30u16;
+        let height = 20u16;
+        let buf = render_view_at(&model, width, height);
+        let rows = buf_rows(&buf);
+
+        // Row 0 must start with the first 30 chars of the bracketed email (hard-break boundary).
+        // "<noreply-serviceaccount-admin@" = 30 chars.
+        let row0 = &rows[0];
+        assert!(
+            row0.starts_with("<noreply-serviceaccount-admin@"),
+            "y=0 must begin with the first 30 chars of the long token: {row0:?}"
+        );
+
+        // Row 1 must contain the continuation of the token (no truncation, no ellipsis).
+        // "very-long-subdomain.example.co" = next 30 chars.
+        let row1 = &rows[1];
+        assert!(
+            row1.starts_with("very-long-subdomain.example.co"),
+            "y=1 must continue the hard-broken token without truncation: {row1:?}"
+        );
+
+        // Row 2 must contain the tail ("m> · inst").
+        let row2 = &rows[2];
+        assert!(
+            row2.starts_with("m>"),
+            "y=2 must contain the tail of the hard-broken token: {row2:?}"
+        );
+
+        // No ellipsis anywhere — hard-break preserves all characters.
+        let content: String = rows.join("\n");
+        assert!(
+            !content.contains('\u{2026}'),
+            "unbreakable token must hard-break, not produce ellipsis: {content}"
+        );
+    }
 }

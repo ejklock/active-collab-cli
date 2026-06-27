@@ -18,9 +18,14 @@ pub fn draw_projects(
     groups: &[ProjectGroup],
     selected: usize,
     loading: bool,
+    revalidating: bool,
     targets: &mut Vec<ClickTarget>,
 ) {
-    let title = format!(" {} ", t("Projects"));
+    let title = if revalidating {
+        format!(" {} ↻ ", t("Projects"))
+    } else {
+        format!(" {} ", t("Projects"))
+    };
 
     if loading {
         let msg = Paragraph::new(t("Loading tasks…"))

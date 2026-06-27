@@ -210,7 +210,7 @@ pub struct Asset {
 
 /// Returns true when `name` looks like a real filename: non-empty, at most 48
 /// chars, and ends with a dot followed by 1–6 ASCII-alphanumeric characters.
-fn looks_like_filename(name: &str) -> bool {
+pub(crate) fn looks_like_filename(name: &str) -> bool {
     if name.is_empty() || name.chars().count() > 48 {
         return false;
     }
@@ -235,6 +235,22 @@ pub fn asset_link_line(index: usize, asset: &Asset) -> String {
     format!("[{}] \u{2197} {}", index, label)
 }
 
+/// Render an asset row as one or more wrapped lines for the Artifacts panel.
+///
+/// The prefix `"[{index}] ↗ "` is fixed; the label wraps to `width` display
+/// columns with a hanging indent under the label start so continuation lines
+/// align with the label text.  Single-line rows (when the full row fits) return
+/// exactly one element equal to `asset_link_line(index, asset)`.
+pub(crate) fn asset_row_lines(index: usize, asset: &Asset, width: usize) -> Vec<String> {
+    let full = asset_link_line(index, asset);
+    if width == 0 || display_width(&full) <= width {
+        return vec![full];
+    }
+    let prefix = format!("[{}] \u{2197} ", index);
+    let label = &full[prefix.len()..];
+    format_asset_row(&prefix, label, width)
+}
+
 /// Parity: Python tui/view.py is_openable_url.
 ///
 /// Returns true only for http and https schemes. Rejects file://, javascript:,
@@ -251,6 +267,7 @@ pub fn is_openable_url(url: &str) -> bool {
 }
 
 /// One row in the mine/list table.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct MineTableRow {
     pub instance: String,
     pub project_id: i64,
@@ -576,8 +593,37 @@ const MIDDOT: &str = "\u{00B7}";
 const PANEL_HPAD: usize = 1;
 const PANEL_VPAD: usize = 1;
 
-fn display_width(s: &str) -> usize {
+pub(crate) fn display_width(s: &str) -> usize {
     UnicodeWidthStr::width(s)
+}
+
+/// Format a prefixed asset row with a hanging indent on continuation lines.
+///
+/// `prefix` is the fixed part (e.g. `"[1] ↗ "`), `label` is the potentially
+/// long text that follows.  The first output line is `"{prefix}{label_start}"`;
+/// continuation lines are indented by `display_width(prefix)` spaces so the
+/// label text aligns under itself.  When everything fits in `width`, exactly
+/// one line is returned.  `width == 0` returns `[prefix.to_string()]`.
+pub(crate) fn format_asset_row(prefix: &str, label: &str, width: usize) -> Vec<String> {
+    let prefix_dw = display_width(prefix);
+    if width == 0 || prefix_dw >= width {
+        return vec![format!("{prefix}{label}")];
+    }
+    let label_width = width.saturating_sub(prefix_dw);
+    let label_lines = wrap_text(label, label_width);
+    let pad = " ".repeat(prefix_dw);
+    let mut result: Vec<String> = Vec::new();
+    match label_lines.as_slice() {
+        [] => result.push(prefix.to_string()),
+        [first] => result.push(format!("{prefix}{first}")),
+        [first, rest @ ..] => {
+            result.push(format!("{prefix}{first}"));
+            for cont in rest {
+                result.push(format!("{pad}{cont}"));
+            }
+        }
+    }
+    result
 }
 
 fn fit_to_display_width(s: &str, cols: usize) -> String {

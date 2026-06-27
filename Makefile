@@ -25,6 +25,9 @@ image:
 run:
 	docker compose run --rm dev cargo run
 
+fix: 
+	docker compose run --rm dev cargo fix --bin "ac" -p ac
+
 test:
 	docker compose run --rm dev cargo test
 

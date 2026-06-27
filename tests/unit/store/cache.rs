@@ -1,6 +1,7 @@
 use super::*;
 use crate::config::Config;
-use crate::store::cache::{ProjectNamesCache, UserMapCache};
+use crate::store::cache::{instances_key, ProjectNamesCache, TaskListCache, UserMapCache};
+use crate::store::instances::Instance;
 use crate::store::Store;
 use serde_json::json;
 use std::collections::HashMap;
@@ -233,5 +234,135 @@ fn project_names_cache_write_with_fetched_at_stamps_supplied_timestamp() {
         result.names.get(&42).map(|s| s.as_str()),
         Some("Seeded Project"),
         "names must be written alongside the custom timestamp"
+    );
+}
+
+fn make_instance(name: &str) -> Instance {
+    Instance {
+        name: name.to_string(),
+        base_url: "https://example.com".to_string(),
+        email: "test@example.com".to_string(),
+        token: "tok".to_string(),
+        user_id: None,
+    }
+}
+
+// S8a-A1: write then read within max-age returns the stored list_json
+#[test]
+fn task_list_cache_write_then_read_within_max_age_returns_json() {
+    let (_dir, store) = make_store();
+    let cache = TaskListCache::new(store.conn());
+    cache.write("browse", "acme|beta", r#"["task1"]"#).unwrap();
+    let result = cache.read("browse", "acme|beta", 3600).unwrap();
+    assert_eq!(result.as_deref(), Some(r#"["task1"]"#));
+}
+
+// S8a-A1: write overwrites and round-trips latest value
+#[test]
+fn task_list_cache_write_overwrites_previous_entry() {
+    let (_dir, store) = make_store();
+    let cache = TaskListCache::new(store.conn());
+    cache.write("browse", "acme", r#"["old"]"#).unwrap();
+    cache.write("browse", "acme", r#"["new"]"#).unwrap();
+    let result = cache.read("browse", "acme", 3600).unwrap();
+    assert_eq!(result.as_deref(), Some(r#"["new"]"#));
+}
+
+// S8a-A1: read when no row written returns None
+#[test]
+fn task_list_cache_read_when_absent_returns_none() {
+    let (_dir, store) = make_store();
+    let cache = TaskListCache::new(store.conn());
+    let result = cache.read("browse", "acme", 3600).unwrap();
+    assert!(result.is_none());
+}
+
+// S8a-A2: different instances_key does not cross-read
+#[test]
+fn task_list_cache_different_instances_key_returns_none() {
+    let (_dir, store) = make_store();
+    let cache = TaskListCache::new(store.conn());
+    cache.write("browse", "acme", r#"["task1"]"#).unwrap();
+    let result = cache.read("browse", "other", 3600).unwrap();
+    assert!(
+        result.is_none(),
+        "different instances_key must not cross-read"
+    );
+}
+
+// S8a-A2: different scope (browse vs mine) does not cross-read
+#[test]
+fn task_list_cache_different_scope_returns_none() {
+    let (_dir, store) = make_store();
+    let cache = TaskListCache::new(store.conn());
+    cache.write("browse", "acme", r#"["browse-task"]"#).unwrap();
+    let result = cache.read("mine", "acme", 3600).unwrap();
+    assert!(result.is_none(), "mine scope must not read browse snapshot");
+}
+
+// S8a-A2: instances_key helper is order-independent
+#[test]
+fn instances_key_is_order_independent() {
+    let a = make_instance("acme");
+    let b = make_instance("beta");
+    let key_ab = instances_key(&[a.clone(), b.clone()]);
+    let key_ba = instances_key(&[b, a]);
+    assert_eq!(key_ab, key_ba, "instances_key must be order-independent");
+}
+
+// S8a-A2: instances_key with single instance equals its name
+#[test]
+fn instances_key_single_instance_equals_name() {
+    let inst = make_instance("acme");
+    assert_eq!(instances_key(&[inst]), "acme");
+}
+
+// S8a-A3: row exactly at max_age boundary reads Some (age == max_age_secs)
+#[test]
+fn task_list_cache_row_exactly_at_max_age_reads_some() {
+    let (_dir, store) = make_store();
+    let cache = TaskListCache::new(store.conn());
+    let now = crate::store::now_epoch_secs();
+    cache
+        .write_with_fetched_at("browse", "acme", r#"["data"]"#, now)
+        .unwrap();
+    // age is 0, which is <= max_age_secs=0, so it should be a hit
+    let result = cache.read("browse", "acme", 0).unwrap();
+    assert!(
+        result.is_some(),
+        "row with age=0 and max_age=0 must be a hit"
+    );
+}
+
+// S8a-A3: row older than max_age_secs reads None
+#[test]
+fn task_list_cache_row_older_than_max_age_returns_none() {
+    let (_dir, store) = make_store();
+    let cache = TaskListCache::new(store.conn());
+    let old_ts = crate::store::now_epoch_secs() - 7200;
+    cache
+        .write_with_fetched_at("browse", "acme", r#"["stale"]"#, old_ts)
+        .unwrap();
+    let result = cache.read("browse", "acme", 3600).unwrap();
+    assert!(
+        result.is_none(),
+        "row older than max_age_secs must be treated as a miss"
+    );
+}
+
+// S8a-A3: row within max_age but not too old reads Some
+#[test]
+fn task_list_cache_row_within_max_age_reads_some() {
+    let (_dir, store) = make_store();
+    let cache = TaskListCache::new(store.conn());
+    let recent_ts = crate::store::now_epoch_secs() - 60;
+    cache
+        .write_with_fetched_at("browse", "acme", r#"["fresh"]"#, recent_ts)
+        .unwrap();
+    let result = cache.read("browse", "acme", 3600).unwrap();
+    assert_eq!(
+        result.as_deref(),
+        Some(r#"["fresh"]"#),
+        "row 60s old with max_age=3600 must be a hit"
     );
 }
