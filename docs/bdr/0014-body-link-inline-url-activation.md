@@ -43,11 +43,18 @@ In the **TUI detail view**:
 - When `text` is empty or equals the URL, only `[URL]` is rendered.
 - `mailto:` URLs render the bare address in the brackets (`text [a@b.com]`); the
   open `Cmd` re-adds the `mailto:` scheme.
-- The **visible URL token** is the click target: clicking the `[URL]` bracket
-  content (or a raw URL printed in the body) emits the open `Cmd` for that URL.
+- The **visible URL token** is the click target: a **Ctrl/Cmd+click** on the `[URL]`
+  bracket content (or a raw URL printed in the body) emits the open `Cmd` for that URL.
   The target is derived from the visible text at the click column — no indirected
   "Link N" index to correlate (that indirection was the source of the missed
   clicks). A bracketed e-mail address opens via `mailto:`.
+- **Amended (D1c): activation requires a Ctrl or Cmd/Super modifier.** A plain
+  (unmodified) click does **not** open the URL — it is reserved for text selection
+  (BDR 0015 / V6) and never navigates by accident. This mirrors the terminal-native
+  convention (terminals open a detected URL on Cmd/Ctrl+click, not on a bare click).
+  The modifier is read from the click event's modifier set (`CONTROL` or `SUPER`).
+  Where the terminal itself intercepts the modifier+click to open the visible URL,
+  the link still opens — the URL is on screen either way.
 - The URL text is on screen, so it is selectable/copyable (BDR 0015) and terminals
   with URL detection make it Cmd/Ctrl+clickable natively. A URL long enough to wrap
   across lines stays fully visible and copyable. **Amended (D1c):** an app-side click
@@ -71,9 +78,9 @@ rendered, Then only `[https://x/y]` appears (no duplication).
 **Scenario 3: empty anchor text** — Given `<a href="https://x/y"></a>`, When rendered,
 Then `[https://x/y]` appears.
 
-**Scenario 4: click on the URL token opens it** — Given a rendered `text [URL]` link,
-When a click lands on the `[URL]` token (or on a raw URL printed in the body), Then the
-open-URL `Cmd` for that URL is emitted.
+**Scenario 4: Ctrl/Cmd+click on the URL token opens it** — Given a rendered `text [URL]`
+link, When a click carrying a Ctrl or Cmd/Super modifier lands on the `[URL]` token (or on
+a raw URL printed in the body), Then the open-URL `Cmd` for that URL is emitted.
 
 **Scenario 5: mailto** — Given `<a href="mailto:a@b.com">mail</a>`, When rendered,
 Then `mail [a@b.com]` appears and clicking the `[a@b.com]` token emits the open `Cmd`
@@ -84,9 +91,13 @@ When the body renders, Then the full URL is on screen across the wrapped lines
 (selectable/copyable).
 
 **Scenario 7 (D1c): click on a wrapped fragment opens the full URL** — Given a body URL
-long enough to wrap across two or more rendered lines, When a click lands on **any** of
-those wrapped fragments, Then the open `Cmd` for the **complete** URL is emitted (the
-click maps to the pre-wrap logical line, where the whole token is resolvable).
+long enough to wrap across two or more rendered lines, When a **Ctrl/Cmd+click** lands on
+**any** of those wrapped fragments, Then the open `Cmd` for the **complete** URL is emitted
+(the click maps to the pre-wrap logical line, where the whole token is resolvable).
+
+**Scenario 8 (D1c): plain click does not activate** — Given a rendered `text [URL]` link,
+When a click **without** a Ctrl/Cmd/Super modifier lands on the `[URL]` token, Then **no**
+open `Cmd` is emitted (the click is reserved for selection / cursor placement — V6).
 
 ## Test Design
 
@@ -98,10 +109,11 @@ pure `body_link_cmd_at` against rendered geometry. Each row names what it proves
 | Text != URL | unit | 1 | `text [url]`; bracketed url link-styled | inline render |
 | Text == URL | unit | 2 | `[url]` only | no duplication |
 | Empty text | unit | 3 | `[url]` only | empty-anchor handling |
-| Click opens | unit | 4 | URL-token click → open Cmd with URL | url-from-click (no index) |
+| Click opens | unit | 4 | Ctrl/Cmd+click on URL token → open Cmd with URL | url-from-click (no index) |
 | Mailto | unit | 5 | `mail [a@b.com]` + open Cmd `mailto:a@b.com` | mailto handling |
 | Long URL visible | unit | 6 | full URL present across wrapped lines | URL always visible/copyable |
-| Wrapped click (D1c) | unit | 7 | click on a wrapped fragment → open Cmd with the FULL url | pre-wrap logical-line click mapping |
+| Wrapped click (D1c) | unit | 7 | Ctrl/Cmd+click on a wrapped fragment → open Cmd with the FULL url | pre-wrap logical-line click mapping |
+| Plain click no-op (D1c) | unit | 8 | unmodified click on URL token → no open Cmd | modifier-gated activation |
 
 ## Related
 

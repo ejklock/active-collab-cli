@@ -75,6 +75,33 @@ use. The click now maps to the **pre-wrap logical line** before `url_at` runs, s
 on **any** fragment of a wrapped URL resolves the **whole** token. Asset/"Anexo N"
 affordances are unchanged (separate panel).
 
+### 2a. Activation requires a Ctrl/Cmd modifier (amended D1c, issue 0022)
+
+V5 opened the URL on a **plain** (unmodified) left click. Real-terminal use showed two
+problems: (a) a plain click felt "strange" and fired accidentally while the operator was
+only trying to position the cursor or read, and (b) it collides head-on with the
+app-managed text selection planned for V6 ([ADR 0021](/adr/0021-app-managed-text-selection-clipboard.md)),
+where a plain click+drag must mean *select*, not *navigate*.
+
+Activation is therefore **gated on a keyboard modifier**: the open `Cmd` is emitted only
+when the click carries **Ctrl or Cmd/Super** (`crossterm` `MouseEvent.modifiers` contains
+`CONTROL` or `SUPER`). A plain, unmodified click does **not** open the URL — it is reserved
+for text selection (V6) and a future caret. This is exactly the terminal-native convention
+the operator named: terminals open a detected URL on **Cmd/Ctrl+click**, never on a bare
+click.
+
+The two activation paths coexist and are both correct:
+
+- **Mouse capture on (the TUI's normal state):** the app receives the modifier+click as a
+  `MouseEvent` and emits the open `Cmd` itself.
+- **Terminal intercepts the modifier+click** (some terminals, e.g. iTerm2, open a detected
+  URL on Cmd+click before forwarding to the app): the terminal opens the **visible** URL.
+  Either way the link opens, because the real URL string is on screen (§1). The app never
+  needs to fight the terminal for the event.
+
+Selection (plain click/drag) and activation (modifier+click) are thus disjoint inputs — the
+modifier is the discriminator, mirroring every modern terminal.
+
 ### 3. Terminal-native + optional OSC 8
 
 Because the real URL string is rendered, terminals with URL detection make it
@@ -92,6 +119,10 @@ ranges). The inline URL guarantees the link is visible and copyable regardless.
   the URL would be invisible and uncopyable on unsupported terminals.
 - **Footnote-style URL list at the bottom.** Rejected: reintroduces indirection; the
   operator must scroll to correlate.
+- **Activate on a plain (unmodified) click** (the V5 behavior). Rejected after real use
+  (D1c): fires accidentally during read/cursor movement and collides with the V6 plain
+  click+drag selection. Superseded by the Ctrl/Cmd-modifier gate (§2a), which matches the
+  terminal-native convention the operator asked for.
 
 ## Consequences
 
@@ -102,7 +133,10 @@ product's own plain-text convention. Degrades gracefully on any terminal.
 **Accepted trade-offs:** inline URLs make long links consume body width (mitigated by
 style-aware wrapping — the `[url]` wraps like any text). The `↗ Link N` affordance is
 gone for body links; anyone who relied on the label uses the visible URL instead.
-Explicit OSC 8 is deferred.
+Explicit OSC 8 is deferred. **Activation now requires Ctrl/Cmd (§2a):** a discoverability
+cost (the modifier is not self-evident) traded for no accidental navigation and clean
+coexistence with V6 selection — the footer hint advertises it, and it is the convention
+operators already know from their terminal.
 
 ## Related
 

@@ -32,6 +32,9 @@ under the [ADR 0020](/adr/0020-body-links-inline-url-native-click.md) amendment.
 4. **Wrapped-link click is a no-op** — `body_link_cmd_at` calls `url_at` on a single
    wrapped line; a long `[url]` split by `wrap_rich` resolves on no fragment, so clicks
    miss after the URL wraps / the terminal is resized.
+5. **Plain click activates (strange/accidental)** — V5 opens the URL on an unmodified
+   click, which fires while reading and collides with the V6 selection plan. Activation
+   should require Ctrl/Cmd, like every terminal's URL handling.
 
 ### Slices (vertical, each demoable)
 
@@ -44,10 +47,13 @@ under the [ADR 0020](/adr/0020-body-links-inline-url-native-click.md) amendment.
   (tightened `looks_like_filename`: reject `?`/`=`/`&`, alpha extension 2–6, not purely
   numeric) → host. Files: `src/controller.rs` (label/name derivation, carry anchor text),
   `src/render.rs` (`looks_like_filename`, `asset_link_line`), tests. ADR 0023 / BDR 0017.
-- **D1c — Wrapped-link click.** Map a body click to the **pre-wrap logical line** before
-  `url_at`, so a click on any wrapped fragment opens the full URL. Files: `src/render.rs`
-  (logical-line/column mapping helper), `src/tui/model.rs` (`body_link_cmd_at`), tests.
-  BDR 0014 Sc. 7 / ADR 0020 amendment.
+- **D1c — Wrapped-link click + Ctrl/Cmd-gated activation.** Map a body click to the
+  **pre-wrap logical line** before `url_at`, so a click on any wrapped fragment opens the
+  full URL; **and** gate activation on a Ctrl/Cmd/Super modifier (a plain click no longer
+  opens — reserved for V6 selection). Files: `src/render.rs` (logical-line/column mapping
+  helper), `src/tui/model.rs` (`body_link_cmd_at` takes the modifier set),
+  `src/tui/events.rs` (forward mouse modifiers), tests.
+  BDR 0014 Sc. 7 + Sc. 8 / ADR 0020 §2 + §2a.
 
 ### Acceptance
 
@@ -56,8 +62,9 @@ under the [ADR 0020](/adr/0020-body-links-inline-url-native-click.md) amendment.
   (BDR 0016 Sc. 1–4).
 - **D1b:** a non-file web link labels as its host (or anchor text when present); a real
   file labels as its filename; a `?`/`=` tail is never a label (BDR 0017 Sc. 1–4).
-- **D1c:** a click on any wrapped fragment of a long body URL emits the open `Cmd` for
-  the complete URL (BDR 0014 Sc. 7).
+- **D1c:** a Ctrl/Cmd+click on any wrapped fragment of a long body URL emits the open
+  `Cmd` for the complete URL (BDR 0014 Sc. 7); a plain (unmodified) click emits no `Cmd`
+  (BDR 0014 Sc. 8).
 - Each slice: full suite green; clippy `-D warnings`, fmt, comment-policy clean;
   complexity within budget; tests assert observable behavior (rendered rows/labels,
   emitted `Cmd`), mutation-resistant.
