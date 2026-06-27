@@ -44,13 +44,18 @@ slice **V6**.
 a cursor cell position (row/col in the rendered body viewport). Mouse capture stays
 **on** (the V2/V4 click affordances are unaffected). The pure `update`:
 
-- **Left button down** on the body → start a selection (anchor = cursor = cell).
+- **Unmodified left button down** on the body → start a selection (anchor = cursor = cell).
 - **Drag (move with button held)** → extend the cursor; the selected span is anchor→
   cursor in reading order.
-- **Left button up** → finalize; emit `Cmd::CopyToClipboard(text)` with the selected
-  text extracted from the rendered lines.
-- A **click without drag** keeps the existing click semantics (drill-in / open link /
-  open asset) — a zero-length selection is not a selection.
+- **Left button up** after a drag → finalize; emit `Cmd::CopyToClipboard(text)` with the
+  selected text extracted from the rendered lines.
+- A **plain (unmodified) click without drag** is a zero-length selection — not a
+  selection. **Reconciled with [D1c](/adr/0020-body-links-inline-url-native-click.md) §2a:**
+  it does **not** open a body link (link activation is now Ctrl/Cmd+click only). On the
+  detail body it clears any existing selection (no-op otherwise); on list screens it keeps
+  the screen's drill-in. A **Ctrl/Cmd/Super-modified press is reserved for activation** and
+  does **not** start a selection — selecting and activating are disjoint, discriminated by
+  the modifier.
 
 ### 2. Drawn feedback (the operator's ask)
 

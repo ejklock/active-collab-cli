@@ -47,7 +47,9 @@ non-detail screens' click behavior (unchanged).
   reverse-video (BDR 0015 Sc. 1); highlight asserted via TestBackend.
 - Release emits `Cmd::CopyToClipboard(text)` with reading-order-normalized text
   (Sc. 2, 4).
-- A click with no movement does not copy and runs the normal click action (Sc. 3).
+- A plain (unmodified) click with no movement does not copy, does not open a link (D1c),
+  and clears any existing selection (Sc. 3). Selection only starts on an **unmodified**
+  press; a Ctrl/Cmd/Super press starts no selection — reserved for D1c activation (Sc. 7).
 - Clipboard failure degrades to a footer note, no panic (Sc. 5); `s` emits no capture
   Cmd — V3 removed (Sc. 6).
 - Full suite green; clippy `-D warnings`, fmt, comment-policy clean; complexity within
