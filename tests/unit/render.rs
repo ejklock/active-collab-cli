@@ -2148,10 +2148,10 @@ fn looks_like_filename_accepts_short_extension() {
 }
 
 #[test]
-fn looks_like_filename_accepts_six_char_extension() {
+fn looks_like_filename_rejects_alphanumeric_extension() {
     assert!(
-        looks_like_filename("archive.tar123"),
-        "six-char alphanumeric extension must be accepted"
+        !looks_like_filename("archive.tar123"),
+        "extension with digits must be rejected (only pure alphabetic extensions are valid)"
     );
 }
 
@@ -2212,6 +2212,63 @@ fn looks_like_filename_rejects_empty_extension_after_trailing_dot() {
     );
 }
 
+// D1b-A4: tightened looks_like_filename rules
+#[test]
+fn looks_like_filename_rejects_segment_with_query_char() {
+    assert!(
+        !looks_like_filename("edit?tab=t.0"),
+        "segment containing '?' must be rejected"
+    );
+}
+
+#[test]
+fn looks_like_filename_rejects_segment_with_equals() {
+    assert!(
+        !looks_like_filename("key=value.pdf"),
+        "segment containing '=' must be rejected"
+    );
+}
+
+#[test]
+fn looks_like_filename_rejects_segment_with_ampersand() {
+    assert!(
+        !looks_like_filename("a&b.pdf"),
+        "segment containing '&' must be rejected"
+    );
+}
+
+#[test]
+fn looks_like_filename_rejects_purely_numeric_extension() {
+    assert!(
+        !looks_like_filename("page.0"),
+        "purely-numeric extension '.0' must be rejected"
+    );
+}
+
+#[test]
+fn looks_like_filename_rejects_multi_digit_numeric_extension() {
+    assert!(
+        !looks_like_filename("page.123"),
+        "purely-numeric extension '.123' must be rejected"
+    );
+}
+
+#[test]
+fn looks_like_filename_rejects_single_char_extension() {
+    assert!(
+        !looks_like_filename("file.p"),
+        "single-char extension must be rejected (minimum 2 alphabetic chars)"
+    );
+}
+
+#[test]
+fn looks_like_filename_accepts_two_char_alphabetic_extension() {
+    assert!(
+        looks_like_filename("file.gz"),
+        "two-char alphabetic extension must be accepted"
+    );
+}
+
 #[test]
 fn asset_link_line_real_filename_uses_name_as_label() {
     let asset = Asset {
@@ -2226,15 +2283,17 @@ fn asset_link_line_real_filename_uses_name_as_label() {
 }
 
 #[test]
-fn asset_link_line_ugly_fragment_falls_back_to_open_link() {
+fn asset_link_line_non_empty_name_is_rendered_as_label() {
+    // asset_link_line renders asset.name directly; derivation is done upstream.
+    // A name that is non-empty (even if not a filename) is shown as-is.
     let asset = Asset {
-        name: "a8f3c920-deadbeef".to_owned(),
+        name: "example.com".to_owned(),
         url: "https://example.com/a8f3c920-deadbeef".to_owned(),
     };
     let line = asset_link_line(2, &asset);
     assert_eq!(
-        line, "[2] \u{2197} Open link",
-        "ugly fragment must fall back to 'Open link': {line:?}"
+        line, "[2] \u{2197} example.com",
+        "non-empty name is rendered as label: {line:?}"
     );
 }
 
@@ -2252,17 +2311,17 @@ fn asset_link_line_empty_name_falls_back_to_open_link() {
 }
 
 #[test]
-fn asset_link_line_over_long_name_falls_back_to_open_link() {
-    let long_name = format!("{}.pdf", "x".repeat(46));
-    assert_eq!(long_name.chars().count(), 50);
+fn asset_link_line_empty_name_from_derivation_falls_back_to_open_link() {
+    // When derive_asset_label yields an empty string (e.g. unparseable URL with no host),
+    // asset_link_line must fall back to "Open link".
     let asset = Asset {
-        name: long_name,
-        url: "https://example.com/long".to_owned(),
+        name: String::new(),
+        url: "not-a-url".to_owned(),
     };
     let line = asset_link_line(4, &asset);
     assert_eq!(
         line, "[4] \u{2197} Open link",
-        "over-long name must fall back to 'Open link': {line:?}"
+        "empty name must fall back to 'Open link': {line:?}"
     );
 }
 
@@ -2588,5 +2647,53 @@ fn url_at_inside_bracketed_url_in_bordered_padded_line() {
         result.as_deref(),
         Some(url),
         "url_at inside bordered bracketed URL must return URL: {result:?}"
+    );
+}
+
+// --- D1b: asset_link_line with pre-derived labels (BDR 0017) ---
+
+// D1b-A1: asset with host label (from derive_asset_label) renders as host
+#[test]
+fn asset_link_line_host_label_renders_correctly() {
+    let asset = Asset {
+        name: "docs.google.com".to_owned(),
+        url: "https://docs.google.com/document/d/ABC/edit?tab=t.0".to_owned(),
+    };
+    let line = asset_link_line(1, &asset);
+    assert_eq!(
+        line, "[1] \u{2197} docs.google.com",
+        "host label must render as-is: {line:?}"
+    );
+    assert!(
+        !line.contains("edit?tab=t.0"),
+        "query tail must never appear in rendered label: {line:?}"
+    );
+}
+
+// D1b-A2: asset with real filename label renders as filename
+#[test]
+fn asset_link_line_with_derived_filename_label() {
+    let asset = Asset {
+        name: "relatorio.pdf".to_owned(),
+        url: "https://x.example.com/uploads/relatorio.pdf".to_owned(),
+    };
+    let line = asset_link_line(2, &asset);
+    assert_eq!(
+        line, "[2] \u{2197} relatorio.pdf",
+        "filename label must render as-is: {line:?}"
+    );
+}
+
+// D1b-A3: asset with anchor text label renders as anchor text
+#[test]
+fn asset_link_line_with_derived_anchor_text_label() {
+    let asset = Asset {
+        name: "Especificação V1".to_owned(),
+        url: "https://x.example.com/y".to_owned(),
+    };
+    let line = asset_link_line(3, &asset);
+    assert_eq!(
+        line, "[3] \u{2197} Especificação V1",
+        "anchor text label must render as-is: {line:?}"
     );
 }

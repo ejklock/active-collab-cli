@@ -250,10 +250,16 @@ pub struct Asset {
     pub url: String,
 }
 
-/// Returns true when `name` looks like a real filename: non-empty, at most 48
-/// chars, and ends with a dot followed by 1–6 ASCII-alphanumeric characters.
+/// Returns true when `name` looks like a real downloadable filename.
+///
+/// Requirements: non-empty, at most 48 chars, no `?`/`=`/`&` anywhere (rejects query
+/// tails), and ends with a dot followed by 2–6 ASCII-alphabetic characters (rejects
+/// purely-numeric extensions like `.0` or `.123` and mixed alphanumeric like `.tar123`).
 pub(crate) fn looks_like_filename(name: &str) -> bool {
     if name.is_empty() || name.chars().count() > 48 {
+        return false;
+    }
+    if name.contains('?') || name.contains('=') || name.contains('&') {
         return false;
     }
     let last_dot = match name.rfind('.') {
@@ -261,18 +267,19 @@ pub(crate) fn looks_like_filename(name: &str) -> bool {
         None => return false,
     };
     let ext = &name[last_dot + 1..];
-    !ext.is_empty() && ext.len() <= 6 && ext.chars().all(|c| c.is_ascii_alphanumeric())
+    ext.len() >= 2 && ext.len() <= 6 && ext.chars().all(|c| c.is_ascii_alphabetic())
 }
 
 /// Returns the display line for a single asset entry in the Artifacts panel.
 ///
-/// Format: `"[{index}] \u{2197} {label}"` where `label` is `asset.name` when it
-/// looks like a real filename, otherwise the locale-aware "Open link" fallback.
+/// Format: `"[{index}] \u{2197} {label}"` where `label` is `asset.name` when
+/// non-empty (already fully derived by the controller), otherwise the locale-aware
+/// "Open link" fallback.
 pub fn asset_link_line(index: usize, asset: &Asset) -> String {
-    let label = if looks_like_filename(&asset.name) {
-        asset.name.clone()
-    } else {
+    let label = if asset.name.is_empty() {
         t("Open link")
+    } else {
+        asset.name.clone()
     };
     format!("[{}] \u{2197} {}", index, label)
 }

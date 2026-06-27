@@ -207,7 +207,7 @@ pub struct TaskCore {
 }
 
 static IMG_SRC_RE: OnceLock<Regex> = OnceLock::new();
-static HREF_RE: OnceLock<Regex> = OnceLock::new();
+static HREF_WITH_TEXT_RE: OnceLock<Regex> = OnceLock::new();
 
 fn img_src_re() -> &'static Regex {
     IMG_SRC_RE.get_or_init(|| {
@@ -216,9 +216,10 @@ fn img_src_re() -> &'static Regex {
     })
 }
 
-fn href_re() -> &'static Regex {
-    HREF_RE.get_or_init(|| {
-        Regex::new(r#"(?i)<a\b[^>]*\bhref=["']([^"']+)["']"#).expect("href_re is a valid pattern")
+fn href_with_text_re() -> &'static Regex {
+    HREF_WITH_TEXT_RE.get_or_init(|| {
+        Regex::new(r#"(?i)<a\b[^>]*\bhref=["']([^"']+)["'][^>]*>(.*?)</a>"#)
+            .expect("href_with_text_re is a valid pattern")
     })
 }
 
@@ -230,16 +231,43 @@ fn url_basename(url: &str) -> String {
         .to_string()
 }
 
+fn url_host(url: &str) -> Option<String> {
+    url::Url::parse(url)
+        .ok()
+        .and_then(|u| u.host_str().map(|h| h.to_string()))
+        .filter(|h| !h.is_empty())
+}
+
+/// Derive the display label for an asset using anchor text → real filename → host precedence.
+///
+/// Returns an empty string when none of the three fallbacks yield a meaningful label
+/// (signals the renderer to use its own final fallback).
+pub(crate) fn derive_asset_label(url: &str, anchor_text: Option<&str>) -> String {
+    if let Some(text) = anchor_text {
+        let text = text.trim();
+        if !text.is_empty() && text != url {
+            return text.to_string();
+        }
+    }
+    let basename = url_basename(url);
+    if crate::render::looks_like_filename(&basename) {
+        return basename;
+    }
+    url_host(url).unwrap_or_default()
+}
+
 fn assets_from_html(html: &str) -> Vec<Asset> {
     let mut assets = vec![];
     for cap in img_src_re().captures_iter(html) {
         let url = cap[1].to_string();
-        let name = url_basename(&url);
+        let name = derive_asset_label(&url, None);
         assets.push(Asset { name, url });
     }
-    for cap in href_re().captures_iter(html) {
+    for cap in href_with_text_re().captures_iter(html) {
         let url = cap[1].to_string();
-        let name = url_basename(&url);
+        let raw_text = cap[2].to_string();
+        let anchor_text = crate::render::html_to_text(&raw_text);
+        let name = derive_asset_label(&url, Some(&anchor_text));
         assets.push(Asset { name, url });
     }
     assets

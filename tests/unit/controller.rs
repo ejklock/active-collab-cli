@@ -618,6 +618,8 @@ async fn task_detail_extracts_assets_from_task_body() {
     let detail = task_detail_with_conn(store.conn(), &inst, &http, 10, 99, false).await;
     assert_eq!(detail.assets.len(), 1);
     assert_eq!(detail.assets[0].url, "https://example.com/file.pdf");
+    // anchor text "link" is non-empty and different from the URL → anchor text wins
+    assert_eq!(detail.assets[0].name, "link");
 }
 
 #[tokio::test]
@@ -899,6 +901,8 @@ async fn load_task_core_extracts_assets() {
 
     assert_eq!(core.assets.len(), 1);
     assert_eq!(core.assets[0].url, "https://files.example.com/doc.pdf");
+    // anchor text "doc" is non-empty and different from the URL → anchor text wins
+    assert_eq!(core.assets[0].name, "doc");
 }
 
 #[tokio::test]
@@ -1487,6 +1491,121 @@ fn seed_project_names_cache(
         .unwrap();
 }
 
+// --- D1b: derive_asset_label ---
+
+// D1b-A1: URL with query tail → host label (BDR 0017 Sc.1)
+#[test]
+fn derive_asset_label_query_tail_url_yields_host() {
+    let url = "https://docs.google.com/document/d/ABC/edit?tab=t.0";
+    let label = derive_asset_label(url, None);
+    assert_eq!(
+        label, "docs.google.com",
+        "query-tail URL must label as host, not the query tail: {label:?}"
+    );
+}
+
+// D1b-A2: URL ending in a real file → filename label (BDR 0017 Sc.2)
+#[test]
+fn derive_asset_label_real_filename_yields_filename() {
+    let url = "https://x.example.com/uploads/relatorio.pdf";
+    let label = derive_asset_label(url, None);
+    assert_eq!(
+        label, "relatorio.pdf",
+        "URL with real filename must label as filename: {label:?}"
+    );
+}
+
+// D1b-A3: anchor text present and different from URL → anchor text wins (BDR 0017 Sc.3)
+#[test]
+fn derive_asset_label_anchor_text_preferred_over_filename() {
+    let url = "https://x.example.com/uploads/relatorio.pdf";
+    let label = derive_asset_label(url, Some("Especificação V1"));
+    assert_eq!(
+        label, "Especificação V1",
+        "non-empty anchor text must be preferred over filename: {label:?}"
+    );
+}
+
+// D1b-A4: query tail segment like `edit?tab=t.0` is never a filename (BDR 0017 Sc.4)
+#[test]
+fn derive_asset_label_query_tail_segment_is_never_a_filename() {
+    let url = "https://docs.google.com/document/d/ABC/edit?tab=t.0";
+    let label = derive_asset_label(url, None);
+    assert!(
+        !label.contains("edit?tab=t.0"),
+        "query tail must never become a label: {label:?}"
+    );
+    assert!(
+        !label.contains(".0"),
+        "numeric extension must never become a label: {label:?}"
+    );
+}
+
+// D1b-A4: purely-numeric extension like `.0` is not a valid filename
+#[test]
+fn derive_asset_label_numeric_extension_falls_through_to_host() {
+    let url = "https://example.com/path/page.0";
+    let label = derive_asset_label(url, None);
+    assert_eq!(
+        label, "example.com",
+        "purely-numeric extension must fall through to host: {label:?}"
+    );
+}
+
+// Anchor text that equals the URL is treated as absent
+#[test]
+fn derive_asset_label_anchor_text_equal_to_url_is_ignored() {
+    let url = "https://example.com/doc.pdf";
+    let label = derive_asset_label(url, Some(url));
+    assert_eq!(
+        label, "doc.pdf",
+        "anchor text equal to URL must be treated as absent → filename used: {label:?}"
+    );
+}
+
+// Empty anchor text is treated as absent
+#[test]
+fn derive_asset_label_empty_anchor_text_falls_through() {
+    let url = "https://example.com/doc.pdf";
+    let label = derive_asset_label(url, Some(""));
+    assert_eq!(
+        label, "doc.pdf",
+        "empty anchor text must fall through to filename: {label:?}"
+    );
+}
+
+// extract_assets for an <a> with query-tail URL and no anchor text → host stored in name
+#[test]
+fn extract_assets_href_with_query_tail_stores_host_in_name() {
+    let task = serde_json::json!({
+        "id": 1,
+        "body": r#"<a href="https://docs.google.com/document/d/ABC/edit?tab=t.0">https://docs.google.com/document/d/ABC/edit?tab=t.0</a>"#
+    });
+    let assets = extract_assets(&task, &[]);
+    assert_eq!(assets.len(), 1);
+    assert_eq!(
+        assets[0].name, "docs.google.com",
+        "query-tail href with URL-as-anchor-text must store host in name: {:?}",
+        assets[0].name
+    );
+}
+
+// extract_assets for an <a> with distinct anchor text → anchor text wins
+#[test]
+fn extract_assets_href_with_anchor_text_stores_anchor_in_name() {
+    let task = serde_json::json!({
+        "id": 1,
+        "body": r#"<a href="https://x.example.com/y">Especificação V1</a>"#
+    });
+    let assets = extract_assets(&task, &[]);
+    assert_eq!(assets.len(), 1);
+    assert_eq!(
+        assets[0].name, "Especificação V1",
+        "anchor text must be stored as label: {:?}",
+        assets[0].name
+    );
+}
+
 fn seed_project_names_cache_stale(
     db_path: &std::path::Path,
     inst_name: &str,
@@ -1713,7 +1832,8 @@ fn extract_assets_from_body_html() {
     assert_eq!(assets.len(), 2);
     assert_eq!(assets[0].name, "img.png");
     assert_eq!(assets[0].url, "https://example.com/img.png");
-    assert_eq!(assets[1].name, "file.pdf");
+    // anchor text "link" is non-empty and different from the URL → anchor text wins
+    assert_eq!(assets[1].name, "link");
 }
 
 #[test]
