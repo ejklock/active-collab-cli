@@ -1,6 +1,6 @@
 use crate::i18n::t;
 use crate::render::{display_width, wrap_text};
-use crate::tui::model::{ClickTarget, Model, Screen};
+use crate::tui::model::{ClickTarget, Model, Screen, Selection};
 use crate::tui::screens::{draw_detail, draw_projects, draw_tasks, DetailParams};
 use crate::tui::theme;
 use ratatui::{
@@ -30,10 +30,10 @@ pub(crate) fn format_br_datetime(iso: &str) -> Option<String> {
 fn hint_for_screen(screen: &Screen) -> String {
     match screen {
         Screen::Detail { assets, .. } if !assets.is_empty() => {
-            t("↑/↓ scroll  r refresh  Esc/b back  q quit  1-9 open asset  d+1-9 download  s selection")
+            t("↑/↓ scroll  r refresh  Esc/b back  q quit  1-9 open asset  d+1-9 download")
         }
-        Screen::Detail { .. } => t("↑/↓ scroll  r refresh  Esc/b back  q quit  s selection"),
-        _ => t("↑/↓ navigate  Enter select  r refresh  Esc/b back  q quit  s selection"),
+        Screen::Detail { .. } => t("↑/↓ scroll  r refresh  Esc/b back  q quit"),
+        _ => t("↑/↓ navigate  Enter select  r refresh  Esc/b back  q quit"),
     }
 }
 
@@ -51,27 +51,29 @@ struct FooterPlan {
     height: u16,
     /// The full hint string (may be multi-line when stacked).
     hint: String,
-    /// Right-side text (timestamp and/or selection indicator), if any.
+    /// Right-side text (timestamp and/or copied indicator), if any.
     right_text: Option<String>,
     /// When true, hint and right cannot share a row; render right below hint.
     stacked: bool,
-    right_is_selection: bool,
+    right_is_copied: bool,
 }
 
 impl FooterPlan {
-    fn compute(hint: &str, last_loaded: Option<&str>, selection_mode: bool, width: usize) -> Self {
+    fn compute(hint: &str, last_loaded: Option<&str>, copied_feedback: bool, width: usize) -> Self {
         let timestamp_text = last_loaded
             .and_then(format_br_datetime)
             .map(|formatted| format!("{} {}", t("Updated at"), formatted));
 
-        let indicator = if selection_mode {
-            Some(t("footer.selection_indicator"))
+        let copied_indicator = if copied_feedback {
+            Some(t("footer.copied_indicator"))
         } else {
             None
         };
 
-        let right_segments: Vec<String> =
-            [indicator, timestamp_text].into_iter().flatten().collect();
+        let right_segments: Vec<String> = [copied_indicator, timestamp_text]
+            .into_iter()
+            .flatten()
+            .collect();
 
         if right_segments.is_empty() {
             return Self {
@@ -79,7 +81,7 @@ impl FooterPlan {
                 hint: hint.to_string(),
                 right_text: None,
                 stacked: false,
-                right_is_selection: false,
+                right_is_copied: false,
             };
         }
 
@@ -93,7 +95,7 @@ impl FooterPlan {
                 hint: hint.to_string(),
                 right_text: Some(right_text),
                 stacked: false,
-                right_is_selection: selection_mode,
+                right_is_copied: copied_feedback,
             }
         } else {
             let hint_height = wrapped_height(hint, width);
@@ -103,7 +105,7 @@ impl FooterPlan {
                 hint: hint.to_string(),
                 right_text: Some(right_text),
                 stacked: true,
-                right_is_selection: selection_mode,
+                right_is_copied: copied_feedback,
             }
         }
     }
@@ -135,7 +137,7 @@ pub fn view(model: &Model, frame: &mut Frame, targets: &mut Vec<ClickTarget>) {
     let footer_plan = FooterPlan::compute(
         &hint_text,
         model.last_loaded.as_deref(),
-        model.selection_mode,
+        model.copied_feedback,
         area_width,
     );
 
@@ -213,6 +215,9 @@ pub fn view(model: &Model, frame: &mut Frame, targets: &mut Vec<ClickTarget>) {
                     task_name,
                 },
             );
+            if let Some(ref sel) = model.selection {
+                draw_selection_highlight(frame, sel);
+            }
         }
     }
 
@@ -240,7 +245,7 @@ fn render_footer(
             area,
             &plan.hint,
             &right_text,
-            plan.right_is_selection,
+            plan.right_is_copied,
             style,
         );
     } else {
@@ -249,23 +254,23 @@ fn render_footer(
             area,
             &plan.hint,
             &right_text,
-            plan.right_is_selection,
+            plan.right_is_copied,
             style,
         );
     }
 }
 
-/// Render a right-aligned footer segment, applying the selection indicator
-/// style when `right_is_selection` is true.
+/// Render a right-aligned footer segment, applying the copied indicator
+/// style when `right_is_copied` is true.
 fn render_footer_right_segment(
     frame: &mut Frame,
     area: ratatui::layout::Rect,
     right_text: &str,
-    right_is_selection: bool,
+    right_is_copied: bool,
     base_style: ratatui::style::Style,
 ) {
-    let indicator_style = if right_is_selection {
-        theme::selection_indicator_style()
+    let indicator_style = if right_is_copied {
+        theme::copied_indicator_style()
     } else {
         base_style
     };
@@ -280,7 +285,7 @@ fn render_footer_side_by_side(
     area: ratatui::layout::Rect,
     hint: &str,
     right_text: &str,
-    right_is_selection: bool,
+    right_is_copied: bool,
     style: ratatui::style::Style,
 ) {
     let right_width = display_width(right_text) as u16;
@@ -292,13 +297,7 @@ fn render_footer_side_by_side(
     let hint_widget = Paragraph::new(hint.to_string()).style(style);
     frame.render_widget(hint_widget, footer_chunks[0]);
 
-    render_footer_right_segment(
-        frame,
-        footer_chunks[1],
-        right_text,
-        right_is_selection,
-        style,
-    );
+    render_footer_right_segment(frame, footer_chunks[1], right_text, right_is_copied, style);
 }
 
 fn render_footer_stacked(
@@ -306,7 +305,7 @@ fn render_footer_stacked(
     area: ratatui::layout::Rect,
     hint: &str,
     right_text: &str,
-    right_is_selection: bool,
+    right_is_copied: bool,
     style: ratatui::style::Style,
 ) {
     let width = area.width as usize;
@@ -321,11 +320,61 @@ fn render_footer_stacked(
     let hint_widget = Paragraph::new(hint_lines.join("\n")).style(style);
     frame.render_widget(hint_widget, stack_chunks[0]);
 
-    render_footer_right_segment(
-        frame,
-        stack_chunks[1],
-        right_text,
-        right_is_selection,
-        style,
-    );
+    render_footer_right_segment(frame, stack_chunks[1], right_text, right_is_copied, style);
+}
+
+/// Draw a reverse-video highlight over the cells covered by `sel`.
+///
+/// Overwrites only the background+foreground modifier of cells in the
+/// selection range; text content is preserved (ratatui buffer merge).
+fn draw_selection_highlight(frame: &mut Frame, sel: &Selection) {
+    let ((top_row, top_col), (bot_row, bot_col)) = sel.normalized();
+    let buf = frame.buffer_mut();
+    let area = *buf.area();
+    let style = theme::body_selection_style();
+
+    for r in top_row..=bot_row {
+        if r >= area.height {
+            break;
+        }
+        let (col_start, col_end) =
+            highlighted_col_span(r, top_row, bot_row, top_col, bot_col, &area);
+        apply_highlight_to_row(buf, r, col_start, col_end, style);
+    }
+}
+
+/// Compute the (start, end) column range to highlight on a single row.
+fn highlighted_col_span(
+    row: u16,
+    top_row: u16,
+    bot_row: u16,
+    top_col: u16,
+    bot_col: u16,
+    area: &ratatui::layout::Rect,
+) -> (u16, u16) {
+    let col_start = if row == top_row { top_col } else { 0 };
+    let col_end = if row == bot_row {
+        bot_col
+    } else {
+        area.width.saturating_sub(1)
+    };
+    (col_start, col_end)
+}
+
+/// Apply the highlight style to cells in [col_start..=col_end] on the given row.
+fn apply_highlight_to_row(
+    buf: &mut ratatui::buffer::Buffer,
+    row: u16,
+    col_start: u16,
+    col_end: u16,
+    style: ratatui::style::Style,
+) {
+    for c in col_start..=col_end {
+        if c >= buf.area().width {
+            break;
+        }
+        if let Some(cell) = buf.cell_mut((c, row)) {
+            cell.set_style(style);
+        }
+    }
 }

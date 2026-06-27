@@ -113,10 +113,8 @@ pub enum Cmd {
         url: String,
         name: String,
     },
-    /// Enable or disable crossterm mouse capture in the terminal.
-    ///
-    /// true = capture ON (normal browsing); false = capture OFF (native text selection).
-    SetMouseCapture(bool),
+    /// Copy the given text to the system clipboard (interpreted by the shell via arboard).
+    CopyToClipboard(String),
 }
 
 /// Structured payload sent by spawn_load_detail phase 1.
@@ -225,6 +223,14 @@ pub const PAGE_SIZE: usize = 10;
 /// Breakdown: 1 top border + 1 bottom border + 1 header bar row + 1 footer bar row.
 const DETAIL_CHROME_ROWS: u16 = 4;
 
+/// Left-border columns added by the ratatui `Block::borders(ALL)` that `render_content`
+/// wraps the body behind. This border is NOT part of the boxed panel lines stored in
+/// `Screen::Detail.lines`; those lines carry their own `│ … │` chrome counted in
+/// `BODY_LEFT_CHROME_COLS`. The full absolute-frame → inner-content left offset is
+/// `DETAIL_CONTENT_BLOCK_BORDER_COLS + BODY_LEFT_CHROME_COLS` (total 3), matching
+/// the offset used by `body_link_cmd_at`.
+const DETAIL_CONTENT_BLOCK_BORDER_COLS: u16 = 1;
+
 /// True maximum scroll offset for the Detail screen.
 ///
 /// Uses the width-aware wrapped asset-panel height (same formula as `draw_detail`)
@@ -309,6 +315,35 @@ fn digit_to_asset_index(c: char) -> Option<usize> {
         .and_then(|d| if d >= 1 { Some((d - 1) as usize) } else { None })
 }
 
+/// An active text selection anchored at a body cell and extended by drag.
+///
+/// Coordinates are (viewport_row, viewport_col) — terminal cell positions
+/// within the full frame. Anchor is set on mouse-down; cursor tracks drag.
+/// Text is extracted when the button is released.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Selection {
+    pub anchor: (u16, u16),
+    pub cursor: (u16, u16),
+}
+
+impl Selection {
+    /// Whether the selection spans more than a single cell (i.e. a real drag).
+    pub fn is_drag(&self) -> bool {
+        self.anchor != self.cursor
+    }
+
+    /// Return (top_left, bottom_right) in reading order (row-major).
+    pub fn normalized(&self) -> ((u16, u16), (u16, u16)) {
+        let (ar, ac) = self.anchor;
+        let (cr, cc) = self.cursor;
+        if (ar, ac) <= (cr, cc) {
+            ((ar, ac), (cr, cc))
+        } else {
+            ((cr, cc), (ar, ac))
+        }
+    }
+}
+
 /// Application model — the single source of truth for the pure TEA layer.
 pub struct Model {
     pub stack: Vec<Screen>,
@@ -325,9 +360,10 @@ pub struct Model {
     /// ISO wall-clock string (YYYY-MM-DDTHH:MM:SSZ) of when the currently-displayed data was loaded.
     /// None until the first load completes; stamped exclusively by the shell via Msg payloads.
     pub last_loaded: Option<String>,
-    /// When true, mouse capture is OFF so the terminal can perform native text selection.
-    /// Toggled by Msg::ToggleSelection; the shell reacts to Cmd::SetMouseCapture.
-    pub selection_mode: bool,
+    /// Active text selection driven by mouse press/drag; cleared on plain click or new navigation.
+    pub selection: Option<Selection>,
+    /// Set by the shell after a successful clipboard write; cleared at the start of the next selection.
+    pub copied_feedback: bool,
 }
 
 /// All messages the update function understands.
@@ -338,14 +374,26 @@ pub enum Msg {
     ScrollDown,
     PageUp,
     PageDown,
+    /// Left mouse button pressed (Down event).
+    ///
+    /// Modifiers are carried as plain data; the pure update discriminates
+    /// between selection (unmodified) and activation (Ctrl/Cmd/Super) without
+    /// touching the terminal.
     Click {
         column: u16,
         row: u16,
-        /// Keyboard modifiers held when the mouse button was pressed.
-        ///
-        /// Carried as plain data so `update` stays pure. The shell reads
-        /// these from `crossterm::event::MouseEvent::modifiers` and forwards
-        /// them unchanged; the pure layer never touches the terminal.
+        modifiers: crossterm::event::KeyModifiers,
+    },
+    /// Left mouse button dragged (moved while held).
+    Drag {
+        column: u16,
+        row: u16,
+        modifiers: crossterm::event::KeyModifiers,
+    },
+    /// Left mouse button released.
+    MouseUp {
+        column: u16,
+        row: u16,
         modifiers: crossterm::event::KeyModifiers,
     },
     Select,
@@ -376,8 +424,6 @@ pub enum Msg {
     AssetActionResult,
     /// 'd' key: arm the download-next-digit flag on the Detail screen.
     TogglePendingDownload,
-    /// 's' key: toggle selection mode (disables mouse capture for native text selection).
-    ToggleSelection,
     /// Background user directory resolved a display name for the header.
     /// Sets model.header.name when it was previously absent.
     HeaderNameResolved(String),
@@ -407,7 +453,8 @@ impl Model {
             viewport: (0, 0),
             click_targets: vec![],
             last_loaded: None,
-            selection_mode: false,
+            selection: None,
+            copied_feedback: false,
         }
     }
 
@@ -478,6 +525,16 @@ pub fn update(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
             row,
             modifiers,
         } => handle_click(model, column, row, modifiers),
+        Msg::Drag {
+            column,
+            row,
+            modifiers,
+        } => handle_drag(model, column, row, modifiers),
+        Msg::MouseUp {
+            column,
+            row,
+            modifiers,
+        } => handle_mouse_up(model, column, row, modifiers),
         Msg::Select => handle_select(model),
         Msg::Back => (handle_back(model), vec![]),
         Msg::Quit => (handle_quit(model), vec![]),
@@ -492,7 +549,6 @@ pub fn update(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
         Msg::UserMapResolved(map) => (handle_user_map_resolved(model, map), vec![]),
         Msg::AssetOpen(digit) => handle_asset_open(model, digit),
         Msg::TogglePendingDownload => (handle_toggle_pending_download(model), vec![]),
-        Msg::ToggleSelection => handle_toggle_selection(model),
         Msg::AssetActionResult => (model, vec![]),
         Msg::HeaderNameResolved(name) => (handle_header_name_resolved(model, name), vec![]),
     }
@@ -594,10 +650,191 @@ fn handle_click_detail(
     row: u16,
     modifiers: crossterm::event::KeyModifiers,
 ) -> (Model, Vec<Cmd>) {
-    if let Some(cmd) = body_link_cmd_at(&model, column, row, modifiers) {
-        return (model, vec![cmd]);
+    use crossterm::event::KeyModifiers;
+    let has_modifier =
+        modifiers.contains(KeyModifiers::CONTROL) || modifiers.contains(KeyModifiers::SUPER);
+
+    if has_modifier {
+        // Modified press: reserved for D1c link activation (body_link_cmd_at will check again).
+        if let Some(cmd) = body_link_cmd_at(&model, column, row, modifiers) {
+            return (model, vec![cmd]);
+        }
+        return asset_panel_cmd_at(model, row);
     }
+
+    // Unmodified press on the body area: start a selection, clear any prior copied feedback.
+    if is_in_body_area(&model, row) {
+        let mut model = model;
+        model.copied_feedback = false;
+        model.selection = Some(Selection {
+            anchor: (row, column),
+            cursor: (row, column),
+        });
+        return (model, vec![]);
+    }
+
+    // Unmodified press outside the body (e.g. asset panel): clear selection, pass through.
+    let mut model = model;
+    model.selection = None;
     asset_panel_cmd_at(model, row)
+}
+
+/// Return true when `row` falls within the scrollable body text area of the Detail screen.
+fn is_in_body_area(model: &Model, row: u16) -> bool {
+    use crate::tui::screens::asset_panel_render_height;
+    let Some(Screen::Detail { assets, .. }) = model.top() else {
+        return false;
+    };
+    let (viewport_cols, viewport_rows) = model.viewport;
+    let text_top: u16 = 2;
+    let inner_width = viewport_cols.saturating_sub(2) as usize;
+    let panel_h = asset_panel_render_height(assets, inner_width);
+    let content_text_height =
+        viewport_rows.saturating_sub(DETAIL_CHROME_ROWS.saturating_add(panel_h));
+    row >= text_top && row < text_top + content_text_height
+}
+
+fn handle_drag(
+    mut model: Model,
+    column: u16,
+    row: u16,
+    modifiers: crossterm::event::KeyModifiers,
+) -> (Model, Vec<Cmd>) {
+    use crossterm::event::KeyModifiers;
+    let has_modifier =
+        modifiers.contains(KeyModifiers::CONTROL) || modifiers.contains(KeyModifiers::SUPER);
+    if has_modifier {
+        return (model, vec![]);
+    }
+    if let Some(ref mut sel) = model.selection {
+        sel.cursor = (row, column);
+    }
+    (model, vec![])
+}
+
+fn handle_mouse_up(
+    mut model: Model,
+    column: u16,
+    row: u16,
+    modifiers: crossterm::event::KeyModifiers,
+) -> (Model, Vec<Cmd>) {
+    use crossterm::event::KeyModifiers;
+    let has_modifier =
+        modifiers.contains(KeyModifiers::CONTROL) || modifiers.contains(KeyModifiers::SUPER);
+    if has_modifier {
+        return (model, vec![]);
+    }
+
+    let sel = match model.selection.take() {
+        Some(s) => s,
+        None => return (model, vec![]),
+    };
+
+    if !sel.is_drag() {
+        return (model, vec![]);
+    }
+
+    let text = extract_selected_text(&model, &sel);
+    if text.is_empty() {
+        return (model, vec![]);
+    }
+
+    model.selection = Some(Selection {
+        anchor: sel.anchor,
+        cursor: (row, column),
+    });
+
+    (model, vec![Cmd::CopyToClipboard(text)])
+}
+
+/// Extract the text covered by `sel` from the Detail body lines.
+///
+/// Strips the box chrome (│ border + HPAD) from each logical line before slicing,
+/// so the copied text is chrome-free and char-correct (Sc.8, Sc.9).
+/// Coordinates are viewport (row, col); the body area starts at text_top=2.
+/// Returns text in reading order (anchor normalized to be before cursor).
+fn extract_selected_text(model: &Model, sel: &Selection) -> String {
+    use crate::tui::screens::asset_panel_render_height;
+
+    let Screen::Detail {
+        lines,
+        assets,
+        offset,
+        ..
+    } = model.top().expect("detail screen")
+    else {
+        return String::new();
+    };
+
+    let (viewport_cols, viewport_rows) = model.viewport;
+    let text_top: u16 = 2;
+    let inner_width = viewport_cols.saturating_sub(2) as usize;
+    let panel_h = asset_panel_render_height(assets, inner_width);
+    let content_text_height =
+        viewport_rows.saturating_sub(DETAIL_CHROME_ROWS.saturating_add(panel_h));
+
+    let ((top_row, top_col), (bot_row, bot_col)) = sel.normalized();
+
+    let mut parts: Vec<String> = Vec::new();
+
+    for vp_row in top_row..=bot_row {
+        if vp_row < text_top || vp_row >= text_top + content_text_height {
+            continue;
+        }
+        let line_idx = *offset + (vp_row - text_top) as usize;
+        let Some(line) = lines.get(line_idx) else {
+            continue;
+        };
+        let chunk = extract_line_slice(line, vp_row, top_row, bot_row, top_col, bot_col);
+        if !chunk.is_empty() {
+            parts.push(chunk);
+        }
+    }
+
+    parts.join("\n")
+}
+
+use crate::render::BODY_LEFT_CHROME_COLS;
+
+/// Extract the relevant text slice from a single boxed body line.
+///
+/// Maps an absolute frame column from a `Selection` to an inner-content display column
+/// by subtracting the full left offset: `DETAIL_CONTENT_BLOCK_BORDER_COLS` (ratatui
+/// `Block::borders(ALL)` left edge) plus `BODY_LEFT_CHROME_COLS` (panel `│` + HPAD),
+/// totalling 3 — the same offset used by `body_link_cmd_at` so highlight and copy
+/// resolve the same column to the same content position.
+///
+/// Delegates to `render::slice_by_display_cols` which walks chars accumulating display
+/// width, correctly handling double-width chars (emoji, CJK). Trailing padding spaces
+/// added by `fit_to_display_width` are stripped before slicing.
+fn extract_line_slice(
+    line: &str,
+    vp_row: u16,
+    top_row: u16,
+    bot_row: u16,
+    top_col: u16,
+    bot_col: u16,
+) -> String {
+    let inner = crate::render::box_inner_content_pub(line).unwrap_or("");
+    let trimmed = inner.trim_end_matches(' ');
+    let inner_display_width = crate::render::display_width(trimmed);
+
+    let left_offset = DETAIL_CONTENT_BLOCK_BORDER_COLS as usize + BODY_LEFT_CHROME_COLS;
+    let start_inner_col = if vp_row == top_row {
+        (top_col as usize).saturating_sub(left_offset)
+    } else {
+        0
+    };
+    let end_inner_col = if vp_row == bot_row {
+        (bot_col as usize)
+            .saturating_sub(left_offset)
+            .saturating_add(1)
+            .min(inner_display_width)
+    } else {
+        inner_display_width
+    };
+
+    crate::render::slice_by_display_cols(trimmed, start_inner_col, end_inner_col)
 }
 
 /// Try to resolve a body-link click in the Detail content text area.
@@ -1009,12 +1246,6 @@ fn handle_toggle_pending_download(mut model: Model) -> Model {
     model
 }
 
-fn handle_toggle_selection(mut model: Model) -> (Model, Vec<Cmd>) {
-    model.selection_mode = !model.selection_mode;
-    let capture_on = !model.selection_mode;
-    (model, vec![Cmd::SetMouseCapture(capture_on)])
-}
-
 fn handle_header_name_resolved(mut model: Model, name: String) -> Model {
     model.header.name = Some(name);
     model
@@ -1061,7 +1292,8 @@ pub fn init_mine(header: Header, seed: Option<Vec<MineTableRow>>) -> (Model, Vec
         viewport: (0, 0),
         click_targets: vec![],
         last_loaded: None,
-        selection_mode: false,
+        selection: None,
+        copied_feedback: false,
     };
     (model, vec![Cmd::LoadMineTasks])
 }

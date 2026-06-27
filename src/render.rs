@@ -84,6 +84,24 @@ fn box_inner_content(s: &str) -> Option<&str> {
     Some(&s[PREFIX_BYTES..len - SUFFIX_BYTES])
 }
 
+/// Public accessor for `box_inner_content` used by callers outside this module.
+///
+/// Returns the inner content of a box line (stripping `│ ` prefix and ` │` suffix),
+/// or `None` when `s` is not a box content line.
+pub fn box_inner_content_pub(s: &str) -> Option<&str> {
+    box_inner_content(s)
+}
+
+/// Display columns consumed by the panel-box left chrome: the `│` border (1 col) plus
+/// `PANEL_HPAD` (1 space), giving 2 total.
+///
+/// This is the panel-chrome term only. The full absolute-frame → inner-content left
+/// offset also includes the ratatui `Block::borders(ALL)` left border (1 col) drawn by
+/// `render_content`; that additional column is `DETAIL_CONTENT_BLOCK_BORDER_COLS` in
+/// `model.rs`. Add both terms when converting an absolute frame column to an
+/// inner-content column.
+pub const BODY_LEFT_CHROME_COLS: usize = 1 + PANEL_HPAD;
+
 /// Map a clicked (line_idx, char_col) to the start of its logical wrap group and the
 /// column within the joined group content.
 ///
@@ -774,6 +792,40 @@ const PANEL_VPAD: usize = 1;
 
 pub(crate) fn display_width(s: &str) -> usize {
     UnicodeWidthStr::width(s)
+}
+
+/// Return the substring of `s` that occupies the half-open DISPLAY-column window
+/// `[start_col, end_col)`.
+///
+/// Double-width chars (emoji, CJK) are never split: a char whose first display
+/// column falls within the window is included in full. `end_col` is clamped to
+/// `display_width(s)` so a window past the end simply returns the tail of the
+/// string. An empty window (`start_col >= end_col`) returns an empty string.
+///
+/// This is the single source of truth for mapping display columns to char
+/// boundaries. It must be used wherever a display-column range is converted to a
+/// text slice — never treat a display column as a char index.
+pub fn slice_by_display_cols(s: &str, start_col: usize, end_col: usize) -> String {
+    if start_col >= end_col {
+        return String::new();
+    }
+    let end_col = end_col.min(display_width(s));
+    if start_col >= end_col {
+        return String::new();
+    }
+    let mut result = String::new();
+    let mut acc = 0usize;
+    for ch in s.chars() {
+        let cw = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+        if acc >= end_col {
+            break;
+        }
+        if acc >= start_col {
+            result.push(ch);
+        }
+        acc += cw;
+    }
+    result
 }
 
 /// Format a prefixed asset row with a hanging indent on continuation lines.

@@ -92,6 +92,39 @@ down on the body, When pressed (and optionally dragged), Then no selection is st
 (the modified gesture is reserved for D1c link activation), so selecting and activating
 never collide.
 
+**Scenario 8: copy is the logical text, not the rendered chrome** — Given a selection over
+the detail body, When copied, Then the clipboard text contains ONLY the body's logical
+text — no box-drawing border characters (`│`, `─`), no panel padding — and every character
+is copied intact: accented pt-BR characters (á, ç, ã, é, …) are never byte-sliced
+mid-codepoint, AND **double-width characters (emoji like `🔹`, CJK) do not shift or eat
+neighbouring letters**, AND **no character is eaten at the start of a selection that begins
+mid-line** (the first highlighted cell is the first copied character — copy and highlight
+share one column origin). The column→text mapping (a) converts **display columns** to
+character boundaries by accumulating each character's **display width** (the same width the
+box layout uses), never treating a display column as a character index; and (b) maps the
+**absolute frame column** stored in the selection to an inner-content column by subtracting
+the **full left chrome** the body is drawn behind — the ratatui content `Block` border (1
+col) **plus** the panel box `│` and its HPAD (`BODY_LEFT_CHROME_COLS`) — i.e. the **same
+total offset the Ctrl/Cmd+click link-activation path uses** (`body_link_cmd_at`). The
+highlight and the extraction MUST resolve a selection column to the same content position;
+they cannot diverge. *(Reported three times: app-managed selection exists because
+terminal-native selection grabs the `│` borders; a title beginning with the 2-column emoji
+`🔹` ate the following letter when display columns were mis-read as char indices; and a meta
+row `Tarefa  722-75347` copied as `22-75347` — the leading `7` eaten — because the extract
+subtracted only the panel chrome and omitted the content block's border, so it started one
+column too far right while the highlight was correct.)*
+
+**Scenario 9: no eaten characters across a wrap seam** — Given a logical line long enough
+to wrap across two or more rendered rows, When a selection covers it and is copied, Then
+the copied text is the FULL logical-line text with no characters dropped or duplicated at
+the wrap boundaries (the extraction reads the pre-wrap logical line, not the rendered
+fragments).
+
+**Scenario 10: selection is scroll-stable** — Given a selection over a logical span, When
+the body is scrolled, Then the selection stays anchored to the SAME logical text (its
+on-screen highlight tracks the content), and the copied text is that logical span —
+scrolling never changes or extends what is copied.
+
 ## Test Design
 
 Selection state transitions and text extraction are pure and unit-tested on
@@ -109,6 +142,9 @@ buffer. Each row names what it proves.
 | Copy failure safe | unit/integration | 5 | no panic; footer note | graceful degrade |
 | Toggle removed | unit | 6 | `s` emits no capture Cmd | V3 retired |
 | Modifier press no select | unit | 7 | Ctrl/Cmd press starts no selection | select/activate disjoint |
+| Chrome-free + UTF-8 copy | unit | 8 | copied text has no `│`/padding; accents intact; a leading double-width emoji (`🔹`) eats no following letter; a meta row `Tarefa  722-75347` selected from the value start copies `722-75347` with no eaten leading char | logical-text, display-width column mapping, absolute-frame→inner-content origin shared with the highlight/link path |
+| No eaten chars on wrap | unit | 9 | wrapped logical line copies in full | pre-wrap logical extraction |
+| Scroll-stable selection | unit | 10 | scroll keeps the same logical span copied | logical-coord selection |
 
 ## Related
 

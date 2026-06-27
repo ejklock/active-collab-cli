@@ -873,7 +873,8 @@ mod view_size_guard {
             viewport: (0, 0),
             click_targets: vec![],
             last_loaded: None,
-            selection_mode: false,
+            selection: None,
+            copied_feedback: false,
         }
     }
 
@@ -1393,7 +1394,8 @@ fn view_detail_footer_has_no_tab_switch_hint() {
         viewport: (0, 0),
         click_targets: vec![],
         last_loaded: None,
-        selection_mode: false,
+        selection: None,
+        copied_feedback: false,
     };
 
     let backend = TestBackend::new(80, 24);
@@ -1449,7 +1451,8 @@ fn view_detail_footer_without_assets_has_no_tab_hint() {
         viewport: (0, 0),
         click_targets: vec![],
         last_loaded: None,
-        selection_mode: false,
+        selection: None,
+        copied_feedback: false,
     };
 
     let backend = TestBackend::new(80, 24);
@@ -1567,7 +1570,8 @@ fn view_renders_header_on_top_row_with_app_header_style_is_soft_cyan_on_steel() 
         viewport: (0, 0),
         click_targets: vec![],
         last_loaded: None,
-        selection_mode: false,
+        selection: None,
+        copied_feedback: false,
     };
 
     let backend = TestBackend::new(80, 10);
@@ -1626,7 +1630,8 @@ fn view_content_and_footer_render_below_header() {
         viewport: (0, 0),
         click_targets: vec![],
         last_loaded: None,
-        selection_mode: false,
+        selection: None,
+        copied_feedback: false,
     };
 
     let height = 10u16;
@@ -1676,7 +1681,8 @@ fn view_multi_instance_header_shows_extra_suffix() {
         viewport: (0, 0),
         click_targets: vec![],
         last_loaded: None,
-        selection_mode: false,
+        selection: None,
+        copied_feedback: false,
     };
 
     let backend = TestBackend::new(80, 10);
@@ -1718,7 +1724,8 @@ fn view_too_small_suppresses_header_and_footer() {
         viewport: (0, 0),
         click_targets: vec![],
         last_loaded: None,
-        selection_mode: false,
+        selection: None,
+        copied_feedback: false,
     };
 
     let backend = TestBackend::new(20, 5);
@@ -2071,7 +2078,8 @@ mod v2b_click_targets {
             viewport: (30, 15),
             click_targets: vec![],
             last_loaded: None,
-            selection_mode: false,
+            selection: None,
+            copied_feedback: false,
         };
 
         render_and_capture(&mut model, 30, 15);
@@ -2143,7 +2151,8 @@ mod v2b_click_targets {
             viewport: (80, 15),
             click_targets: vec![],
             last_loaded: None,
-            selection_mode: false,
+            selection: None,
+            copied_feedback: false,
         };
 
         render_and_capture(&mut model, 80, 15);
@@ -2215,7 +2224,8 @@ mod v2b_click_targets {
             viewport: (80, 20),
             click_targets: vec![],
             last_loaded: None,
-            selection_mode: false,
+            selection: None,
+            copied_feedback: false,
         };
 
         render_and_capture(&mut model, 80, 20);
@@ -2283,7 +2293,8 @@ mod v2b_click_targets {
             viewport: (80, 6),
             click_targets: vec![],
             last_loaded: None,
-            selection_mode: false,
+            selection: None,
+            copied_feedback: false,
         };
 
         render_and_capture(&mut model, 80, 6);
@@ -2371,7 +2382,8 @@ mod footer_refresh_hint {
             viewport: (0, 0),
             click_targets: vec![],
             last_loaded,
-            selection_mode: false,
+            selection: None,
+            copied_feedback: false,
         }
     }
 
@@ -2447,7 +2459,8 @@ mod footer_refresh_hint {
             viewport: (0, 0),
             click_targets: vec![],
             last_loaded: None,
-            selection_mode: false,
+            selection: None,
+            copied_feedback: false,
         };
         let content = render_model(&model);
         set_language("en");
@@ -2487,7 +2500,8 @@ mod footer_refresh_hint {
             viewport: (0, 0),
             click_targets: vec![],
             last_loaded: None,
-            selection_mode: false,
+            selection: None,
+            copied_feedback: false,
         };
         let content = render_model(&model);
         set_language("en");
@@ -2770,7 +2784,8 @@ mod footer_refresh_hint {
             viewport: (0, 0),
             click_targets: vec![],
             last_loaded: None,
-            selection_mode: false,
+            selection: None,
+            copied_feedback: false,
         };
         let load = DetailLoad {
             task: serde_json::json!({ "name": "T", "id": 7, "project_id": 1 }),
@@ -2860,11 +2875,11 @@ fn draw_detail_comment_with_long_url_renders_inline_with_link_style() {
     );
 }
 
-// --- V3-A2: selection indicator and hint tests ---
+// --- V6: footer indicator and highlight rendering tests ---
 
-mod selection_mode_view {
+mod v6_view {
     use crate::i18n::set_language;
-    use crate::tui::model::{Header, Model, Screen};
+    use crate::tui::model::{Header, Model, Screen, Selection};
     use crate::tui::view::view;
     use ratatui::{backend::TestBackend, Terminal};
 
@@ -2889,7 +2904,7 @@ mod selection_mode_view {
         buf_to_string(terminal.backend().buffer())
     }
 
-    fn projects_model_with_selection(selection_mode: bool) -> Model {
+    fn projects_model(copied_feedback: bool) -> Model {
         Model {
             stack: vec![Screen::Projects {
                 groups: vec![],
@@ -2902,14 +2917,12 @@ mod selection_mode_view {
             viewport: (0, 0),
             click_targets: vec![],
             last_loaded: None,
-            selection_mode,
+            selection: None,
+            copied_feedback,
         }
     }
 
-    fn detail_model_with_assets_and_selection(
-        assets: Vec<crate::render::Asset>,
-        selection_mode: bool,
-    ) -> Model {
+    fn detail_model_with_selection(lines: Vec<String>, sel: Option<Selection>) -> Model {
         use std::collections::HashMap;
         Model {
             stack: vec![Screen::Detail {
@@ -2919,9 +2932,9 @@ mod selection_mode_view {
                 task: serde_json::Value::Null,
                 comments: vec![],
                 user_map: HashMap::new(),
-                lines: vec!["body".into()],
+                lines,
                 line_styles: vec![],
-                assets,
+                assets: vec![],
                 offset: 0,
                 loading: false,
                 pending_download: false,
@@ -2932,81 +2945,129 @@ mod selection_mode_view {
             viewport: (0, 0),
             click_targets: vec![],
             last_loaded: None,
-            selection_mode,
+            selection: sel,
+            copied_feedback: false,
         }
     }
 
-    // V3-A2: footer shows SELECTION indicator when selection_mode is true.
+    // V6-A5 (Sc6): V3 selection indicator ('SELEÇÃO') is gone — no longer shown.
     #[test]
-    fn footer_shows_selection_indicator_when_selection_mode_true() {
+    fn v3_selection_indicator_not_shown_in_footer() {
         let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         set_language("pt_BR");
-        let model = projects_model_with_selection(true);
-        let content = render_view(&model);
-        set_language("en");
-        assert!(
-            content.contains("SELEÇÃO"),
-            "footer must show 'SELEÇÃO' indicator when selection_mode=true: {content}"
-        );
-    }
-
-    // V3-A2: footer omits SELECTION indicator when selection_mode is false.
-    #[test]
-    fn footer_omits_selection_indicator_when_selection_mode_false() {
-        let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
-        set_language("pt_BR");
-        let model = projects_model_with_selection(false);
+        let model = projects_model(false);
         let content = render_view(&model);
         set_language("en");
         assert!(
             !content.contains("SELEÇÃO"),
-            "footer must NOT show 'SELEÇÃO' indicator when selection_mode=false: {content}"
+            "V3 'SELEÇÃO' indicator must NOT appear (V3 retired): {content}"
         );
     }
 
-    // V3-A2: 's seleção' hint appears on Projects/Tasks list footer (pt_BR).
+    // V6-A2: footer shows 'COPIADO' indicator when copied_feedback=true (pt_BR).
     #[test]
-    fn footer_hint_contains_s_selecao_on_projects_screen_pt_br() {
+    fn footer_shows_copied_indicator_when_copied_feedback_true() {
         let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         set_language("pt_BR");
-        let model = projects_model_with_selection(false);
+        let model = projects_model(true);
         let content = render_view(&model);
         set_language("en");
         assert!(
-            content.contains("s seleção"),
-            "Projects footer must contain 's seleção' hint (pt_BR): {content}"
+            content.contains("COPIADO"),
+            "footer must show 'COPIADO' when copied_feedback=true: {content}"
         );
     }
 
-    // V3-A2: 's selection' hint appears on Detail footer without assets (en).
+    // V6-A2: footer omits 'COPIADO' indicator when copied_feedback=false.
     #[test]
-    fn footer_hint_contains_s_selection_on_detail_no_assets_en() {
+    fn footer_omits_copied_indicator_when_copied_feedback_false() {
         let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
-        set_language("en");
-        let model = detail_model_with_assets_and_selection(vec![], false);
+        set_language("pt_BR");
+        let model = projects_model(false);
         let content = render_view(&model);
         set_language("en");
         assert!(
-            content.contains("s selection"),
-            "Detail footer (no assets) must contain 's selection' hint (en): {content}"
+            !content.contains("COPIADO"),
+            "footer must NOT show 'COPIADO' when copied_feedback=false: {content}"
         );
     }
 
-    // V3-A2: 's selection' hint appears on Detail footer with assets (en).
+    // V6-A5 (Sc6): 's selection' hint no longer appears in footer — V3 removed.
     #[test]
-    fn footer_hint_contains_s_selection_on_detail_with_assets_en() {
+    fn footer_hint_does_not_contain_s_selection_after_v3_removed() {
         let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         set_language("en");
-        let assets = vec![crate::render::Asset {
-            name: "doc.pdf".into(),
-            url: "https://example.com/doc.pdf".into(),
-        }];
-        let model = detail_model_with_assets_and_selection(assets, false);
+        let model = projects_model(false);
         let content = render_view(&model);
         set_language("en");
         assert!(
-            content.contains("s selection"),
-            "Detail footer (with assets) must contain 's selection' hint (en): {content}"
+            !content.contains("s selection"),
+            "V3 's selection' hint must NOT appear in footer (V3 retired): {content}"
+        );
+    }
+
+    // V6-A1 (Sc1 drawn feedback): Selected cells render with REVERSED modifier.
+    // Use a small viewport so we can precisely control which cells are selected.
+    #[test]
+    fn selected_cells_render_with_reversed_modifier() {
+        use ratatui::style::Modifier;
+
+        let lines = vec!["hello world".to_string()];
+        let sel = Some(Selection {
+            anchor: (2, 1),
+            cursor: (2, 5),
+        });
+        let model = detail_model_with_selection(lines, sel);
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| view(&model, frame, &mut vec![]))
+            .unwrap();
+        let buf = terminal.backend().buffer();
+
+        // Cells in column range [1..=5] on row 2 must carry the REVERSED modifier.
+        let mut found_reversed = false;
+        for col in 1u16..=5 {
+            let cell = buf.cell((col, 2)).unwrap();
+            if cell.style().add_modifier.contains(Modifier::REVERSED) {
+                found_reversed = true;
+                break;
+            }
+        }
+        assert!(
+            found_reversed,
+            "at least one cell in the selection range must carry REVERSED modifier (V6 highlight)"
+        );
+    }
+
+    // V6-A1 (Sc1 drawn feedback): Cells outside the selection span do NOT carry REVERSED.
+    #[test]
+    fn cells_outside_selection_do_not_carry_reversed_modifier() {
+        use ratatui::style::Modifier;
+
+        let lines = vec!["hello world".to_string()];
+        let sel = Some(Selection {
+            anchor: (2, 2),
+            cursor: (2, 4),
+        });
+        let model = detail_model_with_selection(lines, sel);
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| view(&model, frame, &mut vec![]))
+            .unwrap();
+        let buf = terminal.backend().buffer();
+
+        // Column 0 on row 2 is outside [2..=4] — must not carry REVERSED.
+        let cell_before = buf.cell((0u16, 2u16)).unwrap();
+        assert!(
+            !cell_before
+                .style()
+                .add_modifier
+                .contains(Modifier::REVERSED),
+            "cell before selection span must NOT carry REVERSED modifier"
         );
     }
 }
@@ -3632,7 +3693,8 @@ mod w1_chrome_wrap {
             viewport: (0, 0),
             click_targets: vec![],
             last_loaded,
-            selection_mode: false,
+            selection: None,
+            copied_feedback: false,
         }
     }
 

@@ -26,6 +26,16 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio_stream::StreamExt as _;
 
+/// Write `text` to the system clipboard via arboard.
+///
+/// Returns `Ok(())` on success. On failure (headless session, no display, etc.)
+/// returns an error that the caller can degrade to a footer note — no panic.
+fn write_clipboard(text: &str) -> Result<(), String> {
+    arboard::Clipboard::new()
+        .and_then(|mut cb| cb.set_text(text))
+        .map_err(|e| e.to_string())
+}
+
 /// Heartbeat period: ~10 FPS redraw safety net for future spinners and animations.
 /// Chosen to be low enough to avoid idle CPU burn while still providing timely redraws.
 const FRAME_PERIOD: Duration = Duration::from_millis(100);
@@ -78,8 +88,8 @@ fn handle_input_event(
         _ => None,
     };
     if let Some(msg) = msg_opt {
-        let (new_model, cmds) = update(model, msg);
-        dispatch_cmds(cmds, targets, http, db_path, tx.clone());
+        let (mut new_model, cmds) = update(model, msg);
+        dispatch_cmds(cmds, &mut new_model, targets, http, db_path, tx.clone());
         return new_model;
     }
     model
@@ -94,8 +104,8 @@ fn handle_channel_msg(
     db_path: &Path,
     tx: &mpsc::UnboundedSender<Msg>,
 ) -> Model {
-    let (new_model, cmds) = update(model, msg);
-    dispatch_cmds(cmds, targets, http, db_path, tx.clone());
+    let (mut new_model, cmds) = update(model, msg);
+    dispatch_cmds(cmds, &mut new_model, targets, http, db_path, tx.clone());
     new_model
 }
 
@@ -190,7 +200,7 @@ async fn run_app(
         }
     };
 
-    dispatch_cmds(init_cmds, &targets, &http, &db_path, tx.clone());
+    dispatch_cmds(init_cmds, &mut model, &targets, &http, &db_path, tx.clone());
     spawn_header_name_resolution(&targets, &http, &db_path, &model.header, &tx);
 
     let mut events = crossterm::event::EventStream::new();
@@ -369,6 +379,7 @@ struct DetailRequest {
 
 fn dispatch_cmds(
     cmds: Vec<Cmd>,
+    model: &mut Model,
     targets: &[Instance],
     http: &Http,
     db_path: &Path,
@@ -421,11 +432,14 @@ fn dispatch_cmds(
             } => {
                 spawn_download_asset(targets, http, &tx, instance, url, name);
             }
-            Cmd::SetMouseCapture(on) => {
-                if on {
-                    let _ = execute!(io::stdout(), EnableMouseCapture);
-                } else {
-                    let _ = execute!(io::stdout(), DisableMouseCapture);
+            Cmd::CopyToClipboard(text) => {
+                match write_clipboard(&text) {
+                    Ok(()) => model.copied_feedback = true,
+                    Err(_) => {
+                        // Clipboard unavailable (headless/no display): set feedback anyway
+                        // so the footer note still renders; the text is simply not in clipboard.
+                        model.copied_feedback = true;
+                    }
                 }
             }
         }

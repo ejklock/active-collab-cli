@@ -65,13 +65,19 @@ pub fn badge_style() -> Style {
     Style::default().fg(AMBER).add_modifier(Modifier::BOLD)
 }
 
-/// Selection mode indicator in the footer — near-black on amber, bold.
+/// Body text selection highlight — reversed foreground/background (REVERSED modifier).
 ///
-/// Matches the row selection palette so the indicator is visually cohesive.
-pub fn selection_indicator_style() -> Style {
+/// Reverse video is terminal-portable and provides visible contrast without
+/// requiring foreground/background color knowledge of the underlying cell.
+pub fn body_selection_style() -> Style {
+    Style::default().add_modifier(Modifier::REVERSED)
+}
+
+/// Copied feedback indicator in the footer — near-black on muted green, bold.
+pub fn copied_indicator_style() -> Style {
     Style::default()
         .fg(NEAR_BLACK)
-        .bg(AMBER)
+        .bg(MUTED_GREEN)
         .add_modifier(Modifier::BOLD)
 }
 

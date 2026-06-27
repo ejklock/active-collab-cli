@@ -26,6 +26,8 @@ tokio-stream = "0.1"
 rpassword = "7"
 url = "2"
 
+arboard = "3"
+
 [dev-dependencies]
 tempfile = "3"
 wiremock = "0.6"

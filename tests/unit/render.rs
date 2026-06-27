@@ -2697,3 +2697,97 @@ fn asset_link_line_with_derived_anchor_text_label() {
         "anchor text label must render as-is: {line:?}"
     );
 }
+
+// --- V6-A7c: slice_by_display_cols ---
+
+// Pure ASCII: window [2, 5) returns chars at display cols 2,3,4.
+#[test]
+fn slice_by_display_cols_pure_ascii_mid_window() {
+    let s = "abcdefgh";
+    assert_eq!(
+        slice_by_display_cols(s, 2, 5),
+        "cde",
+        "ASCII [2,5) must return the three chars at those display cols"
+    );
+}
+
+// A leading double-width emoji occupies display cols 0-1. Slicing [2, 3) must
+// return the character immediately after the emoji ('x'), not eat it.
+#[test]
+fn slice_by_display_cols_leading_emoji_does_not_eat_next_char() {
+    // '🔹' is 2 display cols; 'x' is at display col 2.
+    let s = "🔹x";
+    assert_eq!(
+        slice_by_display_cols(s, 2, 3),
+        "x",
+        "slicing at display col 2 after a 2-wide emoji must yield 'x', not eat it"
+    );
+}
+
+// Requesting the emoji itself (cols [0, 2)) returns the emoji.
+#[test]
+fn slice_by_display_cols_emoji_window_returns_emoji() {
+    let s = "🔹xyz";
+    assert_eq!(
+        slice_by_display_cols(s, 0, 2),
+        "🔹",
+        "cols [0,2) on a leading 2-wide emoji must return the emoji"
+    );
+}
+
+// A 1-wide accented char (ç = 1 display col) is treated the same as ASCII.
+#[test]
+fn slice_by_display_cols_accent_1wide_correct() {
+    // "ação" → 'a'(1) 'ç'(1) 'ã'(1) 'o'(1); cols [1,3) → "çã"
+    let s = "ação";
+    assert_eq!(
+        slice_by_display_cols(s, 1, 3),
+        "çã",
+        "accented 1-wide chars must be sliced at their exact display-col boundary"
+    );
+}
+
+// A window past the end of the string clamps to display_width(s).
+#[test]
+fn slice_by_display_cols_window_past_end_clamps() {
+    let s = "ab";
+    assert_eq!(
+        slice_by_display_cols(s, 0, 100),
+        "ab",
+        "end_col past string length must clamp and return the whole string"
+    );
+}
+
+// An empty window (start_col == end_col) returns an empty string.
+#[test]
+fn slice_by_display_cols_empty_window_returns_empty() {
+    assert_eq!(
+        slice_by_display_cols("hello", 3, 3),
+        "",
+        "zero-width window must return an empty string"
+    );
+}
+
+// start_col >= end_col inverted window also returns empty.
+#[test]
+fn slice_by_display_cols_inverted_window_returns_empty() {
+    assert_eq!(
+        slice_by_display_cols("hello", 5, 2),
+        "",
+        "inverted window must return an empty string"
+    );
+}
+
+// Mixed emoji + accents: '🔹' (2 cols) followed by ' [ProForce] ação' text.
+// Slicing [2, 12) must skip the emoji and return the next 10 display cols.
+#[test]
+fn slice_by_display_cols_emoji_then_accented_text() {
+    // '🔹'(2) ' '(1) 'P'(1) 'r'(1) 'o'(1) 'F'(1) 'o'(1) 'r'(1) 'c'(1) 'e'(1) ']'(1)
+    // cols:  0-1   2    3    4    5    6    7    8    9   10    11
+    let s = "🔹 ProForce]";
+    let result = slice_by_display_cols(s, 2, 12);
+    assert_eq!(
+        result, " ProForce]",
+        "after a 2-wide emoji, cols [2,12) must yield the next 10 chars: got {result:?}"
+    );
+}
