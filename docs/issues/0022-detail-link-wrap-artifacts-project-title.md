@@ -2,7 +2,7 @@
 type: Issue
 title: "D1 — detail polish: wrapped-link click, Anexos label, empty project, title placement"
 description: Four detail-view fixes surfaced by real-terminal use after V5 — app-side click on a wrapped URL fragment, meaningful Anexos/Artefatos labels, a populated Projeto row, and the task title moved into the Detalhes panel as a Título row.
-status: open
+status: closed
 labels: [tui, detail, render, links, ux]
 blocked_by:
 tracker:
@@ -74,3 +74,24 @@ under the [ADR 0020](/adr/0020-body-links-inline-url-native-click.md) amendment.
 Three sequential slices D1a → D1b → D1c (shared file `src/render.rs`, so sequential, not
 parallel). Persist the plan once; dispatch each slice slim. Architecture: D1a adds a
 detail-load project-name enrichment step (note in [architecture.md](/architecture.md)).
+
+### Outcome (closed)
+
+All three slices shipped through the full pipeline (Coder → quality-gate → Reviewer
+approved):
+
+- **D1a** — `Projeto` row now resolves the project name from the per-instance
+  `ProjectNamesCache`; the task title moved into the `Detalhes` panel as a `Título` meta
+  row (loose header removed); meta rows hanging-indent wrap.
+- **D1b** — Anexos/Artefatos labels derive as anchor text → real filename → URL host in
+  one place (`derive_asset_label`); `looks_like_filename` rejects `?`/`=`/`&` segments and
+  non-alphabetic extensions, so a query tail never surfaces.
+- **D1c** — a body link opens only on **Ctrl/Cmd/Super+click** (a plain click is reserved
+  for V6 selection); the click maps to the pre-wrap logical line before `url_at`, so a
+  click on any wrapped fragment resolves the complete URL. Mouse modifiers ride as data on
+  `Msg::Click`, keeping `model.update` pure.
+
+A latent note on the wrap-group continuation edge (a word-boundary line exactly
+`content_width` wide is over-joined; behavior unaffected) and the ASCII-only test-fixture
+fidelity is recorded in agent-memory for future maintainers (relevant if V6 selection
+reuses the continuation flag).
