@@ -48,8 +48,8 @@ pub fn asset_panel_render_height(assets: &[Asset], inner_width: usize) -> u16 {
 /// Draw the Detail screen as a single scrollable content block with an optional
 /// fixed Artifacts panel below.
 ///
-/// The task name is rendered as a wrapped bold header inside the content block,
-/// above the body.  The Block border has no title.
+/// The content block renders `lines` directly (the Título meta row inside the
+/// Details panel carries the task name).  The block border has no title.
 /// When `assets` is non-empty the area is split vertically into a content chunk
 /// (Min(0)) and a fixed panel chunk whose height counts wrapped asset rows (capped 8).
 pub fn draw_detail(frame: &mut Frame, area: Rect, params: DetailParams<'_>) {
@@ -70,14 +70,7 @@ pub fn draw_detail(frame: &mut Frame, area: Rect, params: DetailParams<'_>) {
     let panel_height = asset_panel_render_height(params.assets, inner_width);
 
     match panel_height {
-        0 => render_content(
-            frame,
-            area,
-            params.lines,
-            params.line_styles,
-            params.offset,
-            params.task_name,
-        ),
+        0 => render_content(frame, area, params.lines, params.line_styles, params.offset),
         ph => {
             let chunks = Layout::default()
                 .direction(Direction::Vertical)
@@ -89,7 +82,6 @@ pub fn draw_detail(frame: &mut Frame, area: Rect, params: DetailParams<'_>) {
                 params.lines,
                 params.line_styles,
                 params.offset,
-                params.task_name,
             );
             render_assets_panel(frame, chunks[1], params.assets);
         }
@@ -238,39 +230,12 @@ fn render_content(
     lines: &[String],
     line_styles: &[Vec<StyleRun>],
     offset: usize,
-    task_name: &str,
 ) {
-    let bold = Style::default().add_modifier(Modifier::BOLD);
-    let inner_width = area.width.saturating_sub(2) as usize;
-    let name_wrapped = crate::render::wrap_text(task_name, inner_width);
-    let name_line_count = if task_name.is_empty() {
-        0usize
-    } else {
-        name_wrapped.len().max(1)
-    };
-
     let block = Block::default().borders(Borders::ALL);
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
     if inner.height == 0 || inner.width == 0 {
-        return;
-    }
-
-    let name_rows = (name_line_count as u16).min(inner.height);
-    let body_rows = inner.height.saturating_sub(name_rows);
-
-    let (name_rect, body_rect) = split_inner_for_name(inner, name_rows, body_rows);
-
-    if let Some(nr) = name_rect {
-        let name_lines: Vec<Line<'static>> = name_wrapped
-            .iter()
-            .map(|l| Line::styled(l.clone(), bold))
-            .collect();
-        frame.render_widget(Paragraph::new(name_lines), nr);
-    }
-
-    if body_rect.height == 0 {
         return;
     }
 
@@ -285,7 +250,7 @@ fn render_content(
             .collect::<Vec<_>>(),
     );
 
-    let viewport_height = body_rect.height as usize;
+    let viewport_height = inner.height as usize;
     let max_offset = lines.len().saturating_sub(viewport_height);
     let eff = offset.min(max_offset);
 
@@ -293,7 +258,7 @@ fn render_content(
         Paragraph::new(text)
             .wrap(Wrap { trim: false })
             .scroll((eff as u16, 0)),
-        body_rect,
+        inner,
     );
 
     let total_content = lines.len();
@@ -304,23 +269,6 @@ fn render_content(
             .position(eff);
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight);
         frame.render_stateful_widget(scrollbar, area, &mut scrollbar_state);
-    }
-}
-
-fn split_inner_for_name(inner: Rect, name_rows: u16, body_rows: u16) -> (Option<Rect>, Rect) {
-    if name_rows > 0 && body_rows > 0 {
-        let splits = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Length(name_rows), Constraint::Min(0)])
-            .split(inner);
-        (Some(splits[0]), splits[1])
-    } else if name_rows > 0 {
-        (
-            Some(inner),
-            Rect::new(inner.x, inner.y + inner.height, inner.width, 0),
-        )
-    } else {
-        (None, inner)
     }
 }
 

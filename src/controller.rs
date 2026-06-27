@@ -316,14 +316,41 @@ pub async fn load_task_core(
     refresh: bool,
 ) -> TaskCore {
     let client = ActiveCollabClient::new(inst.clone(), http);
-    let (task, comments) =
+    let (mut task, comments) =
         load_task_data_from_path(&db_path, &inst, &client, project_id, task_id, refresh).await;
+    enrich_task_with_project_name(&mut task, &db_path, &inst.name, project_id);
     let assets = extract_assets(&task, &comments);
     TaskCore {
         task,
         comments,
         assets,
     }
+}
+
+/// Injects `project_name` into `task` by reading the per-instance project-name cache.
+///
+/// No network call is made. On cache miss the key is set to `t("(unknown)")` so the
+/// Projeto row in the Details panel is never blank.
+fn enrich_task_with_project_name(
+    task: &mut Value,
+    db_path: &Path,
+    instance_name: &str,
+    project_id: i64,
+) {
+    let name = project_name_from_cache(db_path, instance_name, project_id);
+    if let Some(obj) = task.as_object_mut() {
+        obj.insert("project_name".to_string(), Value::String(name));
+    }
+}
+
+/// Read the project name for `project_id` from the per-instance cache.
+///
+/// Returns the cached name when fresh, otherwise the `t("(unknown)")` fallback.
+/// Never issues a network request.
+pub fn project_name_from_cache(db_path: &Path, instance_name: &str, project_id: i64) -> String {
+    fresh_project_names_cache_read(db_path, instance_name)
+        .and_then(|names| names.get(&project_id).cloned())
+        .unwrap_or_else(|| crate::i18n::t("(unknown)"))
 }
 
 /// Read the user map from the per-instance cache without any network call.

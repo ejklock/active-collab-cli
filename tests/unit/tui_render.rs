@@ -1187,14 +1187,14 @@ fn draw_detail_renders_single_global_content_block() {
     let buf = render_detail_to_buf_with_name(&lines, &assets, 0, 80, 40, "Test Task");
     let content = buf_to_string(&buf);
 
-    // The single block title now shows the task name, not "Task #42"
+    // The task name appears via the Título meta row inside the Details panel.
     assert!(
         content.contains("Test Task"),
-        "single block title must contain the task name 'Test Task': {content}"
+        "content must contain the task name 'Test Task' (via Título row): {content}"
     );
     assert!(
         !content.contains("Task #42"),
-        "single block title must NOT contain 'Task #42' (name is now in border): {content}"
+        "content must NOT contain 'Task #42': {content}"
     );
     // The Artifacts panel must also appear
     assert!(
@@ -1210,30 +1210,63 @@ fn draw_detail_renders_single_global_content_block() {
     );
 }
 
-// W2-A1 (replaces D2-A1): task name is rendered as a bold wrapped header line INSIDE the
-// content block (not in the Block border title). The full name text appears in the buffer.
-// The Block border (top row) does NOT contain the name.
+// D1a-A1: the Details panel contains a Title row directly after the Task row.
+// The title appears exactly once (via the row), not as a separate floating header.
 #[test]
-fn draw_detail_task_name_renders_as_bold_header_inside_content_block() {
+fn draw_detail_title_row_present_after_task_row_in_details_panel() {
+    let _guard = LANG_MUTEX.lock().unwrap();
+    set_language("en");
+    let task = json!({
+        "name": "OSV-Scanner",
+        "id": 71583,
+        "project_id": 725,
+        "project_name": "Base",
+        "is_completed": false
+    });
+    let user_map: HashMap<i64, String> = HashMap::new();
+    let detail = build_detail_content(&task, &[], &user_map, 76);
+    let buf = render_detail_to_buf_with_name(&detail.lines, &[], 0, 80, 30, "OSV-Scanner");
+    let content = buf_to_string(&buf);
+    set_language("en");
+
+    assert!(
+        content.contains("Title"),
+        "Details panel must contain a 'Title' row: {content}"
+    );
+    assert!(
+        content.contains("OSV-Scanner"),
+        "Title row must carry the task name: {content}"
+    );
+    let task_pos = content.find("Task").expect("Task row must be present");
+    let title_pos = content.find("Title").expect("Title row must be present");
+    assert!(
+        task_pos < title_pos,
+        "Title row must appear after Task row: task_pos={task_pos} title_pos={title_pos}"
+    );
+}
+
+// D1a-A2: the task name must NOT appear as a standalone bold header line above the Details
+// panel. The content block renders only the `lines` passed in (the Título meta row inside the
+// Details panel carries the name via build_detail_content, not via a separate header).
+#[test]
+fn draw_detail_task_name_not_rendered_as_loose_header() {
+    let task_name = "My Important Task";
     let lines = vec!["some content".to_string()];
-    let buf = render_detail_to_buf_with_name(&lines, &[], 0, 80, 10, "My Important Task");
+    let buf = render_detail_to_buf_with_name(&lines, &[], 0, 80, 10, task_name);
     let content = buf_to_string(&buf);
     let rows: Vec<&str> = content.lines().collect();
-    // The full name must appear somewhere in the buffer (it is the bold header line).
+    // The name must NOT appear as a bold header row separate from the passed-in lines.
+    // Since the lines only contain "some content", the task_name must not appear at all
+    // (it is NOT injected by draw_detail any more).
     assert!(
-        content.contains("My Important Task"),
-        "task name 'My Important Task' must appear in the buffer as a header: {content}"
+        !content.contains(task_name),
+        "task_name must NOT be rendered as a loose header by draw_detail: {content}"
     );
-    // The Block border (row 0) is now empty (no title) — name is inside content, not title.
+    // The Block border (row 0) must also not contain the name.
     let top_border = rows[0];
     assert!(
-        !top_border.contains("My Important Task"),
-        "Block border title must NOT contain the task name (name moved into content): {top_border}"
-    );
-    // No ellipsis should appear (name is short enough to fit on one line at width 80).
-    assert!(
-        !content.contains('\u{2026}'),
-        "no ellipsis when name fits on one line: {content}"
+        !top_border.contains(task_name),
+        "Block border must NOT contain the task name: {top_border}"
     );
 }
 
@@ -1253,10 +1286,10 @@ fn draw_detail_empty_task_name_shows_no_name_in_border() {
     );
 }
 
-// W2-A1: a long task name wraps across multiple bold header lines inside the content block
-// with NO ellipsis. The full name text is present in the buffer.
+// D1a-A2: a long task_name must not be injected as a loose header even for very long names.
+// The passed-in `lines` are rendered as-is with no extra bold header rows.
 #[test]
-fn draw_detail_long_task_name_wraps_inside_content_no_ellipsis() {
+fn draw_detail_long_task_name_not_injected_as_header() {
     let very_long_name =
         "This Is An Extremely Long Task Name That Does Not Fit In The Border At All";
     let lines = vec!["content".to_string()];
@@ -1264,24 +1297,20 @@ fn draw_detail_long_task_name_wraps_inside_content_no_ellipsis() {
     let content = buf_to_string(&buf);
     let rows: Vec<&str> = content.lines().collect();
     let top_border = rows[0];
-    // Full name must appear (wrapped across lines inside the block).
+    // The name must NOT appear in the buffer (it is not injected by draw_detail).
     assert!(
-        content.contains("This Is"),
-        "beginning of long name must appear in buffer: {content}"
+        !content.contains("This Is An"),
+        "long task_name must NOT be injected as a header by draw_detail: {content}"
     );
-    assert!(
-        content.contains("At All"),
-        "end of long name must appear in buffer (no clip): {content}"
-    );
-    // No ellipsis in the whole buffer — name wraps, never truncates.
-    assert!(
-        !content.contains('\u{2026}'),
-        "long task name must wrap, never truncate with ellipsis: {content}"
-    );
-    // The Block border (top row) must NOT contain the name.
+    // The Block border must not contain the name either.
     assert!(
         !top_border.contains("This Is"),
-        "Block border must NOT contain the task name (moved into content): {top_border}"
+        "Block border must NOT contain the task name: {top_border}"
+    );
+    // The body content must still render.
+    assert!(
+        content.contains("content"),
+        "body content must still render: {content}"
     );
 }
 
@@ -2979,26 +3008,24 @@ mod selection_mode_view {
 
 // --- W2: Detail chrome responsiveness — task name header + asset row wrapping ---
 
-// W2-A1: A short task name stays on exactly one line inside the content block.
-// At width=80, inner_width=78; a 20-char name fits on one line.
+// D1a-A2: draw_detail does not inject the task name into the content rows at all.
+// Only the content lines passed in are rendered; `task_name` is used only for the loading state.
 #[test]
-fn draw_detail_short_task_name_stays_on_one_line() {
+fn draw_detail_task_name_not_present_in_content_rows() {
     let name = "Short Task Name";
     let lines = vec!["body content".to_string()];
     let buf = render_detail_to_buf_with_name(&lines, &[], 0, 80, 20, name);
     let content = buf_to_string(&buf);
-    let rows: Vec<&str> = content.lines().collect();
-    // The name should appear on row 1 (first content row inside the block).
-    let row1 = rows.get(1).copied().unwrap_or("");
+    // The task_name must NOT appear in the rendered output because draw_detail no longer
+    // injects it as a header; it would only appear if it were in the passed-in lines.
     assert!(
-        row1.contains(name),
-        "short task name must appear on the first content row (row 1): {row1:?}"
+        !content.contains(name),
+        "task_name must NOT appear in rendered content (not injected by draw_detail): {content}"
     );
-    // Row 2 must NOT contain the name (it must not wrap to the next line).
-    let row2 = rows.get(2).copied().unwrap_or("");
+    // The body line passed in must still appear.
     assert!(
-        !row2.contains(name),
-        "short name must NOT appear on row 2 (must fit on one line): {row2:?}"
+        content.contains("body content"),
+        "passed-in body content must be rendered: {content}"
     );
 }
 
@@ -3076,10 +3103,10 @@ fn draw_detail_wrapped_asset_panel_is_taller_than_minimum() {
     );
 }
 
-// W2-A4: At a wide width (120 cols), a short task name is on one line and
-// each asset row is on one line — no wrapping.
+// D1a-A2: At a wide width (120 cols), draw_detail still does not inject the task name.
+// Asset rows do appear. The name only appears via the content lines (Título row), not as a header.
 #[test]
-fn draw_detail_wide_width_no_wrapping_for_name_or_assets() {
+fn draw_detail_wide_width_assets_render_no_injected_name() {
     let name = "Short Name";
     let assets = vec![Asset {
         name: "report.pdf".into(),
@@ -3087,14 +3114,7 @@ fn draw_detail_wide_width_no_wrapping_for_name_or_assets() {
     }];
     let buf = render_detail_to_buf_with_name(&["body".to_string()], &assets, 0, 120, 30, name);
     let content = buf_to_string(&buf);
-    let rows: Vec<&str> = content.lines().collect();
 
-    // Name appears on row 1 (single line).
-    let row1 = rows.get(1).copied().unwrap_or("");
-    assert!(
-        row1.contains(name),
-        "task name must appear on row 1 at wide width: {row1:?}"
-    );
     // report.pdf asset label fits on one row — verify it appears somewhere.
     assert!(
         content.contains("report.pdf"),
@@ -3104,6 +3124,11 @@ fn draw_detail_wide_width_no_wrapping_for_name_or_assets() {
     assert!(
         !content.contains('\u{2026}'),
         "no ellipsis expected at wide width: {content}"
+    );
+    // task_name must NOT appear as an injected header (only body line "body" is in lines).
+    assert!(
+        !content.contains(name),
+        "task_name must NOT be injected by draw_detail: {content}"
     );
 }
 
@@ -3751,11 +3776,10 @@ mod w1_chrome_wrap {
         );
     }
 
-    // W2-A1: at a narrow width where an asset label wraps, draw_detail still renders
-    // the bold name header without ellipsis, and the Artifacts title appears.
-    // This guards the already-approved W2-A1 visual behavior during the hit-test fix.
+    // D1a-A2 / W2: at a narrow width where an asset label wraps, draw_detail still renders
+    // the body lines and the Artifacts panel. task_name is NOT injected as a header.
     #[test]
-    fn draw_detail_wrapped_asset_still_shows_name_and_artifacts_no_ellipsis() {
+    fn draw_detail_wrapped_asset_shows_body_and_artifacts_no_injected_name() {
         use crate::render::Asset;
         use crate::tui::screens::{draw_detail, DetailParams};
 
@@ -3793,12 +3817,16 @@ mod w1_chrome_wrap {
         let content = super::buf_to_string(terminal.backend().buffer());
 
         assert!(
-            content.contains("My Task"),
-            "task name must appear as header even with wrapped asset: {content}"
+            !content.contains(task_name),
+            "task_name must NOT be injected as a header by draw_detail: {content}"
+        );
+        assert!(
+            content.contains("body text"),
+            "body line must still render: {content}"
         );
         assert!(
             !content.contains('\u{2026}'),
-            "no ellipsis when name and asset wrap: {content}"
+            "no ellipsis when asset wraps: {content}"
         );
         assert!(
             content.contains("Artifacts"),

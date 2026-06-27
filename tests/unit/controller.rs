@@ -869,11 +869,10 @@ async fn load_task_core_assignee_line_shows_id_when_user_map_empty() {
         lines.iter().any(|l| l.contains("comment text")),
         "comments must render fully even without user_map"
     );
-    // The task name is now promoted to the frame border title; it must NOT appear
-    // duplicated in the scroll body produced by build_detail_content.
+    // The task name appears in the Título meta row inside the Details panel.
     assert!(
-        !lines.iter().any(|l| l.contains("Assigned Task")),
-        "task name must NOT appear in the scroll body (it lives in the frame border): {lines:?}"
+        lines.iter().any(|l| l.contains("Assigned Task")),
+        "task name must appear in the Title meta row of the Details panel: {lines:?}"
     );
 }
 
@@ -990,6 +989,120 @@ async fn load_task_core_served_from_cache_makes_no_task_fetch() {
         reqs.is_empty(),
         "cache hit must make zero network calls: got {reqs:?}"
     );
+}
+
+// D1a-A3: load_task_core injects project_name from cache → Projeto row shows resolved name.
+#[tokio::test]
+async fn load_task_core_enriches_task_with_project_name_from_cache() {
+    let server = MockServer::start().await;
+    let fix = CoreTestFixture::with_server(&server).await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/projects/10/tasks/99"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "single": {
+                "id": 99,
+                "name": "Work item",
+                "project_id": 10
+            },
+            "tracked_time": null,
+            "comments": []
+        })))
+        .mount(&server)
+        .await;
+
+    let names: std::collections::HashMap<i64, String> =
+        [(10i64, "Acme Corp".to_string())].into_iter().collect();
+    seed_project_names_cache(&fix.db_path, "inst", &names);
+
+    let core = load_task_core(fix.db_path, fix.inst, fix.http, 10, 99, false).await;
+
+    assert_eq!(
+        core.task["project_name"].as_str(),
+        Some("Acme Corp"),
+        "project_name must be injected from cache: {:?}",
+        core.task
+    );
+
+    let empty_map = std::collections::HashMap::new();
+    let lines = crate::render::build_detail_content(&core.task, &[], &empty_map, 80).lines;
+    let project_line = lines
+        .iter()
+        .find(|l| l.contains("Project"))
+        .cloned()
+        .unwrap_or_default();
+    assert!(
+        project_line.contains("Acme Corp"),
+        "Projeto row must show resolved project name: {project_line:?}"
+    );
+}
+
+// D1a-A4: on cache miss, load_task_core injects the fallback → Projeto row never blank.
+#[tokio::test]
+async fn load_task_core_project_name_fallback_when_cache_miss() {
+    let server = MockServer::start().await;
+    let fix = CoreTestFixture::with_server(&server).await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/projects/10/tasks/99"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "single": {
+                "id": 99,
+                "name": "Work item",
+                "project_id": 10
+            },
+            "tracked_time": null,
+            "comments": []
+        })))
+        .mount(&server)
+        .await;
+
+    let core = load_task_core(fix.db_path, fix.inst, fix.http, 10, 99, false).await;
+
+    let project_name = core.task["project_name"].as_str().unwrap_or("");
+    assert!(
+        !project_name.is_empty(),
+        "project_name must never be blank on cache miss: got {:?}",
+        core.task
+    );
+
+    let empty_map = std::collections::HashMap::new();
+    let lines = crate::render::build_detail_content(&core.task, &[], &empty_map, 80).lines;
+    let project_line = lines
+        .iter()
+        .find(|l| l.contains("Project"))
+        .cloned()
+        .unwrap_or_default();
+    assert!(
+        !project_line.trim_end().ends_with("Project"),
+        "Project row value must not be blank: {project_line:?}"
+    );
+}
+
+// D1a-A3: project_name_from_cache returns the cached name when fresh.
+#[test]
+fn project_name_from_cache_returns_cached_name() {
+    let fix = CoreTestFixture::without_server();
+
+    let names: std::collections::HashMap<i64, String> =
+        [(42i64, "Test Project".to_string())].into_iter().collect();
+    seed_project_names_cache(&fix.db_path, "inst", &names);
+
+    let result = project_name_from_cache(&fix.db_path, "inst", 42);
+    assert_eq!(result, "Test Project");
+}
+
+// D1a-A4: project_name_from_cache returns fallback on miss.
+#[test]
+fn project_name_from_cache_returns_fallback_on_miss() {
+    let fix = CoreTestFixture::without_server();
+
+    let result = project_name_from_cache(&fix.db_path, "inst", 999);
+    assert!(
+        !result.is_empty(),
+        "fallback must not be empty on cache miss: {result:?}"
+    );
+    assert_ne!(result, "", "fallback must not be an empty string");
 }
 
 // S5-A1: pre-populated user_map_cache → zero GET /api/v1/users calls on detail open

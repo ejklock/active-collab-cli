@@ -1340,8 +1340,7 @@ fn build_header_lines_returns_panel_with_details_label() {
 }
 
 #[test]
-fn build_header_lines_no_title_row() {
-    // Title row must be absent — the title band in build_detail_content shows the name
+fn build_header_lines_title_row_present_after_task() {
     let task = json!({
         "id": 1,
         "name": "Fix bug"
@@ -1349,8 +1348,18 @@ fn build_header_lines_no_title_row() {
     let lines = build_header_lines(&task, &HashMap::new(), 80);
     let joined = lines.join("\n");
     assert!(
-        !joined.contains("Title"),
-        "Details panel must NOT include a Title row: {joined}"
+        joined.contains("Title"),
+        "Details panel must include a Title row: {joined}"
+    );
+    assert!(
+        joined.contains("Fix bug"),
+        "Details panel Title row must show the task name: {joined}"
+    );
+    let task_pos = joined.find("Task").expect("Task row must be present");
+    let title_pos = joined.find("Title").expect("Title row must be present");
+    assert!(
+        task_pos < title_pos,
+        "Title row must appear after Task row: task_pos={task_pos} title_pos={title_pos}"
     );
 }
 
@@ -1509,6 +1518,112 @@ fn build_header_lines_2_column_alignment() {
             "all value columns must start at the same offset (2-col alignment): positions={value_positions:?}"
         );
     }
+}
+
+// --- D1a: Título row, Projeto populated, long-title wraps ---
+
+#[test]
+fn build_header_lines_project_row_shows_fallback_when_project_name_absent() {
+    let task = json!({
+        "id": 5,
+        "project_id": 99
+    });
+    let lines = build_header_lines(&task, &HashMap::new(), 80);
+    let joined = lines.join("\n");
+    assert!(
+        joined.contains("(unknown)"),
+        "Project row must show '(unknown)' fallback when project_name absent: {joined}"
+    );
+}
+
+#[test]
+fn build_header_lines_long_title_wraps_within_panel() {
+    // BDR 0016 Sc.4: a value wider than the panel content width must wrap to continuation
+    // lines with a hanging indent. No U+2026 ellipsis may appear anywhere in the meta rows.
+    let long_title = "A very long task title that exceeds the narrow panel inner width for sure";
+    let task = json!({
+        "id": 7,
+        "project_id": 3,
+        "project_name": "Proj",
+        "name": long_title
+    });
+    let inner_width = 40;
+    let lines = build_header_lines(&task, &HashMap::new(), inner_width);
+
+    // Collect the meta-row body lines (strip box borders and VPAD blank rows).
+    // Body lines are all lines between the first and last (which are box borders).
+    let meta_body: Vec<&str> = lines[1..lines.len() - 1]
+        .iter()
+        .map(|s| s.as_str())
+        .collect();
+
+    // No line in the panel may exceed inner_width chars.
+    for line in &lines {
+        let len = line.chars().count();
+        assert!(
+            len <= inner_width,
+            "No line may exceed inner_width ({inner_width}): line={line:?} len={len}"
+        );
+    }
+
+    // No ellipsis character may appear in any meta body line.
+    for line in &meta_body {
+        assert!(
+            !line.contains('\u{2026}'),
+            "Meta rows must not contain U+2026 ellipsis: line={line:?}"
+        );
+    }
+
+    // Find the Title label line and collect all title fragment lines (first + continuation).
+    // The Title row prefix is "Title  " (or translated equivalent) padded to label_col + 2 spaces.
+    // A continuation line starts with spaces of the same width (all spaces in its content area).
+    // We detect title lines by finding the line containing "Title" and then collecting
+    // consecutive following lines that have only spaces in the label column (indented continuations).
+    let joined = meta_body.join("\n");
+    assert!(
+        joined.contains("Title"),
+        "Title label must appear in meta rows: {joined}"
+    );
+
+    // Count body lines that contain long_title content.
+    // The first title fragment line contains "Title"; continuation lines contain only value text.
+    // We count all lines that contain at least one word from the long title and are not pure borders.
+    // More robust: collect the title row and its continuations by index.
+    let title_label = "Title";
+    let title_line_idx = meta_body
+        .iter()
+        .position(|l| l.contains(title_label))
+        .expect("Title label must appear in some meta body line");
+
+    // Count how many title fragment lines there are: the first one + all following indented lines
+    // whose content area (inside the box) starts with spaces (continuation indent).
+    let mut fragment_count = 1usize;
+    for line in &meta_body[title_line_idx + 1..] {
+        // A continuation line has BOX_V + hpad + indent_spaces + value_text + hpad + BOX_V.
+        // Strip the leading BOX_V character and HPAD (1 space each side as per panel_box).
+        let chars: Vec<char> = line.chars().collect();
+        if chars.len() < 3 {
+            break;
+        }
+        // inner content starts at index 2 (BOX_V + 1 hpad space)
+        let inner_start = &chars[2..];
+        // A continuation line's inner content begins with spaces (the hanging indent).
+        // A new label row starts with non-space (next label). A VPAD blank row is all spaces
+        // but also has all spaces after stripping — we distinguish by checking if the NEXT
+        // non-space char exists (value text follows the indent on a continuation line).
+        let starts_with_spaces = inner_start.first().map_or(false, |c| *c == ' ');
+        let has_non_space = inner_start.iter().any(|c| *c != ' ');
+        if starts_with_spaces && has_non_space {
+            fragment_count += 1;
+        } else {
+            break;
+        }
+    }
+
+    assert!(
+        fragment_count >= 2,
+        "Long title must wrap to at least 2 fragment lines (got {fragment_count}): {joined}"
+    );
 }
 
 // --- U10: build_body_lines_with_collector (Description panel) ---
@@ -1833,7 +1948,7 @@ fn build_detail_lines_comments_panel_present_when_non_empty() {
 }
 
 #[test]
-fn build_detail_lines_no_title_row_in_meta() {
+fn build_detail_lines_title_row_in_meta() {
     let task = json!({
         "id": 1,
         "name": "My Important Task",
@@ -1842,10 +1957,13 @@ fn build_detail_lines_no_title_row_in_meta() {
     });
     let lines = build_detail_content(&task, &[], &HashMap::new(), 80).lines;
     let joined = lines.join("\n");
-    // The title band contains the name; the Details panel must NOT have a "Title" label row
     assert!(
-        !joined.contains("Title"),
-        "Details panel must NOT contain a Title row: {joined}"
+        joined.contains("Title"),
+        "Details panel must contain a Title row: {joined}"
+    );
+    assert!(
+        joined.contains("My Important Task"),
+        "Title row must carry the task name: {joined}"
     );
 }
 
@@ -1877,7 +1995,7 @@ fn build_detail_lines_no_line_exceeds_inner_width() {
 
 #[test]
 fn build_detail_lines_panels_appear_in_order() {
-    // title band -> blank -> Details -> blank -> Description -> [blank + Comments]
+    // Details -> blank -> Description -> [blank + Comments]
     let task = json!({
         "id": 1,
         "name": "Task Name",

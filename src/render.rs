@@ -1352,22 +1352,28 @@ fn build_meta_table_rows(
     let content_width = panel_content_width(inner_width);
     pairs
         .into_iter()
-        .map(|(lbl, val)| format_meta_row(&lbl, &val, label_col, content_width))
+        .flat_map(|(lbl, val)| format_meta_row(&lbl, &val, label_col, content_width))
         .collect()
 }
 
 /// Returns the ordered (translated_label, value) pairs for the Details meta table.
 ///
-/// Always includes Task, Project, Status, Assignee, Estimate, Logged.
+/// Always includes Task, Title, Project, Status, Assignee, Estimate, Logged.
 /// Start and Due are included only when non-empty (i.e. the task has those dates set).
 fn meta_field_pairs(task: &Value, user_map: &HashMap<i64, String>) -> Vec<(String, String)> {
     let project_id = task.get("project_id").and_then(|v| v.as_i64()).unwrap_or(0);
     let task_id = task.get("id").and_then(|v| v.as_i64()).unwrap_or(0);
-    let project_name = task
-        .get("project_name")
+    let title = task
+        .get("name")
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
+    let project_name = task
+        .get("project_name")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| t("(unknown)"));
     let status = meta_status_value(task);
     let assignee = meta_assignee_value(task, user_map);
     let start = fmt_date(task.get("start_on").unwrap_or(&Value::Null));
@@ -1383,6 +1389,7 @@ fn meta_field_pairs(task: &Value, user_map: &HashMap<i64, String>) -> Vec<(Strin
 
     let mut pairs = vec![
         (t("Task"), format!("{}-{}", project_id, task_id)),
+        (t("Title"), title),
         (t("Project"), project_name),
         (t("Status"), status),
         (t("Assignee"), assignee),
@@ -1436,13 +1443,37 @@ fn meta_label_col_width(pairs: &[(String, String)]) -> usize {
         .unwrap_or(0)
 }
 
-/// Formats a single (label, value) pair as a padded two-column meta row.
+/// Formats a single (label, value) pair as one or more wrapped meta-row lines.
 ///
-/// `"{label:<label_col$}  {value}"` is truncated to `content_width` chars so the
-/// row always fits inside the panel's inner area.
-fn format_meta_row(label: &str, value: &str, label_col: usize, content_width: usize) -> String {
-    let row = format!("{:<width$}  {}", label, value, width = label_col);
-    truncate_cell(&row, content_width)
+/// The first line is `"{label:<label_col$}  {value_fragment}"`. When the value is
+/// wider than the remaining columns, it wraps to continuation lines indented by
+/// `label_col + 2` spaces so the value text aligns under itself. No ellipsis is
+/// ever inserted.
+fn format_meta_row(
+    label: &str,
+    value: &str,
+    label_col: usize,
+    content_width: usize,
+) -> Vec<String> {
+    let prefix = format!("{:<width$}  ", label, width = label_col);
+    let prefix_len = prefix.chars().count();
+    let value_width = content_width.saturating_sub(prefix_len);
+    if value_width == 0 {
+        return vec![prefix];
+    }
+    let value_lines = wrap_text(value, value_width);
+    let indent = " ".repeat(prefix_len);
+    match value_lines.as_slice() {
+        [] => vec![prefix],
+        [first] => vec![format!("{prefix}{first}")],
+        [first, rest @ ..] => {
+            let mut rows = vec![format!("{prefix}{first}")];
+            for cont in rest {
+                rows.push(format!("{indent}{cont}"));
+            }
+            rows
+        }
+    }
 }
 
 fn extract_comment_author(comment: &Value) -> String {
@@ -1466,6 +1497,7 @@ fn extract_comment_author(comment: &Value) -> String {
 /// the result is the first `max_width - 1` chars followed by "\u{2026}" so the
 /// caller's column stays at exactly `max_width` chars. Edge cases: `max_width == 0`
 /// returns an empty string; `max_width == 1` returns "\u{2026}".
+#[allow(dead_code)]
 pub fn truncate_cell(s: &str, max_width: usize) -> String {
     let char_count = s.chars().count();
     if char_count <= max_width {
