@@ -27,6 +27,7 @@ pub fn map_browse_mouse_event(mouse: crossterm::event::MouseEvent) -> Option<Msg
         MouseEventKind::Down(MouseButton::Left) => Some(Msg::Click {
             column: mouse.column,
             row: mouse.row,
+            modifiers: mouse.modifiers,
         }),
         _ => None,
     }

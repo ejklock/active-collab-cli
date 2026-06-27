@@ -64,6 +64,136 @@ pub struct DetailContent {
     pub line_styles: Vec<Vec<StyleRun>>,
 }
 
+/// Strip the panel-box left border and HPAD from a boxed content line.
+///
+/// A box content line has the form `│ {content} │` where `│` is U+2502 (3 bytes)
+/// and the surrounding space is PANEL_HPAD (1 byte each side). Returns the inner
+/// content slice `{content}` (including any trailing-space padding added by
+/// `fit_to_display_width`), or `None` when the string is not a box content line
+/// (e.g. a rounded-corner border row starting with `╭` or `╰`).
+fn box_inner_content(s: &str) -> Option<&str> {
+    const PREFIX_BYTES: usize = 4; // U+2502 = 3 UTF-8 bytes, then one HPAD space
+    const SUFFIX_BYTES: usize = 4; // one HPAD space, then U+2502 = 3 UTF-8 bytes
+    if !s.starts_with('\u{2502}') {
+        return None;
+    }
+    let len = s.len();
+    if len < PREFIX_BYTES + SUFFIX_BYTES {
+        return None;
+    }
+    Some(&s[PREFIX_BYTES..len - SUFFIX_BYTES])
+}
+
+/// Map a clicked (line_idx, char_col) to the start of its logical wrap group and the
+/// column within the joined group content.
+///
+/// When `wrap_rich` hard-splits a URL token across multiple content lines, every line
+/// except the last fills the entire `content_width` with non-space characters (no
+/// trailing-space padding). This function walks backward from `line_idx` to find the
+/// first line of such a group, then computes the display-column offset within the
+/// concatenated inner content.
+///
+/// `char_col` is the display-column index into the full boxed string (0 = the `│`
+/// border character). Content starts at display-column 2 (border + HPAD).
+///
+/// Returns `(group_start_idx, logical_col)` where `group_start_idx` is the index into
+/// `lines` of the first line of the group and `logical_col` is the column within the
+/// concatenated inner content (trailing-space padding stripped from each fragment).
+/// Returns `None` when `line_idx` is out of range or not a box content line.
+pub fn logical_position_in_wrap_group(
+    lines: &[String],
+    line_idx: usize,
+    char_col: usize,
+    content_width: usize,
+) -> Option<(usize, usize)> {
+    box_inner_content(lines.get(line_idx)?)?;
+
+    let mut group_start = line_idx;
+    while group_start > 0 {
+        let prev_inner = match box_inner_content(&lines[group_start - 1]) {
+            Some(c) => c,
+            None => break,
+        };
+        let trimmed_dw = display_width(prev_inner.trim_end_matches(' '));
+        if trimmed_dw < content_width {
+            break;
+        }
+        group_start -= 1;
+    }
+
+    let content_col = char_col.saturating_sub(2);
+    let mut logical_col = 0usize;
+    for line in lines.iter().take(line_idx).skip(group_start) {
+        let inner = box_inner_content(line)?;
+        logical_col += display_width(inner.trim_end_matches(' '));
+    }
+    logical_col += content_col;
+
+    Some((group_start, logical_col))
+}
+
+/// Join the inner content of consecutive hard-split lines starting at `group_start`
+/// and run `url_at` on the joined string at `logical_col`.
+///
+/// A line is considered hard-split (has a continuation on the next line) when its
+/// inner content, after trimming trailing spaces, fills the entire `content_width`.
+/// Joining stops at the first naturally-ended line or after 20 continuations.
+fn url_at_in_wrap_group(
+    lines: &[String],
+    group_start: usize,
+    logical_col: usize,
+    content_width: usize,
+) -> Option<String> {
+    let mut joined = String::new();
+    let mut i = group_start;
+    loop {
+        let inner = box_inner_content(lines.get(i)?)?;
+        let trimmed = inner.trim_end_matches(' ');
+        let is_hard_split = display_width(trimmed) >= content_width;
+        joined.push_str(trimmed);
+        if !is_hard_split || i >= lines.len().saturating_sub(1) || i >= group_start + 20 {
+            break;
+        }
+        i += 1;
+    }
+    url_at(&joined, logical_col)
+}
+
+/// Resolve the URL at a click that may land on a wrapped fragment of a `[url]` token.
+///
+/// When `wrap_rich` hard-splits a long `[url]` token across multiple rendered lines,
+/// `url_at` on a single fragment returns an incomplete URL or `None`. This function
+/// detects the wrap group (consecutive full-width lines), joins their inner content,
+/// and runs `url_at` on the reconstructed logical line so any fragment of a split URL
+/// resolves to the complete URL.
+///
+/// For single-line (unwrapped) tokens the function falls through to a direct `url_at`
+/// call on the clicked boxed string, preserving the V5 behavior.
+///
+/// `char_col` is the display-column index into the full boxed string (0 = the `│`
+/// border character). `content_width` must equal `panel_content_width(inner_width)`
+/// — the same value used when wrapping the body text.
+pub fn resolve_wrapped_url(
+    lines: &[String],
+    line_idx: usize,
+    char_col: usize,
+    content_width: usize,
+) -> Option<String> {
+    let (group_start, logical_col) =
+        logical_position_in_wrap_group(lines, line_idx, char_col, content_width)?;
+
+    let clicked_inner = box_inner_content(&lines[line_idx])?;
+    let clicked_trimmed_dw = display_width(clicked_inner.trim_end_matches(' '));
+    let is_continuation = group_start < line_idx;
+    let is_hard_split_source = clicked_trimmed_dw >= content_width;
+
+    if is_continuation || is_hard_split_source {
+        return url_at_in_wrap_group(lines, group_start, logical_col, content_width);
+    }
+
+    url_at(&lines[line_idx], char_col)
+}
+
 /// Resolve the URL at `target_col` (display-column) within a rendered body line.
 ///
 /// Algorithm (in priority order):
@@ -704,6 +834,14 @@ fn fit_to_display_width(s: &str, cols: usize) -> String {
 
 fn panel_content_width(width: usize) -> usize {
     width.saturating_sub(2 + 2 * PANEL_HPAD)
+}
+
+/// Public accessor for `panel_content_width` used by callers outside this module.
+///
+/// Returns the number of display columns available for content inside a panel box
+/// of `outer_width` columns (removes 2 border columns and 2×PANEL_HPAD padding).
+pub fn panel_content_width_pub(outer_width: usize) -> usize {
+    panel_content_width(outer_width)
 }
 
 /// Parity: Python tui.py wrap_text.

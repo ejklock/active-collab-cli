@@ -1,6 +1,7 @@
 use super::*;
 use crate::render::Asset;
 use crate::tui::screens::detail::{asset_panel_render_height, draw_detail, DetailParams};
+use crossterm::event::KeyModifiers;
 use ratatui::{backend::TestBackend, layout::Rect, Terminal};
 use std::collections::HashMap;
 
@@ -95,7 +96,14 @@ fn click_struct_form_accepted_by_update_on_projects_screen() {
         last_loaded: None,
         selection_mode: false,
     };
-    let (m, cmds) = update(m, Msg::Click { column: 10, row: 5 });
+    let (m, cmds) = update(
+        m,
+        Msg::Click {
+            column: 10,
+            row: 5,
+            modifiers: KeyModifiers::NONE,
+        },
+    );
     assert!(cmds.is_empty());
     assert!(!m.should_quit);
 }
@@ -117,6 +125,7 @@ fn click_first_asset_row_emits_open_asset_cmd() {
         Msg::Click {
             column: 5,
             row: geom.first_asset,
+            modifiers: KeyModifiers::NONE,
         },
     );
     assert_eq!(cmds.len(), 1, "must emit exactly one cmd");
@@ -145,6 +154,7 @@ fn click_last_asset_row_opens_last_asset() {
         Msg::Click {
             column: 5,
             row: geom.last_asset,
+            modifiers: KeyModifiers::NONE,
         },
     );
     assert_eq!(cmds.len(), 1);
@@ -168,6 +178,7 @@ fn click_on_panel_top_border_row_is_noop() {
         Msg::Click {
             column: 5,
             row: geom.top,
+            modifiers: KeyModifiers::NONE,
         },
     );
     assert!(cmds.is_empty(), "click on top border must be a no-op");
@@ -185,6 +196,7 @@ fn click_on_panel_bottom_border_row_is_noop() {
         Msg::Click {
             column: 5,
             row: geom.bottom,
+            modifiers: KeyModifiers::NONE,
         },
     );
     assert!(cmds.is_empty(), "click on bottom border must be a no-op");
@@ -203,6 +215,7 @@ fn click_above_panel_is_noop() {
         Msg::Click {
             column: 5,
             row: above_row,
+            modifiers: KeyModifiers::NONE,
         },
     );
     assert!(cmds.is_empty(), "click above panel must be a no-op");
@@ -220,6 +233,7 @@ fn click_asset_row_with_pending_download_emits_download_cmd() {
         Msg::Click {
             column: 5,
             row: geom.first_asset,
+            modifiers: KeyModifiers::NONE,
         },
     );
     assert_eq!(cmds.len(), 1);
@@ -260,6 +274,7 @@ fn click_asset_clears_pending_download_flag() {
         Msg::Click {
             column: 0,
             row: geom.first_asset,
+            modifiers: KeyModifiers::NONE,
         },
     );
     match m_after.top() {
@@ -279,7 +294,14 @@ fn click_asset_clears_pending_download_flag() {
 #[test]
 fn click_detail_with_no_assets_is_noop() {
     let m = detail_model_with_assets_and_viewport(vec![], "inst", (80, 24), false);
-    let (_m, cmds) = update(m, Msg::Click { column: 5, row: 20 });
+    let (_m, cmds) = update(
+        m,
+        Msg::Click {
+            column: 5,
+            row: 20,
+            modifiers: KeyModifiers::NONE,
+        },
+    );
     assert!(
         cmds.is_empty(),
         "click on detail with no assets must be a no-op"
@@ -348,6 +370,7 @@ fn click_mapper_agrees_with_render_height_for_multiple_viewport_sizes() {
             Msg::Click {
                 column: 0,
                 row: geom.first_asset,
+                modifiers: KeyModifiers::NONE,
             },
         );
         assert_eq!(
@@ -773,7 +796,14 @@ fn click_on_projects_screen_with_target_drills_into_tasks() {
         },
     ]);
 
-    let (m, cmds) = update(m, Msg::Click { column: 10, row: 4 });
+    let (m, cmds) = update(
+        m,
+        Msg::Click {
+            column: 10,
+            row: 4,
+            modifiers: KeyModifiers::NONE,
+        },
+    );
     assert!(cmds.is_empty(), "PushTasks produces no async Cmd");
     match m.top() {
         Some(Screen::Tasks { project_name, .. }) => {
@@ -835,7 +865,14 @@ fn click_bracketed_url_token_emits_open_asset_with_exact_url() {
     let m = detail_model_with_lines_and_assets(vec![line], vec![], 0, (80, 24));
 
     // Click at col 15 — inside the URL inner span (starts at col 14 after "│ click here [")
-    let (_m, cmds) = update(m, Msg::Click { column: 15, row: 2 });
+    let (_m, cmds) = update(
+        m,
+        Msg::Click {
+            column: 15,
+            row: 2,
+            modifiers: KeyModifiers::CONTROL,
+        },
+    );
     assert_eq!(cmds.len(), 1, "must emit exactly one cmd");
     match &cmds[0] {
         Cmd::OpenAsset {
@@ -861,7 +898,14 @@ fn click_body_link_accounts_for_scroll_offset() {
 
     // char_col = column - 1; URL inner starts at display col 3.
     // So column must be 4 → char_col = 3 → inside the URL.
-    let (_m, cmds) = update(m, Msg::Click { column: 4, row: 2 });
+    let (_m, cmds) = update(
+        m,
+        Msg::Click {
+            column: 4,
+            row: 2,
+            modifiers: KeyModifiers::CONTROL,
+        },
+    );
     assert_eq!(cmds.len(), 1);
     match &cmds[0] {
         Cmd::OpenAsset { url: cmd_url, .. } => {
@@ -879,7 +923,14 @@ fn click_non_url_content_cell_is_noop() {
     let m = detail_model_with_lines_and_assets(vec![link_line], vec![], 0, (80, 24));
 
     // Column 0 is the "│" border — no URL there.
-    let (_m, cmds) = update(m, Msg::Click { column: 0, row: 2 });
+    let (_m, cmds) = update(
+        m,
+        Msg::Click {
+            column: 0,
+            row: 2,
+            modifiers: KeyModifiers::NONE,
+        },
+    );
     assert!(cmds.is_empty(), "click on border must be a no-op");
 }
 
@@ -891,7 +942,14 @@ fn click_non_url_bracket_token_is_noop() {
     let m = detail_model_with_lines_and_assets(vec![line], vec![], 0, (80, 24));
 
     // Click col 6 is inside "[note]" inner span ("note" starts at col 6 after "│ see [")
-    let (_m, cmds) = update(m, Msg::Click { column: 6, row: 2 });
+    let (_m, cmds) = update(
+        m,
+        Msg::Click {
+            column: 6,
+            row: 2,
+            modifiers: KeyModifiers::NONE,
+        },
+    );
     assert!(
         cmds.is_empty(),
         "non-url '[note]' bracket must NOT be clickable"
@@ -907,7 +965,14 @@ fn click_mailto_bracket_token_yields_mailto_cmd() {
 
     // char_col = column - 1; email inner starts at display col 8 (after "│ mail [").
     // So column must be 9 → char_col = 8 → inside the email.
-    let (_m, cmds) = update(m, Msg::Click { column: 9, row: 2 });
+    let (_m, cmds) = update(
+        m,
+        Msg::Click {
+            column: 9,
+            row: 2,
+            modifiers: KeyModifiers::CONTROL,
+        },
+    );
     assert_eq!(cmds.len(), 1, "mailto click must emit a cmd");
     match &cmds[0] {
         Cmd::OpenAsset { url: cmd_url, .. } => {
@@ -937,6 +1002,7 @@ fn click_asset_panel_still_works_after_body_link_change() {
         Msg::Click {
             column: 5,
             row: geom.first_asset,
+            modifiers: KeyModifiers::NONE,
         },
     );
     assert_eq!(cmds.len(), 1, "asset panel click must emit one cmd");
@@ -955,11 +1021,173 @@ fn click_outside_content_text_area_is_noop() {
     let m = detail_model_with_lines_and_assets(vec![link_line], vec![], 0, (80, 24));
 
     // Row 1 is the top border of the content block (< text_top=2).
-    let (_m, cmds) = update(m, Msg::Click { column: 3, row: 1 });
+    let (_m, cmds) = update(
+        m,
+        Msg::Click {
+            column: 3,
+            row: 1,
+            modifiers: KeyModifiers::NONE,
+        },
+    );
     assert!(
         cmds.is_empty(),
         "click on content top border (row 1) must be a no-op"
     );
+}
+
+// --- D1c: modifier-gated wrapped-URL click tests ---
+
+/// Build a Detail model with a URL token that hard-splits across exactly two box-content
+/// lines at `content_width = inner_width - 4 = viewport_cols - 6`.
+///
+/// The URL is placed inside a `[url]` bracket token. The combined `[url]` token is
+/// longer than `content_width`, so `wrap_text` splits it mid-token. The two boxed
+/// lines simulate the output of `build_detail_content` + `panel_box`.
+fn detail_model_with_wrapped_url_lines(
+    url: &str,
+    viewport: (u16, u16),
+) -> (Model, usize, usize, u16) {
+    let inner_width = viewport.0.saturating_sub(2) as usize;
+    let content_width = inner_width.saturating_sub(4);
+    let token = format!("[{url}]");
+
+    assert!(
+        token.len() > content_width,
+        "url token must be longer than content_width={content_width} to force wrapping; \
+         got token.len()={} for url.len()={}",
+        token.len(),
+        url.len()
+    );
+
+    let frag0 = &token[..content_width];
+    let frag1 = &token[content_width..];
+    let pad1 = " ".repeat(content_width.saturating_sub(frag1.len()));
+    let border = '\u{2502}';
+    let line0 = format!("{border} {frag0} {border}");
+    let line1 = format!("{border} {frag1}{pad1} {border}");
+
+    let lines = vec![line0, line1];
+    let line0_idx = 0usize;
+    let line1_idx = 1usize;
+    let text_top: u16 = 2;
+
+    let m = detail_model_with_lines_and_assets(lines, vec![], 0, viewport);
+    (m, line0_idx, line1_idx, text_top)
+}
+
+// D1c-A1: Ctrl+click on the FIRST wrapped fragment of a long URL returns the COMPLETE URL.
+// Uses a viewport of width=42 → inner_width=40 → content_width=36.
+// URL of 38 chars is placed in a [url] token (40 chars), hard-split at col 36.
+#[test]
+fn ctrl_click_on_first_wrapped_fragment_returns_complete_url() {
+    let url = "https://example.com/long-path/to/page";
+    let viewport = (42u16, 24u16);
+    let (m, line0_idx, _line1_idx, text_top) = detail_model_with_wrapped_url_lines(url, viewport);
+
+    let row0 = text_top + line0_idx as u16;
+    let (_m, cmds) = update(
+        m,
+        Msg::Click {
+            column: 4,
+            row: row0,
+            modifiers: KeyModifiers::CONTROL,
+        },
+    );
+    assert_eq!(
+        cmds.len(),
+        1,
+        "Ctrl+click on first fragment must emit one cmd"
+    );
+    match &cmds[0] {
+        Cmd::OpenAsset {
+            url: cmd_url,
+            instance,
+        } => {
+            assert_eq!(cmd_url, url, "must return the COMPLETE url, not a fragment");
+            assert_eq!(instance, "inst");
+        }
+        other => panic!("expected OpenAsset, got {other:?}"),
+    }
+}
+
+// D1c-A1: Ctrl+click on the LAST wrapped fragment of a long URL returns the COMPLETE URL.
+#[test]
+fn ctrl_click_on_last_wrapped_fragment_returns_complete_url() {
+    let url = "https://example.com/long-path/to/page";
+    let viewport = (42u16, 24u16);
+    let (m, _line0_idx, line1_idx, text_top) = detail_model_with_wrapped_url_lines(url, viewport);
+
+    let row1 = text_top + line1_idx as u16;
+    let (_m, cmds) = update(
+        m,
+        Msg::Click {
+            column: 4,
+            row: row1,
+            modifiers: KeyModifiers::CONTROL,
+        },
+    );
+    assert_eq!(
+        cmds.len(),
+        1,
+        "Ctrl+click on last fragment must emit one cmd"
+    );
+    match &cmds[0] {
+        Cmd::OpenAsset { url: cmd_url, .. } => {
+            assert_eq!(cmd_url, url, "must return the COMPLETE url, not a fragment");
+        }
+        other => panic!("expected OpenAsset, got {other:?}"),
+    }
+}
+
+// D1c-A2: A plain (no Ctrl/Cmd/Super) click on the [url] token returns None — no open Cmd.
+#[test]
+fn plain_click_on_url_token_is_noop() {
+    let url = "https://example.com/long-path/to/page";
+    let viewport = (42u16, 24u16);
+    let (m, line0_idx, _line1_idx, text_top) = detail_model_with_wrapped_url_lines(url, viewport);
+
+    let row0 = text_top + line0_idx as u16;
+    let (_m, cmds) = update(
+        m,
+        Msg::Click {
+            column: 4,
+            row: row0,
+            modifiers: KeyModifiers::NONE,
+        },
+    );
+    assert!(
+        cmds.is_empty(),
+        "plain click on url token must not emit any cmd (BDR 0014 Sc.8)"
+    );
+}
+
+// D1c-A3: A single-line (unwrapped) body link still resolves to OpenAsset with the modifier.
+// Regression test: the new wrapped-URL path must not break the existing single-line case.
+#[test]
+fn ctrl_click_on_single_line_url_still_resolves() {
+    let url = "https://example.com/short";
+    let line = format!("\u{2502} [{url}] \u{2502}");
+    let m = detail_model_with_lines_and_assets(vec![line], vec![], 0, (80, 24));
+
+    let (_m, cmds) = update(
+        m,
+        Msg::Click {
+            column: 4,
+            row: 2,
+            modifiers: KeyModifiers::CONTROL,
+        },
+    );
+    assert_eq!(
+        cmds.len(),
+        1,
+        "Ctrl+click on single-line url must emit one cmd"
+    );
+    match &cmds[0] {
+        Cmd::OpenAsset { url: cmd_url, .. } => {
+            assert_eq!(cmd_url, url);
+        }
+        other => panic!("expected OpenAsset for single-line url, got {other:?}"),
+    }
 }
 
 // --- V3-A1: ToggleSelection model tests ---
@@ -1298,6 +1526,7 @@ fn click_wrapped_asset_first_row_opens_owning_asset() {
         Msg::Click {
             column: 5,
             row: first_asset_row,
+            modifiers: KeyModifiers::NONE,
         },
     );
     assert_eq!(cmds.len(), 1, "panel_row=0 must emit one cmd");
@@ -1334,6 +1563,7 @@ fn click_wrapped_asset_continuation_row_resolves_to_owning_asset() {
         Msg::Click {
             column: 5,
             row: continuation_row,
+            modifiers: KeyModifiers::NONE,
         },
     );
     assert_eq!(cmds.len(), 1, "continuation panel_row=1 must emit one cmd");
@@ -1370,6 +1600,7 @@ fn click_second_asset_row_after_wrapped_first_asset_resolves_correctly() {
         Msg::Click {
             column: 5,
             row: second_asset_row,
+            modifiers: KeyModifiers::NONE,
         },
     );
     assert_eq!(cmds.len(), 1, "first row of asset[1] must emit one cmd");
@@ -1460,6 +1691,7 @@ fn body_link_click_at_wrapped_panel_region_is_noop() {
         Msg::Click {
             column: 3,
             row: panel_top,
+            modifiers: KeyModifiers::NONE,
         },
     );
     assert!(

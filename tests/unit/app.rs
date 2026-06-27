@@ -1,6 +1,7 @@
 use super::*;
 use crate::render::MineTableRow;
 use crate::tui::model::{DetailLoad, Header};
+use crossterm::event::KeyModifiers;
 use serde_json::json;
 use std::collections::HashMap;
 
@@ -201,7 +202,14 @@ fn scroll_down_at_last_row_clamps_projects() {
 fn click_with_empty_targets_is_noop_projects() {
     let m = projects_model(3);
     let sel_before = m.stack.last().unwrap().selected();
-    let (m, cmds) = update(m, Msg::Click { column: 0, row: 99 });
+    let (m, cmds) = update(
+        m,
+        Msg::Click {
+            column: 0,
+            row: 99,
+            modifiers: KeyModifiers::NONE,
+        },
+    );
     assert_eq!(m.stack.last().unwrap().selected(), sel_before);
     assert!(cmds.is_empty());
     assert!(!m.should_quit);
@@ -212,7 +220,14 @@ fn click_with_empty_targets_is_noop_projects() {
 fn click_with_empty_targets_is_noop_tasks() {
     let m = tasks_model(3);
     let sel_before = m.stack.last().unwrap().selected();
-    let (m, cmds) = update(m, Msg::Click { column: 0, row: 99 });
+    let (m, cmds) = update(
+        m,
+        Msg::Click {
+            column: 0,
+            row: 99,
+            modifiers: KeyModifiers::NONE,
+        },
+    );
     assert_eq!(m.stack.last().unwrap().selected(), sel_before);
     assert!(cmds.is_empty());
     assert!(!m.should_quit);
@@ -264,7 +279,14 @@ fn empty_list_navigation_never_panics_or_quits_projects() {
     assert!(!m.should_quit);
     let (m, _) = update(m, Msg::Up);
     assert!(!m.should_quit);
-    let (m, _) = update(m, Msg::Click { column: 0, row: 0 });
+    let (m, _) = update(
+        m,
+        Msg::Click {
+            column: 0,
+            row: 0,
+            modifiers: KeyModifiers::NONE,
+        },
+    );
     assert!(!m.should_quit);
     let (m, _) = update(m, Msg::ScrollDown);
     assert!(!m.should_quit);
@@ -301,7 +323,14 @@ fn empty_list_navigation_never_panics_or_quits_tasks() {
     assert!(!m.should_quit);
     let (m, _) = update(m, Msg::Up);
     assert!(!m.should_quit);
-    let (m, _) = update(m, Msg::Click { column: 0, row: 0 });
+    let (m, _) = update(
+        m,
+        Msg::Click {
+            column: 0,
+            row: 0,
+            modifiers: KeyModifiers::NONE,
+        },
+    );
     assert!(!m.should_quit);
 }
 
@@ -351,7 +380,11 @@ fn non_quit_msgs_do_not_set_should_quit() {
         || Msg::Down,
         || Msg::ScrollUp,
         || Msg::ScrollDown,
-        || Msg::Click { column: 0, row: 0 },
+        || Msg::Click {
+            column: 0,
+            row: 0,
+            modifiers: KeyModifiers::NONE,
+        },
     ];
     for make_msg in msgs {
         let m = projects_model(3);
@@ -753,6 +786,7 @@ fn detail_click_does_not_change_state_or_quit() {
         Msg::Click {
             column: 0,
             row: 100,
+            modifiers: KeyModifiers::NONE,
         },
     );
     assert!(!m.should_quit);
@@ -865,6 +899,7 @@ fn detail_click_below_last_row_does_not_quit() {
         Msg::Click {
             column: 0,
             row: 255,
+            modifiers: KeyModifiers::NONE,
         },
     );
     assert!(!m.should_quit);
@@ -883,6 +918,7 @@ fn projects_mouse_scroll_and_click_beyond_bounds_never_quit() {
         Msg::Click {
             column: 0,
             row: 255,
+            modifiers: KeyModifiers::NONE,
         },
     );
     assert!(!m2.should_quit);
@@ -901,6 +937,7 @@ fn tasks_mouse_scroll_and_click_beyond_bounds_never_quit() {
         Msg::Click {
             column: 0,
             row: 255,
+            modifiers: KeyModifiers::NONE,
         },
     );
     assert!(!m2.should_quit);
@@ -1337,7 +1374,14 @@ fn mine_click_with_target_drills_into_clicked_rows_detail() {
     ]);
 
     // Click at y=4 → index 2 → inst-gamma, project 30, task 303
-    let (m, cmds) = update(m, Msg::Click { column: 0, row: 4 });
+    let (m, cmds) = update(
+        m,
+        Msg::Click {
+            column: 0,
+            row: 4,
+            modifiers: KeyModifiers::NONE,
+        },
+    );
     assert_eq!(cmds.len(), 1, "click must emit one Cmd::LoadDetail");
     match &cmds[0] {
         Cmd::LoadDetail {
@@ -1392,7 +1436,14 @@ fn mine_click_below_last_target_is_noop() {
     ]);
 
     // Click at y=10 is below all targets → no-op
-    let (m, cmds) = update(m, Msg::Click { column: 0, row: 10 });
+    let (m, cmds) = update(
+        m,
+        Msg::Click {
+            column: 0,
+            row: 10,
+            modifiers: KeyModifiers::NONE,
+        },
+    );
     assert!(cmds.is_empty(), "click below targets must emit no cmd");
     assert_eq!(m.stack.last().unwrap().selected(), sel_before);
     assert!(!m.should_quit);

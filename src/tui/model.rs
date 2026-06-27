@@ -341,6 +341,12 @@ pub enum Msg {
     Click {
         column: u16,
         row: u16,
+        /// Keyboard modifiers held when the mouse button was pressed.
+        ///
+        /// Carried as plain data so `update` stays pure. The shell reads
+        /// these from `crossterm::event::MouseEvent::modifiers` and forwards
+        /// them unchanged; the pure layer never touches the terminal.
+        modifiers: crossterm::event::KeyModifiers,
     },
     Select,
     Back,
@@ -467,7 +473,11 @@ pub fn update(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
         Msg::Down | Msg::ScrollDown => (handle_down(model), vec![]),
         Msg::PageUp => (handle_page_up(model), vec![]),
         Msg::PageDown => (handle_page_down(model), vec![]),
-        Msg::Click { column, row } => handle_click(model, column, row),
+        Msg::Click {
+            column,
+            row,
+            modifiers,
+        } => handle_click(model, column, row, modifiers),
         Msg::Select => handle_select(model),
         Msg::Back => (handle_back(model), vec![]),
         Msg::Quit => (handle_quit(model), vec![]),
@@ -548,9 +558,14 @@ fn handle_page_down(mut model: Model) -> Model {
     model
 }
 
-fn handle_click(model: Model, column: u16, row: u16) -> (Model, Vec<Cmd>) {
+fn handle_click(
+    model: Model,
+    column: u16,
+    row: u16,
+    modifiers: crossterm::event::KeyModifiers,
+) -> (Model, Vec<Cmd>) {
     match model.top() {
-        Some(Screen::Detail { .. }) => handle_click_detail(model, column, row),
+        Some(Screen::Detail { .. }) => handle_click_detail(model, column, row, modifiers),
         Some(_) => handle_click_list(model, row),
         None => (model, vec![]),
     }
@@ -573,8 +588,13 @@ fn handle_click_list(model: Model, row: u16) -> (Model, Vec<Cmd>) {
     handle_select(model)
 }
 
-fn handle_click_detail(model: Model, column: u16, row: u16) -> (Model, Vec<Cmd>) {
-    if let Some(cmd) = body_link_cmd_at(&model, column, row) {
+fn handle_click_detail(
+    model: Model,
+    column: u16,
+    row: u16,
+    modifiers: crossterm::event::KeyModifiers,
+) -> (Model, Vec<Cmd>) {
+    if let Some(cmd) = body_link_cmd_at(&model, column, row, modifiers) {
         return (model, vec![cmd]);
     }
     asset_panel_cmd_at(model, row)
@@ -582,15 +602,30 @@ fn handle_click_detail(model: Model, column: u16, row: u16) -> (Model, Vec<Cmd>)
 
 /// Try to resolve a body-link click in the Detail content text area.
 ///
-/// Resolves the URL from the visible text at the clicked display column via
-/// `url_at`. On a bracketed bare email address, re-adds the `mailto:` scheme.
-/// Returns `None` when the click lands outside the text viewport, on a border,
-/// on padding, on plain text, or on a `[note]` that is not a URL/email.
+/// Returns `None` when:
+/// - the modifier set does not include Ctrl or Cmd/Super (BDR 0014 Sc.8 — plain
+///   click is reserved for text selection and must not navigate),
+/// - the click lands outside the text viewport, on a border, on padding, on plain
+///   text, or on a `[note]` that is not a URL/email.
 ///
-/// Uses the wrapped asset-panel height (same as `draw_detail`) so the body
-/// hit region stops above the real panel top even when asset labels wrap.
-fn body_link_cmd_at(model: &Model, column: u16, row: u16) -> Option<Cmd> {
+/// When the modifier gate passes, resolves the URL via `resolve_wrapped_url` so a
+/// click on any wrapped fragment of a long `[url]` token returns the complete URL
+/// (BDR 0014 Sc.7). Uses the wrapped asset-panel height (same as `draw_detail`) so
+/// the body hit region stops above the real panel top even when asset labels wrap.
+fn body_link_cmd_at(
+    model: &Model,
+    column: u16,
+    row: u16,
+    modifiers: crossterm::event::KeyModifiers,
+) -> Option<Cmd> {
     use crate::tui::screens::asset_panel_render_height;
+    use crossterm::event::KeyModifiers;
+
+    let has_modifier =
+        modifiers.contains(KeyModifiers::CONTROL) || modifiers.contains(KeyModifiers::SUPER);
+    if !has_modifier {
+        return None;
+    }
 
     let Screen::Detail {
         instance,
@@ -614,10 +649,10 @@ fn body_link_cmd_at(model: &Model, column: u16, row: u16) -> Option<Cmd> {
         return None;
     }
 
-    let logical_line = offset + (row - text_top) as usize;
-    let line = lines.get(logical_line)?;
+    let line_idx = offset + (row - text_top) as usize;
     let char_col = (column as usize).saturating_sub(1);
-    let token = crate::render::url_at(line, char_col)?;
+    let content_width = crate::render::panel_content_width_pub(inner_width);
+    let token = crate::render::resolve_wrapped_url(lines, line_idx, char_col, content_width)?;
     let url = normalize_link_url(&token);
     if !crate::render::is_openable_url(&url) && !is_mailto_url(&url) {
         return None;

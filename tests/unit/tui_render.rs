@@ -2008,6 +2008,7 @@ fn draw_projects_name_column_absorbs_full_width() {
 mod v2b_click_targets {
     use crate::tui::model::{update, Header, Model, Msg, ProjectGroup, Screen, TaskRow};
     use crate::tui::view::view;
+    use crossterm::event::KeyModifiers;
     use ratatui::{backend::TestBackend, Terminal};
 
     fn empty_header() -> Header {
@@ -2098,6 +2099,7 @@ mod v2b_click_targets {
             Msg::Click {
                 column: 5,
                 row: click_y,
+                modifiers: KeyModifiers::NONE,
             },
         );
         assert!(cmds.is_empty(), "PushTasks must not emit async cmds");
@@ -2164,6 +2166,7 @@ mod v2b_click_targets {
             Msg::Click {
                 column: 5,
                 row: click_y,
+                modifiers: KeyModifiers::NONE,
             },
         );
         assert_eq!(cmds.len(), 1, "clicking a task must emit LoadDetail");
@@ -2235,6 +2238,7 @@ mod v2b_click_targets {
             Msg::Click {
                 column: 5,
                 row: below_y,
+                modifiers: KeyModifiers::NONE,
             },
         );
         assert!(cmds.is_empty(), "click below all rows must emit no cmds");
@@ -2307,6 +2311,7 @@ mod v2b_click_targets {
             Msg::Click {
                 column: 5,
                 row: click_y,
+                modifiers: KeyModifiers::NONE,
             },
         );
         assert_eq!(cmds.len(), 1, "must emit LoadDetail cmd");
@@ -3885,5 +3890,121 @@ mod w1_chrome_wrap {
             !content.contains('\u{2026}'),
             "unbreakable token must hard-break, not produce ellipsis: {content}"
         );
+    }
+}
+
+// --- D1c: logical_position_in_wrap_group unit tests ---
+
+mod d1c_wrap_group_position {
+    use crate::render::{logical_position_in_wrap_group, panel_content_width_pub};
+
+    fn make_box_line(content: &str, content_width: usize) -> String {
+        let pad = " ".repeat(content_width.saturating_sub(content.len()));
+        format!("\u{2502} {content}{pad} \u{2502}")
+    }
+
+    // D1c-A4: logical_position_in_wrap_group resolves the first character of line 0
+    // (char_col=2, which is content_col=0) to group_start=0 and logical_col=0.
+    //
+    // Uses a content of exactly content_width chars to simulate a hard-split line, so
+    // group_start remains 0 (the click is on the first/only line of the group).
+    #[test]
+    fn single_line_group_start_col_maps_to_logical_zero() {
+        // frag0: exactly 36 ASCII chars — the first hard-split fragment of a [url] token.
+        // "[https://example.com/long-path/to/pa" = 1 + 8 + 11 + 16 = 36 chars.
+        let content_width = 36usize;
+        let frag0 = "[https://example.com/long-path/to/pa";
+        assert_eq!(
+            frag0.len(),
+            content_width,
+            "sanity: frag0 must fill content_width exactly"
+        );
+        let line = make_box_line(frag0, content_width);
+        let lines = vec![line];
+
+        let result = logical_position_in_wrap_group(&lines, 0, 2, content_width);
+        let (group_start, logical_col) = result.expect("must resolve for a valid box line");
+        assert_eq!(group_start, 0);
+        assert_eq!(logical_col, 0, "char_col=2 → content_col=0 → logical_col=0");
+    }
+
+    // D1c-A4: clicking at char_col=5 on line 0 (a hard-split line) returns logical_col=3.
+    //
+    // frag0 fills content_width exactly (hard-split); frag1 is the continuation.
+    // char_col=5 → content_col = 5-2 = 3 → logical_col = 3 (no prior fragments).
+    #[test]
+    fn hard_split_line_zero_char_col_maps_correctly() {
+        let content_width = 36usize;
+        let frag0 = "[https://example.com/long-path/to/pa"; // exactly 36 chars
+        let frag1 = "ge]";
+        assert_eq!(
+            frag0.len(),
+            content_width,
+            "frag0 must fill content_width exactly"
+        );
+        let line0 = make_box_line(frag0, content_width);
+        let line1 = make_box_line(frag1, content_width);
+        let lines = vec![line0, line1];
+
+        let (group_start, logical_col) =
+            logical_position_in_wrap_group(&lines, 0, 5, content_width)
+                .expect("must resolve on first line");
+        assert_eq!(group_start, 0);
+        assert_eq!(
+            logical_col, 3,
+            "char_col=5 → content_col=3 on line 0 → logical_col=3"
+        );
+    }
+
+    // D1c-A4: clicking at char_col=4 on line 1 (the continuation) maps to
+    // logical_col = content_width (36) + content_col (2) = 38.
+    #[test]
+    fn continuation_line_click_maps_to_logical_col_across_split() {
+        let content_width = 36usize;
+        let frag0 = "[https://example.com/long-path/to/pa"; // 36 chars — exactly fills content_width
+        let frag1 = "ge]";
+        assert_eq!(
+            frag0.len(),
+            content_width,
+            "frag0 must fill content_width exactly"
+        );
+        let line0 = make_box_line(frag0, content_width);
+        let line1 = make_box_line(frag1, content_width);
+        let lines = vec![line0, line1];
+
+        // char_col=4 on line 1: content_col = 4-2 = 2; previous line contributes 36 cols.
+        let (group_start, logical_col) =
+            logical_position_in_wrap_group(&lines, 1, 4, content_width)
+                .expect("must resolve on continuation line");
+        assert_eq!(group_start, 0, "group must walk back to line 0");
+        assert_eq!(
+            logical_col,
+            content_width + 2,
+            "logical_col = frag0.display_width ({content_width}) + content_col (2) = {}",
+            content_width + 2
+        );
+    }
+
+    // D1c-A4: a non-box line (no │ border) returns None.
+    #[test]
+    fn non_box_line_returns_none() {
+        let lines = vec!["plain text without box border".to_string()];
+        let result = logical_position_in_wrap_group(&lines, 0, 2, 36);
+        assert!(result.is_none(), "non-box line must return None");
+    }
+
+    // D1c-A4: panel_content_width_pub is called with inner_width (viewport_cols - 2),
+    // and returns inner_width - 4 (removes 2 border cols + 2×HPAD).
+    // For viewport_cols=42 → inner_width=40 → content_width=36.
+    #[test]
+    fn panel_content_width_pub_matches_expected() {
+        let inner_width = 40usize; // = viewport_cols(42) - 2
+        let expected_content_width = inner_width.saturating_sub(4);
+        assert_eq!(
+            panel_content_width_pub(inner_width),
+            expected_content_width,
+            "panel_content_width_pub(inner_width=40) must equal inner_width - 4 = 36"
+        );
+        assert_eq!(expected_content_width, 36, "sanity: 40 - 4 = 36");
     }
 }
