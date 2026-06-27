@@ -13,10 +13,13 @@
 | [0009](/adr/0009-tui-visual-redesign-vibrant-dashboard.md) | TUI visual redesign — vibrant dashboard (user header, unified lists, scrollbar) | Accepted |
 | [0010](/adr/0010-detail-sectioned-panels-focus-scroll.md) | Detail screen as fixed, independently-scrollable sections (focus + Tab + numeric jump) | Reverted (U6c) |
 | [0011](/adr/0011-agent-json-output-contract.md) | Curated, minified JSON output for agent/LLM consumption (--json contract) (U21) | Accepted |
-| [0012](/adr/0012-mouse-capture-toggle-for-text-selection.md) | Toggle terminal mouse capture for native text selection (V3) | Accepted |
+| [0012](/adr/0012-mouse-capture-toggle-for-text-selection.md) | Toggle terminal mouse capture for native text selection (V3) | Superseded by 0021 |
 | [0013](/adr/0013-tty-gated-default-subcommand.md) | A bare `ac` invocation in a TTY defaults to `mine` (C1) | Accepted |
 | [0014](/adr/0014-browse-list-project-name-cache-swr.md) | Browse-list project-name cache (SWR) — stop re-fetching the directory on refresh (R2) | Accepted |
 | [0015](/adr/0015-richtext-html-subset-styled-segments.md) | Render comment/description HTML as styled segments over a known tag subset (R3) | Accepted |
 | [0016](/adr/0016-refactor-render-decompose-relocate.md) | Refactor render.rs — decompose the meta-table god function, drop dead seams, relocate asset extraction (ARCH) | Accepted |
 | [0017](/adr/0017-task-list-first-paint-cache-swr-entry.md) | First-paint-from-cache SWR on browse/mine entry (task-list snapshot cache) (S8) | Accepted |
 | [0018](/adr/0018-detail-chrome-dynamic-height-wrap.md) | Detail chrome wraps via dynamic region heights; task name moves off the un-wrappable frame title | Accepted |
+| [0019](/adr/0019-richtext-full-activecollab-tag-coverage.md) | Extend the rich-text mapper to the full ActiveCollab allowed-tag set (tables, strike/del, underline, pre) (R4) | Accepted |
+| [0020](/adr/0020-body-links-inline-url-native-click.md) | Body links render inline as text + visible URL, clickable from the visible region (V5) | Accepted |
+| [0021](/adr/0021-app-managed-text-selection-clipboard.md) | App-managed text selection with a drawn highlight and clipboard copy (V6) | Accepted |

@@ -2,9 +2,9 @@
 type: ADR
 title: Toggle terminal mouse capture so native text selection works on demand
 description: Add a keyboard-toggled selection mode that disables crossterm mouse capture (restoring the terminal's native click-drag selection) and shows a footer indicator, then re-enables capture so the V2/V4 click affordances return.
-status: Accepted
+status: Superseded
 supersedes:
-superseded_by:
+superseded_by: [0021]
 tags: [tui, ux, ratatui, crossterm, mouse, selection]
 timestamp: 2026-06-26T00:00:00Z
 ---

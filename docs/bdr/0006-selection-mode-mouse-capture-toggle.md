@@ -2,8 +2,8 @@
 type: BDR
 title: "Selection mode: a key toggles mouse capture off so the terminal can select text"
 description: Pressing `s` flips selection mode; entering it disables mouse capture (terminal regains native selection) and shows a footer indicator, leaving it re-enables capture and the click affordances.
-status: Accepted
-superseded_by:
+status: Superseded
+superseded_by: [15]
 tags: [tui, input, mouse, selection]
 timestamp: 2026-06-26T00:00:00Z
 ---
