@@ -172,6 +172,7 @@ fn build_groups(
             name: task.name,
             instance: instance_name,
             project_id: pid,
+            due_on: None,
         });
     }
 

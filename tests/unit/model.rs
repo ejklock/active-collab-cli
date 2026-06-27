@@ -2971,6 +2971,7 @@ fn sample_mine_rows() -> Vec<MineTableRow> {
             task_number: 10,
             task_id: 100,
             name: "Task Alpha".into(),
+            due_on: None,
         },
         MineTableRow {
             instance: "inst-b".into(),
@@ -2978,6 +2979,7 @@ fn sample_mine_rows() -> Vec<MineTableRow> {
             task_number: 20,
             task_id: 200,
             name: "Task Beta".into(),
+            due_on: None,
         },
     ]
 }
@@ -3075,6 +3077,7 @@ fn loaded_mine_tasks_replaces_rows_clears_revalidating_stamps_last_loaded() {
         task_number: 30,
         task_id: 300,
         name: "Task Gamma".into(),
+        due_on: None,
     }];
     let loaded_at = "2026-06-26T12:00:00Z".to_string();
     let (updated, cmds) = update(
@@ -3356,4 +3359,151 @@ fn loaded_mine_tasks_on_cold_model_clears_loading() {
         }
         _ => panic!("expected Tasks screen"),
     }
+}
+
+// --- D2b: due_on threading and relative_due formatter ---
+
+fn mine_row_with_due(due_on: Option<&str>) -> MineTableRow {
+    MineTableRow {
+        instance: "inst".into(),
+        project_id: 1,
+        task_number: 1,
+        task_id: 1,
+        name: "Task".into(),
+        due_on: due_on.map(str::to_owned),
+    }
+}
+
+#[test]
+fn due_on_threads_mine_table_row_to_task_row_via_loaded_mine_tasks() {
+    use crate::tui::model::init_mine;
+    let rows = vec![
+        mine_row_with_due(Some("2026-08-01")),
+        mine_row_with_due(None),
+    ];
+    let (model, _) = init_mine(empty_header(), Some(rows));
+    match model.stack.last() {
+        Some(Screen::Tasks { tasks, .. }) => {
+            assert_eq!(tasks[0].due_on.as_deref(), Some("2026-08-01"));
+            assert_eq!(tasks[1].due_on, None);
+        }
+        _ => panic!("expected Tasks screen"),
+    }
+}
+
+#[test]
+fn mine_table_row_serde_round_trip_preserves_due_on() {
+    let row = MineTableRow {
+        instance: "inst".into(),
+        project_id: 1,
+        task_number: 1,
+        task_id: 1,
+        name: "Task".into(),
+        due_on: Some("2026-07-15".into()),
+    };
+    let json = serde_json::to_string(&row).unwrap();
+    let decoded: MineTableRow = serde_json::from_str(&json).unwrap();
+    assert_eq!(decoded.due_on.as_deref(), Some("2026-07-15"));
+}
+
+#[test]
+fn mine_table_row_old_snapshot_missing_due_on_deserializes_to_none() {
+    let json = r#"{"instance":"inst","project_id":1,"task_number":1,"task_id":1,"name":"Task"}"#;
+    let row: MineTableRow = serde_json::from_str(json).unwrap();
+    assert_eq!(
+        row.due_on, None,
+        "old snapshot without due_on must deserialize to None"
+    );
+}
+
+fn today() -> chrono::NaiveDate {
+    chrono::NaiveDate::from_ymd_opt(2026, 7, 10).unwrap()
+}
+
+#[test]
+fn relative_due_none_input_returns_sem_data_and_none_style() {
+    let (label, style) = relative_due(None, today());
+    assert_eq!(style, DueStyle::None);
+    assert!(!label.is_empty(), "label must not be empty");
+}
+
+#[test]
+fn relative_due_unparseable_returns_sem_data_and_none_style() {
+    let (label, style) = relative_due(Some("not-a-date"), today());
+    assert_eq!(style, DueStyle::None);
+    assert!(!label.is_empty());
+}
+
+#[test]
+fn relative_due_today_returns_near_style() {
+    let (label, style) = relative_due(Some("2026-07-10"), today());
+    assert_eq!(style, DueStyle::Near);
+    assert!(!label.is_empty(), "label must not be empty for today");
+}
+
+#[test]
+fn relative_due_tomorrow_returns_near_style() {
+    let (label, style) = relative_due(Some("2026-07-11"), today());
+    assert_eq!(style, DueStyle::Near);
+    assert!(!label.is_empty());
+}
+
+#[test]
+fn relative_due_two_days_ahead_returns_near_style() {
+    let (label, style) = relative_due(Some("2026-07-12"), today());
+    assert_eq!(style, DueStyle::Near, "2 days ahead must be Near");
+    assert!(
+        label.contains('2'),
+        "label must mention the number 2: {label}"
+    );
+}
+
+#[test]
+fn relative_due_at_window_boundary_three_days_returns_near() {
+    let (label, style) = relative_due(Some("2026-07-13"), today());
+    assert_eq!(
+        style,
+        DueStyle::Near,
+        "exactly 3 days ahead must be Near (window boundary)"
+    );
+    assert!(label.contains('3'), "label must mention 3: {label}");
+}
+
+#[test]
+fn relative_due_beyond_window_returns_normal_style() {
+    let (label, style) = relative_due(Some("2026-07-14"), today());
+    assert_eq!(
+        style,
+        DueStyle::Normal,
+        "4 days ahead must be Normal (beyond window)"
+    );
+    assert!(label.contains('4'), "label must mention 4: {label}");
+}
+
+#[test]
+fn relative_due_overdue_one_day_returns_singular_label() {
+    let (label, style) = relative_due(Some("2026-07-09"), today());
+    assert_eq!(style, DueStyle::Overdue);
+    assert!(
+        label.contains('1'),
+        "singular overdue label must contain 1: {label}"
+    );
+    assert!(
+        !label.contains("dias"),
+        "singular must not use plural 'dias': {label}"
+    );
+}
+
+#[test]
+fn relative_due_overdue_many_days_returns_plural_label() {
+    let (label, style) = relative_due(Some("2026-07-05"), today());
+    assert_eq!(style, DueStyle::Overdue);
+    assert!(
+        label.contains('5'),
+        "overdue 5 days label must contain 5: {label}"
+    );
+    assert!(
+        !label.contains(" 1 "),
+        "plural overdue must not contain singular '1': {label}"
+    );
 }

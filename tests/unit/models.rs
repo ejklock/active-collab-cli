@@ -139,3 +139,31 @@ fn mine_task_from_api_null_name_yields_empty_string() {
     let mine = MineTask::from_api(&data, "x");
     assert_eq!(mine.name, "");
 }
+
+#[test]
+fn mine_task_from_api_due_on_unix_timestamp_normalizes_to_ymd() {
+    let data = json!({ "id": 10, "due_on": 1700000000i64 });
+    let mine = MineTask::from_api(&data, "inst");
+    assert_eq!(mine.due_on, Some("2023-11-14".to_owned()));
+}
+
+#[test]
+fn mine_task_from_api_due_on_iso_string_passes_through() {
+    let data = json!({ "id": 11, "due_on": "2026-07-01" });
+    let mine = MineTask::from_api(&data, "inst");
+    assert_eq!(mine.due_on, Some("2026-07-01".to_owned()));
+}
+
+#[test]
+fn mine_task_from_api_due_on_null_yields_none() {
+    let data = json!({ "id": 12, "due_on": null });
+    let mine = MineTask::from_api(&data, "inst");
+    assert_eq!(mine.due_on, None);
+}
+
+#[test]
+fn mine_task_from_api_due_on_missing_yields_none() {
+    let data = json!({ "id": 13 });
+    let mine = MineTask::from_api(&data, "inst");
+    assert_eq!(mine.due_on, None);
+}

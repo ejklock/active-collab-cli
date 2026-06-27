@@ -27,6 +27,7 @@ rpassword = "7"
 url = "2"
 
 arboard = "3"
+chrono = { version = "0.4", default-features = false, features = ["std"] }
 
 [dev-dependencies]
 tempfile = "3"

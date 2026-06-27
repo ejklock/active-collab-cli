@@ -471,6 +471,8 @@ pub struct MineTableRow {
     pub task_number: i64,
     pub task_id: i64,
     pub name: String,
+    #[serde(default)]
+    pub due_on: Option<String>,
 }
 
 /// Parity: render.py render_mine_table.
@@ -572,6 +574,19 @@ pub fn fmt_date(value: &Value) -> String {
         }
         Value::String(s) => s.clone(),
         _ => value.to_string(),
+    }
+}
+
+/// Normalize a raw API `due_on` value to a `YYYY-MM-DD` string.
+///
+/// Accepts the same shapes as `fmt_date` (unix-timestamp number or ISO string).
+/// Returns `None` when the value is null, missing, or unparseable.
+pub fn normalize_due_to_ymd(value: &Value) -> Option<String> {
+    let s = fmt_date(value);
+    if s.is_empty() {
+        None
+    } else {
+        Some(s)
     }
 }
 

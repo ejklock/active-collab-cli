@@ -344,6 +344,7 @@ fn write_mine_snapshot(model: &Model, targets: &[Instance], db_path: &Path) {
             task_number: t.task_number,
             task_id: t.task_id,
             name: t.name.clone(),
+            due_on: t.due_on.clone(),
         })
         .collect();
     let Ok(list_json) = serde_json::to_string(&rows) else {

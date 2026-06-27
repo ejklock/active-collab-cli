@@ -66,6 +66,18 @@ pub struct TaskRow {
     pub name: String,
     pub instance: String,
     pub project_id: i64,
+    #[serde(default)]
+    pub due_on: Option<String>,
+}
+
+/// Style classification produced by `relative_due`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[allow(dead_code)]
+pub enum DueStyle {
+    Overdue,
+    Near,
+    Normal,
+    None,
 }
 
 /// A project group returned by the controller.
@@ -1146,6 +1158,7 @@ fn rows_to_task_rows(rows: Vec<MineTableRow>) -> Vec<TaskRow> {
             name: r.name,
             instance: r.instance,
             project_id: r.project_id,
+            due_on: r.due_on,
         })
         .collect()
 }
@@ -1245,6 +1258,67 @@ pub fn init_mine(header: Header, seed: Option<Vec<MineTableRow>>) -> (Model, Vec
         copied_feedback: false,
     };
     (model, vec![Cmd::LoadMineTasks])
+}
+
+#[allow(dead_code)]
+const NEAR_DUE_WINDOW_DAYS: i64 = 3;
+
+/// Map an optional `YYYY-MM-DD` due date to a Brazilian-Portuguese label and style.
+///
+/// Pure and total: no side effects, no I/O. Accepts an injected `today` so callers
+/// remain deterministic in tests.
+#[allow(dead_code)]
+pub fn relative_due(due_on: Option<&str>, today: chrono::NaiveDate) -> (String, DueStyle) {
+    use chrono::NaiveDate;
+
+    let Some(s) = due_on else {
+        return (t("due_none"), DueStyle::None);
+    };
+
+    let Ok(date) = NaiveDate::parse_from_str(s, "%Y-%m-%d") else {
+        return (t("due_none"), DueStyle::None);
+    };
+
+    let delta = (date - today).num_days();
+
+    match delta {
+        0 => (t("due_today"), DueStyle::Near),
+        1 => (t("due_tomorrow"), DueStyle::Near),
+        2..=NEAR_DUE_WINDOW_DAYS => {
+            let day_word = day_word(delta);
+            (
+                format!("{} {} {}", t("due_in"), delta, day_word),
+                DueStyle::Near,
+            )
+        }
+        d if d > NEAR_DUE_WINDOW_DAYS => {
+            let day_word = day_word(d);
+            (
+                format!("{} {} {}", t("due_in"), d, day_word),
+                DueStyle::Normal,
+            )
+        }
+        -1 => (
+            format!("{} 1 {}", t("due_overdue"), t("due_day")),
+            DueStyle::Overdue,
+        ),
+        d => {
+            let abs_d = d.unsigned_abs() as i64;
+            (
+                format!("{} {} {}", t("due_overdue"), abs_d, t("due_days")),
+                DueStyle::Overdue,
+            )
+        }
+    }
+}
+
+#[allow(dead_code)]
+fn day_word(n: i64) -> String {
+    if n == 1 {
+        t("due_day")
+    } else {
+        t("due_days")
+    }
 }
 
 #[cfg(test)]

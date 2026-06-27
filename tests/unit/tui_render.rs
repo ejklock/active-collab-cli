@@ -39,6 +39,7 @@ fn make_groups(names: &[&str]) -> Vec<ProjectGroup> {
                 name: format!("Task {i}"),
                 instance: "inst".into(),
                 project_id: i as i64,
+                due_on: None,
             }],
         })
         .collect()
@@ -58,6 +59,7 @@ fn make_groups_with_instance(names_and_instances: &[(&str, &str)]) -> Vec<Projec
                 name: format!("Task {i}"),
                 instance: inst.to_string(),
                 project_id: i as i64,
+                due_on: None,
             }],
         })
         .collect()
@@ -73,6 +75,7 @@ fn make_tasks(names: &[&str]) -> Vec<TaskRow> {
             name: name.to_string(),
             instance: format!("instance{i}"),
             project_id: 0,
+            due_on: None,
         })
         .collect()
 }
@@ -2151,6 +2154,7 @@ mod v2b_click_targets {
             name: name.to_string(),
             instance: "inst".into(),
             project_id: 0,
+            due_on: None,
         }
     }
 
@@ -2493,6 +2497,7 @@ mod footer_refresh_hint {
                         name: "Task 0".into(),
                         instance: "inst".into(),
                         project_id: 0,
+                        due_on: None,
                     }],
                 }],
                 selected: 0,

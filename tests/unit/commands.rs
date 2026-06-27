@@ -1840,6 +1840,7 @@ async fn mine_core_non_tty_writes_render_mine_table_exactly_and_returns_done() {
         task_number: 4,
         task_id: 77,
         name: "Table row task".to_owned(),
+        due_on: None,
     }]);
     let s = output_str(&out);
     assert!(

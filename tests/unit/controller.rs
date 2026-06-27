@@ -213,6 +213,7 @@ fn build_groups_uses_numeric_fallback_for_unknown_project() {
         is_completed: false,
         is_trashed: false,
         project_id: Some(999),
+        due_on: None,
         instance_name: "inst".into(),
     };
     let groups = build_groups(vec![(task, "inst".into())], &HashMap::new());
@@ -230,6 +231,7 @@ fn build_groups_same_project_id_on_two_instances_produces_two_groups() {
         is_completed: false,
         is_trashed: false,
         project_id: Some(100),
+        due_on: None,
         instance_name: "alpha".into(),
     };
     let task_b = MineTask {
@@ -239,6 +241,7 @@ fn build_groups_same_project_id_on_two_instances_produces_two_groups() {
         is_completed: false,
         is_trashed: false,
         project_id: Some(100),
+        due_on: None,
         instance_name: "beta".into(),
     };
     let mut names: HashMap<(String, i64), String> = HashMap::new();
@@ -283,6 +286,7 @@ fn build_groups_instance_field_matches_task_instance() {
         is_completed: false,
         is_trashed: false,
         project_id: Some(42),
+        due_on: None,
         instance_name: "prod".into(),
     };
     let mut names: HashMap<(String, i64), String> = HashMap::new();
@@ -307,6 +311,7 @@ fn build_groups_sorted_by_project_name_then_instance() {
         is_completed: false,
         is_trashed: false,
         project_id: Some(1),
+        due_on: None,
         instance_name: "z-inst".into(),
     };
     let task_b_a = MineTask {
@@ -316,6 +321,7 @@ fn build_groups_sorted_by_project_name_then_instance() {
         is_completed: false,
         is_trashed: false,
         project_id: Some(1),
+        due_on: None,
         instance_name: "a-inst".into(),
     };
     let task_a = MineTask {
@@ -325,6 +331,7 @@ fn build_groups_sorted_by_project_name_then_instance() {
         is_completed: false,
         is_trashed: false,
         project_id: Some(2),
+        due_on: None,
         instance_name: "m-inst".into(),
     };
     let mut names: HashMap<(String, i64), String> = HashMap::new();

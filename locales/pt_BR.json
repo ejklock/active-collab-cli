@@ -110,5 +110,12 @@
   "footer.selection_indicator": "SELEÇÃO",
   "footer.copied_indicator": "COPIADO",
   "Updated at": "Atualizado em",
-  "Error: instance not found": "Erro: instância não encontrada"
+  "Error: instance not found": "Erro: instância não encontrada",
+  "due_today": "hoje",
+  "due_tomorrow": "amanhã",
+  "due_in": "vence em",
+  "due_overdue": "atrasada",
+  "due_day": "dia",
+  "due_days": "dias",
+  "due_none": "sem data"
 }
