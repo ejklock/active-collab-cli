@@ -72,6 +72,21 @@ Each row names what it proves.
 | Click anywhere drills in | unit | 5 | click on any card row resolves to that task index | multi-line click target |
 | Selected card highlighted | render (TestBackend) | 6 | all rows of the selected card styled selected | whole-card highlight |
 
+## Amendment (2026-06-27): line 2 carries no status; slice delivery
+
+Refines the Textual Description and Scenario 1's "line 2" per the ADR 0026 amendment.
+
+- **No status segment.** The list is pre-filtered to *open* tasks (`fetch_open_tasks` drops
+  completed and trashed), so a per-card status would be uniformly "aberto" and prove nothing.
+  **Line 2 is `<relative colored due> · <project name>`** — the status mentioned in the
+  original Textual Description and Scenario 1 is removed. Scenarios 2 (relative colored due)
+  and 3 (missing due → "sem data") are unchanged. Scenario 4 (project name) still holds.
+- **Delivery.** Scenarios 2 and 3 are delivered by slice **D2c** (the colored due date on
+  line 2 + threading `today` into the view); Scenario 4 (project name) by slice **D2d**
+  (resolve `project_id → name` from the cache, no extra fetch). Scenarios 1, 5, 6 shipped in
+  **D2a**; the `due_on` parsing + the pure `relative_due` formatter behind Scenarios 2/3
+  shipped in **D2b**.
+
 ## Related
 
 - ADR: [/adr/0026-task-list-as-cards.md](/adr/0026-task-list-as-cards.md)

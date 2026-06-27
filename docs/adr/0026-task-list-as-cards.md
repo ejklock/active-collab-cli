@@ -96,6 +96,32 @@ input threaded into the view and color logic. If `due_on` turns out absent from 
 payload for some instances, those cards degrade to "sem data" (surfaced, not silently wrong)
 and a follow-up would decide whether to enrich from detail.
 
+## Amendment (2026-06-27): slice refinement and status omission
+
+Implementing D2b/D2c surfaced two data realities that refine §1 (Card content) and the
+slice split. The original decision stands; this records what changed.
+
+1. **The `· status` segment is dropped.** The task list — Minhas Tarefas and browse — is
+   already pre-filtered to *open* tasks: `fetch_open_tasks` discards `is_completed` and
+   `is_trashed` rows before they ever reach the list. A per-card status would therefore read
+   "aberto" on every card and carry no information. **Line 2 shows the relative colored due
+   date and the project name only** (`Vence em 3 dias · ProForce`), not a status.
+
+2. **Project name is re-sliced after the due date.** A per-row project *name* is not yet
+   available for the mine list without resolving it from a cache: browse builds named
+   `ProjectGroup`s, but the mine path (`collect_mine_rows`) carries only `project_id`. So the
+   original D2b ("project + due") splits:
+   - **D2b** — thread `due_on` through `MineTask → MineTableRow → TaskRow` and add the pure
+     `relative_due(due_on, today)` formatter (data + logic, unit-tested).
+   - **D2c** — render the relative **colored due date** as card line 2 and thread `today`
+     from the shell into the view (the operator's core ask — *"informação de data due"*).
+   - **D2d** — resolve `project_id → project name` from the project-directory cache
+     (ADR 0014) for the mine list and append it to line 2. The **no-extra-per-task-fetch**
+     invariant (§2, Alternatives) is unchanged: D2d reads the cache, it does not fetch.
+
+   If the cache has no name for a `(instance, project_id)`, the segment is omitted rather than
+   showing a raw id (surfaced, not silently wrong) — a follow-up decides cache population.
+
 ## Related
 
 - ADR: [/adr/0014-browse-list-project-name-cache-swr.md](/adr/0014-browse-list-project-name-cache-swr.md) (project-name cache the card reuses)

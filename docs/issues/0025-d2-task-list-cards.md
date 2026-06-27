@@ -34,20 +34,39 @@ drills in; highlight the whole selected card.
 - Files: `src/tui/screens/tasks.rs`, `src/tui/model.rs` (ClickTarget y-range per card),
   `locales/pt_BR.json` (remove NOME header string), `tests/unit/tui_render.rs`.
 
-**D2b — project name + relative colored due.** Parse `due_on` into `MineTask`/`TaskRow`;
-resolve project name from cache into the row; add a pure `relative_due(due_on, today) ->
-(text, style)` formatter (overdue red / near yellow / default; "hoje"/"amanhã"/"vence em N
-dias"/"atrasada N dias"/"sem data"); render card line 2 `due · project · status`; thread
-`today` from the shell into the view.
-- Files: `src/models.rs`, `src/tui/model.rs` (TaskRow due_on + project_name), the list loader
-  (`src/commands.rs`/controller), `src/render.rs` or `src/tui/screens/tasks.rs` (relative-due
-  formatter + line 2), `src/tui/view.rs` (pass `today`), `locales/pt_BR.json`, tests.
+**D2b — `due_on` data + the pure `relative_due` formatter.** Thread `due_on` through
+`MineTask → MineTableRow → TaskRow` (serde default keeps SWR snapshots compatible) and add a
+pure `relative_due(due_on, today) -> (text, DueStyle)` formatter (overdue red / near yellow /
+default; "hoje"/"amanhã"/"vence em N dias"/"atrasada N dias"/"sem data"). Data + logic only,
+unit-tested; no card render yet.
+- Files: `src/models.rs`, `src/render.rs` (`MineTableRow.due_on`), `src/commands.rs`
+  (`mine_task_to_row`), `src/tui/model.rs` (`TaskRow.due_on` + `relative_due` + `DueStyle`),
+  `locales/pt_BR.json` (due labels), tests.
+
+**D2c — render the relative colored due on card line 2.** Consume `relative_due` in the card
+render: line 2 shows the colored due text (overdue red, near yellow, else default; "sem data"
+when absent). Thread `today` from the shell into the view (the view reads the clock; the card
+takes `today` as data so tests stay deterministic).
+- Files: `src/tui/screens/tasks.rs` (line 2 + colors), `src/tui/view.rs` (pass `today`),
+  `src/tui/model.rs` (drop the D2b `allow(dead_code)` deferrals), `src/tui/theme.rs`
+  (`DueStyle → Style`), `tests/unit/tui_render.rs`.
+
+**D2d — project name on line 2.** Resolve `project_id → project name` from the
+project-directory cache (ADR 0014) for the mine list and append ` · <project>` to line 2;
+omit the segment when the cache has no name (no extra fetch).
+- Files: the mine list loader / model name map, `src/tui/screens/tasks.rs`,
+  `locales/pt_BR.json` if needed, tests.
+
+**Note — no status segment.** The list is pre-filtered to open tasks (`fetch_open_tasks`),
+so a per-card status is uniformly "aberto" and is omitted; line 2 is `<due> · <project>`
+(see the ADR 0026 / BDR 0020 amendments).
 
 ### Acceptance (full D2)
 
 - No `NOME` header; each task is a bordered card with `#number name` (BDR 0020 Sc.1).
 - Line 2 shows a relative, color-coded due (red overdue, yellow near, default else;
-  hoje/amanhã/vence em N/atrasada N), the project name, and status (Sc.2, Sc.4).
+  hoje/amanhã/vence em N/atrasada N) and the project name (Sc.2, Sc.4). No status segment —
+  the list is pre-filtered to open tasks (see the BDR 0020 amendment).
 - A task with no `due_on` shows "sem data", default style (Sc.3).
 - A click anywhere on a card drills into that task; the whole selected card is highlighted
   (Sc.5, Sc.6).
