@@ -49,11 +49,13 @@ pub async fn tasks_by_project(
     }
 
     let mut all_tasks: Vec<(MineTask, String)> = vec![];
-    let mut project_names: HashMap<i64, String> = HashMap::new();
+    let mut project_names: HashMap<(String, i64), String> = HashMap::new();
 
     while let Some(joined) = set.join_next().await {
         if let Ok((inst_name, tasks, names)) = joined {
-            project_names.extend(names);
+            for (pid, name) in names {
+                project_names.insert((inst_name.clone(), pid), name);
+            }
             for task in tasks {
                 all_tasks.push((task, inst_name.clone()));
             }
@@ -145,14 +147,14 @@ async fn fetch_project_names(client: &ActiveCollabClient) -> HashMap<i64, String
 
 fn build_groups(
     tasks: Vec<(MineTask, String)>,
-    project_names: &HashMap<i64, String>,
+    project_names: &HashMap<(String, i64), String>,
 ) -> Vec<ProjectGroup> {
     let mut groups: HashMap<(String, i64), ProjectGroup> = HashMap::new();
 
     for (task, instance_name) in tasks {
         let pid = task.project_id.unwrap_or(0);
         let project_name = project_names
-            .get(&pid)
+            .get(&(instance_name.clone(), pid))
             .cloned()
             .unwrap_or_else(|| pid.to_string());
 

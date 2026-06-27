@@ -243,8 +243,9 @@ fn build_groups_same_project_id_on_two_instances_produces_two_groups() {
         project_id: Some(100),
         instance_name: "beta".into(),
     };
-    let mut names = HashMap::new();
-    names.insert(100i64, "Shared Project".to_string());
+    let mut names: HashMap<(String, i64), String> = HashMap::new();
+    names.insert(("alpha".to_string(), 100i64), "Shared Project".to_string());
+    names.insert(("beta".to_string(), 100i64), "Shared Project".to_string());
 
     let groups = build_groups(
         vec![(task_a, "alpha".into()), (task_b, "beta".into())],
@@ -286,8 +287,11 @@ fn build_groups_instance_field_matches_task_instance() {
         project_id: Some(42),
         instance_name: "prod".into(),
     };
-    let mut names = HashMap::new();
-    names.insert(42i64, "Production Project".to_string());
+    let mut names: HashMap<(String, i64), String> = HashMap::new();
+    names.insert(
+        ("prod".to_string(), 42i64),
+        "Production Project".to_string(),
+    );
 
     let groups = build_groups(vec![(task, "prod".into())], &names);
 
@@ -325,9 +329,10 @@ fn build_groups_sorted_by_project_name_then_instance() {
         project_id: Some(2),
         instance_name: "m-inst".into(),
     };
-    let mut names = HashMap::new();
-    names.insert(1i64, "Beta Project".to_string());
-    names.insert(2i64, "Alpha Project".to_string());
+    let mut names: HashMap<(String, i64), String> = HashMap::new();
+    names.insert(("z-inst".to_string(), 1i64), "Beta Project".to_string());
+    names.insert(("a-inst".to_string(), 1i64), "Beta Project".to_string());
+    names.insert(("m-inst".to_string(), 2i64), "Alpha Project".to_string());
 
     let groups = build_groups(
         vec![
@@ -1081,6 +1086,86 @@ async fn task_detail_empty_user_cache_fetches_once_then_serves_from_cache() {
         1,
         "second open must serve from cache — still only one users request total"
     );
+}
+
+// BDR-0008 Scenario 6: two instances both expose project_id=N with DIFFERENT names —
+// each group must show ITS OWN name; the last-joined instance must not clobber the first.
+#[tokio::test]
+async fn tasks_by_project_colliding_project_ids_show_per_instance_names() {
+    let server1 = MockServer::start().await;
+    let server2 = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/users/1/tasks"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "tasks": [
+                { "id": 10, "task_number": 1, "name": "Task from Inst1", "project_id": 42,
+                  "is_completed": false, "is_trashed": false }
+            ]
+        })))
+        .mount(&server1)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/projects"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            { "id": 42, "name": "Inst1 Project Name" }
+        ])))
+        .mount(&server1)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/users/2/tasks"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "tasks": [
+                { "id": 20, "task_number": 2, "name": "Task from Inst2", "project_id": 42,
+                  "is_completed": false, "is_trashed": false }
+            ]
+        })))
+        .mount(&server2)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/projects"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            { "id": 42, "name": "Inst2 Project Name" }
+        ])))
+        .mount(&server2)
+        .await;
+
+    let inst1 = make_instance("inst1", &server1.uri(), Some(1));
+    let inst2 = make_instance("inst2", &server2.uri(), Some(2));
+    let http = make_http();
+    let (_dir, db_path) = make_db_path();
+
+    let groups = tasks_by_project(db_path, &[inst1, inst2], &http).await;
+
+    assert_eq!(
+        groups.len(),
+        2,
+        "colliding project_id must produce two groups"
+    );
+
+    let g1 = groups
+        .iter()
+        .find(|g| g.instance == "inst1")
+        .expect("group for inst1 must exist");
+    let g2 = groups
+        .iter()
+        .find(|g| g.instance == "inst2")
+        .expect("group for inst2 must exist");
+
+    assert_eq!(
+        g1.project_name, "Inst1 Project Name",
+        "inst1 group must show inst1's project name, not inst2's"
+    );
+    assert_eq!(
+        g2.project_name, "Inst2 Project Name",
+        "inst2 group must show inst2's project name, not inst1's"
+    );
+
+    assert_eq!(g1.tasks[0].name, "Task from Inst1");
+    assert_eq!(g2.tasks[0].name, "Task from Inst2");
 }
 
 // S5.3 tests: concurrent tasks_by_project

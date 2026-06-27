@@ -78,6 +78,14 @@ no cached name, When the group is built, Then the group label is the numeric
 `project_id`s, When names are cached, Then each instance reads its own names (no
 cross-instance leakage).
 
+**Scenario 6: name isolation end-to-end across the in-memory merge (amendment,
+issue 0018)** — Given two instances that both expose `project_id = N` with
+**different** project names, When the browse list is built (cache read → in-memory
+merge → `build_groups`), Then each instance's group shows **its own** name. This
+closes the gap where Scenario 5 held at the cache layer but `tasks_by_project`
+re-flattened the per-instance maps into one `project_id`-keyed map (clobbering the
+collision back in). See [Issue 0018](/issues/0018-b1-multi-instance-project-name-isolation.md).
+
 ## Test Design
 
 The cache-vs-fetch decision is tested against a temp SQLite cache (R1) + the mocked
@@ -92,9 +100,11 @@ fallback and per-instance isolation are pure/unit. Each row names what it proves
 | Tasks always fresh | integration | 3 | tasks mock hit on every refresh | refresh keeps listing current |
 | Name fallback | unit | 4 | group label == project_id, no panic | graceful cold-cache degradation |
 | Per-instance isolation | unit | 5 | each instance reads its own names | no pid cross-leak |
+| Name isolation end-to-end | unit | 6 | 2 instances, same pid, different names → each group shows its own name | merge keyed by (instance, pid), not pid alone |
 
 ## Related
 
 - ADR: [/adr/0014-browse-list-project-name-cache-swr.md](/adr/0014-browse-list-project-name-cache-swr.md)
 - BDR: [/bdr/0005-loader-single-flight-refresh.md](/bdr/0005-loader-single-flight-refresh.md)
 - Issue: [/issues/0012-r2-browse-list-project-name-cache.md](/issues/0012-r2-browse-list-project-name-cache.md)
+- Issue (amendment, Scenario 6): [/issues/0018-b1-multi-instance-project-name-isolation.md](/issues/0018-b1-multi-instance-project-name-isolation.md)
