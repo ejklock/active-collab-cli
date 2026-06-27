@@ -3,8 +3,6 @@ use crate::store::cache::{ProjectNamesCache, UserMapCache};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-const TOKEN_HEADER: &str = "x-angie-authapitoken";
-
 fn make_instance(name: &str, base_url: &str, user_id: Option<i64>) -> Instance {
     Instance {
         name: name.to_string(),
@@ -620,79 +618,6 @@ async fn task_detail_extracts_assets_from_task_body() {
     assert_eq!(detail.assets[0].url, "https://example.com/file.pdf");
     // anchor text "link" is non-empty and different from the URL → anchor text wins
     assert_eq!(detail.assets[0].name, "link");
-}
-
-#[tokio::test]
-async fn download_asset_attaches_token_when_same_host() {
-    let server = MockServer::start().await;
-    let inst = make_instance("inst", &server.uri(), None);
-    let http = make_http();
-
-    let asset_path = "/files/doc.pdf";
-    Mock::given(method("GET"))
-        .and(path(asset_path))
-        .and(wiremock::matchers::header(TOKEN_HEADER, "tok-inst"))
-        .respond_with(ResponseTemplate::new(200).set_body_bytes(b"pdf-bytes".to_vec()))
-        .expect(1)
-        .mount(&server)
-        .await;
-
-    let tmp = tempfile::TempDir::new().unwrap();
-    let dest = tmp.path().join("doc.pdf");
-    let url = format!("{}{}", server.uri(), asset_path);
-    download_asset(&http, &inst, &url, &dest).await.unwrap();
-
-    assert_eq!(std::fs::read(&dest).unwrap(), b"pdf-bytes");
-    server.verify().await;
-}
-
-#[tokio::test]
-async fn download_asset_no_token_when_different_host() {
-    let asset_server = MockServer::start().await;
-    let inst = make_instance("inst", "https://my-instance.example.com", None);
-    let http = make_http();
-
-    let asset_path = "/cdn/file.pdf";
-    Mock::given(method("GET"))
-        .and(path(asset_path))
-        .respond_with(ResponseTemplate::new(200).set_body_bytes(b"file".to_vec()))
-        .expect(1)
-        .mount(&asset_server)
-        .await;
-
-    let tmp = tempfile::TempDir::new().unwrap();
-    let dest = tmp.path().join("file.pdf");
-    let url = format!("{}{}", asset_server.uri(), asset_path);
-    download_asset(&http, &inst, &url, &dest).await.unwrap();
-
-    let reqs = asset_server.received_requests().await.unwrap();
-    assert_eq!(reqs.len(), 1);
-    assert!(
-        reqs[0].headers.get(TOKEN_HEADER).is_none(),
-        "token must NOT be attached to a foreign-host download"
-    );
-    asset_server.verify().await;
-}
-
-#[tokio::test]
-async fn download_asset_non_200_returns_err() {
-    let server = MockServer::start().await;
-    let inst = make_instance("inst", &server.uri(), None);
-    let http = make_http();
-
-    Mock::given(method("GET"))
-        .and(path("/files/missing.pdf"))
-        .respond_with(ResponseTemplate::new(404).set_body_string("not found"))
-        .mount(&server)
-        .await;
-
-    let tmp = tempfile::TempDir::new().unwrap();
-    let dest = tmp.path().join("missing.pdf");
-    let url = format!("{}/files/missing.pdf", server.uri());
-    let result = download_asset(&http, &inst, &url, &dest).await;
-    assert!(result.is_err(), "non-200 must return Err");
-    let err = result.unwrap_err().to_string();
-    assert!(err.contains("404"), "error must mention the status: {err}");
 }
 
 #[test]

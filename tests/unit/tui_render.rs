@@ -1388,7 +1388,6 @@ fn view_detail_footer_has_no_tab_switch_hint() {
             assets,
             offset: 0,
             loading: false,
-            pending_download: false,
             rendered_width: 80,
         }],
         should_quit: false,
@@ -1416,8 +1415,12 @@ fn view_detail_footer_has_no_tab_switch_hint() {
         "Detail footer must NOT contain 'switch section' (U6b removed): {content}"
     );
     assert!(
-        content.contains("1-9"),
-        "Detail footer must still contain '1-9 open asset' hint: {content}"
+        !content.contains("1-9"),
+        "Detail footer must NOT contain '1-9 open asset' hint (numeric scheme removed): {content}"
+    );
+    assert!(
+        content.contains("Ctrl") || content.contains("Cmd") || content.contains("click"),
+        "Detail footer must contain Ctrl/Cmd+click model hint: {content}"
     );
     assert!(
         content.contains("↑/↓"),
@@ -1445,7 +1448,6 @@ fn view_detail_footer_without_assets_has_no_tab_hint() {
             assets: vec![],
             offset: 0,
             loading: false,
-            pending_download: false,
             rendered_width: 80,
         }],
         should_quit: false,
@@ -2453,7 +2455,6 @@ mod footer_refresh_hint {
                 assets: vec![],
                 offset: 0,
                 loading: false,
-                pending_download: false,
                 rendered_width: 80,
             }],
             should_quit: false,
@@ -2494,7 +2495,6 @@ mod footer_refresh_hint {
                 }],
                 offset: 0,
                 loading: false,
-                pending_download: false,
                 rendered_width: 80,
             }],
             should_quit: false,
@@ -2778,7 +2778,6 @@ mod footer_refresh_hint {
                 assets: vec![],
                 offset: 0,
                 loading: true,
-                pending_download: false,
                 rendered_width: usize::MAX,
             }],
             should_quit: false,
@@ -2939,7 +2938,6 @@ mod v6_view {
                 assets: vec![],
                 offset: 0,
                 loading: false,
-                pending_download: false,
                 rendered_width: 120,
             }],
             should_quit: false,
@@ -4295,7 +4293,6 @@ fn click_second_asset_row_derived_from_real_buffer_resolves_to_index_1() {
             assets,
             offset: 0,
             loading: false,
-            pending_download: false,
             rendered_width: usize::MAX,
         }],
         should_quit: false,
@@ -4307,16 +4304,16 @@ fn click_second_asset_row_derived_from_real_buffer_resolves_to_index_1() {
         copied_feedback: false,
     };
 
-    // Click on buffer row containing "[1]" → must open first.pdf (index 0).
+    // Ctrl+click on buffer row containing "[1]" → must open first.pdf (index 0).
     let (_, cmds) = update(
         make_model(assets.clone()),
         Msg::Click {
             column: 5,
             row: row1,
-            modifiers: KeyModifiers::NONE,
+            modifiers: KeyModifiers::CONTROL,
         },
     );
-    assert_eq!(cmds.len(), 1, "click on '[1]' row must emit one cmd");
+    assert_eq!(cmds.len(), 1, "ctrl+click on '[1]' row must emit one cmd");
     match &cmds[0] {
         crate::tui::model::Cmd::OpenAsset { url, .. } => {
             assert_eq!(
@@ -4327,16 +4324,16 @@ fn click_second_asset_row_derived_from_real_buffer_resolves_to_index_1() {
         other => panic!("expected OpenAsset for '[1]' row, got {other:?}"),
     }
 
-    // Click on buffer row containing "[2]" → must open second.pdf (index 1).
+    // Ctrl+click on buffer row containing "[2]" → must open second.pdf (index 1).
     let (_, cmds) = update(
         make_model(assets.clone()),
         Msg::Click {
             column: 5,
             row: row2,
-            modifiers: KeyModifiers::NONE,
+            modifiers: KeyModifiers::CONTROL,
         },
     );
-    assert_eq!(cmds.len(), 1, "click on '[2]' row must emit one cmd");
+    assert_eq!(cmds.len(), 1, "ctrl+click on '[2]' row must emit one cmd");
     match &cmds[0] {
         crate::tui::model::Cmd::OpenAsset { url, .. } => {
             assert_eq!(
@@ -4348,16 +4345,16 @@ fn click_second_asset_row_derived_from_real_buffer_resolves_to_index_1() {
         other => panic!("expected OpenAsset for '[2]' row, got {other:?}"),
     }
 
-    // Click on buffer row containing "[3]" → must open third.pdf (index 2).
+    // Ctrl+click on buffer row containing "[3]" → must open third.pdf (index 2).
     let (_, cmds) = update(
         make_model(assets.clone()),
         Msg::Click {
             column: 5,
             row: row3,
-            modifiers: KeyModifiers::NONE,
+            modifiers: KeyModifiers::CONTROL,
         },
     );
-    assert_eq!(cmds.len(), 1, "click on '[3]' row must emit one cmd");
+    assert_eq!(cmds.len(), 1, "ctrl+click on '[3]' row must emit one cmd");
     match &cmds[0] {
         crate::tui::model::Cmd::OpenAsset { url, .. } => {
             assert_eq!(
@@ -4368,13 +4365,13 @@ fn click_second_asset_row_derived_from_real_buffer_resolves_to_index_1() {
         other => panic!("expected OpenAsset for '[3]' row, got {other:?}"),
     }
 
-    // Click on the separator row → must resolve to None (no asset).
+    // Ctrl+click on the separator row → must resolve to None (no asset).
     let (_, cmds) = update(
         make_model(assets.clone()),
         Msg::Click {
             column: 5,
             row: sep_row,
-            modifiers: KeyModifiers::NONE,
+            modifiers: KeyModifiers::CONTROL,
         },
     );
     assert!(

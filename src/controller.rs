@@ -7,7 +7,7 @@ use crate::store::cache::{ProjectNamesCache, TaskCache, UserMapCache};
 use crate::store::instances::Instance;
 use crate::store::Store;
 use crate::tui::model::{ProjectGroup, TaskRow};
-use anyhow::{anyhow, Context};
+use anyhow::anyhow;
 use regex::Regex;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -544,29 +544,6 @@ pub fn open_asset(url: &str) -> anyhow::Result<()> {
     if !is_openable_url(url) {
         return Err(anyhow!("non-http/https URL rejected: {url}"));
     }
-    Ok(())
-}
-
-/// Parity: Python assets.py download_asset.
-///
-/// Performs a GET for `url`, attaching the auth token only when the asset
-/// host matches the instance host (via http::host_gated_token_header).
-/// Writes the response body bytes to `dest_path`. Returns Err on non-2xx.
-pub async fn download_asset(
-    http: &Http,
-    inst: &Instance,
-    url: &str,
-    dest_path: &Path,
-) -> anyhow::Result<()> {
-    let (status, body) = http
-        .authed_get(url, &inst.base_url, &inst.token)
-        .await
-        .with_context(|| format!("GET {url}"))?;
-    if !(200..300).contains(&status) {
-        return Err(anyhow!("download failed for {url}: HTTP {status}"));
-    }
-    std::fs::write(dest_path, &body)
-        .with_context(|| format!("writing download to {}", dest_path.display()))?;
     Ok(())
 }
 

@@ -108,11 +108,6 @@ pub enum Cmd {
         instance: String,
         url: String,
     },
-    DownloadAsset {
-        instance: String,
-        url: String,
-        name: String,
-    },
     /// Copy the given text to the system clipboard (interpreted by the shell via arboard).
     CopyToClipboard(String),
 }
@@ -176,7 +171,6 @@ pub enum Screen {
         assets: Vec<Asset>,
         offset: usize,
         loading: bool,
-        pending_download: bool,
         /// Width at which the cache was last built; usize::MAX means "not yet built".
         rendered_width: usize,
     },
@@ -309,12 +303,6 @@ fn select_action(stack: &[Screen]) -> Option<SelectAction> {
     }
 }
 
-/// Digit keys 1–9 on the Detail screen.
-fn digit_to_asset_index(c: char) -> Option<usize> {
-    c.to_digit(10)
-        .and_then(|d| if d >= 1 { Some((d - 1) as usize) } else { None })
-}
-
 /// An active text selection anchored at a body cell and extended by drag.
 ///
 /// Coordinates are (viewport_row, viewport_col) — terminal cell positions
@@ -418,12 +406,7 @@ pub enum Msg {
     /// Phase-2: fresh user directory resolved; invalidates the render cache
     /// so the next reflow shows the assignee name.
     UserMapResolved(HashMap<i64, String>),
-    /// Digit 1–9 on the Detail screen.
-    /// When pending_download is true, triggers download; otherwise opens in browser.
-    AssetOpen(char),
     AssetActionResult,
-    /// 'd' key: arm the download-next-digit flag on the Detail screen.
-    TogglePendingDownload,
     /// Background user directory resolved a display name for the header.
     /// Sets model.header.name when it was previously absent.
     HeaderNameResolved(String),
@@ -547,8 +530,6 @@ pub fn update(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
         }
         Msg::LoadedDetail(load) => (handle_loaded_detail(model, load), vec![]),
         Msg::UserMapResolved(map) => (handle_user_map_resolved(model, map), vec![]),
-        Msg::AssetOpen(digit) => handle_asset_open(model, digit),
-        Msg::TogglePendingDownload => (handle_toggle_pending_download(model), vec![]),
         Msg::AssetActionResult => (model, vec![]),
         Msg::HeaderNameResolved(name) => (handle_header_name_resolved(model, name), vec![]),
     }
@@ -655,11 +636,14 @@ fn handle_click_detail(
         modifiers.contains(KeyModifiers::CONTROL) || modifiers.contains(KeyModifiers::SUPER);
 
     if has_modifier {
-        // Modified press: reserved for D1c link activation (body_link_cmd_at will check again).
+        // Modified press: body link (D1c) takes priority; fall through to asset panel.
         if let Some(cmd) = body_link_cmd_at(&model, column, row, modifiers) {
             return (model, vec![cmd]);
         }
-        return asset_panel_cmd_at(model, row);
+        if let Some(cmd) = asset_panel_cmd_at(&model, row, modifiers) {
+            return (model, vec![cmd]);
+        }
+        return (model, vec![]);
     }
 
     // Unmodified press on the body area: start a selection, clear any prior copied feedback.
@@ -673,10 +657,11 @@ fn handle_click_detail(
         return (model, vec![]);
     }
 
-    // Unmodified press outside the body (e.g. asset panel): clear selection, pass through.
+    // Unmodified press outside the body (e.g. asset panel): clear selection, no asset action.
+    // Plain click on an asset row is reserved for V6 text selection and must not open an asset.
     let mut model = model;
     model.selection = None;
-    asset_panel_cmd_at(model, row)
+    (model, vec![])
 }
 
 /// Return true when `row` falls within the scrollable body text area of the Detail screen.
@@ -957,73 +942,62 @@ fn asset_index_at_panel_row(
     None // bottom vpad or out-of-range row
 }
 
-/// Try to resolve an asset-panel click in the Detail screen.
+/// Try to resolve a Ctrl/Cmd+click on an asset row in the Detail screen.
+///
+/// Gates on `has_modifier` (Ctrl or Super/Cmd): a plain unmodified click returns
+/// `None` so the caller can keep it reserved for V6 text selection.
 ///
 /// Uses the width-aware wrapped panel height (same as `draw_detail`) so that:
 ///   - the panel's top row is computed correctly when asset labels wrap,
 ///   - a click on any continuation row of a wrapped label resolves to the
 ///     owning asset rather than the following (mis-shifted) one.
 ///
-/// Returns the appropriate `Cmd` (open or download) when the click lands on
-/// an asset row inside the panel. Returns `(model, vec![])` for any click that
-/// misses the panel or falls on a border row.
-fn asset_panel_cmd_at(model: Model, row: u16) -> (Model, Vec<Cmd>) {
+/// Returns `Some(Cmd::OpenAsset)` when the click lands on an asset row inside
+/// the panel. Returns `None` for any click that misses the panel, falls on a
+/// border row, or lacks a Ctrl/Cmd/Super modifier.
+fn asset_panel_cmd_at(
+    model: &Model,
+    row: u16,
+    modifiers: crossterm::event::KeyModifiers,
+) -> Option<Cmd> {
     use crate::tui::screens::asset_panel_render_height;
+    use crossterm::event::KeyModifiers;
+
+    let has_modifier =
+        modifiers.contains(KeyModifiers::CONTROL) || modifiers.contains(KeyModifiers::SUPER);
+    if !has_modifier {
+        return None;
+    }
 
     let (viewport_cols, viewport_rows) = model.viewport;
 
-    let Some(Screen::Detail {
-        instance,
-        assets,
-        pending_download,
-        ..
-    }) = model.top()
+    let Screen::Detail {
+        instance, assets, ..
+    } = model.top()?
     else {
-        return (model, vec![]);
+        return None;
     };
 
     if assets.is_empty() {
-        return (model, vec![]);
+        return None;
     }
 
     let inner_width = viewport_cols.saturating_sub(2) as usize;
     let panel_h = asset_panel_render_height(assets, inner_width);
     if panel_h == 0 {
-        return (model, vec![]);
+        return None;
     }
 
     // content_width mirrors asset_content_width(inner_width) in detail.rs
     let content_width = inner_width.saturating_sub(2 * PANEL_HPAD);
     let panel_top = viewport_rows.saturating_sub(panel_h);
 
-    let Some(idx) = asset_index_at_panel_row(assets, content_width, panel_top, row, viewport_rows)
-    else {
-        return (model, vec![]);
-    };
-
-    let asset = assets[idx].clone();
-    let cmd = if *pending_download {
-        Cmd::DownloadAsset {
-            instance: instance.clone(),
-            url: asset.url.clone(),
-            name: asset.name.clone(),
-        }
-    } else {
-        Cmd::OpenAsset {
-            instance: instance.clone(),
-            url: asset.url.clone(),
-        }
-    };
-
-    let mut model = model;
-    if let Some(Screen::Detail {
-        pending_download, ..
-    }) = model.top_mut()
-    {
-        *pending_download = false;
-    }
-
-    (model, vec![cmd])
+    let idx = asset_index_at_panel_row(assets, content_width, panel_top, row, viewport_rows)?;
+    let asset = &assets[idx];
+    Some(Cmd::OpenAsset {
+        instance: instance.clone(),
+        url: asset.url.clone(),
+    })
 }
 
 fn handle_select(mut model: Model) -> (Model, Vec<Cmd>) {
@@ -1065,7 +1039,6 @@ fn handle_select(mut model: Model) -> (Model, Vec<Cmd>) {
                     assets: vec![],
                     offset: 0,
                     loading: true,
-                    pending_download: false,
                     rendered_width: usize::MAX,
                 });
             }
@@ -1218,54 +1191,6 @@ fn handle_user_map_resolved(mut model: Model, map: HashMap<i64, String>) -> Mode
         *ls = vec![];
         *lss = vec![];
         *rw = usize::MAX;
-    }
-    model
-}
-
-fn handle_asset_open(model: Model, digit: char) -> (Model, Vec<Cmd>) {
-    let mut cmds = vec![];
-    if let Some(Screen::Detail {
-        instance,
-        assets,
-        pending_download,
-        ..
-    }) = model.top()
-    {
-        let is_download = *pending_download;
-        let instance = instance.clone();
-        if let Some(idx) = digit_to_asset_index(digit) {
-            if let Some(asset) = assets.get(idx) {
-                if is_download {
-                    cmds.push(Cmd::DownloadAsset {
-                        instance,
-                        url: asset.url.clone(),
-                        name: asset.name.clone(),
-                    });
-                } else {
-                    cmds.push(Cmd::OpenAsset {
-                        instance,
-                        url: asset.url.clone(),
-                    });
-                }
-            }
-        }
-    }
-    let mut model = model;
-    if let Some(Screen::Detail {
-        pending_download, ..
-    }) = model.top_mut()
-    {
-        *pending_download = false;
-    }
-    (model, cmds)
-}
-
-fn handle_toggle_pending_download(mut model: Model) -> Model {
-    if let Some(Screen::Detail {
-        pending_download, ..
-    }) = model.top_mut()
-    {
-        *pending_download = !*pending_download;
     }
     model
 }

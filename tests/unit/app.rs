@@ -515,7 +515,6 @@ fn detail_model(line_count: usize, offset: usize) -> Model {
                 assets: vec![],
                 offset,
                 loading: false,
-                pending_download: false,
                 rendered_width: 80,
             },
         ],
@@ -557,7 +556,6 @@ fn loading_detail_model() -> Model {
                 assets: vec![],
                 offset: 0,
                 loading: true,
-                pending_download: false,
                 rendered_width: usize::MAX,
             },
         ],
@@ -952,220 +950,10 @@ fn tasks_mouse_scroll_and_click_beyond_bounds_never_quit() {
     assert!(!m2.should_quit);
 }
 
-fn detail_model_with_assets(assets: Vec<Asset>, instance: &str) -> Model {
-    Model {
-        stack: vec![
-            Screen::Projects {
-                groups: make_groups(1),
-                selected: 0,
-                loading: false,
-                revalidating: false,
-            },
-            Screen::Tasks {
-                project_name: "P".into(),
-                tasks: vec![TaskRow {
-                    task_id: 1,
-                    task_number: 1,
-                    name: "T".into(),
-                    instance: instance.into(),
-                    project_id: 0,
-                }],
-                selected: 0,
-                loading: false,
-                revalidating: false,
-            },
-            Screen::Detail {
-                instance: instance.into(),
-                project_id: 0,
-                task_id: 1,
-                task: serde_json::Value::Null,
-                comments: vec![],
-                user_map: HashMap::new(),
-                lines: vec![],
-                line_styles: vec![],
-                assets,
-                offset: 0,
-                loading: false,
-                pending_download: false,
-                rendered_width: usize::MAX,
-            },
-        ],
-        should_quit: false,
-        header: empty_header(),
-        viewport: (0, 0),
-        click_targets: vec![],
-        last_loaded: None,
-        selection: None,
-        copied_feedback: false,
-    }
-}
-
 fn make_asset(name: &str, url: &str) -> Asset {
     Asset {
         name: name.into(),
         url: url.into(),
-    }
-}
-
-#[test]
-fn asset_open_digit_1_emits_open_asset_cmd_with_correct_url() {
-    let assets = vec![
-        make_asset("file1.pdf", "https://acme.example.com/file1.pdf"),
-        make_asset("file2.pdf", "https://acme.example.com/file2.pdf"),
-    ];
-    let m = detail_model_with_assets(assets, "acme");
-    let (_m, cmds) = update(m, Msg::AssetOpen('1'));
-    assert_eq!(cmds.len(), 1);
-    match &cmds[0] {
-        Cmd::OpenAsset { instance, url } => {
-            assert_eq!(instance, "acme");
-            assert_eq!(url, "https://acme.example.com/file1.pdf");
-        }
-        other => panic!("expected OpenAsset, got {other:?}"),
-    }
-}
-
-#[test]
-fn asset_open_digit_2_selects_second_asset() {
-    let assets = vec![
-        make_asset("a.pdf", "https://host.com/a.pdf"),
-        make_asset("b.pdf", "https://host.com/b.pdf"),
-    ];
-    let m = detail_model_with_assets(assets, "inst-b");
-    let (_m, cmds) = update(m, Msg::AssetOpen('2'));
-    assert_eq!(cmds.len(), 1);
-    match &cmds[0] {
-        Cmd::OpenAsset { url, .. } => assert_eq!(url, "https://host.com/b.pdf"),
-        other => panic!("expected OpenAsset, got {other:?}"),
-    }
-}
-
-#[test]
-fn asset_open_out_of_range_digit_emits_no_cmd() {
-    let assets = vec![make_asset("only.pdf", "https://host.com/only.pdf")];
-    let m = detail_model_with_assets(assets, "inst");
-    let (_m, cmds) = update(m, Msg::AssetOpen('9'));
-    assert!(cmds.is_empty(), "out-of-range digit must produce no cmd");
-}
-
-#[test]
-fn asset_open_digit_0_emits_no_cmd() {
-    let assets = vec![make_asset("a.pdf", "https://host.com/a.pdf")];
-    let m = detail_model_with_assets(assets, "inst");
-    let (_m, cmds) = update(m, Msg::AssetOpen('0'));
-    assert!(cmds.is_empty(), "digit 0 must produce no cmd");
-}
-
-#[test]
-fn asset_download_emits_download_cmd_with_selected_instance() {
-    let assets = vec![make_asset(
-        "report.pdf",
-        "https://acme.example.com/report.pdf",
-    )];
-    let m = detail_model_with_assets(assets, "acme-inst");
-    let (m, _) = update(m, Msg::TogglePendingDownload);
-    let (_m, cmds) = update(m, Msg::AssetOpen('1'));
-    assert_eq!(cmds.len(), 1);
-    match &cmds[0] {
-        Cmd::DownloadAsset {
-            instance,
-            url,
-            name,
-        } => {
-            assert_eq!(instance, "acme-inst");
-            assert_eq!(url, "https://acme.example.com/report.pdf");
-            assert_eq!(name, "report.pdf");
-        }
-        other => panic!("expected DownloadAsset, got {other:?}"),
-    }
-}
-
-#[test]
-fn asset_open_carries_selected_tasks_instance_not_first_instance() {
-    let m = Model {
-        stack: vec![
-            Screen::Projects {
-                groups: vec![ProjectGroup {
-                    project_id: 1,
-                    project_name: "P".into(),
-                    instance: "inst1".into(),
-                    tasks: vec![
-                        TaskRow {
-                            task_id: 10,
-                            task_number: 1,
-                            name: "task on inst1".into(),
-                            instance: "inst1".into(),
-                            project_id: 1,
-                        },
-                        TaskRow {
-                            task_id: 20,
-                            task_number: 2,
-                            name: "task on inst2".into(),
-                            instance: "inst2".into(),
-                            project_id: 1,
-                        },
-                    ],
-                }],
-                selected: 0,
-                loading: false,
-                revalidating: false,
-            },
-            Screen::Tasks {
-                project_name: "P".into(),
-                tasks: vec![
-                    TaskRow {
-                        task_id: 10,
-                        task_number: 1,
-                        name: "task on inst1".into(),
-                        instance: "inst1".into(),
-                        project_id: 1,
-                    },
-                    TaskRow {
-                        task_id: 20,
-                        task_number: 2,
-                        name: "task on inst2".into(),
-                        instance: "inst2".into(),
-                        project_id: 1,
-                    },
-                ],
-                selected: 1,
-                loading: false,
-                revalidating: false,
-            },
-            Screen::Detail {
-                instance: "inst2".into(),
-                project_id: 1,
-                task_id: 20,
-                task: serde_json::Value::Null,
-                comments: vec![],
-                user_map: HashMap::new(),
-                lines: vec![],
-                line_styles: vec![],
-                assets: vec![make_asset("x.pdf", "https://inst2.example.com/x.pdf")],
-                offset: 0,
-                loading: false,
-                pending_download: false,
-                rendered_width: usize::MAX,
-            },
-        ],
-        should_quit: false,
-        header: empty_header(),
-        viewport: (0, 0),
-        click_targets: vec![],
-        last_loaded: None,
-        selection: None,
-        copied_feedback: false,
-    };
-    let (_m, cmds) = update(m, Msg::AssetOpen('1'));
-    assert_eq!(cmds.len(), 1);
-    match &cmds[0] {
-        Cmd::OpenAsset { instance, .. } => {
-            assert_eq!(
-                instance, "inst2",
-                "must use selected task's instance, not first"
-            );
-        }
-        other => panic!("expected OpenAsset, got {other:?}"),
     }
 }
 
@@ -1250,14 +1038,6 @@ fn loaded_detail_stores_assets_on_screen() {
         }
         other => panic!("expected Detail, got {other:?}"),
     }
-}
-
-#[test]
-fn asset_action_on_non_detail_screen_is_noop() {
-    let m = projects_model(2);
-    let (m, cmds) = update(m, Msg::AssetOpen('1'));
-    assert!(cmds.is_empty());
-    assert!(!m.should_quit);
 }
 
 fn make_mine_row(task_id: i64, task_number: i64, project_id: i64, instance: &str) -> MineTableRow {
@@ -1520,7 +1300,6 @@ fn reflow_detail_builds_lines_and_is_memoized() {
             assets: vec![],
             offset: 0,
             loading: false,
-            pending_download: false,
             rendered_width: usize::MAX,
         }],
         should_quit: false,
@@ -1617,7 +1396,6 @@ fn reflow_detail_lines_fit_inner_width() {
             assets: vec![],
             offset: 0,
             loading: false,
-            pending_download: false,
             rendered_width: usize::MAX,
         }],
         should_quit: false,
@@ -1662,7 +1440,6 @@ fn reflow_detail_rebuilds_on_width_change() {
             assets: vec![],
             offset: 0,
             loading: false,
-            pending_download: false,
             rendered_width: usize::MAX,
         }],
         should_quit: false,
@@ -1705,7 +1482,6 @@ fn reflow_detail_is_noop_while_loading() {
             assets: vec![],
             offset: 0,
             loading: true,
-            pending_download: false,
             rendered_width: usize::MAX,
         }],
         should_quit: false,
@@ -1754,7 +1530,6 @@ fn reflow_detail_clamps_offset_when_content_shortens() {
             assets: vec![],
             offset: 4,
             loading: false,
-            pending_download: false,
             rendered_width: usize::MAX,
         }],
         should_quit: false,
@@ -1803,7 +1578,6 @@ fn user_map_resolved_updates_map_and_invalidates_cache() {
             assets: vec![],
             offset: 0,
             loading: false,
-            pending_download: false,
             rendered_width: 80,
         }],
         should_quit: false,
@@ -1876,7 +1650,6 @@ fn progressive_paint_assignee_fills_in_after_user_map_resolved() {
             assets: vec![],
             offset: 0,
             loading: true,
-            pending_download: false,
             rendered_width: usize::MAX,
         }],
         should_quit: false,
@@ -2006,7 +1779,6 @@ fn detail_global_scroll_offset_advances_through_all_content() {
             assets: vec![],
             offset: 0,
             loading: false,
-            pending_download: false,
             rendered_width: 80,
         }],
         should_quit: false,

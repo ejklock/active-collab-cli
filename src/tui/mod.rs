@@ -425,13 +425,6 @@ fn dispatch_cmds(
             Cmd::OpenAsset { instance, url } => {
                 spawn_open_asset(targets, &tx, instance, url);
             }
-            Cmd::DownloadAsset {
-                instance,
-                url,
-                name,
-            } => {
-                spawn_download_asset(targets, http, &tx, instance, url, name);
-            }
             Cmd::CopyToClipboard(text) => {
                 match write_clipboard(&text) {
                     Ok(()) => model.copied_feedback = true,
@@ -554,23 +547,6 @@ fn spawn_open_asset(
     });
 }
 
-fn spawn_download_asset(
-    targets: &[Instance],
-    http: &Http,
-    tx: &mpsc::UnboundedSender<Msg>,
-    instance: String,
-    url: String,
-    name: String,
-) {
-    let inst = targets.iter().find(|t| t.name == instance).cloned();
-    let http = http.clone();
-    let tx = tx.clone();
-    tokio::spawn(async move {
-        run_download(inst, http, &url, &name).await;
-        let _ = tx.send(Msg::AssetActionResult);
-    });
-}
-
 fn spawn_opener(inst: Option<Instance>, url: &str) -> String {
     let _inst = match inst {
         Some(i) => i,
@@ -582,21 +558,6 @@ fn spawn_opener(inst: Option<Instance>, url: &str) -> String {
     let opener = platform_opener();
     match std::process::Command::new(opener).arg(url).spawn() {
         Ok(_) => format!("{} {}", crate::i18n::t("Downloaded:"), url),
-        Err(e) => format!("{} {}", crate::i18n::t("Error:"), e),
-    }
-}
-
-async fn run_download(inst: Option<Instance>, http: Http, url: &str, name: &str) -> String {
-    let inst = match inst {
-        Some(i) => i,
-        None => return crate::i18n::t("Error: instance not found"),
-    };
-    let dest_dir = dirs::download_dir()
-        .or_else(dirs::home_dir)
-        .unwrap_or_else(std::env::temp_dir);
-    let dest_path = dest_dir.join(name);
-    match controller::download_asset(&http, &inst, url, &dest_path).await {
-        Ok(()) => format!("{} {}", crate::i18n::t("Downloaded:"), dest_path.display()),
         Err(e) => format!("{} {}", crate::i18n::t("Error:"), e),
     }
 }

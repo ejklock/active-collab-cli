@@ -57,7 +57,6 @@ fn detail_model_with_assets_and_viewport(
     assets: Vec<Asset>,
     instance: &str,
     viewport: (u16, u16),
-    pending_download: bool,
 ) -> Model {
     Model {
         stack: vec![Screen::Detail {
@@ -72,7 +71,6 @@ fn detail_model_with_assets_and_viewport(
             assets,
             offset: 0,
             loading: false,
-            pending_download,
             rendered_width: usize::MAX,
         }],
         should_quit: false,
@@ -115,16 +113,16 @@ fn click_struct_form_accepted_by_update_on_projects_screen() {
     assert!(!m.should_quit);
 }
 
-// V2a-A1: Click on the first asset row opens assets[0] via OpenAsset.
+// AC1 / V2a-A1: Ctrl+click on the first asset row opens assets[0] via OpenAsset.
 // Viewport 80x24, 2 assets → panel_height = min(2*2+3, 14) = 7.
 // first_asset_row = panel_top + 1 (border) + PANEL_VPAD (blank pad).
 #[test]
-fn click_first_asset_row_emits_open_asset_cmd() {
+fn ctrl_click_first_asset_row_emits_open_asset_cmd() {
     let assets = vec![
         make_asset("a.pdf", "https://example.com/a.pdf"),
         make_asset("b.pdf", "https://example.com/b.pdf"),
     ];
-    let m = detail_model_with_assets_and_viewport(assets.clone(), "inst", (80, 24), false);
+    let m = detail_model_with_assets_and_viewport(assets.clone(), "inst", (80, 24));
     let geom = PanelGeom::compute(80, 24, &assets).expect("panel must exist");
 
     let (_m, cmds) = update(
@@ -132,7 +130,7 @@ fn click_first_asset_row_emits_open_asset_cmd() {
         Msg::Click {
             column: 5,
             row: geom.first_asset,
-            modifiers: KeyModifiers::NONE,
+            modifiers: KeyModifiers::CONTROL,
         },
     );
     assert_eq!(cmds.len(), 1, "must emit exactly one cmd");
@@ -145,16 +143,16 @@ fn click_first_asset_row_emits_open_asset_cmd() {
     }
 }
 
-// V2a-A1: Click on the last asset content row opens the last asset
+// V2a-A1: Ctrl+click on the last asset content row opens the last asset
 // (no off-by-one; bottom vpad and border rows are no-ops).
 #[test]
-fn click_last_asset_row_opens_last_asset() {
+fn ctrl_click_last_asset_row_opens_last_asset() {
     let assets = vec![
         make_asset("first.pdf", "https://example.com/first.pdf"),
         make_asset("second.pdf", "https://example.com/second.pdf"),
         make_asset("third.pdf", "https://example.com/third.pdf"),
     ];
-    let m = detail_model_with_assets_and_viewport(assets.clone(), "inst", (80, 30), false);
+    let m = detail_model_with_assets_and_viewport(assets.clone(), "inst", (80, 30));
     let geom = PanelGeom::compute(80, 30, &assets).expect("panel must exist");
 
     let (_m, cmds) = update(
@@ -162,7 +160,7 @@ fn click_last_asset_row_opens_last_asset() {
         Msg::Click {
             column: 5,
             row: geom.last_asset,
-            modifiers: KeyModifiers::NONE,
+            modifiers: KeyModifiers::CONTROL,
         },
     );
     assert_eq!(cmds.len(), 1);
@@ -174,11 +172,11 @@ fn click_last_asset_row_opens_last_asset() {
     }
 }
 
-// V2a-A1: Click on the panel top border row is a no-op.
+// V2a-A1: Ctrl+click on the panel top border row is a no-op.
 #[test]
-fn click_on_panel_top_border_row_is_noop() {
+fn ctrl_click_on_panel_top_border_row_is_noop() {
     let assets = vec![make_asset("x.pdf", "https://example.com/x.pdf")];
-    let m = detail_model_with_assets_and_viewport(assets.clone(), "inst", (80, 24), false);
+    let m = detail_model_with_assets_and_viewport(assets.clone(), "inst", (80, 24));
     let geom = PanelGeom::compute(80, 24, &assets).expect("panel must exist");
 
     let (_m, cmds) = update(
@@ -186,17 +184,17 @@ fn click_on_panel_top_border_row_is_noop() {
         Msg::Click {
             column: 5,
             row: geom.top,
-            modifiers: KeyModifiers::NONE,
+            modifiers: KeyModifiers::CONTROL,
         },
     );
-    assert!(cmds.is_empty(), "click on top border must be a no-op");
+    assert!(cmds.is_empty(), "ctrl+click on top border must be a no-op");
 }
 
-// V2a-A1: Click on the panel bottom border row is a no-op.
+// V2a-A1: Ctrl+click on the panel bottom border row is a no-op.
 #[test]
-fn click_on_panel_bottom_border_row_is_noop() {
+fn ctrl_click_on_panel_bottom_border_row_is_noop() {
     let assets = vec![make_asset("x.pdf", "https://example.com/x.pdf")];
-    let m = detail_model_with_assets_and_viewport(assets.clone(), "inst", (80, 24), false);
+    let m = detail_model_with_assets_and_viewport(assets.clone(), "inst", (80, 24));
     let geom = PanelGeom::compute(80, 24, &assets).expect("panel must exist");
 
     let (_m, cmds) = update(
@@ -204,17 +202,20 @@ fn click_on_panel_bottom_border_row_is_noop() {
         Msg::Click {
             column: 5,
             row: geom.bottom,
-            modifiers: KeyModifiers::NONE,
+            modifiers: KeyModifiers::CONTROL,
         },
     );
-    assert!(cmds.is_empty(), "click on bottom border must be a no-op");
+    assert!(
+        cmds.is_empty(),
+        "ctrl+click on bottom border must be a no-op"
+    );
 }
 
-// V2a-A1: Click above the panel (in the content area) is a no-op.
+// V2a-A1: Ctrl+click above the panel (in the content area) is a no-op.
 #[test]
-fn click_above_panel_is_noop() {
+fn ctrl_click_above_panel_is_noop() {
     let assets = vec![make_asset("y.pdf", "https://example.com/y.pdf")];
-    let m = detail_model_with_assets_and_viewport(assets.clone(), "inst", (80, 24), false);
+    let m = detail_model_with_assets_and_viewport(assets.clone(), "inst", (80, 24));
     let geom = PanelGeom::compute(80, 24, &assets).expect("panel must exist");
     let above_row = geom.top.saturating_sub(1);
 
@@ -223,20 +224,21 @@ fn click_above_panel_is_noop() {
         Msg::Click {
             column: 5,
             row: above_row,
-            modifiers: KeyModifiers::NONE,
+            modifiers: KeyModifiers::CONTROL,
         },
     );
-    assert!(cmds.is_empty(), "click above panel must be a no-op");
+    assert!(cmds.is_empty(), "ctrl+click above panel must be a no-op");
 }
 
-// V2a-A1: With pending_download set, clicking an asset row emits DownloadAsset.
+// AC2: A plain (unmodified) click on an asset row emits no OpenAsset and no download.
+// Plain click is reserved for V6 text selection.
 #[test]
-fn click_asset_row_with_pending_download_emits_download_cmd() {
+fn plain_click_on_asset_row_emits_no_cmd() {
     let assets = vec![make_asset("report.pdf", "https://example.com/report.pdf")];
-    let m = detail_model_with_assets_and_viewport(assets.clone(), "acme", (80, 24), true);
+    let m = detail_model_with_assets_and_viewport(assets.clone(), "acme", (80, 24));
     let geom = PanelGeom::compute(80, 24, &assets).expect("panel must exist");
 
-    let (m_after, cmds) = update(
+    let (_m, cmds) = update(
         m,
         Msg::Click {
             column: 5,
@@ -244,64 +246,40 @@ fn click_asset_row_with_pending_download_emits_download_cmd() {
             modifiers: KeyModifiers::NONE,
         },
     );
-    assert_eq!(cmds.len(), 1);
-    match &cmds[0] {
-        Cmd::DownloadAsset {
-            instance,
-            url,
-            name,
-        } => {
-            assert_eq!(instance, "acme");
-            assert_eq!(url, "https://example.com/report.pdf");
-            assert_eq!(name, "report.pdf");
-        }
-        other => panic!("expected DownloadAsset, got {other:?}"),
-    }
-    match m_after.top() {
-        Some(Screen::Detail {
-            pending_download, ..
-        }) => {
-            assert!(
-                !pending_download,
-                "pending_download must be cleared after click-open"
-            );
-        }
-        other => panic!("expected Detail screen, got {other:?}"),
-    }
+    assert!(
+        cmds.is_empty(),
+        "plain click on asset row must emit no cmd (reserved for V6 selection)"
+    );
 }
 
-// V2a-A1: After a click-open, pending_download is cleared (matches AssetOpen shortcut behavior).
+// AC2: A plain unmodified click on the last asset row also emits no cmd.
 #[test]
-fn click_asset_clears_pending_download_flag() {
-    let assets = vec![make_asset("z.pdf", "https://example.com/z.pdf")];
-    let m = detail_model_with_assets_and_viewport(assets.clone(), "inst", (80, 24), true);
+fn plain_click_on_last_asset_row_emits_no_cmd() {
+    let assets = vec![
+        make_asset("first.pdf", "https://example.com/first.pdf"),
+        make_asset("last.pdf", "https://example.com/last.pdf"),
+    ];
+    let m = detail_model_with_assets_and_viewport(assets.clone(), "inst", (80, 24));
     let geom = PanelGeom::compute(80, 24, &assets).expect("panel must exist");
 
-    let (m_after, _cmds) = update(
+    let (_m, cmds) = update(
         m,
         Msg::Click {
-            column: 0,
-            row: geom.first_asset,
+            column: 5,
+            row: geom.last_asset,
             modifiers: KeyModifiers::NONE,
         },
     );
-    match m_after.top() {
-        Some(Screen::Detail {
-            pending_download, ..
-        }) => {
-            assert!(
-                !pending_download,
-                "pending_download must be false after open"
-            );
-        }
-        other => panic!("expected Detail, got {other:?}"),
-    }
+    assert!(
+        cmds.is_empty(),
+        "plain click on last asset row must emit no cmd"
+    );
 }
 
 // V2a-A1: Detail with no assets — any click is a no-op (no panel exists).
 #[test]
 fn click_detail_with_no_assets_is_noop() {
-    let m = detail_model_with_assets_and_viewport(vec![], "inst", (80, 24), false);
+    let m = detail_model_with_assets_and_viewport(vec![], "inst", (80, 24));
     let (_m, cmds) = update(
         m,
         Msg::Click {
@@ -360,20 +338,16 @@ fn asset_panel_render_height_consistent_geometry_for_short_names() {
 }
 
 // V2a-A3: Render and click mapper use asset_panel_render_height so geometry cannot diverge.
-// Clicking the first asset row opens the first asset, verified across multiple viewport sizes.
+// Ctrl+clicking the first asset row opens the first asset, verified across multiple viewport sizes.
 #[test]
-fn click_mapper_agrees_with_render_height_for_multiple_viewport_sizes() {
+fn ctrl_click_mapper_agrees_with_render_height_for_multiple_viewport_sizes() {
     for (viewport_w, viewport_h) in [(80u16, 24u16), (120, 40), (40, 20)] {
         let assets = vec![
             make_asset("doc1.pdf", "https://example.com/doc1.pdf"),
             make_asset("doc2.pdf", "https://example.com/doc2.pdf"),
         ];
-        let m = detail_model_with_assets_and_viewport(
-            assets.clone(),
-            "inst",
-            (viewport_w, viewport_h),
-            false,
-        );
+        let m =
+            detail_model_with_assets_and_viewport(assets.clone(), "inst", (viewport_w, viewport_h));
         let geom = PanelGeom::compute(viewport_w, viewport_h, &assets).expect("panel must exist");
 
         let (_m, cmds) = update(
@@ -381,13 +355,13 @@ fn click_mapper_agrees_with_render_height_for_multiple_viewport_sizes() {
             Msg::Click {
                 column: 0,
                 row: geom.first_asset,
-                modifiers: KeyModifiers::NONE,
+                modifiers: KeyModifiers::CONTROL,
             },
         );
         assert_eq!(
             cmds.len(),
             1,
-            "click on first asset row must emit one cmd at \
+            "ctrl+click on first asset row must emit one cmd at \
              viewport ({viewport_w}x{viewport_h})"
         );
         match &cmds[0] {
@@ -540,7 +514,6 @@ fn detail_model_scrollable(lines: Vec<String>, assets: Vec<Asset>, viewport: (u1
             assets,
             offset: 0,
             loading: false,
-            pending_download: false,
             rendered_width: usize::MAX,
         }],
         should_quit: false,
@@ -851,7 +824,6 @@ fn detail_model_with_lines_and_assets(
             assets,
             offset,
             loading: false,
-            pending_download: false,
             rendered_width: usize::MAX,
         }],
         should_quit: false,
@@ -1000,11 +972,11 @@ fn click_mailto_bracket_token_yields_mailto_cmd() {
     }
 }
 
-// V5-A2 (regression): Asset-panel clicks still work after the body-link change.
+// AC1 (regression): Asset-panel Ctrl+click still works after the body-link change.
 // The content-area check happens first; the asset-panel check falls through for rows
 // outside the text viewport.
 #[test]
-fn click_asset_panel_still_works_after_body_link_change() {
+fn ctrl_click_asset_panel_still_works_after_body_link_change() {
     let url = "https://example.com/asset.pdf";
     let assets = vec![make_asset("asset.pdf", url)];
     let geom = PanelGeom::compute(80, 24, &assets).expect("panel must exist");
@@ -1016,10 +988,10 @@ fn click_asset_panel_still_works_after_body_link_change() {
         Msg::Click {
             column: 5,
             row: geom.first_asset,
-            modifiers: KeyModifiers::NONE,
+            modifiers: KeyModifiers::CONTROL,
         },
     );
-    assert_eq!(cmds.len(), 1, "asset panel click must emit one cmd");
+    assert_eq!(cmds.len(), 1, "ctrl+click asset panel must emit one cmd");
     match &cmds[0] {
         Cmd::OpenAsset { url: cmd_url, .. } => {
             assert_eq!(cmd_url, url);
@@ -1252,7 +1224,6 @@ fn detail_model_for_selection(lines: Vec<String>, viewport: (u16, u16), offset: 
             assets: vec![],
             offset,
             loading: false,
-            pending_download: false,
             rendered_width: usize::MAX,
         }],
         should_quit: false,
@@ -2047,7 +2018,7 @@ fn loaded_tasks_clears_revalidating_and_stamps_last_loaded() {
 // Layout (panel_top+N):
 //   0: border, 1: vpad, 2..2+span0-1: asset[0] rows, 2+span0: separator,
 //   2+span0+1: asset[1] row, 2+span0+2: vpad, 2+span0+3: border.
-fn make_wrapped_asset_model(viewport: (u16, u16), pending_download: bool) -> (Vec<Asset>, Model) {
+fn make_wrapped_asset_model(viewport: (u16, u16)) -> (Vec<Asset>, Model) {
     // At content_width=16: prefix "[1] ↗ " = 7 cols, label_width = 9 cols.
     // Name "ABCDEFGHIJKLMNOPQRS.pdf" exceeds 9 cols in label → wraps to >=2 rows.
     let long_name = "ABCDEFGHIJKLMNOPQRS.pdf";
@@ -2055,17 +2026,16 @@ fn make_wrapped_asset_model(viewport: (u16, u16), pending_download: bool) -> (Ve
         make_asset(long_name, "https://example.com/long.pdf"),
         make_asset("short.pdf", "https://example.com/short.pdf"),
     ];
-    let m =
-        detail_model_with_assets_and_viewport(assets.clone(), "inst", viewport, pending_download);
+    let m = detail_model_with_assets_and_viewport(assets.clone(), "inst", viewport);
     (assets, m)
 }
 
 #[test]
-fn click_wrapped_asset_first_row_opens_owning_asset() {
+fn ctrl_click_wrapped_asset_first_row_opens_owning_asset() {
     use crate::render::PANEL_HPAD;
     use crate::render::PANEL_VPAD;
     let viewport = (20u16, 24u16);
-    let (assets, m) = make_wrapped_asset_model(viewport, false);
+    let (assets, m) = make_wrapped_asset_model(viewport);
 
     let inner_width: usize = (viewport.0 - 2) as usize;
     let content_width = inner_width.saturating_sub(2 * PANEL_HPAD);
@@ -2085,7 +2055,7 @@ fn click_wrapped_asset_first_row_opens_owning_asset() {
         Msg::Click {
             column: 5,
             row: first_asset_row,
-            modifiers: KeyModifiers::NONE,
+            modifiers: KeyModifiers::CONTROL,
         },
     );
     assert_eq!(cmds.len(), 1, "first content row must emit one cmd");
@@ -2101,11 +2071,11 @@ fn click_wrapped_asset_first_row_opens_owning_asset() {
 }
 
 #[test]
-fn click_wrapped_asset_continuation_row_resolves_to_owning_asset() {
+fn ctrl_click_wrapped_asset_continuation_row_resolves_to_owning_asset() {
     use crate::render::PANEL_HPAD;
     use crate::render::PANEL_VPAD;
     let viewport = (20u16, 24u16);
-    let (assets, m) = make_wrapped_asset_model(viewport, false);
+    let (assets, m) = make_wrapped_asset_model(viewport);
 
     let inner_width: usize = (viewport.0 - 2) as usize;
     let content_width = inner_width.saturating_sub(2 * PANEL_HPAD);
@@ -2125,13 +2095,13 @@ fn click_wrapped_asset_continuation_row_resolves_to_owning_asset() {
         Msg::Click {
             column: 5,
             row: continuation_row,
-            modifiers: KeyModifiers::NONE,
+            modifiers: KeyModifiers::CONTROL,
         },
     );
     assert_eq!(
         cmds.len(),
         1,
-        "continuation row of asset[0] must emit one cmd"
+        "ctrl+click on continuation row of asset[0] must emit one cmd"
     );
     match &cmds[0] {
         Cmd::OpenAsset { url, .. } => {
@@ -2145,11 +2115,11 @@ fn click_wrapped_asset_continuation_row_resolves_to_owning_asset() {
 }
 
 #[test]
-fn click_second_asset_row_after_wrapped_first_asset_resolves_correctly() {
+fn ctrl_click_second_asset_row_after_wrapped_first_asset_resolves_correctly() {
     use crate::render::PANEL_HPAD;
     use crate::render::PANEL_VPAD;
     let viewport = (20u16, 24u16);
-    let (assets, m) = make_wrapped_asset_model(viewport, false);
+    let (assets, m) = make_wrapped_asset_model(viewport);
 
     let inner_width: usize = (viewport.0 - 2) as usize;
     let content_width = inner_width.saturating_sub(2 * PANEL_HPAD);
@@ -2169,10 +2139,14 @@ fn click_second_asset_row_after_wrapped_first_asset_resolves_correctly() {
         Msg::Click {
             column: 5,
             row: second_asset_row,
-            modifiers: KeyModifiers::NONE,
+            modifiers: KeyModifiers::CONTROL,
         },
     );
-    assert_eq!(cmds.len(), 1, "first row of asset[1] must emit one cmd");
+    assert_eq!(
+        cmds.len(),
+        1,
+        "ctrl+click on first row of asset[1] must emit one cmd"
+    );
     match &cmds[0] {
         Cmd::OpenAsset { url, .. } => {
             assert_eq!(
@@ -2260,7 +2234,7 @@ fn body_link_click_at_wrapped_panel_region_is_noop() {
         Msg::Click {
             column: 3,
             row: panel_top,
-            modifiers: KeyModifiers::NONE,
+            modifiers: KeyModifiers::CONTROL,
         },
     );
     assert!(
@@ -2429,61 +2403,61 @@ fn asset_panel_click_separator_and_pad_rows_return_no_asset() {
     let asset1_first_row = separator_row + 1;
     let bottom_vpad_row = asset1_first_row + span1;
 
-    // Top vpad → no-op.
+    // Top vpad → no-op even with Ctrl modifier.
     let (_m, cmds) = update(
-        detail_model_with_assets_and_viewport(assets.clone(), "inst", viewport, false),
+        detail_model_with_assets_and_viewport(assets.clone(), "inst", viewport),
         Msg::Click {
             column: 5,
             row: top_vpad_row,
-            modifiers: KeyModifiers::NONE,
+            modifiers: KeyModifiers::CONTROL,
         },
     );
     assert!(
         cmds.is_empty(),
-        "click on top vpad row must return no asset: row={top_vpad_row}"
+        "ctrl+click on top vpad row must return no asset: row={top_vpad_row}"
     );
 
-    // Separator → no-op.
+    // Separator → no-op even with Ctrl modifier.
     let (_m, cmds) = update(
-        detail_model_with_assets_and_viewport(assets.clone(), "inst", viewport, false),
+        detail_model_with_assets_and_viewport(assets.clone(), "inst", viewport),
         Msg::Click {
             column: 5,
             row: separator_row,
-            modifiers: KeyModifiers::NONE,
+            modifiers: KeyModifiers::CONTROL,
         },
     );
     assert!(
         cmds.is_empty(),
-        "click on separator row must return no asset: row={separator_row}"
+        "ctrl+click on separator row must return no asset: row={separator_row}"
     );
 
-    // Bottom vpad → no-op.
+    // Bottom vpad → no-op even with Ctrl modifier.
     let (_m, cmds) = update(
-        detail_model_with_assets_and_viewport(assets.clone(), "inst", viewport, false),
+        detail_model_with_assets_and_viewport(assets.clone(), "inst", viewport),
         Msg::Click {
             column: 5,
             row: bottom_vpad_row,
-            modifiers: KeyModifiers::NONE,
+            modifiers: KeyModifiers::CONTROL,
         },
     );
     assert!(
         cmds.is_empty(),
-        "click on bottom vpad row must return no asset: row={bottom_vpad_row}"
+        "ctrl+click on bottom vpad row must return no asset: row={bottom_vpad_row}"
     );
 
-    // asset[1] first row → index 1 (url = link2.pdf).
+    // asset[1] first row with Ctrl → index 1 (url = link2.pdf).
     let (_, cmds) = update(
-        detail_model_with_assets_and_viewport(assets.clone(), "inst", viewport, false),
+        detail_model_with_assets_and_viewport(assets.clone(), "inst", viewport),
         Msg::Click {
             column: 5,
             row: asset1_first_row,
-            modifiers: KeyModifiers::NONE,
+            modifiers: KeyModifiers::CONTROL,
         },
     );
     assert_eq!(
         cmds.len(),
         1,
-        "click on asset[1] row must emit one cmd: row={asset1_first_row}"
+        "ctrl+click on asset[1] row must emit one cmd: row={asset1_first_row}"
     );
     match &cmds[0] {
         Cmd::OpenAsset { url, .. } => {
@@ -2494,6 +2468,177 @@ fn asset_panel_click_separator_and_pad_rows_return_no_asset() {
         }
         other => panic!("expected OpenAsset for asset[1], got {other:?}"),
     }
+}
+
+// AC1 (BDR 0019 Sc.6): Ctrl+click on an asset row opens the asset at that index.
+// Derives the row from the rendered geometry (asset_index_at_panel_row), not a guessed constant.
+// Uses 5 assets (panel_h = 13, below the ASSET_PANEL_MAX_ROWS=14 cap) so the last asset
+// row is always within the panel, verifying the geometry-derived mapping is mutation-resistant.
+#[test]
+fn ctrl_click_nth_asset_row_derived_from_geometry_opens_correct_asset() {
+    use crate::render::PANEL_HPAD;
+    use crate::render::PANEL_VPAD;
+
+    // 5 assets: panel_h = min(2*5+3, 14) = 13 (not capped), all rows visible.
+    let assets: Vec<Asset> = (0..5)
+        .map(|i| {
+            make_asset(
+                &format!("f{i}.pdf"),
+                &format!("https://example.com/f{i}.pdf"),
+            )
+        })
+        .collect();
+
+    let viewport = (80u16, 40u16);
+    let m = detail_model_with_assets_and_viewport(assets.clone(), "inst", viewport);
+
+    let inner_width = (viewport.0 - 2) as usize;
+    let content_width = inner_width.saturating_sub(2 * PANEL_HPAD);
+    let panel_h = asset_panel_render_height(&assets, inner_width);
+    let panel_top = viewport.1 - panel_h;
+
+    // Walk asset geometry to find the row of asset index 4 (the 5th asset).
+    // The geometry derivation is the same as asset_index_at_panel_row uses.
+    let mut cursor_row = panel_top + 1 + PANEL_VPAD as u16;
+    for idx in 0..4usize {
+        let span =
+            crate::render::asset_row_lines(idx + 1, &assets[idx], content_width).len() as u16;
+        cursor_row += span;
+        cursor_row += 1; // separator between assets
+    }
+    let fifth_asset_row = cursor_row;
+
+    let (_m, cmds) = update(
+        m,
+        Msg::Click {
+            column: 5,
+            row: fifth_asset_row,
+            modifiers: KeyModifiers::CONTROL,
+        },
+    );
+    assert_eq!(
+        cmds.len(),
+        1,
+        "ctrl+click on fifth asset row must emit one cmd"
+    );
+    match &cmds[0] {
+        Cmd::OpenAsset { url, .. } => {
+            assert_eq!(
+                url, "https://example.com/f4.pdf",
+                "fifth asset row (geometry-derived) must open asset index 4 (f4.pdf)"
+            );
+        }
+        other => panic!("expected OpenAsset for fifth asset, got {other:?}"),
+    }
+}
+
+// AC3 (BDR 0019 Sc.3): Pressing a digit '1'-'9' in the detail view produces no asset action.
+// The key-event mapper no longer maps digit chars to any Msg that opens assets.
+// Verify via events::map_browse_key_event that digits produce None.
+#[test]
+fn digit_keys_produce_no_asset_action_in_detail_view() {
+    use crate::tui::events::map_browse_key_event;
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState};
+
+    for digit in '1'..='9' {
+        let key = KeyEvent {
+            code: KeyCode::Char(digit),
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::NONE,
+        };
+        let msg = map_browse_key_event(key);
+        assert!(
+            msg.is_none(),
+            "digit '{digit}' must produce no Msg (no asset action)"
+        );
+    }
+}
+
+// AC3 (BDR 0019 Sc.4): Pressing 'd' in the detail view enters no download mode.
+// The key 'd' is no longer mapped to TogglePendingDownload.
+#[test]
+fn d_key_does_not_enter_download_mode() {
+    use crate::tui::events::map_browse_key_event;
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState};
+
+    let key = KeyEvent {
+        code: KeyCode::Char('d'),
+        modifiers: KeyModifiers::NONE,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+    let msg = map_browse_key_event(key);
+    assert!(
+        msg.is_none(),
+        "'d' key must produce no Msg (no download mode)"
+    );
+}
+
+// AC5 (BDR 0019 Sc.5): Super/Cmd modifier also opens an asset (not only CONTROL).
+#[test]
+fn super_click_on_asset_row_emits_open_asset_cmd() {
+    let assets = vec![make_asset("doc.pdf", "https://example.com/doc.pdf")];
+    let m = detail_model_with_assets_and_viewport(assets.clone(), "inst", (80, 24));
+    let geom = PanelGeom::compute(80, 24, &assets).expect("panel must exist");
+
+    let (_m, cmds) = update(
+        m,
+        Msg::Click {
+            column: 5,
+            row: geom.first_asset,
+            modifiers: KeyModifiers::SUPER,
+        },
+    );
+    assert_eq!(cmds.len(), 1, "Super+click on asset row must emit one cmd");
+    match &cmds[0] {
+        Cmd::OpenAsset { url, .. } => {
+            assert_eq!(url, "https://example.com/doc.pdf");
+        }
+        other => panic!("expected OpenAsset, got {other:?}"),
+    }
+}
+
+// AC5 / Sc.5: The detail footer hint with assets does NOT contain '1-9 open asset' or 'd+1-9 download'.
+// It reflects the Ctrl/Cmd+click model.
+#[test]
+fn detail_footer_hint_with_assets_reflects_ctrl_cmd_click_model() {
+    use crate::tui::view::hint_for_screen;
+
+    let assets = vec![make_asset("a.pdf", "https://example.com/a.pdf")];
+    let screen = Screen::Detail {
+        instance: "inst".into(),
+        project_id: 1,
+        task_id: 1,
+        task: serde_json::Value::Null,
+        comments: vec![],
+        user_map: std::collections::HashMap::new(),
+        lines: vec![],
+        line_styles: vec![],
+        assets,
+        offset: 0,
+        loading: false,
+        rendered_width: usize::MAX,
+    };
+    let hint = hint_for_screen(&screen);
+    assert!(
+        !hint.contains("1-9"),
+        "footer hint must not contain '1-9' after numeric scheme removal: {hint:?}"
+    );
+    assert!(
+        !hint.contains("d+1-9"),
+        "footer hint must not contain 'd+1-9' after download mode removal: {hint:?}"
+    );
+    assert!(
+        !hint.contains("download") && !hint.contains("baixar"),
+        "footer hint must not reference download: {hint:?}"
+    );
+    assert!(
+        hint.to_lowercase().contains("ctrl")
+            || hint.to_lowercase().contains("cmd")
+            || hint.to_lowercase().contains("clique"),
+        "footer hint must reference Ctrl/Cmd+click model: {hint:?}"
+    );
 }
 
 // V3-A3: Quit sets should_quit regardless of selection state.
@@ -2538,7 +2683,6 @@ fn detail_model_with_boxed_lines(lines: Vec<String>, viewport: (u16, u16), offse
             assets: vec![],
             offset,
             loading: false,
-            pending_download: false,
             rendered_width: usize::MAX,
         }],
         should_quit: false,
