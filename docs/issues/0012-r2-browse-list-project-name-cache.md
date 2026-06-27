@@ -2,7 +2,7 @@
 type: Issue
 title: "R2 — cache the per-instance project directory so list refresh stops re-fetching it"
 description: Add a ProjectNamesCache (TTL, SWR); list refresh always fetches open tasks but serves project names from cache unless stale.
-status: open
+status: closed
 labels: [tui, performance, cache, controller]
 blocked_by:
 tracker:

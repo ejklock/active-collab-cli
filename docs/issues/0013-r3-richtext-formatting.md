@@ -2,7 +2,7 @@
 type: Issue
 title: "R3 — preserve comment/description rich-text via an HTML-subset styled mapper"
 description: Map a fixed HTML subset (bold, italic, code, headings, lists, blockquote, links) to ratatui styled segments in the detail view; CLI plain-text path unchanged.
-status: open
+status: closed
 labels: [tui, render, html, richtext]
 blocked_by:
 tracker:

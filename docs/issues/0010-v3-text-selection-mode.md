@@ -2,7 +2,7 @@
 type: Issue
 title: "V3 — selection mode: toggle mouse capture for native text selection"
 description: An `s` key toggles a selection mode that disables mouse capture (terminal regains native selection) with a footer indicator, then re-enables it.
-status: open
+status: closed
 labels: [tui, ux, mouse, selection]
 blocked_by:
 tracker:

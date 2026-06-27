@@ -2,7 +2,7 @@
 type: Issue
 title: "C1 — bare `ac` in a TTY defaults to mine"
 description: When no subcommand is given and both streams are a terminal, dispatch mine; otherwise keep help+exit-2.
-status: open
+status: closed
 labels: [cli, tty, ux]
 blocked_by:
 tracker:

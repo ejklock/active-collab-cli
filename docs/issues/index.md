@@ -15,11 +15,11 @@ TUI/UX work (V/R/ARCH slices), tracing to
 | [0007](/issues/0007-r6-browse-tui-parity.md) | R6 | browse TUI to parity (screens + loader + refresh) | closed | 0006 |
 | [0008](/issues/0008-r7-i18n-assets.md) | R7 | i18n (en + pt-BR) + asset open/download | closed | 0007 |
 | [0009](/issues/0009-r8-cutover.md) | R8 | cutover: promote Rust, remove Python | closed | 0008 |
-| [0010](/issues/0010-v3-text-selection-mode.md) | V3 | selection mode: toggle mouse capture for native text selection | open | — |
-| [0011](/issues/0011-c1-bare-ac-tty-default-mine.md) | C1 | bare `ac` in a TTY defaults to mine | open | — |
-| [0012](/issues/0012-r2-browse-list-project-name-cache.md) | R2 | cache the per-instance project directory (SWR list refresh) | open | — |
-| [0013](/issues/0013-r3-richtext-formatting.md) | R3 | preserve comment/description rich-text via an HTML-subset styled mapper | open | — |
-| [0014](/issues/0014-arch-refactor-render-decompose-relocate.md) | ARCH | refactor render.rs: decompose meta-table, drop dead seams, relocate extract_assets | open | 0010–0013 |
+| [0010](/issues/0010-v3-text-selection-mode.md) | V3 | selection mode: toggle mouse capture for native text selection | closed | — |
+| [0011](/issues/0011-c1-bare-ac-tty-default-mine.md) | C1 | bare `ac` in a TTY defaults to mine | closed | — |
+| [0012](/issues/0012-r2-browse-list-project-name-cache.md) | R2 | cache the per-instance project directory (SWR list refresh) | closed | — |
+| [0013](/issues/0013-r3-richtext-formatting.md) | R3 | preserve comment/description rich-text via an HTML-subset styled mapper | closed | — |
+| [0014](/issues/0014-arch-refactor-render-decompose-relocate.md) | ARCH | refactor render.rs: decompose meta-table, drop dead seams, relocate extract_assets | closed | 0010–0013 |
 | [0015](/issues/0015-u21-agent-json-output.md) | U21 | curated minified --json contract for get/current/mine/browse + agent skill | closed | — |
 | [0016](/issues/0016-s8-task-list-first-paint-swr.md) | S8 | task-list first-paint-from-cache SWR on browse/mine entry | closed | — |
 | [0017](/issues/0017-detail-chrome-responsive-wrap.md) | DW | Detail chrome responsiveness — wrap header, task title, footer, artifacts | closed | — |

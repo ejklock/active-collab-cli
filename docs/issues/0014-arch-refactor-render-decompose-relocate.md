@@ -2,7 +2,7 @@
 type: Issue
 title: "ARCH — refactor render.rs: decompose meta-table, drop dead seams, relocate extract_assets"
 description: Behavior-preserving maintainability pass; split build_meta_table_rows, remove the three #[allow(dead_code)] wrappers, move extract_assets to the controller/domain layer.
-status: open
+status: closed
 labels: [refactor, render, controller, maintainability]
 blocked_by: [10, 11, 12, 13]
 tracker:
