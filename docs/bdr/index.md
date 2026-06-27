@@ -21,3 +21,4 @@
 | [0017](/bdr/0017-asset-label-derivation.md) | Anexos/Artefatos labels read as anchor text, a real filename, or the host (D1b) | Accepted |
 | [0018](/bdr/0018-asset-card-breathing-room.md) | Anexos/Artefatos card has breathing room: a blank line between links and interior padding (D1d) | Accepted |
 | [0019](/bdr/0019-asset-activation-ctrl-cmd-click.md) | Assets open on Ctrl/Cmd+click; the numeric 1-9 open and d+1-9 download shortcuts are removed (D1e) | Accepted |
+| [0020](/bdr/0020-task-list-cards.md) | The task list shows a bordered card per task with a relative, colored due date (D2) | Accepted |

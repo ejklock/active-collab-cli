@@ -30,3 +30,4 @@ TUI/UX work (V/R/ARCH slices), tracing to
 | [0022](/issues/0022-detail-link-wrap-artifacts-project-title.md) | D1 | detail polish: wrapped-link click, Anexos label, empty project, title placement | closed | 0020 |
 | [0023](/issues/0023-d1d-asset-card-spacing.md) | D1d | Anexos/Artefatos card breathing room — blank line between links + interior padding | open | — |
 | [0024](/issues/0024-d1e-asset-activation-ctrl-cmd-click.md) | D1e | open assets via Ctrl/Cmd+click; remove the numeric 1-9 open + d+1-9 download shortcuts | open | 0023 |
+| [0025](/issues/0025-d2-task-list-cards.md) | D2 | task list as per-task cards with a relative, colored due date (D2a shell, D2b project + due) | open | — |
