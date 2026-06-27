@@ -202,10 +202,10 @@ fn draw_projects_single_name_column_no_task_count() {
     );
 }
 
-// V1-A1: Tasks list has a single name column — no TASK# column.
-// Header shows "NOME" (pt-BR translation of "NAME") and NOT "TAREFA#".
+// D2a-AC1: Tasks list renders NO 'NOME' column header; each task is a bordered card.
+// The card content line begins with '#<task_number>' and includes the task name.
 #[test]
-fn draw_tasks_single_name_column_no_task_number() {
+fn draw_tasks_card_layout_no_nome_header_has_bordered_card() {
     let _guard = LANG_MUTEX.lock().unwrap();
     set_language("pt_BR");
     let tasks = make_tasks(&["My Task"]);
@@ -213,12 +213,25 @@ fn draw_tasks_single_name_column_no_task_number() {
     set_language("en");
     let content = buf_to_string(&buf);
     assert!(
-        content.contains("NOME"),
-        "header must show translated 'NOME': {content}"
+        !content.contains("NOME"),
+        "NOME column header must be absent in card layout: {content}"
     );
     assert!(
         !content.contains("TAREFA#") && !content.contains("TASK#"),
         "task-number column must be absent: {content}"
+    );
+    assert!(
+        content.contains("#1"),
+        "card content must start with '#<task_number>': {content}"
+    );
+    assert!(
+        content.contains("My Task"),
+        "card content must contain the task name: {content}"
+    );
+    // Card uses rounded-corner box chars
+    assert!(
+        content.contains('\u{256D}') || content.contains('\u{2570}'),
+        "card must use rounded-box border chars: {content}"
     );
 }
 
@@ -310,27 +323,47 @@ fn draw_projects_long_name_wraps_on_narrow_terminal() {
     );
 }
 
-// V1-A2: A long task name wraps onto a second buffer line on a narrow terminal.
-// At width=20, name_width = 20 - 4 = 16. A name > 16 chars must wrap.
+// D2a-AC2: A long task name wraps inside the card and the card grows in height.
+// At width=20, outer block takes 2 cols (borders), card borders take 2 more, HPAD takes 2 more,
+// leaving card_inner_w = 20 - 2 - 2 - 2 = 14.
+// "#1  Alpha Beta Gamma Delta" (len 26) wraps at 14 cols across at least 2 content rows.
+// Card layout: row 0 = outer top border; rows 1+ are card rows (top border, content, bottom border).
 #[test]
-fn draw_tasks_long_name_wraps_on_narrow_terminal() {
+fn draw_tasks_long_name_wraps_inside_card() {
     let long_name = "Alpha Beta Gamma Delta";
-    assert!(
-        long_name.len() > 16,
-        "test name must exceed name_width=16 to trigger wrapping"
-    );
     let tasks = make_tasks(&[long_name]);
-    let buf = render_tasks_to_buf(&tasks, 0, 20, 10);
-    let rows: Vec<String> = buf_to_string(&buf).lines().map(str::to_string).collect();
-    let name_part_in_row2 = rows.get(2).map(|r| r.contains("Alpha")).unwrap_or(false);
-    let name_cont_in_row3 = rows.get(3).map(|r| r.contains("Delta")).unwrap_or(false);
+    let buf = render_tasks_to_buf(&tasks, 0, 20, 15);
+    let content = buf_to_string(&buf);
     assert!(
-        name_part_in_row2,
-        "first word of name must appear on data row (y=2): rows={rows:?}"
+        content.contains("Alpha"),
+        "first part of name must appear: {content}"
     );
     assert!(
-        name_cont_in_row3,
-        "wrapped continuation must appear on next row (y=3): rows={rows:?}"
+        content.contains("Delta"),
+        "wrapped tail of name must appear: {content}"
+    );
+    assert!(
+        !content.contains('\u{2026}'),
+        "name must wrap, not truncate with ellipsis: {content}"
+    );
+    let rows: Vec<String> = content.lines().map(str::to_string).collect();
+    let has_alpha = rows.iter().any(|r| r.contains("Alpha"));
+    let has_delta = rows.iter().any(|r| r.contains("Delta"));
+    assert!(
+        has_alpha && has_delta,
+        "both name parts must appear in buffer"
+    );
+    // The card must occupy more rows than a single-line card (height > 3).
+    // Count rows between first and last box char row.
+    let box_rows: Vec<usize> = rows
+        .iter()
+        .enumerate()
+        .filter(|(_, r)| r.contains('\u{256D}') || r.contains('\u{2570}') || r.contains('\u{2502}'))
+        .map(|(i, _)| i)
+        .collect();
+    assert!(
+        box_rows.len() >= 4,
+        "card must have at least 4 rows (top border + 2 content + bottom border): rows={rows:?}"
     );
 }
 
@@ -385,13 +418,17 @@ fn draw_projects_at_width_120_shows_full_name() {
 
 #[test]
 fn draw_tasks_at_width_40_does_not_panic() {
-    let _guard = LANG_MUTEX.lock().unwrap();
-    set_language("pt_BR");
     let tasks = make_tasks(&["Short Task"]);
     let buf = render_tasks_to_buf(&tasks, 0, 40, 10);
-    set_language("en");
     let content = buf_to_string(&buf);
-    assert!(content.contains("NOME"), "header 'NOME' must appear");
+    assert!(
+        !content.contains("NOME"),
+        "NOME header must NOT appear in card layout: {content}"
+    );
+    assert!(
+        content.contains("#1"),
+        "card must render task number '#1': {content}"
+    );
 }
 
 #[test]
@@ -417,14 +454,94 @@ fn draw_projects_selected_row_has_selection_symbol() {
     );
 }
 
+// D2a-AC4: The selected card's border and content rows all carry the selection style.
+// All buffer rows belonging to the selected card (top border, content, bottom border)
+// must have at least one cell with the amber selection background.
 #[test]
-fn draw_tasks_selected_row_has_selection_symbol() {
+fn draw_tasks_selected_card_all_rows_carry_selection_style() {
+    use ratatui::style::Color;
     let tasks = make_tasks(&["Task One", "Task Two"]);
-    let buf = render_tasks_to_buf(&tasks, 0, 80, 10);
-    let content = buf_to_string(&buf);
+    let backend = TestBackend::new(80, 15);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut captured_targets: Vec<crate::tui::model::ClickTarget> = vec![];
+    terminal
+        .draw(|frame| {
+            draw_tasks(
+                frame,
+                Rect::new(0, 0, 80, 15),
+                "Project A",
+                &tasks,
+                0,
+                false,
+                false,
+                &mut captured_targets,
+            );
+        })
+        .unwrap();
+    let buf = terminal.backend().buffer();
+    let amber = Color::Rgb(210, 160, 90);
+    // Find the click target for card 0 (the selected one)
+    let target = captured_targets
+        .iter()
+        .find(|t| t.index == 0)
+        .expect("click target for card 0 must be recorded");
+    // Every row in the selected card's range must have at least one amber-bg cell
+    for y in target.y_start..target.y_end {
+        let has_amber = (0..80u16).any(|x| {
+            buf.cell((x, y))
+                .map(|c| c.style().bg == Some(amber))
+                .unwrap_or(false)
+        });
+        assert!(
+            has_amber,
+            "selected card row y={y} must have amber-bg selection style (D2a-AC4)"
+        );
+    }
+}
+
+// D2a-AC3: A click on a non-first row of a card resolves to that task's index.
+// Card for task 0 occupies at least 3 rows (top border, content, bottom border).
+// Clicking the second row (y_start+1) must still resolve to index 0.
+#[test]
+fn draw_tasks_click_on_non_first_card_row_resolves_to_task_index() {
+    let tasks = make_tasks(&["Task Alpha", "Task Beta"]);
+    let backend = TestBackend::new(80, 20);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut captured_targets: Vec<crate::tui::model::ClickTarget> = vec![];
+    terminal
+        .draw(|frame| {
+            draw_tasks(
+                frame,
+                Rect::new(0, 0, 80, 20),
+                "Project A",
+                &tasks,
+                0,
+                false,
+                false,
+                &mut captured_targets,
+            );
+        })
+        .unwrap();
+    let target0 = captured_targets
+        .iter()
+        .find(|t| t.index == 0)
+        .expect("click target for card 0 must be recorded");
     assert!(
-        content.contains(theme::SELECTION_SYMBOL),
-        "SELECTION_SYMBOL '▸ ' must appear when a row is selected"
+        target0.y_end > target0.y_start + 1,
+        "card 0 must span more than 1 row (y_start={}, y_end={})",
+        target0.y_start,
+        target0.y_end
+    );
+    // The non-first row (y_start + 1) must still be within the card's y-range.
+    let click_y = target0.y_start + 1;
+    let resolved = captured_targets
+        .iter()
+        .find(|t| click_y >= t.y_start && click_y < t.y_end)
+        .map(|t| t.index);
+    assert_eq!(
+        resolved,
+        Some(0),
+        "clicking non-first row y={click_y} must resolve to card index 0 (D2a-AC3)"
     );
 }
 
@@ -464,26 +581,27 @@ fn draw_projects_header_row_present() {
     );
 }
 
-// V1-A1: Tasks header is a single column — only "NOME" header, no "TAREFA#".
+// D2a-AC1: Tasks screen has no column header row; each task is a bordered card.
 #[test]
-fn draw_tasks_header_row_present() {
-    let _guard = LANG_MUTEX.lock().unwrap();
-    set_language("pt_BR");
+fn draw_tasks_no_header_row_only_cards() {
     let tasks = make_tasks(&["My Task"]);
     let buf = render_tasks_to_buf(&tasks, 0, 80, 10);
-    set_language("en");
     let content = buf_to_string(&buf);
     assert!(
-        content.contains("NOME"),
-        "header label 'NOME' must be present"
+        !content.contains("NOME"),
+        "NOME column header must NOT appear in card layout: {content}"
     );
     assert!(
         !content.contains("TAREFA#") && !content.contains("TASK#"),
-        "header label 'TASK#' must NOT be present (column removed)"
+        "TASK# column header must NOT appear: {content}"
     );
     assert!(
         !content.contains("INSTANCE"),
-        "header label 'INSTANCE' must NOT be present (column removed)"
+        "INSTANCE column header must NOT appear: {content}"
+    );
+    assert!(
+        content.contains("#1") && content.contains("My Task"),
+        "card must show '#1' task number and task name: {content}"
     );
 }
 
