@@ -102,6 +102,8 @@ fn emphasis_style(rs: RichStyle) -> Style {
         RichStyle::Bold => Style::default().add_modifier(Modifier::BOLD),
         RichStyle::Italic => Style::default().add_modifier(Modifier::ITALIC),
         RichStyle::Code => theme::code_style(),
+        RichStyle::Strike => Style::default().add_modifier(Modifier::CROSSED_OUT),
+        RichStyle::Underline => Style::default().add_modifier(Modifier::UNDERLINED),
         RichStyle::Plain => Style::default(),
     }
 }
