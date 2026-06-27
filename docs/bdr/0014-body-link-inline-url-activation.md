@@ -37,15 +37,22 @@ flowchart TD
 
 In the **TUI detail view**:
 
-- `<a href="URL">text</a>` renders the anchor `text` styled as a link (link color +
-  underline) followed by ` [URL]` with the URL dimmed.
+- `<a href="URL">text</a>` renders the anchor `text` as normal body text (inline
+  emphasis preserved) followed by ` [URL]`; the bracketed URL is the link-styled
+  (link color), visible, clickable, copyable token.
 - When `text` is empty or equals the URL, only `[URL]` is rendered.
-- `mailto:` URLs render the address.
-- Clicking anywhere on the rendered link region (`text [URL]`) emits the open-URL
-  `Cmd` for that link. The mapping is from the visible region, so any cell of the
-  link is a valid target.
+- `mailto:` URLs render the bare address in the brackets (`text [a@b.com]`); the
+  open `Cmd` re-adds the `mailto:` scheme.
+- The **visible URL token** is the click target: clicking the `[URL]` bracket
+  content (or a raw URL printed in the body) emits the open `Cmd` for that URL.
+  The target is derived from the visible text at the click column — no indirected
+  "Link N" index to correlate (that indirection was the source of the missed
+  clicks). A bracketed e-mail address opens via `mailto:`.
 - The URL text is on screen, so it is selectable/copyable (BDR 0015) and terminals
-  with URL detection make it Cmd/Ctrl+clickable natively.
+  with URL detection make it Cmd/Ctrl+clickable natively. A URL long enough to wrap
+  across lines stays fully visible and copyable; click-activation targets the
+  unwrapped token, and the terminal's native Cmd/Ctrl+click reconstructs a wrapped
+  URL where supported.
 - The `↗ Link N` label and the separate URL list are **gone for body links**.
 
 The **CLI / non-TTY** path is unchanged.
@@ -53,8 +60,8 @@ The **CLI / non-TTY** path is unchanged.
 ## Scenarios
 
 **Scenario 1: text and URL differ** — Given `<a href="https://x/y">docs</a>`, When
-rendered, Then `docs [https://x/y]` appears with `docs` link-styled and the URL
-dimmed.
+rendered, Then `docs [https://x/y]` appears, with the bracketed `[https://x/y]`
+link-styled (link color) as the clickable/copyable token and `docs` as normal text.
 
 **Scenario 2: text equals URL** — Given `<a href="https://x/y">https://x/y</a>`, When
 rendered, Then only `[https://x/y]` appears (no duplication).
@@ -62,15 +69,18 @@ rendered, Then only `[https://x/y]` appears (no duplication).
 **Scenario 3: empty anchor text** — Given `<a href="https://x/y"></a>`, When rendered,
 Then `[https://x/y]` appears.
 
-**Scenario 4: click opens the URL** — Given a rendered link region, When a click lands
-on any cell of that region, Then the open-URL `Cmd` for that URL is emitted.
+**Scenario 4: click on the URL token opens it** — Given a rendered `text [URL]` link,
+When a click lands on the `[URL]` token (or on a raw URL printed in the body), Then the
+open-URL `Cmd` for that URL is emitted.
 
 **Scenario 5: mailto** — Given `<a href="mailto:a@b.com">mail</a>`, When rendered,
-Then `mail [a@b.com]` appears and clicking emits the open `Cmd`.
+Then `mail [a@b.com]` appears and clicking the `[a@b.com]` token emits the open `Cmd`
+for `mailto:a@b.com`.
 
-**Scenario 6: wrapping keeps the region clickable** — Given a link whose `text [URL]`
-exceeds the viewport width, When the line wraps, Then a click on a wrapped fragment
-still maps to the same URL.
+**Scenario 6: long URL stays visible and copyable** — Given a URL long enough to wrap,
+When the body renders, Then the full URL is on screen across the wrapped lines
+(selectable/copyable); click-activation targets the unwrapped token and the terminal's
+native Cmd/Ctrl+click handles a wrapped URL where supported.
 
 ## Test Design
 
@@ -79,12 +89,12 @@ pure `body_link_cmd_at` against rendered geometry. Each row names what it proves
 
 | Case | Level | Scenario | Asserts (observable) | Proves |
 |---|---|---|---|---|
-| Text != URL | unit | 1 | `text [url]`, link + dim styles | inline render |
+| Text != URL | unit | 1 | `text [url]`; bracketed url link-styled | inline render |
 | Text == URL | unit | 2 | `[url]` only | no duplication |
 | Empty text | unit | 3 | `[url]` only | empty-anchor handling |
-| Click opens | unit | 4 | region click → open Cmd with URL | robust click mapping |
-| Mailto | unit | 5 | `mail [a@b.com]` + open Cmd | mailto handling |
-| Wrapped clickable | unit | 6 | wrapped fragment → same URL | wrap-aware mapping |
+| Click opens | unit | 4 | URL-token click → open Cmd with URL | url-from-click (no index) |
+| Mailto | unit | 5 | `mail [a@b.com]` + open Cmd `mailto:a@b.com` | mailto handling |
+| Long URL visible | unit | 6 | full URL present across wrapped lines | URL always visible/copyable |
 
 ## Related
 

@@ -25,5 +25,5 @@ TUI/UX work (V/R/ARCH slices), tracing to
 | [0017](/issues/0017-detail-chrome-responsive-wrap.md) | DW | Detail chrome responsiveness — wrap header, task title, footer, artifacts | closed | — |
 | [0018](/issues/0018-b1-multi-instance-project-name-isolation.md) | B1 | multi-instance project-name isolation: key the in-memory name map by (instance, project_id) | closed | — |
 | [0019](/issues/0019-r4-richtext-full-tag-coverage.md) | R4 | rich-text completeness: tables, strikethrough, underline, preformatted blocks | closed | — |
-| [0020](/issues/0020-v5-body-links-inline-url.md) | V5 | body links render inline as text + visible URL, clickable from the visible region | open | — |
+| [0020](/issues/0020-v5-body-links-inline-url.md) | V5 | body links render inline as text + visible URL, clickable from the visible region | closed | — |
 | [0021](/issues/0021-v6-app-managed-selection.md) | V6 | app-managed text selection: drag to highlight, copy to clipboard with feedback | open | — |

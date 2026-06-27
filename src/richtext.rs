@@ -44,24 +44,28 @@ fn prefix_blockquote_lines(text: &str) -> String {
         .join("\n")
 }
 
-/// Emits an inline link label and registers the URL in `collector`.
+/// Emits an inline link token for `<a href=URL>text</a>`.
 ///
-/// When `inner_text` is empty or all-whitespace, the label is just `↗ Link N`.
-/// Otherwise `inner_text ↗ Link N`.
-fn emit_anchor_label(
-    inner_text: &str,
-    url: &str,
-    collector: &mut crate::render::LinkCollector,
-) -> String {
-    let n = collector.next_index;
-    collector.urls.push(url.to_string());
-    collector.next_index += 1;
+/// Follows the ActiveCollab `toPlainText` convention:
+/// - non-empty text that differs from the URL → `text [display_url]`
+/// - empty text or text equal to URL → `[display_url]` (no duplication)
+///
+/// For `mailto:` hrefs, the scheme is stripped from the bracketed display so the
+/// reader sees the bare address (e.g. `[a@b.com]`). The scheme is re-added by the
+/// click path when building the open command.
+fn emit_anchor_label(inner_text: &str, url: &str) -> String {
+    let display_url = strip_mailto_scheme(url);
     let trimmed = inner_text.trim();
-    if trimmed.is_empty() {
-        format!("\u{2197} Link {n}")
+    if trimmed.is_empty() || trimmed == url || trimmed == display_url {
+        format!("[{display_url}]")
     } else {
-        format!("{trimmed} \u{2197} Link {n}")
+        format!("{trimmed} [{display_url}]")
     }
+}
+
+/// Returns `url` with a leading `mailto:` prefix removed, or the original string.
+fn strip_mailto_scheme(url: &str) -> &str {
+    url.strip_prefix("mailto:").unwrap_or(url)
 }
 
 /// Returns the bullet/number prefix for the next `<li>` inside `list_stack`.
@@ -353,12 +357,12 @@ fn flush_heading_rich(inner: &str, lines: &mut Vec<RichLine>) {
 /// Flush any unclosed contexts remaining after the final tag.
 fn flush_open_contexts_rich(
     state: &mut RichParseState,
-    collector: &mut crate::render::LinkCollector,
+    _collector: &mut crate::render::LinkCollector,
 ) {
     if state.in_anchor {
         let inner_text = spans_to_text(&state.anchor_spans);
         let label = match state.anchor_href.take() {
-            Some(url) => emit_anchor_label(&inner_text, &url, collector),
+            Some(url) => emit_anchor_label(&inner_text, &url),
             None => inner_text,
         };
         push_to_current_line(&mut state.current_line, &label, RichStyle::Plain);
@@ -497,11 +501,12 @@ fn close_anchor_rich(state: &mut RichParseState, collector: &mut crate::render::
     state.in_anchor = false;
     let inner_text = spans_to_text(&state.anchor_spans);
     let label = match state.anchor_href.take() {
-        Some(url) => emit_anchor_label(&inner_text, &url, collector),
+        Some(url) => emit_anchor_label(&inner_text, &url),
         None => inner_text,
     };
     push_to_current_line(&mut state.current_line, &label, RichStyle::Plain);
     state.anchor_spans.clear();
+    let _ = collector;
 }
 
 fn handle_emphasis_tag_rich(kind: EmphasisKind, is_closing: bool, state: &mut RichParseState) {

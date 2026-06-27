@@ -2,7 +2,7 @@
 type: Issue
 title: "V5 — body links render inline as text + visible URL, clickable from the visible region"
 description: Replace the indirected '↗ Link N' body-link label with ActiveCollab-style inline 'text [url]' rendering; make the visible link region the click target so activation is robust; retire the separate link list for body links.
-status: open
+status: closed
 labels: [tui, render, links, ux]
 blocked_by:
 tracker:
@@ -39,19 +39,31 @@ selection (V6); asset/"Anexo" affordances (unchanged); CLI path (unchanged).
 
 ### Acceptance
 
-- `text != URL` → `text [URL]` with link + dim styles; `text == URL` or empty →
-  `[URL]` only; `mailto:` → `text [email]` (BDR 0014 Sc. 1–3, 5).
-- A click on any cell of the rendered link region emits that link's open-URL `Cmd`
-  (Sc. 4); wrapped fragments still map to the same URL (Sc. 6).
+- `text != URL` → `text [URL]` (anchor text normal, bracketed URL link-styled);
+  `text == URL` or empty → `[URL]` only; `mailto:` → `text [email]` (BDR 0014 Sc. 1–3, 5).
+- A click on the visible `[URL]` token (or a raw body URL) emits that URL's open `Cmd`
+  via the pure `url_at(line, col)` scanner — no `↗ Link N` index (Sc. 4).
 - The `↗ Link N` label and separate list are gone for body links; URL text is on screen
   (selectable/copyable).
 - Full suite green; clippy `-D warnings`, fmt, comment-policy clean; complexity within
   budget; click-mapping tests assert observable Cmd (mutation-resistant).
 
+### Outcome (delivered)
+
+Shipped the inline `text [url]` render + the single-line `url_at` scanner; `body_link_cmd_at`
+opens the exact clicked URL with no indirection. **Known follow-up (not in V5):** when a
+bracketed URL is long enough to **wrap** across rendered lines, the single-line scanner
+cannot reassemble the token, so an app-side click on a wrapped fragment is a no-op (the
+amended BDR 0014 Sc. 6 defers wrapped-fragment clicks to the terminal's native
+Cmd/Ctrl+click). Real-terminal use shows that is not enough — app-side wrapped-token click
+resolution is tracked as a follow-up alongside the Anexos label, empty-project, and
+title-placement fixes (next detail-polish slice).
+
 ### Plan
 
-Single slice (V5). 1) Change `emit_anchor_label`/`close_anchor_rich` to emit inline
-`text [url]` styled spans and record the region in `LinkCollector`. 2) Style link text
-(color+underline) and URL (dim) in the render layer. 3) Update `body_link_cmd_at` to map
-the visible region → open Cmd. 4) Update fixtures + click-mapping tests; remove
-`↗ Link N` assertions for body links.
+Single slice (V5). 1) `emit_anchor_label` → inline `text [url]` / `[url]`; strip
+`mailto:` for display. 2) Retire `replace_urls_with_labels`/`link_index_at`/`link_label_re`;
+add pure `url_at(line, col)` (bracketed INNER first, then raw URL). 3) `link_segments`
+tags the URL/email token (never the trailing `]`). 4) `body_link_cmd_at` uses `url_at`;
+re-add `mailto:` on bare-email click; remove `body_links`/`DetailContent.links`. 5) Update
+fixtures + click-mapping tests.

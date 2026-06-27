@@ -45,22 +45,30 @@ click target**. Delivered as slice **V5**.
 
 The richtext mapper emits, for `<a href="URL">text</a>`:
 
-- the anchor `text` styled as a link (link color + underline);
-- followed by ` [URL]` with the URL dimmed.
+- the anchor `text` as normal body text (any inline emphasis preserved);
+- followed by ` [URL]` — the bracketed URL is the link-styled token (link color),
+  the single visible/clickable/copyable affordance (mirrors `toPlainText`, which
+  shows the bare URL in brackets).
 - When `text` is empty or equals the URL, render just `[URL]` (mirrors
-  `toPlainText`'s "url only when text == url"). `mailto:` URLs render the address.
+  `toPlainText`'s "url only when text == url"). `mailto:` URLs render the bare
+  address inside the brackets (`text [a@b.com]`); the open `Cmd` re-adds the
+  `mailto:` scheme.
 
-The `↗ Link N` label and its separate URL list are **retired for body links**. The
-`LinkCollector` still records each URL keyed to its on-screen region so the app can
-resolve a click to a URL (the collector stays; only the rendered label changes).
+The `↗ Link N` label and its separate URL list are **retired for body links**, and
+with them the indirected `link_index_at` → `body_links[N-1]` correlation that made
+clicks miss.
 
-### 2. Click target is the visible region
+### 2. Click target is the visible URL token
 
-The click map (`body_link_cmd_at`) maps a click anywhere on the rendered link region
-(the `text [url]` run) to that link's open `Cmd`. Because the region is contiguous
-and visible, the column mapping is direct — eliminating the fragile correlation that
-made the old label hard to hit. Asset/"Anexo N" affordances are unchanged (separate
-panel).
+The click map (`body_link_cmd_at`) resolves the URL **from the visible text at the
+click column** — a `url_at(line, col)` scan returns the `[url]` bracket content (or a
+raw URL printed in the body) under the click, and the app opens it directly. No
+index, no separate URL list: the open target is whatever URL is visibly clicked
+(a bracketed e-mail opens via `mailto:`). Because the URL is on screen, the mapping
+is direct and robust — eliminating the fragile correlation. A URL long enough to wrap
+stays fully visible/copyable; click-activation targets the unwrapped token and the
+terminal's native Cmd/Ctrl+click handles a wrapped URL where supported. Asset/"Anexo N"
+affordances are unchanged (separate panel).
 
 ### 3. Terminal-native + optional OSC 8
 

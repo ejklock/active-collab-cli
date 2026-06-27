@@ -17,20 +17,16 @@ pub struct LinkSegment {
 fn body_url_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
-        Regex::new(r"https?://[^\s]+|www\.[^\s]+").expect("body_url_re is a valid pattern")
+        Regex::new(r"https?://[^\s\]]+|www\.[^\s\]]+").expect("body_url_re is a valid pattern")
     })
 }
 
-fn link_label_re() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"\u{2197} Link \d+").expect("link_label_re is a valid pattern"))
-}
-
-/// Accumulates URLs found in body text during URL-to-label replacement.
+/// Retained for callers that thread it through the richtext parser.
 ///
-/// `next_index` is 1-based and incremented per matched URL. `urls` holds the
-/// original URL strings in the order they were encountered — index N-1 in this
-/// vec corresponds to label "↗ Link N".
+/// The `urls` vec is no longer populated (inline rendering makes the collector
+/// unnecessary for body links). It exists so call sites do not require a
+/// signature change in this slice.
+#[allow(dead_code)]
 pub struct LinkCollector {
     pub next_index: usize,
     pub urls: Vec<String>,
@@ -43,30 +39,6 @@ impl LinkCollector {
             urls: Vec::new(),
         }
     }
-}
-
-/// Replace each URL in `text` with a short sequential label and collect the original URLs.
-///
-/// Each URL matched by the body_url_re (https?:// or www.) is replaced with the label
-/// `"↗ Link N"` where N comes from `collector.next_index` (incremented per match).
-/// The matched URL is pushed into `collector.urls` in the same order. This ensures a
-/// 1:1 mapping between label index and collected URL position.
-///
-/// Text with no URLs is returned unchanged and the collector is unmodified.
-pub fn replace_urls_with_labels(text: &str, collector: &mut LinkCollector) -> String {
-    let mut result = String::with_capacity(text.len());
-    let mut last_byte = 0usize;
-
-    for m in body_url_re().find_iter(text) {
-        result.push_str(&text[last_byte..m.start()]);
-        result.push_str(&format!("\u{2197} Link {}", collector.next_index));
-        collector.urls.push(m.as_str().to_string());
-        collector.next_index += 1;
-        last_byte = m.end();
-    }
-
-    result.push_str(&text[last_byte..]);
-    result
 }
 
 /// An emphasis-style run on a single display-column slice of a rendered line.
@@ -82,39 +54,76 @@ pub struct StyleRun {
     pub style: crate::richtext::RichStyle,
 }
 
-/// Produced by `build_detail_content`: the rendered lines, style runs, and collected URLs.
+/// Produced by `build_detail_content`: the rendered lines and style runs.
 ///
-/// `lines` contains the full detail layout: every URL in the description and comment
-/// bodies has been replaced with a "↗ Link N" label.
+/// `lines` holds the full detail layout with real URLs inline as `text [url]`.
 /// `line_styles` is a parallel channel: `line_styles[i]` holds the `StyleRun`s for
 /// `lines[i]`. Both vecs are always the same length.
-/// `links` holds the original URLs in the order the labels were assigned — element
-/// at index N-1 corresponds to label "↗ Link N".
 pub struct DetailContent {
     pub lines: Vec<String>,
     pub line_styles: Vec<Vec<StyleRun>>,
-    pub links: Vec<String>,
 }
 
-/// Map a display column position to a "↗ Link N" label index within `line`.
+/// Resolve the URL at `target_col` (display-column) within a rendered body line.
 ///
-/// Walks `line` character-by-character, accumulating display-column offsets via
-/// unicode-width (the same metric ratatui uses for layout). For every "↗ Link <N>"
-/// match found by `link_label_re`, the function tests whether `target_col` falls
-/// inside the label's [col_start, col_end) display-column span and returns the
-/// parsed N (1-based, as `usize`) for the first match that contains it.
+/// Algorithm (in priority order):
+/// 1. Scan for `[INNER]` bracketed tokens. When `target_col` falls within the INNER
+///    span and INNER validates as a URL or bare email, return INNER (without brackets).
+///    A `[plain note]` that is not a URL/email is never returned.
+/// 2. Scan for raw URLs via `body_url_re`. When `target_col` is within a match,
+///    return the matched URL string.
+/// 3. Otherwise return `None`.
 ///
-/// Returns `None` when `target_col` lies in border, padding, plain text, or a
-/// label match whose N cannot be parsed. The function is char-boundary-safe and
-/// pure (no I/O, no async, no time access).
-pub fn link_index_at(line: &str, target_col: usize) -> Option<usize> {
-    let re = link_label_re();
-    for m in re.find_iter(line) {
+/// The returned string never contains the surrounding `[` and `]` brackets.
+/// The function is char-boundary-safe and pure (no I/O, no async, no time access).
+pub fn url_at(line: &str, target_col: usize) -> Option<String> {
+    if let Some(url) = bracketed_url_at(line, target_col) {
+        return Some(url);
+    }
+    raw_url_at(line, target_col)
+}
+
+/// Scan `[INNER]` tokens in `line`; return INNER when `target_col` is within the
+/// inner span and INNER is a URL or bare e-mail.
+fn bracketed_url_at(line: &str, target_col: usize) -> Option<String> {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    let re = RE.get_or_init(|| {
+        Regex::new(r"\[([^\[\]]+)\]").expect("bracketed token re is a valid pattern")
+    });
+    for cap in re.captures_iter(line) {
+        let full = cap.get(0)?;
+        let inner = cap.get(1)?;
+        let inner_start_col = display_col_of_byte(line, inner.start());
+        let inner_end_col = inner_start_col + display_width(inner.as_str());
+        if target_col < inner_start_col || target_col >= inner_end_col {
+            continue;
+        }
+        let inner_str = inner.as_str();
+        if is_url_or_email(inner_str) {
+            return Some(inner_str.to_string());
+        }
+        let _ = full;
+    }
+    None
+}
+
+/// Return true when `s` is a URL (http/https/www) or a bare e-mail address.
+fn is_url_or_email(s: &str) -> bool {
+    body_url_re().is_match(s) || is_bare_email(s)
+}
+
+/// Return true when `s` looks like a bare e-mail address (contains `@`, no scheme).
+fn is_bare_email(s: &str) -> bool {
+    s.contains('@') && !s.contains("://")
+}
+
+/// Scan raw URL matches in `line`; return the URL when `target_col` is within a match.
+fn raw_url_at(line: &str, target_col: usize) -> Option<String> {
+    for m in body_url_re().find_iter(line) {
         let col_start = display_col_of_byte(line, m.start());
-        let label_width = display_width(m.as_str());
-        let col_end = col_start + label_width;
+        let col_end = col_start + display_width(m.as_str());
         if target_col >= col_start && target_col < col_end {
-            return parse_link_number(m.as_str());
+            return Some(m.as_str().to_string());
         }
     }
     None
@@ -136,52 +145,85 @@ fn display_col_of_byte(s: &str, byte_pos: usize) -> usize {
     col
 }
 
-/// Extract the numeric N from a "↗ Link N" match string.
-///
-/// Returns `None` when the suffix after "Link " is not a valid positive integer.
-fn parse_link_number(label: &str) -> Option<usize> {
-    let prefix = "\u{2197} Link ";
-    let digits = label.strip_prefix(prefix)?;
-    digits.parse::<usize>().ok()
-}
-
 /// Split a single rendered panel body line into ordered `LinkSegment`s.
 ///
-/// URL substrings (matched by `https?://…` or `www.…`, stopped at whitespace) are
-/// tagged `is_link: true`. Link-label substrings (`↗ Link <digits>`) produced by
-/// `replace_urls_with_labels` are also tagged `is_link: true`. Everything else
-/// (including leading/trailing `│` border chars and padding spaces) is tagged
-/// `is_link: false`. When the line contains no URL or label the function returns a
-/// single non-link segment. Slicing is char-boundary-safe for UTF-8.
+/// For `[INNER]` bracketed tokens where INNER is a URL or bare email, the INNER
+/// span is tagged `is_link: true` while the surrounding `[` and `]` remain
+/// `is_link: false`. Raw URL substrings (`https?://…` or `www.…`) are also tagged
+/// `is_link: true`. Everything else — border chars, padding, plain text, and
+/// non-URL `[note]` tokens — is `is_link: false`. The function never includes a
+/// trailing `]` inside a link segment. Slicing is char-boundary-safe for UTF-8.
 pub fn link_segments(line: &str) -> Vec<LinkSegment> {
-    let mut segments = Vec::new();
+    let link_spans = collect_link_spans(line);
+    build_segments_from_spans(line, &link_spans)
+}
+
+/// A byte-range `[start, end)` within a string that should be tagged `is_link`.
+struct LinkSpan {
+    start: usize,
+    end: usize,
+}
+
+/// Collect all link byte-spans in `line` in sorted order.
+///
+/// For `[INNER]` tokens whose INNER is a URL/email, the span covers INNER only
+/// (not the brackets). For raw URLs, the span covers the full match.
+fn collect_link_spans(line: &str) -> Vec<LinkSpan> {
+    static BRACKET_RE: OnceLock<Regex> = OnceLock::new();
+    let bracket_re = BRACKET_RE
+        .get_or_init(|| Regex::new(r"\[([^\[\]]+)\]").expect("bracket_re is a valid pattern"));
+
+    let mut spans: Vec<LinkSpan> = Vec::new();
+    let mut bracket_ranges: Vec<(usize, usize)> = Vec::new();
+
+    for cap in bracket_re.captures_iter(line) {
+        if let (Some(full), Some(inner)) = (cap.get(0), cap.get(1)) {
+            if is_url_or_email(inner.as_str()) {
+                spans.push(LinkSpan {
+                    start: inner.start(),
+                    end: inner.end(),
+                });
+                bracket_ranges.push((full.start(), full.end()));
+            }
+        }
+    }
+
+    for m in body_url_re().find_iter(line) {
+        let covered = bracket_ranges
+            .iter()
+            .any(|(bs, be)| m.start() >= *bs && m.end() <= *be);
+        if !covered {
+            spans.push(LinkSpan {
+                start: m.start(),
+                end: m.end(),
+            });
+        }
+    }
+
+    spans.sort_by_key(|s| s.start);
+    spans
+}
+
+/// Build a `Vec<LinkSegment>` by slicing `line` around the given sorted `spans`.
+fn build_segments_from_spans(line: &str, spans: &[LinkSpan]) -> Vec<LinkSegment> {
+    let mut segments: Vec<LinkSegment> = Vec::new();
     let mut last_byte = 0usize;
 
-    let url_re = body_url_re();
-    let label_re = link_label_re();
-
-    let mut matches: Vec<(usize, usize)> = url_re
-        .find_iter(line)
-        .map(|m| (m.start(), m.end()))
-        .chain(label_re.find_iter(line).map(|m| (m.start(), m.end())))
-        .collect();
-    matches.sort_by_key(|(start, _)| *start);
-
-    for (start, end) in matches {
-        if start < last_byte {
+    for span in spans {
+        if span.start < last_byte {
             continue;
         }
-        if start > last_byte {
+        if span.start > last_byte {
             segments.push(LinkSegment {
-                text: line[last_byte..start].to_string(),
+                text: line[last_byte..span.start].to_string(),
                 is_link: false,
             });
         }
         segments.push(LinkSegment {
-            text: line[start..end].to_string(),
+            text: line[span.start..span.end].to_string(),
             is_link: true,
         });
-        last_byte = end;
+        last_byte = span.end;
     }
 
     if last_byte < line.len() {
@@ -1071,37 +1113,28 @@ fn build_body_lines_with_collector(
     let rich_lines = crate::richtext::structured_rich_with_links(body_html, collector);
     let content_width = panel_content_width(inner_width);
     let body_rich = if rich_lines.is_empty() {
-        let fallback_plain = apply_url_labels_to_plain(&t("(no description)"), collector);
-        let fallback_wrapped = wrap_text(&fallback_plain, content_width);
+        let fallback_wrapped = wrap_text(&t("(no description)"), content_width);
         plain_lines_to_rich(if fallback_wrapped.is_empty() {
             vec![t("(no description)")]
         } else {
             fallback_wrapped
         })
     } else {
-        build_rich_body_rows(rich_lines, content_width, collector)
+        build_rich_body_rows(rich_lines, content_width)
     };
     let boxed = panel_box_rich(&t("Description"), &body_rich, inner_width);
     unzip_boxed(boxed)
 }
 
-/// Apply URL-label replacement to a plain string, returning the result.
-fn apply_url_labels_to_plain(text: &str, collector: &mut LinkCollector) -> String {
-    replace_urls_with_labels(text, collector)
-}
-
-/// Wrap a set of rich lines to `content_width`, applying URL-label replacement
-/// to any plain spans that contain bare URLs, then return the wrapped rich lines.
+/// Wrap a set of rich lines to `content_width` and return the wrapped rich lines.
 fn build_rich_body_rows(
     rich_lines: Vec<crate::richtext::RichLine>,
     content_width: usize,
-    collector: &mut LinkCollector,
 ) -> Vec<crate::richtext::RichLine> {
     use crate::richtext::RichLine;
     let mut wrapped: Vec<RichLine> = Vec::new();
     for line in rich_lines {
-        let url_processed = apply_url_labels_to_rich_line(line, collector);
-        let fragments = wrap_rich(&url_processed, content_width);
+        let fragments = wrap_rich(&line, content_width);
         if fragments.is_empty() {
             wrapped.push(vec![]);
         } else {
@@ -1113,27 +1146,6 @@ fn build_rich_body_rows(
     } else {
         wrapped
     }
-}
-
-/// Replace bare URLs within Plain-style spans of a `RichLine`.
-fn apply_url_labels_to_rich_line(
-    line: crate::richtext::RichLine,
-    collector: &mut LinkCollector,
-) -> crate::richtext::RichLine {
-    use crate::richtext::{RichLine, RichSpan, RichStyle};
-    let mut result: RichLine = Vec::new();
-    for span in line {
-        if span.style == RichStyle::Plain {
-            let replaced = replace_urls_with_labels(&span.text, collector);
-            result.push(RichSpan {
-                text: replaced,
-                style: RichStyle::Plain,
-            });
-        } else {
-            result.push(span);
-        }
-    }
-    result
 }
 
 /// Convert a `Vec<String>` to a `Vec<RichLine>` where every span is Plain.
@@ -1224,7 +1236,7 @@ fn build_comment_lines_with_collector(
 /// Build a single comment card as a plain `comment_box`, returning (lines, style_runs).
 ///
 /// The body is parsed through the rich path so inline emphasis carries through
-/// into the card's content rows. URL labels are applied before wrapping.
+/// into the card's content rows.
 fn build_comment_card(
     comment: &Value,
     author: &str,
@@ -1237,7 +1249,7 @@ fn build_comment_card(
     let body_rich = if rich_body.is_empty() {
         plain_lines_to_rich(vec![String::new()])
     } else {
-        build_rich_body_rows(rich_body, content_width, collector)
+        build_rich_body_rows(rich_body, content_width)
     };
     let label = format!("{} {} {}", author, MIDDOT, when);
     panel_box_rich(&label, &body_rich, card_width)
@@ -1278,13 +1290,11 @@ fn extract_comment_body_rich(
     }
 }
 
-/// Build the full detail content, replacing every URL in the description and comment
-/// bodies with a sequential "↗ Link N" label and collecting the original URLs.
+/// Build the full detail content for the TUI detail view.
 ///
-/// URL numbering is global: description URLs are assigned indices first, then
-/// comment bodies in order. Each label maps 1:1 to the URL at `links[N-1]`.
-/// `line_styles` is a parallel channel index-aligned with `lines`; both vecs
-/// always have the same length.
+/// URLs in the description and comment bodies are rendered inline as `text [url]`
+/// (no separate URL list). `line_styles` is a parallel channel index-aligned with
+/// `lines`; both vecs are always the same length.
 /// Pure: no I/O, no async, no time access.
 pub fn build_detail_content(
     task: &Value,
@@ -1325,11 +1335,7 @@ pub fn build_detail_content(
         "lines and line_styles must remain index-aligned"
     );
 
-    DetailContent {
-        lines,
-        line_styles,
-        links: collector.urls,
-    }
+    DetailContent { lines, line_styles }
 }
 
 /// Builds the 2-column aligned meta table rows for the Details panel.

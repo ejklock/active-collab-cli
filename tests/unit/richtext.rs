@@ -148,39 +148,53 @@ fn blockquote_multiline_all_lines_prefixed() {
     );
 }
 
-// --- R3a-A2: Anchor / link label —————————————————————————————————————————
+// --- V5-A1: Anchor inline rendering —————————————————————————————————————
 
 #[test]
-fn anchor_replaced_by_link_label_and_url_collected() {
+fn anchor_with_text_renders_text_bracket_url() {
     let html = r#"<a href="https://x.example.com/y">click here</a>"#;
     let mut col = LinkCollector::new();
     let out = structured_text_with_links(html, &mut col);
     assert!(
-        out.contains("\u{2197} Link 1"),
-        "anchor must produce '↗ Link 1' label: {out:?}"
+        out.contains("click here [https://x.example.com/y]"),
+        "anchor with text must render 'text [url]': {out:?}"
     );
     assert!(
-        out.contains("click here"),
-        "inner text must be preserved before the label: {out:?}"
-    );
-    assert_eq!(
-        col.urls,
-        vec!["https://x.example.com/y"],
-        "URL must be registered in collector: {:?}",
-        col.urls
+        !out.contains("\u{2197} Link"),
+        "must NOT contain old '↗ Link N' label: {out:?}"
     );
 }
 
 #[test]
-fn anchor_with_empty_inner_text_emits_only_label() {
+fn anchor_with_empty_inner_text_renders_bracket_url_only() {
     let html = r#"<a href="https://empty.example.com/"></a>"#;
     let mut col = LinkCollector::new();
     let out = structured_text_with_links(html, &mut col);
     assert!(
-        out.contains("\u{2197} Link 1"),
-        "empty-inner anchor must still emit '↗ Link 1': {out:?}"
+        out.contains("[https://empty.example.com/]"),
+        "empty-inner anchor must render '[url]' only: {out:?}"
     );
-    assert_eq!(col.urls, vec!["https://empty.example.com/"]);
+    assert!(
+        !out.contains("  ["),
+        "must not have double space before bracket when text is empty: {out:?}"
+    );
+}
+
+#[test]
+fn anchor_with_text_equal_to_url_renders_bracket_url_only() {
+    let url = "https://example.com/page";
+    let html = format!(r#"<a href="{url}">{url}</a>"#);
+    let mut col = LinkCollector::new();
+    let out = structured_text_with_links(&html, &mut col);
+    assert!(
+        out.contains(&format!("[{url}]")),
+        "anchor where text==url must render '[url]' only (no duplication): {out:?}"
+    );
+    let occurrences = out.matches(url).count();
+    assert_eq!(
+        occurrences, 1,
+        "URL must appear exactly once (no duplication): {out:?}"
+    );
 }
 
 #[test]
@@ -192,48 +206,48 @@ fn anchor_without_href_strips_tag_preserves_inner_text() {
         out.contains("bare link text"),
         "anchor without href must still show inner text: {out:?}"
     );
-    assert!(
-        col.urls.is_empty(),
-        "no URL must be collected when href absent: {:?}",
-        col.urls
-    );
 }
 
 #[test]
-fn two_anchors_get_sequential_indices() {
+fn two_anchors_both_render_inline() {
     let html = r#"<a href="https://one.com">first</a> and <a href="https://two.com">second</a>"#;
     let mut col = LinkCollector::new();
     let out = structured_text_with_links(html, &mut col);
     assert!(
-        out.contains("\u{2197} Link 1"),
-        "first anchor must be Link 1: {out:?}"
+        out.contains("first [https://one.com]"),
+        "first anchor must render inline: {out:?}"
     );
     assert!(
-        out.contains("\u{2197} Link 2"),
-        "second anchor must be Link 2: {out:?}"
+        out.contains("second [https://two.com]"),
+        "second anchor must render inline: {out:?}"
     );
-    assert_eq!(
-        col.urls,
-        vec!["https://one.com", "https://two.com"],
-        "both URLs must be collected in order: {:?}",
-        col.urls
+}
+
+// V5-A3: mailto href strips the scheme in the display bracket; click path re-adds it.
+#[test]
+fn anchor_mailto_renders_bare_address_in_brackets() {
+    let html = r#"<a href="mailto:user@example.com">mail us</a>"#;
+    let mut col = LinkCollector::new();
+    let out = structured_text_with_links(html, &mut col);
+    assert!(
+        out.contains("mail us [user@example.com]"),
+        "mailto anchor must show bare address in brackets (no 'mailto:' prefix): {out:?}"
+    );
+    assert!(
+        !out.contains("mailto:"),
+        "display must NOT contain the 'mailto:' scheme: {out:?}"
     );
 }
 
 #[test]
-fn anchor_numbering_continues_from_shared_collector() {
+fn anchor_mailto_empty_text_renders_bracket_address_only() {
+    let html = r#"<a href="mailto:a@b.com"></a>"#;
     let mut col = LinkCollector::new();
-    col.next_index = 3;
-    col.urls.push("https://prev1.com".to_string());
-    col.urls.push("https://prev2.com".to_string());
-    let html = r#"<a href="https://new.com">link</a>"#;
     let out = structured_text_with_links(html, &mut col);
     assert!(
-        out.contains("\u{2197} Link 3"),
-        "numbering must continue from collector state: {out:?}"
+        out.contains("[a@b.com]"),
+        "empty-text mailto must render '[a@b.com]' only: {out:?}"
     );
-    assert_eq!(col.next_index, 4);
-    assert_eq!(col.urls[2], "https://new.com");
 }
 
 // --- R3a-A3: Malformed / unknown HTML ————————————————————————————————————

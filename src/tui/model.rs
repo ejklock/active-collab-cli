@@ -175,9 +175,6 @@ pub enum Screen {
         /// Each element holds the `StyleRun`s for the corresponding line.
         /// Populated exclusively by reflow_detail; initialized empty at construction.
         line_styles: Vec<Vec<StyleRun>>,
-        /// Collected URLs from description + comments in label order (index N-1 = "↗ Link N").
-        /// Populated exclusively by reflow_detail; initialized empty at construction.
-        body_links: Vec<String>,
         assets: Vec<Asset>,
         offset: usize,
         loading: bool,
@@ -438,7 +435,6 @@ impl Model {
             user_map,
             lines,
             line_styles,
-            body_links,
             rendered_width,
             offset,
             loading,
@@ -455,7 +451,6 @@ impl Model {
         let content = crate::render::build_detail_content(task, comments, user_map, inner_width);
         *lines = content.lines;
         *line_styles = content.line_styles;
-        *body_links = content.links;
         *rendered_width = inner_width;
 
         clamp_offset(offset, lines.len());
@@ -587,10 +582,10 @@ fn handle_click_detail(model: Model, column: u16, row: u16) -> (Model, Vec<Cmd>)
 
 /// Try to resolve a body-link click in the Detail content text area.
 ///
-/// Returns a `Cmd::OpenAsset` when the click lands on a "↗ Link N" label
-/// whose index is within `body_links` and whose URL passes `is_openable_url`.
-/// Returns `None` for any other click position (border, padding, plain text,
-/// out-of-range label, or a click that falls outside the text viewport).
+/// Resolves the URL from the visible text at the clicked display column via
+/// `url_at`. On a bracketed bare email address, re-adds the `mailto:` scheme.
+/// Returns `None` when the click lands outside the text viewport, on a border,
+/// on padding, on plain text, or on a `[note]` that is not a URL/email.
 ///
 /// Uses the wrapped asset-panel height (same as `draw_detail`) so the body
 /// hit region stops above the real panel top even when asset labels wrap.
@@ -601,7 +596,6 @@ fn body_link_cmd_at(model: &Model, column: u16, row: u16) -> Option<Cmd> {
         instance,
         assets,
         lines,
-        body_links,
         offset,
         ..
     } = model.top()?
@@ -623,15 +617,29 @@ fn body_link_cmd_at(model: &Model, column: u16, row: u16) -> Option<Cmd> {
     let logical_line = offset + (row - text_top) as usize;
     let line = lines.get(logical_line)?;
     let char_col = (column as usize).saturating_sub(1);
-    let n = crate::render::link_index_at(line, char_col)?;
-    let url = body_links.get(n.checked_sub(1)?)?;
-    if !crate::render::is_openable_url(url) {
+    let token = crate::render::url_at(line, char_col)?;
+    let url = normalize_link_url(&token);
+    if !crate::render::is_openable_url(&url) && !is_mailto_url(&url) {
         return None;
     }
     Some(Cmd::OpenAsset {
         instance: instance.clone(),
-        url: url.clone(),
+        url,
     })
+}
+
+/// Prepend `mailto:` when `token` is a bare email (contains `@`, no scheme).
+fn normalize_link_url(token: &str) -> String {
+    if token.contains('@') && !token.contains("://") && !token.starts_with("mailto:") {
+        format!("mailto:{token}")
+    } else {
+        token.to_string()
+    }
+}
+
+/// Return true for `mailto:` URLs (not caught by `is_openable_url` which accepts only http/https).
+fn is_mailto_url(url: &str) -> bool {
+    url.starts_with("mailto:")
 }
 
 /// Try to resolve an asset-panel click in the Detail screen.
@@ -758,7 +766,6 @@ fn handle_select(mut model: Model) -> (Model, Vec<Cmd>) {
                     user_map: HashMap::new(),
                     lines: vec![],
                     line_styles: vec![],
-                    body_links: vec![],
                     assets: vec![],
                     offset: 0,
                     loading: true,

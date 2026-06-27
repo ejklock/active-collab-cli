@@ -1353,7 +1353,6 @@ fn view_detail_footer_has_no_tab_switch_hint() {
             user_map,
             lines,
             line_styles: vec![],
-            body_links: vec![],
             assets,
             offset: 0,
             loading: false,
@@ -1410,7 +1409,6 @@ fn view_detail_footer_without_assets_has_no_tab_hint() {
             user_map: HashMap::new(),
             lines: vec!["body".into()],
             line_styles: vec![],
-            body_links: vec![],
             assets: vec![],
             offset: 0,
             loading: false,
@@ -1788,10 +1786,8 @@ fn draw_tasks_no_instance_header_and_name_fits_full_width() {
     );
 }
 
-// D3-A1 checks that a URL in Description body is rendered with link_style in muted green underline
-// while surrounding text keeps default style.
-// D3-A1: URL in description is replaced by a "↗ Link N" label and the label cells
-// carry link_style (muted-green + underline). Raw URL text no longer appears.
+// V5-D3-A1: URL in description renders inline and the URL cells carry link_style
+// (muted-green + underline). Surrounding text keeps default style.
 #[test]
 fn draw_detail_url_in_description_body_has_link_style() {
     use crate::render::build_detail_content;
@@ -1807,15 +1803,10 @@ fn draw_detail_url_in_description_body_has_link_style() {
     let content = build_detail_content(&task, &[], &user_map, (width - 2) as usize);
     let lines = content.lines;
 
-    assert_eq!(content.links, vec!["https://example.com/docs"]);
     let joined = lines.join("\n");
     assert!(
-        joined.contains("\u{2197} Link 1"),
-        "label must appear in lines: {joined}"
-    );
-    assert!(
-        !joined.contains("https://example.com/docs"),
-        "raw URL must not appear: {joined}"
+        joined.contains("https://example.com/docs"),
+        "inline URL must appear in lines: {joined}"
     );
 
     let buf = render_detail_to_buf(&lines, &[], 0, width, 30);
@@ -1831,12 +1822,12 @@ fn draw_detail_url_in_description_body_has_link_style() {
         for x in 0..area.width {
             let cell = buf.cell((x, y)).unwrap();
             let sym = cell.symbol();
-            if sym == "\u{2197}"
-                && cell.style().fg == Some(muted_green)
-                && cell.style().add_modifier.contains(underline)
+            // Any cell that is part of the URL must carry link_style
+            if cell.style().fg == Some(muted_green) && cell.style().add_modifier.contains(underline)
             {
                 found_link_cell = true;
             }
+            // "V" in "Visit" must not carry link style
             if sym == "V" && cell.style().fg != Some(muted_green) {
                 found_normal_cell = true;
             }
@@ -1845,7 +1836,7 @@ fn draw_detail_url_in_description_body_has_link_style() {
 
     assert!(
         found_link_cell,
-        "↗ Link label cells must carry muted-green+underline link_style"
+        "inline URL cells must carry muted-green+underline link_style"
     );
     assert!(
         found_normal_cell,
@@ -1853,8 +1844,8 @@ fn draw_detail_url_in_description_body_has_link_style() {
     );
 }
 
-// D3-A1: URL in a Comment body is replaced by a "↗ Link N" label; the label cells
-// carry link_style (muted-green + underline). Raw URL text no longer appears.
+// V5-D3-A2: URL in a comment body renders inline; the URL cells carry link_style
+// (muted-green + underline).
 #[test]
 fn draw_detail_url_in_comment_body_has_link_style() {
     use crate::render::build_detail_content;
@@ -1875,15 +1866,10 @@ fn draw_detail_url_in_comment_body_has_link_style() {
     let content = build_detail_content(&task, &[comment], &user_map, (width - 2) as usize);
     let lines = content.lines;
 
-    assert_eq!(content.links, vec!["https://docs.example.com/guide"]);
     let joined = lines.join("\n");
     assert!(
-        joined.contains("\u{2197} Link 1"),
-        "label must appear in lines: {joined}"
-    );
-    assert!(
-        !joined.contains("https://docs.example.com/guide"),
-        "raw URL must not appear: {joined}"
+        joined.contains("https://docs.example.com/guide"),
+        "inline URL must appear in comment lines: {joined}"
     );
 
     let buf = render_detail_to_buf(&lines, &[], 0, width, 40);
@@ -1910,7 +1896,7 @@ fn draw_detail_url_in_comment_body_has_link_style() {
 
     assert!(
         found_link_cell,
-        "↗ Link label cells in Comment body must carry muted-green+underline link_style"
+        "inline URL cells in Comment body must carry muted-green+underline link_style"
     );
 }
 
@@ -2416,7 +2402,6 @@ mod footer_refresh_hint {
                 user_map: HashMap::new(),
                 lines: vec!["body".into()],
                 line_styles: vec![],
-                body_links: vec![],
                 assets: vec![],
                 offset: 0,
                 loading: false,
@@ -2454,7 +2439,6 @@ mod footer_refresh_hint {
                 user_map: HashMap::new(),
                 lines: vec!["body".into()],
                 line_styles: vec![],
-                body_links: vec![],
                 assets: vec![Asset {
                     name: "doc.pdf".into(),
                     url: "https://example.com/doc.pdf".into(),
@@ -2741,7 +2725,6 @@ mod footer_refresh_hint {
                 user_map: HashMap::new(),
                 lines: vec![],
                 line_styles: vec![],
-                body_links: vec![],
                 assets: vec![],
                 offset: 0,
                 loading: true,
@@ -2778,11 +2761,11 @@ mod footer_refresh_hint {
 
 // --- V4a: TestBackend render — comment with long URL shows label, not raw URL ---
 
-// V4a-A1/A2/A3: a Detail screen whose comment holds a long URL renders "↗ Link 1"
-// with link_style (muted-green + underline) and does NOT contain the raw URL text
-// or a URL fragment. Verifies the wrap-regression fix.
+// V5-A3: a Detail screen whose comment holds a long URL renders the URL inline.
+// The URL cells carry link_style (muted-green + underline). The full URL appears
+// in the rendered output (possibly wrapped across lines).
 #[test]
-fn draw_detail_comment_with_long_url_shows_link_label_not_raw_url() {
+fn draw_detail_comment_with_long_url_renders_inline_with_link_style() {
     use crate::render::build_detail_content;
     use ratatui::style::{Color, Modifier};
 
@@ -2806,51 +2789,40 @@ fn draw_detail_comment_with_long_url_shows_link_label_not_raw_url() {
 
     let joined = lines.join("\n");
     assert!(
-        !joined.contains("https://"),
-        "raw URL must not appear in rendered lines: {joined}"
+        joined.contains("https://"),
+        "inline URL must appear in rendered lines: {joined}"
     );
-    assert!(
-        joined.contains("\u{2197} Link 1"),
-        "label '↗ Link 1' must appear in rendered lines: {joined}"
-    );
-    assert_eq!(content.links, vec![long_url]);
 
     let buf = render_detail_to_buf(&lines, &[], 0, width, 40);
     let rendered = buf_to_string(&buf);
 
     assert!(
-        !rendered.contains("https://"),
-        "raw URL must not appear in TestBackend output: {rendered}"
-    );
-    assert!(
-        rendered.contains("\u{2197}"),
-        "↗ arrow must appear in TestBackend output: {rendered}"
+        rendered.contains("https://"),
+        "inline URL must appear in TestBackend output: {rendered}"
     );
 
     let muted_green = Color::Rgb(120, 190, 130);
     let underline = Modifier::UNDERLINED;
     let area = buf.area();
-    let mut found_label_link_cell = false;
+    let mut found_link_cell = false;
 
     for y in 0..area.height {
         for x in 0..area.width {
             let cell = buf.cell((x, y)).unwrap();
-            if cell.symbol() == "\u{2197}"
-                && cell.style().fg == Some(muted_green)
-                && cell.style().add_modifier.contains(underline)
+            if cell.style().fg == Some(muted_green) && cell.style().add_modifier.contains(underline)
             {
-                found_label_link_cell = true;
+                found_link_cell = true;
                 break;
             }
         }
-        if found_label_link_cell {
+        if found_link_cell {
             break;
         }
     }
 
     assert!(
-        found_label_link_cell,
-        "↗ arrow cell must carry muted-green+underline link_style"
+        found_link_cell,
+        "inline URL cells must carry muted-green+underline link_style"
     );
 }
 
@@ -2915,7 +2887,6 @@ mod selection_mode_view {
                 user_map: HashMap::new(),
                 lines: vec!["body".into()],
                 line_styles: vec![],
-                body_links: vec![],
                 assets,
                 offset: 0,
                 loading: false,
