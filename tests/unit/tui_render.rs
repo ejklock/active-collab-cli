@@ -3,7 +3,9 @@ use crate::render::{build_detail_content, build_header_lines, Asset, StyleRun};
 use crate::richtext::RichStyle;
 use crate::store::instances::Instance;
 use crate::tui::model::{Header, ProjectGroup, TaskRow};
-use crate::tui::screens::{draw_detail, draw_projects, draw_tasks, DetailParams};
+use crate::tui::screens::{
+    asset_panel_render_height, draw_detail, draw_projects, draw_tasks, DetailParams,
+};
 use crate::tui::theme;
 use ratatui::{backend::TestBackend, layout::Rect, Terminal};
 use serde_json::json;
@@ -3136,29 +3138,26 @@ fn draw_detail_long_asset_label_wraps_with_hanging_indent_no_clip() {
     );
 }
 
-// W2-A3: When a single asset's label wraps, the panel is taller than the 1-asset + 2-border
-// minimum (3 rows). At width=32, panel_inner=30; prefix "[1] ↗ " = 8 cols; label_width=22.
-// A 30-char label wraps across 2 content rows, so the panel must be at least 4 rows tall.
+// W2-A3: When a single asset's label wraps, the panel is taller than the single-row
+// minimum. At width=32: panel_inner=30; content_width=30-2*PANEL_HPAD=28.
+// "[1] ↗ " prefix is 8 display cols; label_width=28-8=20.
+// "thirty-char-label-padded-xyz.pdf" (32 chars) wraps to >=2 content rows.
+// Spaced height = rows + 0 separators + 2 vpad + 2 borders >= 6.
 #[test]
 fn draw_detail_wrapped_asset_panel_is_taller_than_minimum() {
-    // Exactly 30 ascii chars: needs 2 rows at label_width=22.
     let label_30 = "thirty-char-label-padded-xyz.pdf";
     assert_eq!(label_30.len(), 32, "sanity: label must be 32 chars");
     let assets = vec![Asset {
         name: label_30.into(),
         url: "https://example.com/f.pdf".into(),
     }];
-    // At width=32: panel_inner = 30; prefix dw(8); label_width=22; label (32 chars) wraps to 2 rows.
-    // Panel height = (2 + 2).min(8) = 4.
     let buf = render_detail_to_buf_with_name(&["body".to_string()], &assets, 0, 32, 20, "T");
     let content = buf_to_string(&buf);
 
-    // The Artifacts panel block must appear.
     assert!(
         content.contains("Artifacts"),
         "Artifacts panel must appear: {content}"
     );
-    // Full label must appear (no clip on wrapped rows).
     assert!(
         content.contains("thirty-char"),
         "beginning of asset label must appear: {content}"
@@ -3167,6 +3166,178 @@ fn draw_detail_wrapped_asset_panel_is_taller_than_minimum() {
         content.contains("xyz.pdf"),
         "end of asset label must appear (no clip): {content}"
     );
+}
+
+// D1d-AC1: render_assets_panel renders one blank row between consecutive links,
+// one blank interior pad row below the top border, and one above the bottom border.
+#[test]
+fn draw_detail_asset_panel_has_blank_separator_and_vpad_rows() {
+    let viewport_w = 80u16;
+    let viewport_h = 30u16;
+    let assets = vec![
+        Asset {
+            name: "alpha.pdf".into(),
+            url: "https://example.com/alpha.pdf".into(),
+        },
+        Asset {
+            name: "beta.pdf".into(),
+            url: "https://example.com/beta.pdf".into(),
+        },
+    ];
+
+    let buf = render_detail_to_buf_with_name(
+        &["body".to_string()],
+        &assets,
+        0,
+        viewport_w,
+        viewport_h,
+        "T",
+    );
+
+    let inner_width = (viewport_w - 2) as usize;
+    let panel_h = asset_panel_render_height(&assets, inner_width);
+    let panel_top = viewport_h - panel_h;
+
+    // Row immediately inside top border (panel_top + 1) must be blank (top vpad).
+    // Exclude the left and right border columns (col 0 and col viewport_w-1).
+    let top_vpad: String = (1..viewport_w - 1)
+        .map(|x| buf.cell((x, panel_top + 1)).unwrap().symbol().to_string())
+        .collect::<String>()
+        .trim()
+        .to_string();
+    assert!(
+        top_vpad.is_empty(),
+        "row immediately inside top border must be blank (top vpad): {top_vpad:?}"
+    );
+
+    // Row immediately inside bottom border (panel_top + panel_h - 2) must be blank (bottom vpad).
+    let bottom_vpad_row = panel_top + panel_h - 2;
+    let bottom_vpad: String = (1..viewport_w - 1)
+        .map(|x| buf.cell((x, bottom_vpad_row)).unwrap().symbol().to_string())
+        .collect::<String>()
+        .trim()
+        .to_string();
+    assert!(
+        bottom_vpad.is_empty(),
+        "row immediately inside bottom border must be blank (bottom vpad): {bottom_vpad:?}"
+    );
+
+    // The first asset row is at panel_top + 2 (border + vpad).
+    let asset0_row: String = (0..viewport_w)
+        .map(|x| buf.cell((x, panel_top + 2)).unwrap().symbol().to_string())
+        .collect();
+    assert!(
+        asset0_row.contains("alpha"),
+        "first asset row must contain 'alpha': {asset0_row:?}"
+    );
+
+    // The row after asset[0] (panel_top + 3 for 1-row asset) must be blank (separator).
+    // Exclude left and right border columns.
+    let sep_row: String = (1..viewport_w - 1)
+        .map(|x| buf.cell((x, panel_top + 3)).unwrap().symbol().to_string())
+        .collect::<String>()
+        .trim()
+        .to_string();
+    assert!(
+        sep_row.is_empty(),
+        "row between consecutive assets must be blank (separator): {sep_row:?}"
+    );
+
+    // The row after the separator (panel_top + 4) must contain asset[1].
+    let asset1_row: String = (0..viewport_w)
+        .map(|x| buf.cell((x, panel_top + 4)).unwrap().symbol().to_string())
+        .collect();
+    assert!(
+        asset1_row.contains("beta"),
+        "second asset row must contain 'beta': {asset1_row:?}"
+    );
+}
+
+// D1d-AC2: Each link row is inset from the left border by PANEL_HPAD (1 space).
+#[test]
+fn draw_detail_asset_rows_inset_by_hpad() {
+    let viewport_w = 80u16;
+    let viewport_h = 30u16;
+    let assets = vec![Asset {
+        name: "file.pdf".into(),
+        url: "https://example.com/file.pdf".into(),
+    }];
+
+    let buf = render_detail_to_buf_with_name(
+        &["body".to_string()],
+        &assets,
+        0,
+        viewport_w,
+        viewport_h,
+        "T",
+    );
+
+    let inner_width = (viewport_w - 2) as usize;
+    let panel_h = asset_panel_render_height(&assets, inner_width);
+    let panel_top = viewport_h - panel_h;
+
+    // Asset row is at panel_top + 2 (border + vpad).
+    let asset_row_abs = panel_top + 2;
+
+    // Column 0 of the buffer is the left border character (│).
+    // Column 1 must be a space (PANEL_HPAD=1).
+    // Column 2 must be '[' (start of "[1] ↗ label").
+    let col0 = buf.cell((0, asset_row_abs)).unwrap().symbol().to_string();
+    let col1 = buf.cell((1, asset_row_abs)).unwrap().symbol().to_string();
+    let col2 = buf.cell((2, asset_row_abs)).unwrap().symbol().to_string();
+
+    assert!(
+        col0.contains('│') || col0.contains('|'),
+        "column 0 of asset row must be left border: got {col0:?}"
+    );
+    assert_eq!(
+        col1, " ",
+        "column 1 of asset row must be HPAD space: got {col1:?}"
+    );
+    assert_eq!(
+        col2, "[",
+        "column 2 of asset row must be '[' (start of [1] prefix): got {col2:?}"
+    );
+}
+
+// D1d-AC3: A task with four assets whose labels each fit on one line shows all
+// four [n] rows — no clipping (ASSET_PANEL_MAX_ROWS=14 clears the spaced 4-link
+// card = 4 rows + 3 separators + 2 vpad + 2 borders = 11).
+#[test]
+fn draw_detail_four_assets_all_visible_no_clip() {
+    let assets: Vec<Asset> = (1..=4)
+        .map(|i| Asset {
+            name: format!("doc{i}.pdf"),
+            url: format!("https://example.com/doc{i}.pdf"),
+        })
+        .collect();
+
+    // Use a generous viewport so all 11 rows fit.
+    let viewport_w = 80u16;
+    let viewport_h = 40u16;
+    let buf = render_detail_to_buf_with_name(
+        &["body".to_string()],
+        &assets,
+        0,
+        viewport_w,
+        viewport_h,
+        "T",
+    );
+    let content = buf_to_string(&buf);
+
+    for i in 1..=4 {
+        assert!(
+            content.contains(&format!("[{i}]")),
+            "link [{i}] must appear — ASSET_PANEL_MAX_ROWS must clear the 4-link spaced card: {content}"
+        );
+    }
+    // Verify all four filenames appear (label not clipped).
+    for i in 1..=4 {
+        assert!(
+            content.contains(&format!("doc{i}.pdf")),
+            "doc{i}.pdf must appear in panel: {content}"
+        );
+    }
 }
 
 // D1a-A2: At a wide width (120 cols), draw_detail still does not inject the task name.
@@ -3953,6 +4124,281 @@ mod w1_chrome_wrap {
             "unbreakable token must hard-break, not produce ellipsis: {content}"
         );
     }
+}
+
+// AC-BLEED (BDR 0018 Sc.3a): On a rendered asset link row, only the visible '[n] ↗ label'
+// token cells carry the link/underline style. The leading PANEL_HPAD pad cell (col 1 after
+// the left border) and the trailing cells near the right border carry the default style.
+// A cell inside the '[n] ↗ label' token carries the asset/link style (underlined).
+#[test]
+fn asset_link_row_underline_confined_to_token_not_leading_pad_or_trailing_fill() {
+    use ratatui::style::Modifier;
+
+    let viewport_w = 80u16;
+    let viewport_h = 30u16;
+    let assets = vec![
+        Asset {
+            name: "alpha.pdf".into(),
+            url: "https://example.com/alpha.pdf".into(),
+        },
+        Asset {
+            name: "beta.pdf".into(),
+            url: "https://example.com/beta.pdf".into(),
+        },
+    ];
+
+    let buf = render_detail_to_buf_with_name(
+        &["body".to_string()],
+        &assets,
+        0,
+        viewport_w,
+        viewport_h,
+        "T",
+    );
+
+    let inner_width = (viewport_w - 2) as usize;
+    let panel_h = asset_panel_render_height(&assets, inner_width);
+    let panel_top = viewport_h - panel_h;
+
+    // Asset[0] row: panel_top + 1 (top border) + 1 (top vpad) = panel_top + 2.
+    let asset_row = panel_top + 2;
+
+    // Col 0 is the left border (│). Col 1 is the PANEL_HPAD space — must be UNSTYLED.
+    let pad_cell = buf.cell((1, asset_row)).unwrap();
+    assert!(
+        !pad_cell.style().add_modifier.contains(Modifier::UNDERLINED),
+        "leading HPAD cell (col 1) on asset row must NOT carry UNDERLINED modifier; \
+         bleed detected: style={:?}",
+        pad_cell.style()
+    );
+
+    // The rightmost inner column (col viewport_w-2, before the right border) must also be UNSTYLED
+    // when the label text does not reach that far (short name "alpha.pdf").
+    let right_cell = buf.cell((viewport_w - 2, asset_row)).unwrap();
+    assert!(
+        !right_cell
+            .style()
+            .add_modifier
+            .contains(Modifier::UNDERLINED),
+        "trailing fill cell near right border (col {}) on asset row must NOT carry UNDERLINED; \
+         bleed detected: style={:?}",
+        viewport_w - 2,
+        right_cell.style()
+    );
+
+    // Col 2 is the first char of "[1] ↗ alpha.pdf" — must carry the link/underline style.
+    let token_cell = buf.cell((2, asset_row)).unwrap();
+    assert!(
+        token_cell
+            .style()
+            .add_modifier
+            .contains(Modifier::UNDERLINED),
+        "first char of '[n]' token (col 2) must carry UNDERLINED modifier; \
+         style={:?}",
+        token_cell.style()
+    );
+}
+
+// AC-MAP (click-mapping from real buffer): clicking the actual rendered row of link [2]
+// resolves to asset index 1 in asset_panel_cmd_at.
+//
+// The test renders >=3 assets via TestBackend, locates the actual screen row that contains
+// the '[2]' marker in the buffer, feeds THAT row to the click handler, and asserts it
+// resolves to asset index 1. Also asserts [1] row → index 0 and a separator/pad row → None.
+// This prevents the test from passing while the live mapping is wrong.
+#[test]
+fn click_second_asset_row_derived_from_real_buffer_resolves_to_index_1() {
+    use crate::tui::model::{update, Header, Msg, Screen};
+    use crate::tui::screens::detail::{draw_detail, DetailParams};
+    use crossterm::event::KeyModifiers;
+    use ratatui::{backend::TestBackend, layout::Rect, Terminal};
+    use std::collections::HashMap;
+
+    let viewport_w = 80u16;
+    let viewport_h = 30u16;
+    let assets = vec![
+        Asset {
+            name: "first.pdf".into(),
+            url: "https://example.com/first.pdf".into(),
+        },
+        Asset {
+            name: "second.pdf".into(),
+            url: "https://example.com/second.pdf".into(),
+        },
+        Asset {
+            name: "third.pdf".into(),
+            url: "https://example.com/third.pdf".into(),
+        },
+    ];
+
+    // Render via TestBackend to capture the exact layout.
+    let empty_styles: Vec<Vec<crate::render::StyleRun>> = vec![];
+    let backend = TestBackend::new(viewport_w, viewport_h);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|frame| {
+            draw_detail(
+                frame,
+                Rect::new(0, 0, viewport_w, viewport_h),
+                DetailParams {
+                    lines: &["body".to_string()],
+                    line_styles: &empty_styles,
+                    assets: &assets,
+                    offset: 0,
+                    loading: false,
+                    task_id: 1,
+                    task_name: "T",
+                },
+            );
+        })
+        .unwrap();
+
+    let buf = terminal.backend().buffer();
+
+    // Scan all rows to find the rows containing "[1]", "[2]", "[3]".
+    let mut row_for = [None::<u16>; 4]; // index 1,2,3 used
+    for y in 0..viewport_h {
+        let row_str: String = (0..viewport_w)
+            .map(|x| buf.cell((x, y)).unwrap().symbol().to_string())
+            .collect();
+        for n in 1usize..=3 {
+            let marker = format!("[{n}]");
+            if row_str.contains(&marker) && row_for[n].is_none() {
+                row_for[n] = Some(y);
+            }
+        }
+    }
+
+    let row1 = row_for[1].expect("'[1]' marker must appear in the rendered buffer");
+    let row2 = row_for[2].expect("'[2]' marker must appear in the rendered buffer");
+    let row3 = row_for[3].expect("'[3]' marker must appear in the rendered buffer");
+
+    // The separator row is between [1] and [2] rows.
+    // It must be exactly row1 + 1 (since each short asset occupies 1 row).
+    let sep_row = row1 + 1;
+    assert_eq!(
+        sep_row + 1,
+        row2,
+        "separator must be at row1+1 and asset[2] at row1+2"
+    );
+
+    let make_model = |assets: Vec<Asset>| crate::tui::model::Model {
+        stack: vec![Screen::Detail {
+            instance: "inst".into(),
+            project_id: 1,
+            task_id: 1,
+            task: serde_json::Value::Null,
+            comments: vec![],
+            user_map: HashMap::new(),
+            lines: vec!["body".to_string()],
+            line_styles: vec![],
+            assets,
+            offset: 0,
+            loading: false,
+            pending_download: false,
+            rendered_width: usize::MAX,
+        }],
+        should_quit: false,
+        header: Header::from_instances(&[], None),
+        viewport: (viewport_w, viewport_h),
+        click_targets: vec![],
+        last_loaded: None,
+        selection: None,
+        copied_feedback: false,
+    };
+
+    // Click on buffer row containing "[1]" → must open first.pdf (index 0).
+    let (_, cmds) = update(
+        make_model(assets.clone()),
+        Msg::Click {
+            column: 5,
+            row: row1,
+            modifiers: KeyModifiers::NONE,
+        },
+    );
+    assert_eq!(cmds.len(), 1, "click on '[1]' row must emit one cmd");
+    match &cmds[0] {
+        crate::tui::model::Cmd::OpenAsset { url, .. } => {
+            assert_eq!(
+                url, "https://example.com/first.pdf",
+                "'[1]' row (buffer row {row1}) must resolve to first.pdf (index 0)"
+            );
+        }
+        other => panic!("expected OpenAsset for '[1]' row, got {other:?}"),
+    }
+
+    // Click on buffer row containing "[2]" → must open second.pdf (index 1).
+    let (_, cmds) = update(
+        make_model(assets.clone()),
+        Msg::Click {
+            column: 5,
+            row: row2,
+            modifiers: KeyModifiers::NONE,
+        },
+    );
+    assert_eq!(cmds.len(), 1, "click on '[2]' row must emit one cmd");
+    match &cmds[0] {
+        crate::tui::model::Cmd::OpenAsset { url, .. } => {
+            assert_eq!(
+                url, "https://example.com/second.pdf",
+                "'[2]' row (buffer row {row2}) must resolve to second.pdf (index 1), \
+                 not first.pdf — off-by-one regression guard"
+            );
+        }
+        other => panic!("expected OpenAsset for '[2]' row, got {other:?}"),
+    }
+
+    // Click on buffer row containing "[3]" → must open third.pdf (index 2).
+    let (_, cmds) = update(
+        make_model(assets.clone()),
+        Msg::Click {
+            column: 5,
+            row: row3,
+            modifiers: KeyModifiers::NONE,
+        },
+    );
+    assert_eq!(cmds.len(), 1, "click on '[3]' row must emit one cmd");
+    match &cmds[0] {
+        crate::tui::model::Cmd::OpenAsset { url, .. } => {
+            assert_eq!(
+                url, "https://example.com/third.pdf",
+                "'[3]' row (buffer row {row3}) must resolve to third.pdf (index 2)"
+            );
+        }
+        other => panic!("expected OpenAsset for '[3]' row, got {other:?}"),
+    }
+
+    // Click on the separator row → must resolve to None (no asset).
+    let (_, cmds) = update(
+        make_model(assets.clone()),
+        Msg::Click {
+            column: 5,
+            row: sep_row,
+            modifiers: KeyModifiers::NONE,
+        },
+    );
+    assert!(
+        cmds.is_empty(),
+        "click on separator row (row {sep_row}) must return no asset (None)"
+    );
+
+    // Click on the top vpad row (panel_top + 1) → must resolve to None.
+    let inner_width = (viewport_w - 2) as usize;
+    let panel_h = asset_panel_render_height(&assets, inner_width);
+    let panel_top = viewport_h - panel_h;
+    let top_vpad = panel_top + 1;
+    let (_, cmds) = update(
+        make_model(assets.clone()),
+        Msg::Click {
+            column: 5,
+            row: top_vpad,
+            modifiers: KeyModifiers::NONE,
+        },
+    );
+    assert!(
+        cmds.is_empty(),
+        "click on top vpad row (row {top_vpad}) must return no asset (None)"
+    );
 }
 
 // --- D1c: logical_position_in_wrap_group unit tests ---

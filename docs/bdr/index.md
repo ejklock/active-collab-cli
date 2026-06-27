@@ -19,3 +19,4 @@
 | [0015](/bdr/0015-app-managed-text-selection.md) | App-managed text selection: drag highlights text and copies it to the clipboard with feedback (V6) | Accepted |
 | [0016](/bdr/0016-detail-title-row-project-name.md) | Detail view shows the title as a Título row and a populated Projeto row (D1a) | Accepted |
 | [0017](/bdr/0017-asset-label-derivation.md) | Anexos/Artefatos labels read as anchor text, a real filename, or the host (D1b) | Accepted |
+| [0018](/bdr/0018-asset-card-breathing-room.md) | Anexos/Artefatos card has breathing room: a blank line between links and interior padding (D1d) | Accepted |

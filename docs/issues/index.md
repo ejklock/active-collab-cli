@@ -28,3 +28,4 @@ TUI/UX work (V/R/ARCH slices), tracing to
 | [0020](/issues/0020-v5-body-links-inline-url.md) | V5 | body links render inline as text + visible URL, clickable from the visible region | closed | — |
 | [0021](/issues/0021-v6-app-managed-selection.md) | V6 | app-managed text selection: drag to highlight, copy to clipboard with feedback | open | — |
 | [0022](/issues/0022-detail-link-wrap-artifacts-project-title.md) | D1 | detail polish: wrapped-link click, Anexos label, empty project, title placement | closed | 0020 |
+| [0023](/issues/0023-d1d-asset-card-spacing.md) | D1d | Anexos/Artefatos card breathing room — blank line between links + interior padding | open | — |

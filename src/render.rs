@@ -787,8 +787,8 @@ const BOX_H: &str = "\u{2500}";
 const BOX_V: &str = "\u{2502}";
 const ELLIPSIS: &str = "\u{2026}";
 const MIDDOT: &str = "\u{00B7}";
-const PANEL_HPAD: usize = 1;
-const PANEL_VPAD: usize = 1;
+pub(crate) const PANEL_HPAD: usize = 1;
+pub(crate) const PANEL_VPAD: usize = 1;
 
 pub(crate) fn display_width(s: &str) -> usize {
     UnicodeWidthStr::width(s)

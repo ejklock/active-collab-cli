@@ -1,5 +1,5 @@
 use crate::i18n::t;
-use crate::render::{asset_row_lines, Asset, MineTableRow, StyleRun};
+use crate::render::{asset_row_lines, Asset, MineTableRow, StyleRun, PANEL_HPAD, PANEL_VPAD};
 use crate::store::instances::Instance;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -914,6 +914,49 @@ fn is_mailto_url(url: &str) -> bool {
     url.starts_with("mailto:")
 }
 
+/// Walk the panel's row composition and return the index of the asset whose
+/// rendered rows contain `row`, or `None` for a border, pad, or separator row.
+///
+/// The composition mirrors `render_assets_panel`: top border (excluded by the
+/// caller), `PANEL_VPAD` blank rows, then each asset's `asset_row_lines` span
+/// with one blank separator between consecutive assets, then `PANEL_VPAD` blank
+/// rows, then the bottom border (also excluded by the caller).
+fn asset_index_at_panel_row(
+    assets: &[Asset],
+    content_width: usize,
+    panel_top: u16,
+    row: u16,
+    viewport_rows: u16,
+) -> Option<usize> {
+    let first_interior_row = panel_top + 1;
+    let last_interior_row = viewport_rows.saturating_sub(2);
+    if row < first_interior_row || row > last_interior_row {
+        return None;
+    }
+
+    let interior_row = (row - first_interior_row) as usize;
+    if interior_row < PANEL_VPAD {
+        return None; // top vpad blank row
+    }
+    let content_row = interior_row - PANEL_VPAD;
+
+    let mut cursor = 0usize;
+    for (i, asset) in assets.iter().enumerate() {
+        if i > 0 {
+            if content_row == cursor {
+                return None; // separator row between assets
+            }
+            cursor += 1;
+        }
+        let span = asset_row_lines(i + 1, asset, content_width).len();
+        if content_row < cursor + span {
+            return Some(i);
+        }
+        cursor += span;
+    }
+    None // bottom vpad or out-of-range row
+}
+
 /// Try to resolve an asset-panel click in the Detail screen.
 ///
 /// Uses the width-aware wrapped panel height (same as `draw_detail`) so that:
@@ -949,35 +992,16 @@ fn asset_panel_cmd_at(model: Model, row: u16) -> (Model, Vec<Cmd>) {
         return (model, vec![]);
     }
 
+    // content_width mirrors asset_content_width(inner_width) in detail.rs
+    let content_width = inner_width.saturating_sub(2 * PANEL_HPAD);
     let panel_top = viewport_rows.saturating_sub(panel_h);
-    let first_asset_row = panel_top + 1;
-    // last_asset_row is the last row before the bottom border
-    let last_asset_row = viewport_rows.saturating_sub(2);
 
-    if row < first_asset_row || row > last_asset_row {
-        return (model, vec![]);
-    }
-
-    // Map the clicked row to an asset by walking wrapped row spans.
-    // panel_inner_width mirrors the subtraction inside asset_panel_render_height.
-    let panel_inner_width = inner_width.saturating_sub(2);
-    let panel_row = (row - first_asset_row) as usize;
-
-    let mut cursor = 0usize;
-    let mut found_asset: Option<Asset> = None;
-    for (i, asset) in assets.iter().enumerate() {
-        let span = asset_row_lines(i + 1, asset, panel_inner_width).len();
-        if panel_row < cursor + span {
-            found_asset = Some(asset.clone());
-            break;
-        }
-        cursor += span;
-    }
-
-    let Some(asset) = found_asset else {
+    let Some(idx) = asset_index_at_panel_row(assets, content_width, panel_top, row, viewport_rows)
+    else {
         return (model, vec![]);
     };
 
+    let asset = assets[idx].clone();
     let cmd = if *pending_download {
         Cmd::DownloadAsset {
             instance: instance.clone(),

@@ -25,3 +25,4 @@
 | [0021](/adr/0021-app-managed-text-selection-clipboard.md) | App-managed text selection with a drawn highlight and clipboard copy (V6) | Accepted |
 | [0022](/adr/0022-detail-title-as-meta-row.md) | The task title renders as a Título row inside the Detalhes panel, not a loose header (D1a) | Accepted |
 | [0023](/adr/0023-asset-label-derivation.md) | Derive the Anexos/Artefatos label from anchor text, then a real filename, then the host (D1b) | Accepted |
+| [0024](/adr/0024-asset-card-breathing-room.md) | Anexos/Artefatos card breathing room — per-link separators, interior padding, named height ceiling (D1d) | Accepted |

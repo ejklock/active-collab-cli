@@ -9,9 +9,9 @@ use std::collections::HashMap;
 struct PanelGeom {
     /// Row of the panel's top border.
     pub top: u16,
-    /// Row immediately inside the top border (first asset row).
+    /// Row of the first asset content line (after top border + PANEL_VPAD).
     pub first_asset: u16,
-    /// Row immediately inside the bottom border (last asset row).
+    /// Row of the last asset content line (before bottom vpad + bottom border).
     pub last_asset: u16,
     /// Row of the panel's bottom border.
     pub bottom: u16,
@@ -21,16 +21,21 @@ struct PanelGeom {
 
 impl PanelGeom {
     fn compute(viewport_w: u16, viewport_h: u16, assets: &[Asset]) -> Option<Self> {
+        use crate::render::PANEL_VPAD;
         let inner_width = viewport_w.saturating_sub(2) as usize;
         let panel_h = asset_panel_render_height(assets, inner_width);
         if panel_h == 0 {
             return None;
         }
         let top = viewport_h.saturating_sub(panel_h);
+        // first_asset: skip top border (1) + PANEL_VPAD blank rows.
+        let first_asset = top + 1 + PANEL_VPAD as u16;
+        // last_asset: last content row is PANEL_VPAD + 1 rows before the bottom of the panel.
+        let last_asset = viewport_h.saturating_sub(2 + PANEL_VPAD as u16);
         Some(PanelGeom {
             top,
-            first_asset: top + 1,
-            last_asset: viewport_h.saturating_sub(2),
+            first_asset,
+            last_asset,
             bottom: viewport_h.saturating_sub(1),
             height: panel_h,
         })
@@ -111,8 +116,8 @@ fn click_struct_form_accepted_by_update_on_projects_screen() {
 }
 
 // V2a-A1: Click on the first asset row opens assets[0] via OpenAsset.
-// Viewport 80x24, 2 assets → panel_height = min(2+2, 8) = 4.
-// first_asset_row = panel_top + 1 (one row inside the top border).
+// Viewport 80x24, 2 assets → panel_height = min(2*2+3, 14) = 7.
+// first_asset_row = panel_top + 1 (border) + PANEL_VPAD (blank pad).
 #[test]
 fn click_first_asset_row_emits_open_asset_cmd() {
     let assets = vec![
@@ -140,7 +145,8 @@ fn click_first_asset_row_emits_open_asset_cmd() {
     }
 }
 
-// V2a-A1: Click on the last asset row opens the last asset (no off-by-one at bottom boundary).
+// V2a-A1: Click on the last asset content row opens the last asset
+// (no off-by-one; bottom vpad and border rows are no-ops).
 #[test]
 fn click_last_asset_row_opens_last_asset() {
     let assets = vec![
@@ -319,6 +325,8 @@ fn asset_panel_render_height_zero_for_empty_assets() {
 
 // V2a-A3: asset_panel_render_height produces correct height for non-wrapping assets
 // at several viewport sizes — render and click mapper share this single source.
+// New formula: each short asset = 1 row; height = n + (n-1) separators + 2*VPAD + 2 borders
+// = 2n + 3, capped at ASSET_PANEL_MAX_ROWS=14.
 #[test]
 fn asset_panel_render_height_consistent_geometry_for_short_names() {
     for (viewport_w, viewport_h, assets_count) in [
@@ -333,10 +341,11 @@ fn asset_panel_render_height_consistent_geometry_for_short_names() {
             .collect();
         let inner_width = (viewport_w - 2) as usize;
         let panel_h = asset_panel_render_height(&assets, inner_width);
-        let expected_h = (assets_count as u16 + 2).min(8);
+        // n rows + (n-1) separators + 2 vpad + 2 borders = 2n+3, capped at 14.
+        let expected_h = (2 * assets_count as u16 + 3).min(14);
         assert_eq!(
             panel_h, expected_h,
-            "panel height for {assets_count} short assets must equal min(n+2,8)={expected_h} \
+            "panel height for {assets_count} short assets must equal min(2n+3,14)={expected_h} \
              at viewport ({viewport_w}x{viewport_h})"
         );
 
@@ -501,9 +510,9 @@ fn draw_detail_wrapped_asset_panel_top_matches_asset_panel_render_height() {
          row content: {panel_top_row:?}"
     );
 
-    // Also verify that the UNWRAPPED height (1 row per asset + 2 borders, capped at 8) would
-    // predict the WRONG row, confirming that wrapping actually shifts the panel top upward.
-    let unwrapped_h = (assets.len() as u16 + 2).min(8);
+    // Also verify that the UNWRAPPED height (1 row per asset + 0 separators + 2 vpad + 2 borders,
+    // capped at 14) would predict the WRONG row, confirming wrapping shifts the panel top upward.
+    let unwrapped_h = (2 * assets.len() as u16 + 3).min(14);
     if panel_h != unwrapped_h {
         let wrong_top = viewport_h - unwrapped_h;
         let wrong_row: String = (0..viewport_w)
@@ -556,8 +565,8 @@ fn detail_max_offset_no_assets_viewport_24_lines_50() {
     );
 }
 
-// V5-A1: detail_max_offset — 2 short assets (panel_h=4 unwrapped=wrapped), viewport 24x80, lines_len=50.
-// text_vh=24-4-4=16, max=50-16=34.
+// V5-A1: detail_max_offset — 2 short assets, viewport 24x80, lines_len=50.
+// panel_h = 2*2+3 = 7; text_vh = 24-4-7 = 13; max = 50-13 = 37.
 #[test]
 fn detail_max_offset_with_assets_shrinks_text_viewport() {
     use crate::tui::model::detail_max_offset;
@@ -567,13 +576,13 @@ fn detail_max_offset_with_assets_shrinks_text_viewport() {
     ];
     let max = detail_max_offset(24, 80, 50, &assets);
     assert_eq!(
-        max, 34,
-        "viewport=24x80, 2 short assets (panel_h=4): text_vh=16, max=50-16=34"
+        max, 37,
+        "viewport=24x80, 2 short assets (panel_h=7): text_vh=13, max=50-13=37"
     );
 }
 
-// V5-A1: detail_max_offset — 6 short assets (panel_h=8 capped), viewport 24x80, lines_len=50.
-// text_vh=24-4-8=12, max=50-12=38.
+// V5-A1: detail_max_offset — 6 short assets (panel_h=14 capped), viewport 24x80, lines_len=50.
+// panel_h = min(2*6+3, 14) = 14; text_vh = 24-4-14 = 6; max = 50-6 = 44.
 #[test]
 fn detail_max_offset_many_assets_caps_panel_height() {
     use crate::tui::model::detail_max_offset;
@@ -582,8 +591,8 @@ fn detail_max_offset_many_assets_caps_panel_height() {
         .collect();
     let max = detail_max_offset(24, 80, 50, &assets);
     assert_eq!(
-        max, 38,
-        "viewport=24x80, 6 short assets (panel_h=8 capped): text_vh=12, max=50-12=38"
+        max, 44,
+        "viewport=24x80, 6 short assets (panel_h=14 capped): text_vh=6, max=50-6=44"
     );
 }
 
@@ -662,7 +671,7 @@ fn handle_down_idempotent_at_max() {
 }
 
 // V5-A1: handle_down clamps to a tighter max when assets are present.
-// viewport=80x24, 50 lines, 2 short assets (panel_h=4 unwrapped=wrapped) → max=34.
+// viewport=80x24, 50 lines, 2 short assets (panel_h=7) → max=37.
 #[test]
 fn handle_down_clamps_to_detail_max_offset_with_assets() {
     use crate::tui::model::detail_max_offset;
@@ -1226,8 +1235,9 @@ fn box_line(content: &str) -> String {
 
 /// Build a Detail model suitable for testing selection behavior.
 /// Uses a wide viewport so the body area is clearly accessible.
-/// Lines must be boxed (see `box_line`) when the test exercises text extraction;
-/// plain strings may be used when only anchor/cursor state is checked.
+/// Lines must be boxed when the test exercises text extraction so that
+/// chrome-free extraction is verified end-to-end. Plain strings are fine
+/// when only anchor/cursor state is checked.
 fn detail_model_for_selection(lines: Vec<String>, viewport: (u16, u16), offset: usize) -> Model {
     Model {
         stack: vec![Screen::Detail {
@@ -2028,22 +2038,18 @@ fn loaded_tasks_clears_revalidating_and_stamps_last_loaded() {
     }
 }
 
-// W2-A3: Click on a wrapped asset's continuation row resolves to the owning asset,
-// not the (now mis-shifted) asset that would follow at 1-row-per-asset arithmetic.
+// W2-A3: Click on a wrapped asset's continuation row resolves to the owning asset.
 //
-// At viewport width=20: inner_width=18, panel_inner_width=16.
-// "[1] ↗ " prefix is 7 cols, so label_width = 16 - 7 = 9 cols.
-// A name that exceeds 9 chars wraps to a second row.
-// So asset[0] occupies panel rows 0 and 1; asset[1] occupies panel row 2.
+// At viewport width=20: inner_width=18, content_width=18-2*PANEL_HPAD=16.
+// "[1] ↗ " prefix is 7 cols, label_width = 16-7 = 9 cols.
+// "ABCDEFGHIJKLMNOPQRS.pdf" (23 chars) wraps to >=2 rows at label_width=9.
 //
-// panel_h includes border rows (wrapped_row_count + 2).min(8).
-// first_asset_row = panel_top + 1 (skip top border).
-// Click on first_asset_row+0 → asset[0].
-// Click on first_asset_row+1 → asset[0] (continuation row).
-// Click on first_asset_row+(rows of asset[0]) → asset[1].
+// Layout (panel_top+N):
+//   0: border, 1: vpad, 2..2+span0-1: asset[0] rows, 2+span0: separator,
+//   2+span0+1: asset[1] row, 2+span0+2: vpad, 2+span0+3: border.
 fn make_wrapped_asset_model(viewport: (u16, u16), pending_download: bool) -> (Vec<Asset>, Model) {
-    // At panel_inner=16: prefix "[1] ↗ " = 7 cols, label_width = 9 cols.
-    // Name "ABCDEFGHIJKLMNOPQRS.pdf" exceeds 9 cols in label → wraps to 2 rows.
+    // At content_width=16: prefix "[1] ↗ " = 7 cols, label_width = 9 cols.
+    // Name "ABCDEFGHIJKLMNOPQRS.pdf" exceeds 9 cols in label → wraps to >=2 rows.
     let long_name = "ABCDEFGHIJKLMNOPQRS.pdf";
     let assets = vec![
         make_asset(long_name, "https://example.com/long.pdf"),
@@ -2056,20 +2062,23 @@ fn make_wrapped_asset_model(viewport: (u16, u16), pending_download: bool) -> (Ve
 
 #[test]
 fn click_wrapped_asset_first_row_opens_owning_asset() {
+    use crate::render::PANEL_HPAD;
+    use crate::render::PANEL_VPAD;
     let viewport = (20u16, 24u16);
     let (assets, m) = make_wrapped_asset_model(viewport, false);
 
-    let panel_inner: usize = 16;
-    let row_count_asset0 = crate::render::asset_row_lines(1, &assets[0], panel_inner).len();
+    let inner_width: usize = (viewport.0 - 2) as usize;
+    let content_width = inner_width.saturating_sub(2 * PANEL_HPAD);
+    let row_count_asset0 = crate::render::asset_row_lines(1, &assets[0], content_width).len();
     assert!(
         row_count_asset0 >= 2,
-        "asset[0] must wrap to >=2 rows at panel_inner={panel_inner}"
+        "asset[0] must wrap to >=2 rows at content_width={content_width}"
     );
 
-    let inner_width: usize = (viewport.0 - 2) as usize;
     let panel_h = asset_panel_render_height(&assets, inner_width);
     let panel_top = viewport.1 - panel_h;
-    let first_asset_row = panel_top + 1;
+    // First asset row: skip top border (1) + PANEL_VPAD blank rows.
+    let first_asset_row = panel_top + 1 + PANEL_VPAD as u16;
 
     let (_m, cmds) = update(
         m,
@@ -2079,12 +2088,12 @@ fn click_wrapped_asset_first_row_opens_owning_asset() {
             modifiers: KeyModifiers::NONE,
         },
     );
-    assert_eq!(cmds.len(), 1, "panel_row=0 must emit one cmd");
+    assert_eq!(cmds.len(), 1, "first content row must emit one cmd");
     match &cmds[0] {
         Cmd::OpenAsset { url, .. } => {
             assert_eq!(
                 url, "https://example.com/long.pdf",
-                "panel_row=0 must open asset[0]"
+                "first content row must open asset[0]"
             );
         }
         other => panic!("expected OpenAsset for asset[0], got {other:?}"),
@@ -2093,20 +2102,23 @@ fn click_wrapped_asset_first_row_opens_owning_asset() {
 
 #[test]
 fn click_wrapped_asset_continuation_row_resolves_to_owning_asset() {
+    use crate::render::PANEL_HPAD;
+    use crate::render::PANEL_VPAD;
     let viewport = (20u16, 24u16);
     let (assets, m) = make_wrapped_asset_model(viewport, false);
 
-    let panel_inner: usize = 16;
-    let row_count_asset0 = crate::render::asset_row_lines(1, &assets[0], panel_inner).len();
+    let inner_width: usize = (viewport.0 - 2) as usize;
+    let content_width = inner_width.saturating_sub(2 * PANEL_HPAD);
+    let row_count_asset0 = crate::render::asset_row_lines(1, &assets[0], content_width).len();
     assert!(
         row_count_asset0 >= 2,
-        "asset[0] must wrap at panel_inner={panel_inner}"
+        "asset[0] must wrap at content_width={content_width}"
     );
 
-    let inner_width: usize = (viewport.0 - 2) as usize;
     let panel_h = asset_panel_render_height(&assets, inner_width);
     let panel_top = viewport.1 - panel_h;
-    let continuation_row = panel_top + 1 + 1;
+    // Continuation row: top border (1) + vpad (PANEL_VPAD) + asset[0] second row (offset 1).
+    let continuation_row = panel_top + 1 + PANEL_VPAD as u16 + 1;
 
     let (_m, cmds) = update(
         m,
@@ -2116,7 +2128,11 @@ fn click_wrapped_asset_continuation_row_resolves_to_owning_asset() {
             modifiers: KeyModifiers::NONE,
         },
     );
-    assert_eq!(cmds.len(), 1, "continuation panel_row=1 must emit one cmd");
+    assert_eq!(
+        cmds.len(),
+        1,
+        "continuation row of asset[0] must emit one cmd"
+    );
     match &cmds[0] {
         Cmd::OpenAsset { url, .. } => {
             assert_eq!(
@@ -2130,20 +2146,23 @@ fn click_wrapped_asset_continuation_row_resolves_to_owning_asset() {
 
 #[test]
 fn click_second_asset_row_after_wrapped_first_asset_resolves_correctly() {
+    use crate::render::PANEL_HPAD;
+    use crate::render::PANEL_VPAD;
     let viewport = (20u16, 24u16);
     let (assets, m) = make_wrapped_asset_model(viewport, false);
 
-    let panel_inner: usize = 16;
-    let row_count_asset0 = crate::render::asset_row_lines(1, &assets[0], panel_inner).len();
+    let inner_width: usize = (viewport.0 - 2) as usize;
+    let content_width = inner_width.saturating_sub(2 * PANEL_HPAD);
+    let row_count_asset0 = crate::render::asset_row_lines(1, &assets[0], content_width).len();
     assert!(
         row_count_asset0 >= 2,
-        "asset[0] must wrap at panel_inner={panel_inner}"
+        "asset[0] must wrap at content_width={content_width}"
     );
 
-    let inner_width: usize = (viewport.0 - 2) as usize;
     let panel_h = asset_panel_render_height(&assets, inner_width);
     let panel_top = viewport.1 - panel_h;
-    let second_asset_row = panel_top + 1 + row_count_asset0 as u16;
+    // asset[1] row: top border (1) + vpad (PANEL_VPAD) + span of asset[0] + separator (1).
+    let second_asset_row = panel_top + 1 + PANEL_VPAD as u16 + row_count_asset0 as u16 + 1;
 
     let (_m, cmds) = update(
         m,
@@ -2158,7 +2177,7 @@ fn click_second_asset_row_after_wrapped_first_asset_resolves_correctly() {
         Cmd::OpenAsset { url, .. } => {
             assert_eq!(
                 url, "https://example.com/short.pdf",
-                "row after wrapped asset[0] must resolve to asset[1]"
+                "row after separator following wrapped asset[0] must resolve to asset[1]"
             );
         }
         other => panic!("expected OpenAsset for asset[1], got {other:?}"),
@@ -2249,6 +2268,232 @@ fn body_link_click_at_wrapped_panel_region_is_noop() {
         "click at real panel top border (row {panel_top}, wrapped_h={wrapped_h}) \
          must be a no-op, not a body-link hit"
     );
+}
+
+// D1d-AC4: asset_panel_render_height equals the exact row count emitted by
+// render_assets_panel, across multiple asset counts and a wrapped label.
+// Empty asset list yields height 0.
+#[test]
+fn asset_panel_render_height_equals_rendered_row_count() {
+    use crate::render::PANEL_HPAD;
+    use crate::tui::screens::detail::{draw_detail, DetailParams};
+    use ratatui::{backend::TestBackend, layout::Rect, Terminal};
+
+    // Empty list → 0.
+    assert_eq!(
+        asset_panel_render_height(&[], 78),
+        0,
+        "empty list must give height 0"
+    );
+
+    let viewport_w = 80u16;
+    let viewport_h = 40u16;
+    let inner_width = (viewport_w - 2) as usize;
+
+    // Short assets (1 row each) at various counts.
+    for count in [1usize, 2, 3, 4] {
+        let assets: Vec<Asset> = (0..count)
+            .map(|i| make_asset(&format!("f{i}.pdf"), &format!("https://x.com/{i}.pdf")))
+            .collect();
+        let expected_h = asset_panel_render_height(&assets, inner_width);
+
+        let area = Rect::new(0, 0, viewport_w, viewport_h);
+        let backend = TestBackend::new(viewport_w, viewport_h);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| {
+                draw_detail(
+                    frame,
+                    area,
+                    DetailParams {
+                        lines: &["body".to_string()],
+                        line_styles: &[],
+                        assets: &assets,
+                        offset: 0,
+                        loading: false,
+                        task_id: 1,
+                        task_name: "T",
+                    },
+                );
+            })
+            .unwrap();
+
+        let buf = terminal.backend().buffer();
+        let panel_top = viewport_h - expected_h;
+
+        // Count rendered rows belonging to the panel (top border through bottom border).
+        let panel_row_count = (panel_top..viewport_h)
+            .map(|y| {
+                (0..viewport_w)
+                    .map(|x| buf.cell((x, y)).unwrap().symbol().to_string())
+                    .collect::<String>()
+            })
+            .count() as u16;
+
+        assert_eq!(
+            panel_row_count, expected_h,
+            "render height mismatch for {count} assets: expected {expected_h} rows but \
+             panel spans {panel_row_count} rows"
+        );
+
+        // Also verify the "Artifacts" title is on the panel_top row.
+        let top_row: String = (0..viewport_w)
+            .map(|x| buf.cell((x, panel_top)).unwrap().symbol().to_string())
+            .collect();
+        assert!(
+            top_row.contains("Artifacts"),
+            "Artifacts title must appear at panel_top={panel_top} for {count} assets: {top_row:?}"
+        );
+    }
+
+    // Wrapped label: use a narrow viewport so the label wraps.
+    // At viewport_w=20: inner_width=18, content_w=16, prefix 7 cols, label_width=9.
+    // "ABCDEFGHIJKLMNOPQRS.pdf" (23 chars) > 9 → wraps.
+    let wrap_viewport_w = 20u16;
+    let wrap_viewport_h = 40u16;
+    let wrap_inner_width = (wrap_viewport_w - 2) as usize;
+    let long_name = "ABCDEFGHIJKLMNOPQRS.pdf";
+    let assets_w = vec![make_asset(long_name, "https://example.com/long.pdf")];
+    let wrap_content_w = wrap_inner_width.saturating_sub(2 * PANEL_HPAD);
+    let wrapped_row_count = crate::render::asset_row_lines(1, &assets_w[0], wrap_content_w).len();
+    assert!(
+        wrapped_row_count >= 2,
+        "long label must wrap to >=2 rows at content_w={wrap_content_w}"
+    );
+    let expected_wrapped_h = asset_panel_render_height(&assets_w, wrap_inner_width);
+
+    let area = Rect::new(0, 0, wrap_viewport_w, wrap_viewport_h);
+    let backend = TestBackend::new(wrap_viewport_w, wrap_viewport_h);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|frame| {
+            draw_detail(
+                frame,
+                area,
+                DetailParams {
+                    lines: &["body".to_string()],
+                    line_styles: &[],
+                    assets: &assets_w,
+                    offset: 0,
+                    loading: false,
+                    task_id: 1,
+                    task_name: "T",
+                },
+            );
+        })
+        .unwrap();
+    let buf = terminal.backend().buffer();
+    let panel_top = wrap_viewport_h - expected_wrapped_h;
+    let top_row: String = (0..wrap_viewport_w)
+        .map(|x| buf.cell((x, panel_top)).unwrap().symbol().to_string())
+        .collect();
+    assert!(
+        top_row.contains("Artifacts"),
+        "Artifacts must appear at panel_top={panel_top} for wrapped label: {top_row:?}"
+    );
+}
+
+// D1d-AC5: Clicking a separator or pad row returns no asset; clicking the second
+// link's row resolves to asset index 1.
+#[test]
+fn asset_panel_click_separator_and_pad_rows_return_no_asset() {
+    use crate::render::PANEL_HPAD;
+    use crate::render::PANEL_VPAD;
+
+    let viewport = (80u16, 30u16);
+    let assets = vec![
+        make_asset("link1.pdf", "https://example.com/link1.pdf"),
+        make_asset("link2.pdf", "https://example.com/link2.pdf"),
+    ];
+
+    let inner_width = (viewport.0 - 2) as usize;
+    let content_width = inner_width.saturating_sub(2 * PANEL_HPAD);
+    let panel_h = asset_panel_render_height(&assets, inner_width);
+    let panel_top = viewport.1 - panel_h;
+
+    // Asset spans (each 1 row for short names).
+    let span0 = crate::render::asset_row_lines(1, &assets[0], content_width).len() as u16;
+    let span1 = crate::render::asset_row_lines(2, &assets[1], content_width).len() as u16;
+
+    // Layout from panel_top:
+    //   +0: top border (no-op)
+    //   +1: top vpad (no-op)
+    //   +1+VPAD..: asset[0] rows
+    //   +1+VPAD+span0: separator (no-op)
+    //   +1+VPAD+span0+1: asset[1] first row → index 1
+    //   +1+VPAD+span0+1+span1: bottom vpad (no-op)
+
+    let top_vpad_row = panel_top + 1;
+    let asset0_first_row = panel_top + 1 + PANEL_VPAD as u16;
+    let separator_row = asset0_first_row + span0;
+    let asset1_first_row = separator_row + 1;
+    let bottom_vpad_row = asset1_first_row + span1;
+
+    // Top vpad → no-op.
+    let (_m, cmds) = update(
+        detail_model_with_assets_and_viewport(assets.clone(), "inst", viewport, false),
+        Msg::Click {
+            column: 5,
+            row: top_vpad_row,
+            modifiers: KeyModifiers::NONE,
+        },
+    );
+    assert!(
+        cmds.is_empty(),
+        "click on top vpad row must return no asset: row={top_vpad_row}"
+    );
+
+    // Separator → no-op.
+    let (_m, cmds) = update(
+        detail_model_with_assets_and_viewport(assets.clone(), "inst", viewport, false),
+        Msg::Click {
+            column: 5,
+            row: separator_row,
+            modifiers: KeyModifiers::NONE,
+        },
+    );
+    assert!(
+        cmds.is_empty(),
+        "click on separator row must return no asset: row={separator_row}"
+    );
+
+    // Bottom vpad → no-op.
+    let (_m, cmds) = update(
+        detail_model_with_assets_and_viewport(assets.clone(), "inst", viewport, false),
+        Msg::Click {
+            column: 5,
+            row: bottom_vpad_row,
+            modifiers: KeyModifiers::NONE,
+        },
+    );
+    assert!(
+        cmds.is_empty(),
+        "click on bottom vpad row must return no asset: row={bottom_vpad_row}"
+    );
+
+    // asset[1] first row → index 1 (url = link2.pdf).
+    let (_, cmds) = update(
+        detail_model_with_assets_and_viewport(assets.clone(), "inst", viewport, false),
+        Msg::Click {
+            column: 5,
+            row: asset1_first_row,
+            modifiers: KeyModifiers::NONE,
+        },
+    );
+    assert_eq!(
+        cmds.len(),
+        1,
+        "click on asset[1] row must emit one cmd: row={asset1_first_row}"
+    );
+    match &cmds[0] {
+        Cmd::OpenAsset { url, .. } => {
+            assert_eq!(
+                url, "https://example.com/link2.pdf",
+                "asset[1] row must resolve to asset index 1 (link2.pdf)"
+            );
+        }
+        other => panic!("expected OpenAsset for asset[1], got {other:?}"),
+    }
 }
 
 // V3-A3: Quit sets should_quit regardless of selection state.
