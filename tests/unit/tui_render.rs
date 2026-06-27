@@ -105,11 +105,26 @@ fn render_projects_to_buf(
     terminal.backend().buffer().clone()
 }
 
+/// Fixed date used in all deterministic D2c tests: 2025-06-15.
+fn today_fixed() -> chrono::NaiveDate {
+    chrono::NaiveDate::from_ymd_opt(2025, 6, 15).unwrap()
+}
+
 fn render_tasks_to_buf(
     tasks: &[TaskRow],
     selected: usize,
     width: u16,
     height: u16,
+) -> ratatui::buffer::Buffer {
+    render_tasks_to_buf_with_today(tasks, selected, width, height, today_fixed())
+}
+
+fn render_tasks_to_buf_with_today(
+    tasks: &[TaskRow],
+    selected: usize,
+    width: u16,
+    height: u16,
+    today: chrono::NaiveDate,
 ) -> ratatui::buffer::Buffer {
     let backend = TestBackend::new(width, height);
     let mut terminal = Terminal::new(backend).unwrap();
@@ -124,6 +139,7 @@ fn render_tasks_to_buf(
                 selected,
                 false,
                 false,
+                today,
                 &mut targets,
             );
         })
@@ -275,6 +291,7 @@ fn draw_my_tasks_title_renders_in_pt_br() {
                 0,
                 false,
                 false,
+                today_fixed(),
                 &mut targets,
             );
         })
@@ -365,8 +382,8 @@ fn draw_tasks_long_name_wraps_inside_card() {
         .map(|(i, _)| i)
         .collect();
     assert!(
-        box_rows.len() >= 4,
-        "card must have at least 4 rows (top border + 2 content + bottom border): rows={rows:?}"
+        box_rows.len() >= 5,
+        "card must have at least 5 rows (top border + 2+ name rows + due row + bottom border): rows={rows:?}"
     );
 }
 
@@ -477,6 +494,7 @@ fn draw_tasks_selected_card_all_rows_carry_selection_style() {
                 0,
                 false,
                 false,
+                today_fixed(),
                 &mut captured_targets,
             );
         })
@@ -521,6 +539,7 @@ fn draw_tasks_click_on_non_first_card_row_resolves_to_task_index() {
                 0,
                 false,
                 false,
+                today_fixed(),
                 &mut captured_targets,
             );
         })
@@ -634,7 +653,17 @@ fn draw_tasks_loading_shows_paragraph_not_table() {
         .draw(|frame| {
             let area = Rect::new(0, 0, 80, 10);
             let mut targets = vec![];
-            draw_tasks(frame, area, "Project A", &[], 0, true, false, &mut targets);
+            draw_tasks(
+                frame,
+                area,
+                "Project A",
+                &[],
+                0,
+                true,
+                false,
+                today_fixed(),
+                &mut targets,
+            );
         })
         .unwrap();
     let content = buf_to_string(terminal.backend().buffer());
@@ -1066,6 +1095,278 @@ fn draw_tasks_wide_terminal_short_name_no_ellipsis() {
     assert!(
         !content.contains('\u{2026}'),
         "wide terminal must NOT show ellipsis for short name: {content}"
+    );
+}
+
+// D2c-AC4: single-line card height grew by exactly one row for line 2.
+// A card with a short name (fits on one line) now occupies 4 rows:
+// top border + name line + due line + bottom border.
+// Derived from the REAL buffer: locate the first card, measure y_end - y_start.
+#[test]
+fn draw_tasks_single_line_card_height_is_four_rows() {
+    let tasks = make_tasks(&["Short"]);
+    let backend = TestBackend::new(80, 20);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut targets: Vec<crate::tui::model::ClickTarget> = vec![];
+    terminal
+        .draw(|frame| {
+            draw_tasks(
+                frame,
+                Rect::new(0, 0, 80, 20),
+                "Project A",
+                &tasks,
+                0,
+                false,
+                false,
+                today_fixed(),
+                &mut targets,
+            );
+        })
+        .unwrap();
+    let card = targets
+        .iter()
+        .find(|t| t.index == 0)
+        .expect("click target for card 0 must be recorded");
+    let height = card.y_end - card.y_start;
+    assert_eq!(
+        height, 4,
+        "single-line card must be exactly 4 rows tall (D2c +1 row for due line): height={height}"
+    );
+}
+
+// D2c-AC1: line 2 shows the relative due text from relative_due with a FIXED today.
+// Task due in 2 days from today_fixed() (2025-06-15) => due_on = "2025-06-17".
+// Expected label contains the count and the 'Vence em' prefix (pt-BR).
+#[test]
+fn draw_tasks_due_line_shows_relative_due_text() {
+    let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+    set_language("pt_BR");
+    let task = TaskRow {
+        task_id: 1,
+        task_number: 1,
+        name: "A Task".into(),
+        instance: "inst".into(),
+        project_id: 0,
+        due_on: Some("2025-06-17".into()),
+    };
+    let buf = render_tasks_to_buf_with_today(&[task], 0, 80, 10, today_fixed());
+    set_language("en");
+    let content = buf_to_string(&buf);
+    assert!(
+        content.contains("vence em"),
+        "due line must contain 'vence em' for a future due date (pt-BR): {content}"
+    );
+    assert!(
+        content.contains('2'),
+        "due line must contain the day count '2': {content}"
+    );
+}
+
+// D2c-AC2: overdue task's due cells carry the red fg.
+#[test]
+fn draw_tasks_overdue_task_due_cells_carry_red_fg() {
+    use ratatui::style::Color;
+    let task = TaskRow {
+        task_id: 1,
+        task_number: 1,
+        name: "Overdue Task".into(),
+        instance: "inst".into(),
+        project_id: 0,
+        due_on: Some("2025-06-10".into()), // 5 days before today_fixed()
+    };
+    let backend = TestBackend::new(80, 10);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut targets: Vec<crate::tui::model::ClickTarget> = vec![];
+    terminal
+        .draw(|frame| {
+            draw_tasks(
+                frame,
+                Rect::new(0, 0, 80, 10),
+                "Project A",
+                &[task],
+                0,
+                false,
+                false,
+                today_fixed(),
+                &mut targets,
+            );
+        })
+        .unwrap();
+    let buf = terminal.backend().buffer();
+    let due_red = Color::Rgb(220, 80, 80);
+    // The due line is the second content row inside the card (row after the name row).
+    // Locate via the click target: card spans y_start..y_end; due row = y_end - 2 (before bot border).
+    let card = targets.iter().find(|t| t.index == 0).unwrap();
+    let due_row = card.y_end - 2;
+    let found_red = (0..80u16).any(|x| {
+        buf.cell((x, due_row))
+            .map(|c| c.style().fg == Some(due_red))
+            .unwrap_or(false)
+    });
+    assert!(
+        found_red,
+        "overdue card's due row (y={due_row}) must have at least one red-fg cell (D2c-AC2)"
+    );
+}
+
+// D2c-AC2: near-due task's due cells carry the yellow fg.
+#[test]
+fn draw_tasks_near_due_task_due_cells_carry_yellow_fg() {
+    use ratatui::style::Color;
+    let task = TaskRow {
+        task_id: 1,
+        task_number: 1,
+        name: "Near Due Task".into(),
+        instance: "inst".into(),
+        project_id: 0,
+        due_on: Some("2025-06-16".into()), // 1 day after today_fixed() => Near
+    };
+    let backend = TestBackend::new(80, 10);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut targets: Vec<crate::tui::model::ClickTarget> = vec![];
+    terminal
+        .draw(|frame| {
+            draw_tasks(
+                frame,
+                Rect::new(0, 0, 80, 10),
+                "Project A",
+                &[task],
+                0,
+                false,
+                false,
+                today_fixed(),
+                &mut targets,
+            );
+        })
+        .unwrap();
+    let buf = terminal.backend().buffer();
+    let due_yellow = Color::Rgb(210, 180, 60);
+    let card = targets.iter().find(|t| t.index == 0).unwrap();
+    let due_row = card.y_end - 2;
+    let found_yellow = (0..80u16).any(|x| {
+        buf.cell((x, due_row))
+            .map(|c| c.style().fg == Some(due_yellow))
+            .unwrap_or(false)
+    });
+    assert!(
+        found_yellow,
+        "near-due card's due row (y={due_row}) must have at least one yellow-fg cell (D2c-AC2)"
+    );
+}
+
+// D2c-AC3: a task with no due_on shows 'sem data' on line 2 with neither red nor yellow fg.
+#[test]
+fn draw_tasks_no_due_shows_sem_data_with_default_style() {
+    use ratatui::style::Color;
+    let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+    set_language("pt_BR");
+    let task = TaskRow {
+        task_id: 1,
+        task_number: 1,
+        name: "No Due Task".into(),
+        instance: "inst".into(),
+        project_id: 0,
+        due_on: None,
+    };
+    let backend = TestBackend::new(80, 10);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut targets: Vec<crate::tui::model::ClickTarget> = vec![];
+    terminal
+        .draw(|frame| {
+            draw_tasks(
+                frame,
+                Rect::new(0, 0, 80, 10),
+                "Project A",
+                &[task],
+                0,
+                false,
+                false,
+                today_fixed(),
+                &mut targets,
+            );
+        })
+        .unwrap();
+    let buf = terminal.backend().buffer();
+    set_language("en");
+    let content = buf_to_string(buf);
+    assert!(
+        content.contains("sem data"),
+        "no-due task must show 'sem data' on line 2: {content}"
+    );
+    let due_red = Color::Rgb(220, 80, 80);
+    let due_yellow = Color::Rgb(210, 180, 60);
+    let card = targets.iter().find(|t| t.index == 0).unwrap();
+    let due_row = card.y_end - 2;
+    let has_urgency_color = (0..80u16).any(|x| {
+        buf.cell((x, due_row))
+            .map(|c| c.style().fg == Some(due_red) || c.style().fg == Some(due_yellow))
+            .unwrap_or(false)
+    });
+    assert!(
+        !has_urgency_color,
+        "no-due task's due row must NOT have red or yellow fg (D2c-AC3): row y={due_row}"
+    );
+}
+
+// D2c-AC4: the selected card highlights every row including the due line (line 2),
+// AND the due color (red/yellow) remains visible on the selected row.
+#[test]
+fn draw_tasks_selected_card_due_line_keeps_color_on_amber_bg() {
+    use ratatui::style::Color;
+    let task = TaskRow {
+        task_id: 1,
+        task_number: 1,
+        name: "Overdue Selected".into(),
+        instance: "inst".into(),
+        project_id: 0,
+        due_on: Some("2025-06-10".into()), // overdue: 5 days before today_fixed()
+    };
+    let backend = TestBackend::new(80, 20);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut targets: Vec<crate::tui::model::ClickTarget> = vec![];
+    terminal
+        .draw(|frame| {
+            draw_tasks(
+                frame,
+                Rect::new(0, 0, 80, 20),
+                "Project A",
+                &[task],
+                0, // card 0 is selected
+                false,
+                false,
+                today_fixed(),
+                &mut targets,
+            );
+        })
+        .unwrap();
+    let buf = terminal.backend().buffer();
+    let amber = Color::Rgb(210, 160, 90);
+    let due_red = Color::Rgb(220, 80, 80);
+    let card = targets.iter().find(|t| t.index == 0).unwrap();
+
+    // Every row in the card must have amber bg (selection style covers all rows).
+    for y in card.y_start..card.y_end {
+        let has_amber = (0..80u16).any(|x| {
+            buf.cell((x, y))
+                .map(|c| c.style().bg == Some(amber))
+                .unwrap_or(false)
+        });
+        assert!(
+            has_amber,
+            "selected card row y={y} must have amber-bg (D2c-AC4 whole-card highlight)"
+        );
+    }
+
+    // The due row must also carry red fg (urgency color over amber bg).
+    let due_row = card.y_end - 2;
+    let has_red_on_due_row = (0..80u16).any(|x| {
+        buf.cell((x, due_row))
+            .map(|c| c.style().fg == Some(due_red))
+            .unwrap_or(false)
+    });
+    assert!(
+        has_red_on_due_row,
+        "selected overdue card's due row (y={due_row}) must still carry red fg over amber bg (D2c-AC4)"
     );
 }
 

@@ -180,6 +180,7 @@ pub fn view(model: &Model, frame: &mut Frame, targets: &mut Vec<ClickTarget>) {
             revalidating,
             ..
         } => {
+            let today = chrono::Local::now().date_naive();
             draw_tasks(
                 frame,
                 chunks[1],
@@ -188,6 +189,7 @@ pub fn view(model: &Model, frame: &mut Frame, targets: &mut Vec<ClickTarget>) {
                 *selected,
                 *loading,
                 *revalidating,
+                today,
                 targets,
             );
         }

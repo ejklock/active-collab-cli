@@ -1,8 +1,9 @@
 use crate::render::{display_width, wrap_text, PANEL_HPAD};
-use crate::tui::model::{ClickTarget, TaskRow};
+use crate::tui::model::{relative_due, ClickTarget, TaskRow};
 use crate::tui::theme;
 use ratatui::{
-    text::{Line, Text},
+    style::Style,
+    text::{Line, Span, Text},
     widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
     Frame,
 };
@@ -27,6 +28,7 @@ pub fn draw_tasks(
     selected: usize,
     loading: bool,
     revalidating: bool,
+    today: chrono::NaiveDate,
     targets: &mut Vec<ClickTarget>,
 ) {
     let title = if revalidating {
@@ -68,6 +70,7 @@ pub fn draw_tasks(
         first_visible,
         selected,
         card_inner_w,
+        today,
         targets,
     );
 
@@ -81,7 +84,7 @@ pub fn draw_tasks(
 
 /// Return the height (in buffer rows) of each task card.
 ///
-/// Each card = 2 border rows + max(1, wrapped content line count).
+/// Each card = 2 border rows + wrapped line-1 rows + 1 (the due-date line-2).
 fn build_card_heights(tasks: &[TaskRow], card_inner_w: usize) -> Vec<u16> {
     tasks
         .iter()
@@ -89,12 +92,13 @@ fn build_card_heights(tasks: &[TaskRow], card_inner_w: usize) -> Vec<u16> {
         .collect()
 }
 
-/// Height of a single task card: 2 border rows + number of wrapped content lines.
+/// Height of a single task card: 2 border rows + wrapped line-1 row count + 1 for line-2 (due).
 fn card_height_for(task: &TaskRow, card_inner_w: usize) -> u16 {
     let content = task_card_content(task);
     let lines = wrap_text(&content, card_inner_w.max(1));
     let body_rows = if lines.is_empty() { 1 } else { lines.len() };
-    2 + body_rows as u16
+    // +1 for the due-date line (line 2); line 2 never wraps.
+    2 + body_rows as u16 + 1
 }
 
 /// Build the first-line content string for a task card: `#<number>  <name>`.
@@ -150,6 +154,7 @@ fn render_cards(
     first_visible: usize,
     selected: usize,
     card_inner_w: usize,
+    today: chrono::NaiveDate,
     targets: &mut Vec<ClickTarget>,
 ) {
     targets.clear();
@@ -170,7 +175,7 @@ fn render_cards(
 
         let card_rect = ratatui::layout::Rect::new(area.x, y, area.width, visible_rows);
         let is_selected = i == selected;
-        render_single_card(frame, card_rect, task, card_inner_w, is_selected);
+        render_single_card(frame, card_rect, task, card_inner_w, is_selected, today);
 
         let absolute_y_start = y;
         let absolute_y_end = y + visible_rows;
@@ -186,15 +191,17 @@ fn render_cards(
 
 /// Render a single task card into `card_rect`.
 ///
-/// Builds top-border, content, and bottom-border lines as a `Text` block.
-/// The selected card is styled with `selection_style()` so its entire area
-/// (borders + content) carries the highlight background.
+/// Builds top-border, content (line 1), due-date (line 2), and bottom-border
+/// lines as a `Text` block. The selected card carries the selection highlight
+/// base style on every row; the due-date fg color (red/yellow) is layered over
+/// the base so urgency color remains visible even on the selection background.
 fn render_single_card(
     frame: &mut Frame,
     card_rect: ratatui::layout::Rect,
     task: &TaskRow,
     card_inner_w: usize,
     is_selected: bool,
+    today: chrono::NaiveDate,
 ) {
     let content = task_card_content(task);
     let wrapped = wrap_text(&content, card_inner_w.max(1));
@@ -212,7 +219,7 @@ fn render_single_card(
     let base_style = if is_selected {
         theme::selection_style()
     } else {
-        ratatui::style::Style::default()
+        Style::default()
     };
 
     let mut lines: Vec<Line<'static>> = Vec::new();
@@ -222,10 +229,34 @@ fn render_single_card(
         let content_text = format!("{}{}{}{}{}", BOX_V, hpad, fitted, hpad, BOX_V);
         lines.push(Line::styled(content_text, base_style));
     }
+    lines.push(due_line(task, card_inner_w, &hpad, base_style, today));
     lines.push(Line::styled(bot_border, base_style));
 
     let text = Text::from(lines);
     frame.render_widget(Paragraph::new(text), card_rect);
+}
+
+/// Build the due-date content line (line 2) for a task card.
+///
+/// The due fg color (red/yellow/default) is applied over the base_style background
+/// so the urgency color survives even when the card is selected (amber bg).
+fn due_line(
+    task: &TaskRow,
+    card_inner_w: usize,
+    hpad: &str,
+    base_style: Style,
+    today: chrono::NaiveDate,
+) -> Line<'static> {
+    let (due_text, due_kind) = relative_due(task.due_on.as_deref(), today);
+    let fitted = fit_to_card_width(&due_text, card_inner_w);
+    let due_fg = theme::due_style(due_kind);
+    // Merge: keep the base bg (selection or default) but override fg with urgency color.
+    let due_cell_style = base_style.patch(due_fg);
+    Line::from(vec![
+        Span::styled(format!("{BOX_V}{hpad}"), base_style),
+        Span::styled(fitted, due_cell_style),
+        Span::styled(format!("{hpad}{BOX_V}"), base_style),
+    ])
 }
 
 /// Pad or truncate `s` to exactly `width` display columns.

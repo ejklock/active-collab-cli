@@ -1,3 +1,4 @@
+use crate::tui::model::DueStyle;
 use ratatui::style::{Color, Modifier, Style};
 
 const NEAR_BLACK: Color = Color::Rgb(13, 13, 13);
@@ -7,6 +8,8 @@ const STEEL_BG: Color = Color::Rgb(38, 52, 74);
 const AMBER: Color = Color::Rgb(210, 160, 90);
 const MUTED_GREEN: Color = Color::Rgb(120, 190, 130);
 const LIGHT_GREY: Color = Color::Rgb(208, 216, 224);
+const DUE_RED: Color = Color::Rgb(220, 80, 80);
+const DUE_YELLOW: Color = Color::Rgb(210, 180, 60);
 
 /// Prefix rendered before the selected row in a table.
 pub const SELECTION_SYMBOL: &str = "▸ ";
@@ -84,4 +87,17 @@ pub fn copied_indicator_style() -> Style {
 /// Inline code spans in rich text — steel, dim.
 pub fn code_style() -> Style {
     Style::default().fg(STEEL).add_modifier(Modifier::DIM)
+}
+
+/// Due-date color for a task card's line 2, keyed on the DueStyle variant.
+///
+/// Overdue -> red; Near -> yellow; Normal or None -> default fg (no color override).
+/// Callers merge this with the base (selection) background when a card is selected
+/// so urgency color stays visible even on the amber highlight.
+pub fn due_style(kind: DueStyle) -> Style {
+    match kind {
+        DueStyle::Overdue => Style::default().fg(DUE_RED),
+        DueStyle::Near => Style::default().fg(DUE_YELLOW),
+        DueStyle::Normal | DueStyle::None => Style::default(),
+    }
 }

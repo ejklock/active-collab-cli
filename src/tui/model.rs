@@ -72,7 +72,6 @@ pub struct TaskRow {
 
 /// Style classification produced by `relative_due`.
 #[derive(Debug, Clone, Copy, PartialEq)]
-#[allow(dead_code)]
 pub enum DueStyle {
     Overdue,
     Near,
@@ -1260,14 +1259,12 @@ pub fn init_mine(header: Header, seed: Option<Vec<MineTableRow>>) -> (Model, Vec
     (model, vec![Cmd::LoadMineTasks])
 }
 
-#[allow(dead_code)]
 const NEAR_DUE_WINDOW_DAYS: i64 = 3;
 
 /// Map an optional `YYYY-MM-DD` due date to a Brazilian-Portuguese label and style.
 ///
 /// Pure and total: no side effects, no I/O. Accepts an injected `today` so callers
 /// remain deterministic in tests.
-#[allow(dead_code)]
 pub fn relative_due(due_on: Option<&str>, today: chrono::NaiveDate) -> (String, DueStyle) {
     use chrono::NaiveDate;
 
@@ -1312,7 +1309,6 @@ pub fn relative_due(due_on: Option<&str>, today: chrono::NaiveDate) -> (String, 
     }
 }
 
-#[allow(dead_code)]
 fn day_word(n: i64) -> String {
     if n == 1 {
         t("due_day")
