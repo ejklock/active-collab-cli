@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0] - 2026-06-25
+
+### Changed
+
+- The Rust (ratatui + crossterm) single binary `ac` is now the shipped
+  application. The Python package (`src/active_collab`, `pyproject.toml`,
+  `legacy/`) has been removed entirely.
+- The Cargo crate has been promoted to the repo root. `Cargo.toml`, `src/`,
+  `tests/`, `locales/`, `Dockerfile`, and `docker-compose.yml` now live at the
+  top level (previously under `rust/`). Build commands are unchanged:
+  `docker compose run --rm dev cargo build|test|clippy|fmt`.
+- The on-disk SQLite schema (`~/.config/active-collab/active-collab.db`) is
+  preserved unchanged, so existing users' instance configuration and task cache
+  continue to work without migration.
+
 ## [0.5.0] - 2026-06-24
 
 ### Added
@@ -12,17 +27,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Task detail redesign: structured meta fields rendered as a full-grid rounded
   bordered table (`├──┼──┤` separators, label | value columns, `Details` title
   embedded in the top border). Task name stays in the frame title, not the grid.
+- Assignee field in the meta grid now renders as `Name (id)` when the user name
+  is known, or `(id)` alone when only the ID is available.
 - Artifacts panel: a rounded `Artifacts` box in the detail view lists each image,
   attachment, and link as `[n] name` with its real URL on an indented line.
   Terminal emulators that auto-link URLs make them clickable without any escape
   codes.
+- Clickable links: mouse-clicking any `http`/`https` URL in the detail view opens
+  it in the browser via `curses.BUTTON1_CLICKED` hit-testing. Only `http`/`https`
+  schemes are accepted; all other schemes are ignored.
 - Digit hotkeys `1`–`9` in the detail view open the matching artifact in the
   browser via `controller.open_asset`; out-of-range digits are safe no-ops.
 - Detail footer now includes a `[1-9] open` cap when artifacts are present.
+- Footer redesign: hint bar uses key-cap style (`[key] action`) rendered on the
+  default terminal background — no colored bar.
 - i18n (en + pt_BR): lightweight in-code dict catalog via `__()` helper; locale
-  resolved from `ACTIVE_COLLAB_LANG` → `LANG` prefix → `en`. All user-facing
-  strings in `render.py`, `cli.py`, and `tui.py` are now wrapped. Works inside
+  resolved at startup with precedence `ACTIVE_COLLAB_LANG` env → SQLite
+  `language` setting → `en`. All user-facing strings in `render.py`, `cli.py`,
+  and `tui.py` are now wrapped, including help text in argparse. Works inside
   a PyInstaller `--onefile` binary with zero bundling overhead.
+- `active-collab setup language [code]`: show or set the display language. With
+  no argument it prints the current language code; with `en` or `pt_BR` it
+  validates the code and persists it to the SQLite settings table so the choice
+  survives across invocations.
+- Interactive Settings screen in `browse`: press `[s]` from any list screen to
+  open the Settings panel. Arrow-key picker for **Language** (`en` / `pt_BR`)
+  and **Active instance** (when multiple instances are configured). Both choices
+  persist to SQLite; language changes take effect immediately without restarting.
 - The `browse` TTY-guard error (`"Error: 'browse' requires an interactive terminal
   (TTY)."`) is now routed through `__()` with a `pt_BR` catalog entry.
 - `__version__` bumped to `0.5.0`.
