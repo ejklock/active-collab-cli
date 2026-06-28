@@ -25,7 +25,11 @@ service mounts `./` and sets `working_dir` to `/app`. Therefore:
    - `docker compose run --rm dev cargo build`
    - `docker compose run --rm dev cargo test`
    - `docker compose run --rm dev cargo test --test comment_policy` (comment-policy gate: no banners, no commented-out code; doc comments and non-obvious why-comments are allowed)
-   - `docker compose run --rm dev cargo clippy -- -D warnings`
+   - `docker compose run --rm dev cargo clippy --all-targets -- -D warnings`
+     (use `--all-targets` to match CI: without it clippy does **not** lint the
+     `#[path]`-included `#[cfg(test)]` modules, and `cargo test` only surfaces
+     rustc warnings — not clippy-specific lints — so test-code clippy denials
+     slip past the local gate and fail CI.)
    - `docker compose run --rm dev cargo fmt --check`
    - `docker compose build` / `docker compose run --rm build` (release)
 2. **NEVER prefix a command with `cd`.** The shell's working directory is already

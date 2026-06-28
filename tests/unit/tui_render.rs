@@ -4859,9 +4859,9 @@ mod panel_row_layout {
         );
 
         // top PANEL_VPAD pads at the start
-        for i in 0..PANEL_VPAD {
+        for (i, row) in rows.iter().enumerate().take(PANEL_VPAD) {
             assert!(
-                matches!(rows[i], PanelRow::Pad),
+                matches!(row, PanelRow::Pad),
                 "row {i} must be Pad (top vpad): got a different kind"
             );
         }

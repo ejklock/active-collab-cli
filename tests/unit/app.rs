@@ -1960,7 +1960,7 @@ fn reflow_tasks_list_swap_invalidates_cache_selected_change_does_not() {
     };
     assert!(!heights_before.is_empty());
 
-    let (mut m2, _) = update(m, Msg::Down);
+    let (m2, _) = update(m, Msg::Down);
     match m2.stack.last() {
         Some(Screen::Tasks {
             selected,

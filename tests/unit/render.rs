@@ -1617,7 +1617,7 @@ fn build_header_lines_long_title_wraps_within_panel() {
         // A new label row starts with non-space (next label). A VPAD blank row is all spaces
         // but also has all spaces after stripping — we distinguish by checking if the NEXT
         // non-space char exists (value text follows the indent on a continuation line).
-        let starts_with_spaces = inner_start.first().map_or(false, |c| *c == ' ');
+        let starts_with_spaces = inner_start.first().is_some_and(|c| *c == ' ');
         let has_non_space = inner_start.iter().any(|c| *c != ' ');
         if starts_with_spaces && has_non_space {
             fragment_count += 1;
@@ -2426,7 +2426,7 @@ fn url_at_returns_raw_body_url_when_clicked_on_raw_url() {
 fn url_at_non_url_bracket_token_returns_none() {
     let line = "see [note] for details";
     // col 5 is inside "[note]" — but it's not a URL
-    let result = url_at(&line, 5);
+    let result = url_at(line, 5);
     assert!(
         result.is_none(),
         "url_at on non-url '[note]' must return None: {result:?}"
