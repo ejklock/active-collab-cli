@@ -2,7 +2,7 @@
 type: Issue
 title: "D1e — open assets via Ctrl/Cmd+click; remove the numeric 1-9 open and d+1-9 download shortcuts"
 description: Replace the numeric asset open (1-9) and download (d+1-9) keyboard shortcuts with Ctrl/Cmd+click activation consistent with D1c body links. Plain click does not open (reserved for selection). Remove pending_download, Msg::AssetOpen/TogglePendingDownload, digit_to_asset_index, the Cmd::DownloadAsset variant, and the numeric footer hints.
-status: open
+status: closed
 labels: [tui, ux, mouse, assets, keybindings]
 blocked_by:
 tracker:

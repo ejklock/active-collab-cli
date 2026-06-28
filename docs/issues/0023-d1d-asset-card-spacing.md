@@ -2,7 +2,7 @@
 type: Issue
 title: "D1d — Anexos/Artefatos card breathing room: blank line between links + interior padding"
 description: Give the detail asset card visual breathing room — a blank separator row between consecutive links, one row of interior vertical padding top and bottom, and a leading horizontal pad — keeping the renderer and asset_panel_render_height in lock-step, and raise the magic height cap to a named ceiling so the common multi-link card is not clipped.
-status: open
+status: closed
 labels: [tui, ux, detail, assets, layout]
 blocked_by:
 tracker:

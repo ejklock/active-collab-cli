@@ -2,7 +2,7 @@
 type: Issue
 title: "D2 — task list as per-task cards with a relative, colored due date (D2a card shell, D2b project + due)"
 description: Replace the single NOME-column task list with a bordered card per task. D2a renders the card shell (#number + name, header removed, whole-card click target/selection). D2b parses due_on from the list payload, resolves the project name from cache, and shows a relative color-coded due date on line 2.
-status: open
+status: closed
 labels: [tui, ux, task-list, cards]
 blocked_by:
 tracker:

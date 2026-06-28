@@ -2,7 +2,7 @@
 type: Issue
 title: "D1f — move the asset-open hint into the Anexos card (italic), out of the footer"
 description: Render the "Ctrl/Cmd+clique abrir anexo" hint as an italic footnote inside the Anexos/Artefatos card and remove it from the Detail footer, keeping the asset click hit-test in lock-step with the taller card.
-status: open
+status: closed
 labels: [tui, ux, detail, assets]
 blocked_by:
 tracker:
