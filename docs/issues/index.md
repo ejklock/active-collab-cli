@@ -35,3 +35,4 @@ TUI/UX work (V/R/ARCH slices), tracing to
 | [0027](/issues/0027-arch-asset-panel-single-layout.md) | ARCH | one layout source of truth for the Anexos/Artefatos panel (asset_panel module) | closed | — |
 | [0028](/issues/0028-assets-inline-scrollable-content.md) | DV | assets render inline in the globally-scrollable detail content (retire the fixed panel + cap) | closed | — |
 | [0029](/issues/0029-richtext-wrap-positional-style.md) | RT | rich-line wrap threads style positionally — fix repeated/substring word emphasis, delete style_of_word_in_rich_line | closed | — |
+| [0030](/issues/0030-tasks-card-layout-cache.md) | PERF | memoize the Tasks-screen card layout (heights + prefix-sum offsets, binary-search first-visible, u32 offsets) | open | — |
