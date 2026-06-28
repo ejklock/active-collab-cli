@@ -26,7 +26,7 @@ TUI/UX work (V/R/ARCH slices), tracing to
 | [0018](/issues/0018-b1-multi-instance-project-name-isolation.md) | B1 | multi-instance project-name isolation: key the in-memory name map by (instance, project_id) | closed | — |
 | [0019](/issues/0019-r4-richtext-full-tag-coverage.md) | R4 | rich-text completeness: tables, strikethrough, underline, preformatted blocks | closed | — |
 | [0020](/issues/0020-v5-body-links-inline-url.md) | V5 | body links render inline as text + visible URL, clickable from the visible region | closed | — |
-| [0021](/issues/0021-v6-app-managed-selection.md) | V6 | app-managed text selection: drag to highlight, copy to clipboard with feedback | open | — |
+| [0021](/issues/0021-v6-app-managed-selection.md) | V6 | app-managed text selection: drag to highlight, copy to clipboard with feedback | closed | — |
 | [0022](/issues/0022-detail-link-wrap-artifacts-project-title.md) | D1 | detail polish: wrapped-link click, Anexos label, empty project, title placement | closed | 0020 |
 | [0023](/issues/0023-d1d-asset-card-spacing.md) | D1d | Anexos/Artefatos card breathing room — blank line between links + interior padding | closed | — |
 | [0024](/issues/0024-d1e-asset-activation-ctrl-cmd-click.md) | D1e | open assets via Ctrl/Cmd+click; remove the numeric 1-9 open + d+1-9 download shortcuts | closed | 0023 |

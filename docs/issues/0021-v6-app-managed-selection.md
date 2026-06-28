@@ -2,7 +2,7 @@
 type: Issue
 title: "V6 — app-managed text selection: drag to highlight, copy to clipboard with feedback"
 description: Replace the V3 mouse-capture toggle with app-managed selection — keep capture on, track press/drag/release, draw a reverse-video highlight over the selection, and copy it to the system clipboard via arboard with a footer confirmation. Supersedes ADR 0012 / BDR 0006.
-status: open
+status: closed
 labels: [tui, ux, mouse, selection, clipboard]
 blocked_by:
 tracker:
