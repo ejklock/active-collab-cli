@@ -11,6 +11,16 @@ timestamp: 2026-06-27T00:00:00Z
 
 # 0028. One layout source of truth for the Anexos/Artefatos panel
 
+> **Amended by [ADR 0029](/adr/0029-assets-inline-in-scrollable-detail-content.md)
+> (2026-06-27).** The core decision — one composition source (`asset_panel::layout`
+> → `Vec<PanelRow>`) that render and the click hit-test both derive from — **still
+> holds**. ADR 0029 repurposes the module: `layout`/`PanelRow` are retained and now
+> feed **inline scrollable content** plus a scroll-aware line→asset-index map, while
+> the fixed-panel adapters (`apply_cap`, `height`, the block `render`, the panel
+> `index_at`, and the `ASSET_PANEL_MAX_ROWS` cap) are **retired** with the fixed
+> panel. The deferred "Note 1" `apply_cap` refinement is thereby subsumed (no cap,
+> nothing to truncate).
+
 ## Context
 
 The detail view's **Anexos/Artefatos** card is laid out by three functions that

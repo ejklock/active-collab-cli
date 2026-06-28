@@ -2,14 +2,20 @@
 type: BDR
 title: The asset-open hint lives inside the Anexos card in italic, not in the footer
 description: On the Detail screen, the "Ctrl/Cmd+clique abrir anexo" hint is rendered as an italic footnote inside the Anexos/Artefatos card and no longer appears in the footer. The asset click-to-open mapping is unchanged by the card growing one footnote.
-status: Accepted
-superseded_by:
+status: Superseded
+superseded_by: 0022
 supersedes:
 tags: [tui, ux, detail, assets]
 timestamp: 2026-06-27T00:00:00Z
 ---
 
 # 0021. Asset-open hint inside the Anexos card
+
+> **Superseded by [BDR 0022](/bdr/0022-assets-inline-scrollable-detail-content.md)
+> (2026-06-27).** The assets folded into the global scroll (ADR 0029); the **italic
+> Ctrl/Cmd+click hint** is carried forward as the last line of the inline asset
+> section, and the click-to-open mapping is now scroll-aware. Retained for
+> provenance.
 
 ## Context
 

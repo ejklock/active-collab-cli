@@ -2,14 +2,20 @@
 type: BDR
 title: "Anexos/Artefatos card has breathing room: a blank line between links and interior padding"
 description: In the detail view, the Anexos/Artefatos card renders each link separated by a blank row and inset from the box border by interior padding (top, bottom, and a leading horizontal pad). The card's height grows to fit the spaced content up to a named ceiling, and the rendered height stays consistent with the geometry used for scroll and click hit-testing.
-status: Accepted
-superseded_by:
+status: Superseded
+superseded_by: 0022
 supersedes:
 tags: [tui, ux, detail, assets, layout]
 timestamp: 2026-06-27T00:00:00Z
 ---
 
 # 0018. Anexos/Artefatos card breathing room
+
+> **Superseded by [BDR 0022](/bdr/0022-assets-inline-scrollable-detail-content.md)
+> (2026-06-27).** The assets folded into the global scroll (ADR 0029); the
+> per-link **breathing room** here is carried forward inline, while the
+> fixed-panel-geometry scenarios (height matching a fixed chunk, Sc. 5) are
+> retired. Retained for provenance.
 
 ## Context
 

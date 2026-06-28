@@ -19,7 +19,8 @@
 | [0015](/bdr/0015-app-managed-text-selection.md) | App-managed text selection: drag highlights text and copies it to the clipboard with feedback (V6) | Accepted |
 | [0016](/bdr/0016-detail-title-row-project-name.md) | Detail view shows the title as a Título row and a populated Projeto row (D1a) | Accepted |
 | [0017](/bdr/0017-asset-label-derivation.md) | Anexos/Artefatos labels read as anchor text, a real filename, or the host (D1b) | Accepted |
-| [0018](/bdr/0018-asset-card-breathing-room.md) | Anexos/Artefatos card has breathing room: a blank line between links and interior padding (D1d) | Accepted |
+| [0018](/bdr/0018-asset-card-breathing-room.md) | Anexos/Artefatos card has breathing room: a blank line between links and interior padding (D1d) | Superseded by 0022 |
 | [0019](/bdr/0019-asset-activation-ctrl-cmd-click.md) | Assets open on Ctrl/Cmd+click; the numeric 1-9 open and d+1-9 download shortcuts are removed (D1e) | Accepted |
 | [0020](/bdr/0020-task-list-cards.md) | The task list shows a bordered card per task with a relative, colored due date (D2) | Accepted |
-| [0021](/bdr/0021-asset-open-hint-in-card.md) | The asset-open hint lives inside the Anexos card in italic, not in the footer (D1f) | Accepted |
+| [0021](/bdr/0021-asset-open-hint-in-card.md) | The asset-open hint lives inside the Anexos card in italic, not in the footer (D1f) | Superseded by 0022 |
+| [0022](/bdr/0022-assets-inline-scrollable-detail-content.md) | Assets are part of the scrollable detail content: every attachment reachable by scrolling, opens on Ctrl/Cmd+click at any scroll position | Accepted |

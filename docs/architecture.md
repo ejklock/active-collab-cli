@@ -26,7 +26,8 @@ flowchart TD
     view --> screens["tui/screens/\nprojects.rs · tasks.rs · detail.rs\neach owns its draw_* fn\n(responsive Table · detail wraps text + assets panel)"]
     view --> drawer["tui/drawer.rs\nshared widget builders (render_table)"]
     view --> theme["tui/theme.rs\ncentralized Style / Color constants"]
-    screens --> asset_panel["tui/screens/asset_panel.rs\nAnexos/Artefatos layout source of truth\nlayout → Vec&lt;PanelRow&gt; · render · height · index_at"]
+    screens --> asset_panel["tui/screens/asset_panel.rs\nAnexos/Artefatos composition source\nlayout → Vec&lt;PanelRow&gt; → inline content lines\n+ pure line→asset-index map"]
+    render --> asset_panel
     model --> asset_panel
     screens --> drawer
     screens --> theme
@@ -60,16 +61,23 @@ flowchart TD
   centered `"Terminal too small"` message.  List screens render a ratatui `Table`
   driven by width `Constraint`s (no fixed-width truncation) with a
   `TableState`-driven selection highlight; the detail screen wraps long lines and
-  renders assets in a dedicated panel. All colors live in `theme.rs` — no inline
+  renders the assets inline at the end of the single globally-scrollable content
+  (ADR 0029 — no fixed panel). All colors live in `theme.rs` — no inline
   `Color`/`Style` literals in the screen or drawer modules.
-- **the Anexos/Artefatos panel has one layout source of truth**
-  ([ADR 0028](/adr/0028-asset-panel-single-layout-source.md)): `screens/asset_panel.rs`
-  owns a pure `layout(assets, width) -> Vec<PanelRow>`; the renderer (`detail.rs`),
-  the panel height, and the click hit-test (`model.rs`) are thin adapters that all
-  derive from that one vector, so they cannot drift. Fitness: `height` equals the
-  rows the renderer emits and the geometry the hit-test indexes
-  ([BDR 0018](/bdr/0018-asset-card-breathing-room.md) Sc. 5), gate-checked by a unit
-  test on the `Vec<PanelRow>` and a TestBackend render assertion.
+- **the Anexos/Artefatos assets are part of the global scroll, from one composition
+  source** ([ADR 0029](/adr/0029-assets-inline-in-scrollable-detail-content.md),
+  amending [ADR 0028](/adr/0028-asset-panel-single-layout-source.md)):
+  `screens/asset_panel.rs` owns a pure `layout(assets, width) -> Vec<PanelRow>`;
+  `build_detail_content` (`render.rs`) splices that vector into the scrollable
+  `lines`/`line_styles` (so every attachment is reachable by scrolling — no fixed
+  panel, no height cap), and the same vector yields a pure line→asset-index map the
+  click hit-test (`model.rs`) reads. The asset click is **scroll-aware**, sharing
+  the body-link `offset + (row − text_top)` translation
+  ([ADR 0020](/adr/0020-body-links-inline-url-native-click.md)). Fitness: the
+  rendered asset lines and the click map both derive from the one `layout` vector
+  (they cannot drift), gate-checked by a unit test on the `Vec<PanelRow>` + the map
+  and a TestBackend render derived from the real buffer
+  ([BDR 0022](/bdr/0022-assets-inline-scrollable-detail-content.md)).
 
 ## Read / browse data flow
 

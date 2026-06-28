@@ -25,8 +25,9 @@
 | [0021](/adr/0021-app-managed-text-selection-clipboard.md) | App-managed text selection with a drawn highlight and clipboard copy (V6) | Accepted |
 | [0022](/adr/0022-detail-title-as-meta-row.md) | The task title renders as a Título row inside the Detalhes panel, not a loose header (D1a) | Accepted |
 | [0023](/adr/0023-asset-label-derivation.md) | Derive the Anexos/Artefatos label from anchor text, then a real filename, then the host (D1b) | Accepted |
-| [0024](/adr/0024-asset-card-breathing-room.md) | Anexos/Artefatos card breathing room — per-link separators, interior padding, named height ceiling (D1d) | Accepted |
+| [0024](/adr/0024-asset-card-breathing-room.md) | Anexos/Artefatos card breathing room — per-link separators, interior padding, named height ceiling (D1d) | Superseded by 0029 |
 | [0025](/adr/0025-asset-activation-ctrl-cmd-click.md) | Open assets with Ctrl/Cmd+click; retire the numeric 1-9 open and d+1-9 download shortcuts (D1e) | Accepted |
 | [0026](/adr/0026-task-list-as-cards.md) | Render the task list as per-task cards with a relative, colored due date (D2) | Accepted |
 | [0027](/adr/0027-asset-open-hint-in-card.md) | Move the asset-open hint into the Anexos card as an italic footnote; drop it from the footer (D1f) | Accepted |
-| [0028](/adr/0028-asset-panel-single-layout-source.md) | One layout source of truth for the Anexos/Artefatos panel — a pure asset_panel module the renderer, height, and hit-test all derive from (ARCH) | Accepted |
+| [0028](/adr/0028-asset-panel-single-layout-source.md) | One layout source of truth for the Anexos/Artefatos panel — a pure asset_panel module the renderer, height, and hit-test all derive from (ARCH) | Accepted (amended by 0029) |
+| [0029](/adr/0029-assets-inline-in-scrollable-detail-content.md) | Assets render inline in the globally-scrollable detail content — retire the fixed asset panel and its height cap; scroll-aware asset click | Accepted |

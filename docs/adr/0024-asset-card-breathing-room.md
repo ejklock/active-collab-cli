@@ -2,14 +2,21 @@
 type: ADR
 title: Anexos/Artefatos card breathing room — per-link separators, interior padding, named height ceiling
 description: Give the detail asset card visual breathing room — a blank separator row between consecutive links, one row of interior vertical padding top and bottom, and a leading horizontal pad — and raise the panel's magic height cap to a named ceiling so the common multi-link case is not clipped. The renderer and the height function stay in lock-step.
-status: Accepted
+status: Superseded
 supersedes:
-superseded_by:
+superseded_by: 0029
 tags: [tui, ux, ratatui, detail, assets, layout]
 timestamp: 2026-06-27T00:00:00Z
 ---
 
 # 0024. Anexos/Artefatos card breathing room
+
+> **Superseded by [ADR 0029](/adr/0029-assets-inline-in-scrollable-detail-content.md)
+> (2026-06-27).** The fixed asset panel and its named height ceiling
+> (`ASSET_PANEL_MAX_ROWS`) were retired when the assets folded into the global
+> scroll. The **breathing room** decided here (a blank row between consecutive
+> links, interior padding) is **carried forward inline** by ADR 0029 / BDR 0022;
+> only the fixed-panel ceiling is reversed. Retained for provenance.
 
 ## Context
 
