@@ -2865,6 +2865,77 @@ fn is_in_body_area_includes_asset_rows_no_panel_height_subtracted() {
     );
 }
 
+// AC2 (fix-inline-asset-link-style-click): Ctrl/Cmd+click on an inline asset content row
+// emits Cmd::OpenAsset with that asset's url; a plain (unmodified) click on the SAME row
+// does NOT emit OpenAsset (reserved for text selection). Pins the Ctrl/Cmd gate end-to-end.
+//
+// This is the regression guard for ADR 0032: the hit-test (asset_panel_cmd_at) is intact;
+// what was broken was only the VISUAL affordance (no link style). Both are now tested together.
+//
+// Layout math for viewport (80, 24), 3 body lines + blank + section:
+//   inner_width = 78, content_width = inline_content_width(78)
+//   section_lines for 1 asset: [header(0), pad(1), Asset(2), sep(3), hint(4), pad(5)] = 6 rows
+//   total_lines = 3 + 1 + 6 = 10
+//   asset_section_start = 10 - 6 = 4
+//   interior_row = 2 → Asset{idx:0}
+//   line_idx = 4 + 2 = 6
+//   row = text_top(2) + (line_idx - offset(0)) = 8
+#[test]
+fn ctrl_click_on_asset_row_emits_open_asset_plain_click_does_not() {
+    let asset_url = "https://example.com/manual.pdf";
+
+    // Ctrl+click on the asset content row must emit OpenAsset with the exact url.
+    let m = detail_model_with_inline_assets(
+        (0..3).map(|i| format!("body line {i}")).collect(),
+        vec![make_asset("manual.pdf", asset_url)],
+        0,
+        (80, 24),
+    );
+    let (_m, ctrl_cmds) = update(
+        m,
+        Msg::Click {
+            column: 5,
+            row: 8,
+            modifiers: crossterm::event::KeyModifiers::CONTROL,
+        },
+    );
+    assert_eq!(
+        ctrl_cmds.len(),
+        1,
+        "Ctrl+click on asset row must emit exactly one cmd"
+    );
+    match &ctrl_cmds[0] {
+        Cmd::OpenAsset { url, instance } => {
+            assert_eq!(url, asset_url, "OpenAsset url must match the asset's url");
+            assert_eq!(instance, "inst");
+        }
+        other => panic!("expected Cmd::OpenAsset, got {other:?}"),
+    }
+
+    // Plain (unmodified) click on the SAME row must NOT emit OpenAsset (Ctrl/Cmd gate).
+    let m2 = detail_model_with_inline_assets(
+        (0..3).map(|i| format!("body line {i}")).collect(),
+        vec![make_asset("manual.pdf", asset_url)],
+        0,
+        (80, 24),
+    );
+    let (_m2, plain_cmds) = update(
+        m2,
+        Msg::Click {
+            column: 5,
+            row: 8,
+            modifiers: crossterm::event::KeyModifiers::NONE,
+        },
+    );
+    let has_open_asset = plain_cmds
+        .iter()
+        .any(|c| matches!(c, Cmd::OpenAsset { .. }));
+    assert!(
+        !has_open_asset,
+        "plain click on asset row must NOT emit OpenAsset (Ctrl/Cmd gate): {plain_cmds:?}"
+    );
+}
+
 // AC3 (BDR 0022 Sc.5): empty assets list → no inline section → no OpenAsset on any row.
 #[test]
 fn ctrl_click_with_empty_assets_emits_no_cmd() {

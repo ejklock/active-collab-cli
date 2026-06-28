@@ -10,6 +10,11 @@ pub enum RichStyle {
     Code,
     Strike,
     Underline,
+    /// Layout-emitted link affordance: muted green + underlined.
+    ///
+    /// Used when linkness is a structural layout fact (e.g. asset rows), not
+    /// inferred from visible URL text. Body links use the `link_segments` path.
+    Link,
 }
 
 /// A single styled text fragment within a rich line.

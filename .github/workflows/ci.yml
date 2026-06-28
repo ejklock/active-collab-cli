@@ -24,7 +24,10 @@ jobs:
         run: cargo clippy --all-targets -- -D warnings
 
       - name: Tests
-        run: cargo test --quiet
+        # --test-threads=1 is mandatory: locale-dependent tests (i18n / setup
+        # messages) share the process-global LANG via a mutex and flake when run
+        # in parallel. This matches the project's authoritative local invocation.
+        run: cargo test --quiet -- --test-threads=1
 
       - name: Comment policy gate
         run: cargo test --test comment_policy
