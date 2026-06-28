@@ -37,3 +37,6 @@ TUI/UX work (V/R/ARCH slices), tracing to
 | [0029](/issues/0029-richtext-wrap-positional-style.md) | RT | rich-line wrap threads style positionally — fix repeated/substring word emphasis, delete style_of_word_in_rich_line | closed | — |
 | [0030](/issues/0030-tasks-card-layout-cache.md) | PERF | memoize the Tasks-screen card layout (heights + prefix-sum offsets, binary-search first-visible, u32 offsets) | closed | — |
 | [0031](/issues/0031-fix-inline-asset-link-style-click.md) | BUG | inline Anexos/Artefatos rows render plain (no link style) + read as not clickable — restore structural link styling, prove Ctrl/Cmd+click open | closed | — |
+| [0032](/issues/0032-create-comment.md) | C1 | create a comment on the open task — multi-line compose, authenticated POST, server-truth refresh (PRD 0002 slice 1) | closed | — |
+| [0033](/issues/0033-edit-comment.md) | C2 | edit your own comment — permission-aware [editar] affordance, pre-filled compose, authenticated PUT (slice 2) | closed | 0032 |
+| [0034](/issues/0034-delete-comment.md) | C3 | delete your own comment — permission-aware [excluir] affordance, inline confirm, authenticated DELETE (slice 3) | closed | 0032 |

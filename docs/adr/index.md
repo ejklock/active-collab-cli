@@ -34,3 +34,7 @@
 | [0030](/adr/0030-richtext-wrap-positional-style.md) | Rich-line wrap threads span style positionally (per character), retiring the substring style lookup | Accepted |
 | [0031](/adr/0031-tasks-card-layout-cache.md) | Memoize the Tasks-screen card layout (prefix-sum offsets + binary-search first-visible) so per-event cost scales with the viewport, not the task count | Accepted |
 | [0032](/adr/0032-asset-row-link-style-structural.md) | Asset-row link styling is structural (a RichStyle::Link run emitted by the layout), not text-pattern URL detection | Accepted |
+| [0033](/adr/0033-authenticated-write-seam-comment-client.md) | Authenticated write seam — host-gated POST/PUT/DELETE on Http, comment-mutation methods on the client | Accepted |
+| [0034](/adr/0034-comment-compose-mode-multiline.md) | Multi-line comment compose is a mode on the Detail screen, driven by mode-aware key mapping in the shell | Accepted |
+| [0035](/adr/0035-server-truth-refresh-after-comment-mutation.md) | After a comment mutation, re-derive the thread from the server (LoadDetail refresh) — no optimistic UI | Accepted |
+| [0036](/adr/0036-permission-aware-comment-targeting.md) | Edit/delete target a comment via permission-aware inline affordances rendered only on the user's own comments | Accepted |
