@@ -22,6 +22,7 @@ struct PanelGeom {
 impl PanelGeom {
     fn compute(viewport_w: u16, viewport_h: u16, assets: &[Asset]) -> Option<Self> {
         use crate::render::PANEL_VPAD;
+        use crate::tui::screens::detail::ASSET_HINT_ROWS;
         let inner_width = viewport_w.saturating_sub(2) as usize;
         let panel_h = asset_panel_render_height(assets, inner_width);
         if panel_h == 0 {
@@ -30,8 +31,9 @@ impl PanelGeom {
         let top = viewport_h.saturating_sub(panel_h);
         // first_asset: skip top border (1) + PANEL_VPAD blank rows.
         let first_asset = top + 1 + PANEL_VPAD as u16;
-        // last_asset: last content row is PANEL_VPAD + 1 rows before the bottom of the panel.
-        let last_asset = viewport_h.saturating_sub(2 + PANEL_VPAD as u16);
+        // last_asset: last ASSET content row is before (blank + hint + PANEL_VPAD + bottom border).
+        // Layout from panel bottom: 1 border + PANEL_VPAD blank + ASSET_HINT_ROWS (hint+blank) + 1 = assets here.
+        let last_asset = viewport_h.saturating_sub(2 + PANEL_VPAD as u16 + ASSET_HINT_ROWS);
         Some(PanelGeom {
             top,
             first_asset,
@@ -303,10 +305,12 @@ fn asset_panel_render_height_zero_for_empty_assets() {
 
 // V2a-A3: asset_panel_render_height produces correct height for non-wrapping assets
 // at several viewport sizes — render and click mapper share this single source.
-// New formula: each short asset = 1 row; height = n + (n-1) separators + 2*VPAD + 2 borders
-// = 2n + 3, capped at ASSET_PANEL_MAX_ROWS=14.
+// Formula: each short asset = 1 row; height = (n + (n-1) separators + 2*VPAD + 2 borders) capped at
+// ASSET_PANEL_MAX_ROWS=14, then ASSET_HINT_ROWS=2 added unconditionally.
+// Result: (2n+3).min(14) + 2.
 #[test]
 fn asset_panel_render_height_consistent_geometry_for_short_names() {
+    use crate::tui::screens::detail::ASSET_HINT_ROWS;
     for (viewport_w, viewport_h, assets_count) in [
         (80u16, 24u16, 1usize),
         (80, 24, 3),
@@ -319,11 +323,11 @@ fn asset_panel_render_height_consistent_geometry_for_short_names() {
             .collect();
         let inner_width = (viewport_w - 2) as usize;
         let panel_h = asset_panel_render_height(&assets, inner_width);
-        // n rows + (n-1) separators + 2 vpad + 2 borders = 2n+3, capped at 14.
-        let expected_h = (2 * assets_count as u16 + 3).min(14);
+        // (n rows + (n-1) separators + 2 vpad + 2 borders) capped at 14, then + ASSET_HINT_ROWS.
+        let expected_h = (2 * assets_count as u16 + 3).min(14) + ASSET_HINT_ROWS;
         assert_eq!(
             panel_h, expected_h,
-            "panel height for {assets_count} short assets must equal min(2n+3,14)={expected_h} \
+            "panel height for {assets_count} short assets must equal (2n+3).min(14)+{ASSET_HINT_ROWS}={expected_h} \
              at viewport ({viewport_w}x{viewport_h})"
         );
 
@@ -539,7 +543,7 @@ fn detail_max_offset_no_assets_viewport_24_lines_50() {
 }
 
 // V5-A1: detail_max_offset — 2 short assets, viewport 24x80, lines_len=50.
-// panel_h = 2*2+3 = 7; text_vh = 24-4-7 = 13; max = 50-13 = 37.
+// panel_h = (2*2+3).min(14) + ASSET_HINT_ROWS = 7+2 = 9; text_vh = 24-4-9 = 11; max = 50-11 = 39.
 #[test]
 fn detail_max_offset_with_assets_shrinks_text_viewport() {
     use crate::tui::model::detail_max_offset;
@@ -549,13 +553,14 @@ fn detail_max_offset_with_assets_shrinks_text_viewport() {
     ];
     let max = detail_max_offset(24, 80, 50, &assets);
     assert_eq!(
-        max, 37,
-        "viewport=24x80, 2 short assets (panel_h=7): text_vh=13, max=50-13=37"
+        max, 39,
+        "viewport=24x80, 2 short assets (panel_h=9): text_vh=11, max=50-11=39"
     );
 }
 
-// V5-A1: detail_max_offset — 6 short assets (panel_h=14 capped), viewport 24x80, lines_len=50.
-// panel_h = min(2*6+3, 14) = 14; text_vh = 24-4-14 = 6; max = 50-6 = 44.
+// V5-A1: detail_max_offset — 6 short assets (capped part = 14, plus ASSET_HINT_ROWS=2),
+// viewport 24x80, lines_len=50.
+// panel_h = min(2*6+3, 14) + 2 = 14+2 = 16; text_vh = 24-4-16 = 4; max = 50-4 = 46.
 #[test]
 fn detail_max_offset_many_assets_caps_panel_height() {
     use crate::tui::model::detail_max_offset;
@@ -564,8 +569,8 @@ fn detail_max_offset_many_assets_caps_panel_height() {
         .collect();
     let max = detail_max_offset(24, 80, 50, &assets);
     assert_eq!(
-        max, 44,
-        "viewport=24x80, 6 short assets (panel_h=14 capped): text_vh=6, max=50-6=44"
+        max, 46,
+        "viewport=24x80, 6 short assets (panel_h=16): text_vh=4, max=50-4=46"
     );
 }
 
@@ -644,7 +649,7 @@ fn handle_down_idempotent_at_max() {
 }
 
 // V5-A1: handle_down clamps to a tighter max when assets are present.
-// viewport=80x24, 50 lines, 2 short assets (panel_h=7) → max=37.
+// viewport=80x24, 50 lines, 2 short assets (panel_h=9 after ASSET_HINT_ROWS) → max=39.
 #[test]
 fn handle_down_clamps_to_detail_max_offset_with_assets() {
     use crate::tui::model::detail_max_offset;
@@ -2599,10 +2604,10 @@ fn super_click_on_asset_row_emits_open_asset_cmd() {
     }
 }
 
-// AC5 / Sc.5: The detail footer hint with assets does NOT contain '1-9 open asset' or 'd+1-9 download'.
-// It reflects the Ctrl/Cmd+click model.
+// AC1 (BDR 0021 Sc.1): The detail footer hint with assets returns the plain scroll/nav hint
+// and does NOT contain 'Ctrl/Cmd' or 'abrir anexo' (hint moved into the Artifacts card).
 #[test]
-fn detail_footer_hint_with_assets_reflects_ctrl_cmd_click_model() {
+fn detail_footer_hint_with_assets_has_no_ctrl_cmd_reference() {
     use crate::tui::view::hint_for_screen;
 
     let assets = vec![make_asset("a.pdf", "https://example.com/a.pdf")];
@@ -2622,22 +2627,16 @@ fn detail_footer_hint_with_assets_reflects_ctrl_cmd_click_model() {
     };
     let hint = hint_for_screen(&screen);
     assert!(
-        !hint.contains("1-9"),
-        "footer hint must not contain '1-9' after numeric scheme removal: {hint:?}"
+        !hint.to_lowercase().contains("ctrl") && !hint.to_lowercase().contains("cmd"),
+        "footer hint with assets must NOT contain 'Ctrl/Cmd' (hint moved to card): {hint:?}"
     );
     assert!(
-        !hint.contains("d+1-9"),
-        "footer hint must not contain 'd+1-9' after download mode removal: {hint:?}"
+        !hint.contains("abrir anexo"),
+        "footer hint with assets must NOT contain 'abrir anexo' (hint moved to card): {hint:?}"
     );
     assert!(
-        !hint.contains("download") && !hint.contains("baixar"),
-        "footer hint must not reference download: {hint:?}"
-    );
-    assert!(
-        hint.to_lowercase().contains("ctrl")
-            || hint.to_lowercase().contains("cmd")
-            || hint.to_lowercase().contains("clique"),
-        "footer hint must reference Ctrl/Cmd+click model: {hint:?}"
+        hint.contains("↑/↓") && hint.contains("scroll"),
+        "footer hint must still contain the scroll nav text: {hint:?}"
     );
 }
 
@@ -3587,4 +3586,128 @@ fn relative_due_overdue_many_days_returns_plural_label() {
         !label.contains(" 1 "),
         "plural overdue must not contain singular '1': {label}"
     );
+}
+
+// --- D1f (BDR 0021) geometry tests ---
+
+// AC4 (BDR 0021 Sc.5): asset_panel_render_height for a non-empty list equals the old capped
+// height plus ASSET_HINT_ROWS. The "old" value is (row_count + separators + 2*VPAD + 2).min(MAX).
+// For 3 short assets: old = (3+2+2+2).min(14) = 9; new = 9 + ASSET_HINT_ROWS.
+#[test]
+fn asset_panel_render_height_is_old_value_plus_asset_hint_rows() {
+    use crate::tui::screens::detail::ASSET_HINT_ROWS;
+
+    let assets: Vec<Asset> = (0..3)
+        .map(|i| make_asset(&format!("f{i}.pdf"), &format!("https://x.com/f{i}.pdf")))
+        .collect();
+
+    let inner_width: usize = 78; // viewport_w=80 - 2 borders
+    let old_capped_height: u16 = (2 * 3u16 + 3).min(14); // = 9
+    let panel_h = asset_panel_render_height(&assets, inner_width);
+
+    assert_eq!(
+        panel_h,
+        old_capped_height + ASSET_HINT_ROWS,
+        "panel height must equal old capped height ({old_capped_height}) + ASSET_HINT_ROWS ({ASSET_HINT_ROWS})"
+    );
+}
+
+// AC4 (BDR 0021 Sc.5): empty asset list still returns 0 (no card, no hint).
+#[test]
+fn asset_panel_render_height_zero_for_empty_assets_d1f() {
+    assert_eq!(
+        asset_panel_render_height(&[], 78),
+        0,
+        "empty asset list must still return 0 after D1f (no card at all)"
+    );
+}
+
+// AC3 (BDR 0021 Sc.3 + Sc.4): Ctrl+click on asset k's row still opens asset k.
+// The hint rows are AFTER all assets so the asset walk is unaffected.
+// Derive asset rows from geometry (not formula) and verify the last asset row
+// resolves correctly.
+#[test]
+fn ctrl_click_asset_rows_unaffected_by_hint_rows() {
+    use crate::render::PANEL_HPAD;
+    use crate::render::PANEL_VPAD;
+
+    let assets = vec![
+        make_asset("first.pdf", "https://example.com/first.pdf"),
+        make_asset("second.pdf", "https://example.com/second.pdf"),
+    ];
+    let viewport = (80u16, 30u16);
+    let m = detail_model_with_assets_and_viewport(assets.clone(), "inst", viewport);
+
+    let inner_width = (viewport.0 - 2) as usize;
+    let content_width = inner_width.saturating_sub(2 * PANEL_HPAD);
+    let panel_h = asset_panel_render_height(&assets, inner_width);
+    let panel_top = viewport.1 - panel_h;
+
+    let span0 = crate::render::asset_row_lines(1, &assets[0], content_width).len() as u16;
+
+    // Second asset first row: top border (1) + vpad + span0 + separator (1).
+    let asset1_row = panel_top + 1 + PANEL_VPAD as u16 + span0 + 1;
+
+    let (_m, cmds) = update(
+        m,
+        Msg::Click {
+            column: 5,
+            row: asset1_row,
+            modifiers: KeyModifiers::CONTROL,
+        },
+    );
+    assert_eq!(
+        cmds.len(),
+        1,
+        "ctrl+click on second asset row must emit one cmd (hint rows must not shift asset walk)"
+    );
+    match &cmds[0] {
+        Cmd::OpenAsset { url, .. } => {
+            assert_eq!(
+                url, "https://example.com/second.pdf",
+                "second asset row must open second.pdf (unaffected by hint rows)"
+            );
+        }
+        other => panic!("expected OpenAsset for second asset, got {other:?}"),
+    }
+}
+
+// AC3 (BDR 0021 Sc.4): Ctrl+click on the footnote (hint) row resolves to None.
+// Hint rows sit AFTER the last asset, at: last_asset_row + 1 (blank) and last_asset_row + 2 (hint text).
+#[test]
+fn ctrl_click_on_hint_row_is_noop() {
+    use crate::render::PANEL_HPAD;
+    use crate::render::PANEL_VPAD;
+    use crate::tui::screens::detail::ASSET_HINT_ROWS;
+
+    let assets = vec![make_asset("doc.pdf", "https://example.com/doc.pdf")];
+    let viewport = (80u16, 30u16);
+
+    let inner_width = (viewport.0 - 2) as usize;
+    let content_width = inner_width.saturating_sub(2 * PANEL_HPAD);
+    let panel_h = asset_panel_render_height(&assets, inner_width);
+    let panel_top = viewport.1 - panel_h;
+
+    let span0 = crate::render::asset_row_lines(1, &assets[0], content_width).len() as u16;
+    // last asset content row: top border (1) + vpad + span0 - 1
+    let last_asset_row = panel_top + 1 + PANEL_VPAD as u16 + span0 - 1;
+
+    // hint rows are the two rows immediately after the last asset row.
+    for hint_offset in 1..=ASSET_HINT_ROWS {
+        let hint_row = last_asset_row + hint_offset;
+        let m = detail_model_with_assets_and_viewport(assets.clone(), "inst", viewport);
+        let (_m, cmds) = update(
+            m,
+            Msg::Click {
+                column: 5,
+                row: hint_row,
+                modifiers: KeyModifiers::CONTROL,
+            },
+        );
+        assert!(
+            cmds.is_empty(),
+            "ctrl+click on hint row (offset {hint_offset} after last asset, row {hint_row}) \
+             must be a no-op (BDR 0021 Sc.4)"
+        );
+    }
 }

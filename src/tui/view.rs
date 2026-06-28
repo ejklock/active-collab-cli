@@ -29,9 +29,6 @@ pub(crate) fn format_br_datetime(iso: &str) -> Option<String> {
 
 pub(crate) fn hint_for_screen(screen: &Screen) -> String {
     match screen {
-        Screen::Detail { assets, .. } if !assets.is_empty() => {
-            t("↑/↓ scroll  r refresh  Esc/b back  q quit  Ctrl/Cmd+click open asset")
-        }
         Screen::Detail { .. } => t("↑/↓ scroll  r refresh  Esc/b back  q quit"),
         _ => t("↑/↓ navigate  Enter select  r refresh  Esc/b back  q quit"),
     }

@@ -25,6 +25,13 @@ pub struct DetailParams<'a> {
 /// multi-link card (4 rows + 3 separators + 2 vpad + 2 borders = 11).
 const ASSET_PANEL_MAX_ROWS: u16 = 14;
 
+/// Extra rows appended inside the Artifacts card after the asset list:
+/// one blank separator row + one italic footnote hint line.
+///
+/// Placed AFTER the asset rows so `asset_index_at_panel_row`'s asset walk
+/// requires no modification; clicks on these rows resolve to None.
+pub const ASSET_HINT_ROWS: u16 = 2;
+
 /// Width available for asset content rows inside the panel.
 ///
 /// Removes `2 * PANEL_HPAD` from `panel_inner_width` so label text clears both
@@ -61,7 +68,9 @@ pub fn asset_panel_render_height(assets: &[Asset], inner_width: usize) -> u16 {
         .map(|(i, asset)| asset_row_lines(i + 1, asset, content_w).len())
         .sum();
     let separators = assets.len().saturating_sub(1);
-    (row_count as u16 + separators as u16 + 2 * PANEL_VPAD as u16 + 2).min(ASSET_PANEL_MAX_ROWS)
+    let capped = (row_count as u16 + separators as u16 + 2 * PANEL_VPAD as u16 + 2)
+        .min(ASSET_PANEL_MAX_ROWS);
+    capped + ASSET_HINT_ROWS
 }
 
 /// Draw the Detail screen as a single scrollable content block with an optional
@@ -315,6 +324,12 @@ fn render_assets_panel(frame: &mut Frame, area: ratatui::layout::Rect, assets: &
             ]));
         }
     }
+
+    rows.push(Line::raw(""));
+    rows.push(Line::from(vec![
+        Span::raw(hpad.clone()),
+        Span::styled(t("Ctrl/Cmd+click to open"), theme::asset_hint_style()),
+    ]));
 
     for _ in 0..PANEL_VPAD {
         rows.push(Line::raw(""));

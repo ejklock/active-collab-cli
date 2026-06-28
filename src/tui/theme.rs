@@ -89,6 +89,11 @@ pub fn code_style() -> Style {
     Style::default().fg(STEEL).add_modifier(Modifier::DIM)
 }
 
+/// Card footnote hint inside the Artifacts panel — italic and dimmed.
+pub fn asset_hint_style() -> Style {
+    Style::default().add_modifier(Modifier::ITALIC | Modifier::DIM)
+}
+
 /// Due-date color for a task card's line 2, keyed on the DueStyle variant.
 ///
 /// Overdue -> red; Near -> yellow; Normal or None -> default fg (no color override).

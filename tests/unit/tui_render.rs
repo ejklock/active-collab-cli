@@ -5134,3 +5134,137 @@ mod d1c_wrap_group_position {
         assert_eq!(expected_content_width, 36, "sanity: 40 - 4 = 36");
     }
 }
+
+// --- D1f (BDR 0021) render tests ---
+
+// AC2 (BDR 0021 Sc.2): render_assets_panel renders the hint text 'Ctrl/Cmd+clique abrir anexo'
+// as the last interior line of the card (before bottom PANEL_VPAD). Those cells carry ITALIC modifier.
+// Derives the hint row from the REAL buffer by scanning the panel region for the hint text.
+#[test]
+fn draw_detail_assets_card_last_interior_line_is_italic_hint() {
+    use crate::i18n::set_language;
+    use ratatui::style::Modifier;
+    let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+    set_language("pt_BR");
+
+    let lines = vec!["Task body".to_string()];
+    let assets = vec![Asset {
+        name: "report.pdf".into(),
+        url: "https://example.com/report.pdf".into(),
+    }];
+
+    let width = 80u16;
+    let height = 30u16;
+    let buf = render_detail_to_buf(&lines, &assets, 0, width, height);
+    set_language("en");
+
+    let expected_hint = "Ctrl/Cmd+clique abrir anexo";
+
+    // Scan every row in the buffer for the hint text.
+    let mut hint_row: Option<u16> = None;
+    for y in 0..height {
+        let row_text: String = (0..width)
+            .map(|x| buf.cell((x, y)).unwrap().symbol().to_string())
+            .collect();
+        if row_text.contains(expected_hint) {
+            hint_row = Some(y);
+            break;
+        }
+    }
+
+    let hint_y = hint_row.unwrap_or_else(|| {
+        let full = buf_to_string(&buf);
+        panic!("hint text '{expected_hint}' must appear in the Artifacts card interior: {full}")
+    });
+
+    // At least one cell on that row must carry the ITALIC modifier.
+    let has_italic = (0..width).any(|x| {
+        buf.cell((x, hint_y))
+            .map(|c| c.style().add_modifier.contains(Modifier::ITALIC))
+            .unwrap_or(false)
+    });
+    assert!(
+        has_italic,
+        "hint row (y={hint_y}) must have at least one cell with ITALIC modifier (BDR 0021 Sc.2)"
+    );
+}
+
+// AC1 (BDR 0021 Sc.1): hint_for_screen for a Detail screen WITH assets returns the plain
+// scroll hint and contains neither 'Ctrl/Cmd' nor 'abrir anexo'.
+#[test]
+fn hint_for_screen_detail_with_assets_has_no_ctrl_cmd_in_footer() {
+    use crate::tui::model::Screen;
+    use crate::tui::view::hint_for_screen;
+
+    let assets = vec![Asset {
+        name: "a.pdf".into(),
+        url: "https://example.com/a.pdf".into(),
+    }];
+    let screen = Screen::Detail {
+        instance: "inst".into(),
+        project_id: 1,
+        task_id: 1,
+        task: json!({}),
+        comments: vec![],
+        user_map: std::collections::HashMap::new(),
+        lines: vec![],
+        line_styles: vec![],
+        assets,
+        offset: 0,
+        loading: false,
+        rendered_width: usize::MAX,
+    };
+    let hint = hint_for_screen(&screen);
+    assert!(
+        !hint.to_lowercase().contains("ctrl") && !hint.to_lowercase().contains("cmd"),
+        "footer hint for Detail-with-assets must NOT contain 'Ctrl/Cmd' (BDR 0021 Sc.1): {hint:?}"
+    );
+    assert!(
+        !hint.contains("abrir anexo"),
+        "footer hint for Detail-with-assets must NOT contain 'abrir anexo' (BDR 0021 Sc.1): {hint:?}"
+    );
+    assert!(
+        hint.contains("↑/↓") && hint.contains("scroll"),
+        "footer hint for Detail must still contain scroll nav (BDR 0021 Sc.1): {hint:?}"
+    );
+}
+
+// AC4 (BDR 0021 Sc.5): renderer and height stay in lock-step — the Artifacts panel top
+// is exactly at the row computed by asset_panel_render_height (which now includes ASSET_HINT_ROWS).
+#[test]
+fn draw_detail_asset_panel_top_stays_in_lock_step_after_d1f() {
+    use crate::tui::screens::asset_panel_render_height;
+
+    let assets = vec![
+        Asset {
+            name: "a.pdf".into(),
+            url: "https://example.com/a.pdf".into(),
+        },
+        Asset {
+            name: "b.pdf".into(),
+            url: "https://example.com/b.pdf".into(),
+        },
+    ];
+    let width = 80u16;
+    let height = 30u16;
+    let inner_width = (width - 2) as usize;
+    let panel_h = asset_panel_render_height(&assets, inner_width);
+    let expected_panel_top = height - panel_h;
+
+    let buf = render_detail_to_buf(&["body".to_string()], &assets, 0, width, height);
+
+    let top_row: String = (0..width)
+        .map(|x| {
+            buf.cell((x, expected_panel_top))
+                .unwrap()
+                .symbol()
+                .to_string()
+        })
+        .collect();
+
+    assert!(
+        top_row.contains("Artifacts"),
+        "Artifacts panel top border must appear at row {expected_panel_top} \
+         (asset_panel_render_height now includes ASSET_HINT_ROWS): {top_row:?}"
+    );
+}
