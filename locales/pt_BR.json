@@ -117,5 +117,14 @@
   "due_overdue": "atrasada",
   "due_day": "dia",
   "due_days": "dias",
-  "due_none": "sem data"
+  "due_none": "sem data",
+  "Ctrl+S send · Esc cancel": "Ctrl+S enviar · Esc cancelar",
+  "Comment": "Comentário",
+  "Sending…": "Enviando…",
+  "Failed to post comment": "Falha ao enviar comentário",
+  "edit": "editar",
+  "excluir": "excluir",
+  "Delete comment?": "Excluir comentário?",
+  "confirmar": "confirmar",
+  "cancelar": "cancelar"
 }

@@ -1724,7 +1724,7 @@ fn build_body_lines_no_line_exceeds_inner_width() {
 #[test]
 fn build_comment_lines_empty_for_zero_comments() {
     let mut collector = LinkCollector::new();
-    let (lines, _) = build_comment_lines_with_collector(&[], 80, &mut collector);
+    let (lines, _, _) = build_comment_lines_with_collector(&[], 80, &mut collector, None, None);
     assert!(
         lines.is_empty(),
         "must return empty vec for no comments: {:?}",
@@ -1740,7 +1740,8 @@ fn build_comment_lines_returns_outer_panel_for_single_comment() {
         "body_plain_text": "LGTM!"
     })];
     let mut collector = LinkCollector::new();
-    let (lines, _) = build_comment_lines_with_collector(&comments, 60, &mut collector);
+    let (lines, _, _) =
+        build_comment_lines_with_collector(&comments, 60, &mut collector, None, None);
     let joined = lines.join("\n");
     // Must be wrapped in an outer panel
     assert!(
@@ -1776,7 +1777,8 @@ fn build_comment_lines_returns_outer_panel_for_multiple_comments() {
         }),
     ];
     let mut collector = LinkCollector::new();
-    let (lines, _) = build_comment_lines_with_collector(&comments, 60, &mut collector);
+    let (lines, _, _) =
+        build_comment_lines_with_collector(&comments, 60, &mut collector, None, None);
     let joined = lines.join("\n");
     assert!(
         lines[0].contains("Comments"),
@@ -1813,7 +1815,8 @@ fn build_comment_lines_no_line_exceeds_inner_width() {
     })];
     let inner_width = 40;
     let mut collector = LinkCollector::new();
-    let (lines, _) = build_comment_lines_with_collector(&comments, inner_width, &mut collector);
+    let (lines, _, _) =
+        build_comment_lines_with_collector(&comments, inner_width, &mut collector, None, None);
     for line in &lines {
         let len = line.chars().count();
         assert!(
@@ -1835,7 +1838,7 @@ fn build_detail_lines_first_line_is_details_panel_top_border() {
         "name": "Fix bug",
         "is_completed": false,
     });
-    let lines = build_detail_content(&task, &[], &HashMap::new(), 80).lines;
+    let lines = build_detail_content(&task, &[], &HashMap::new(), 80, None, None).lines;
     assert!(!lines.is_empty(), "must produce lines");
     let first = &lines[0];
     assert!(
@@ -1863,7 +1866,7 @@ fn build_detail_lines_details_panel_is_first() {
         "name": "My Task",
         "is_completed": false
     });
-    let lines = build_detail_content(&task, &[], &HashMap::new(), 60).lines;
+    let lines = build_detail_content(&task, &[], &HashMap::new(), 60, None, None).lines;
     assert!(
         !lines.is_empty(),
         "must have at least one line: {:?}",
@@ -1884,7 +1887,7 @@ fn build_detail_lines_details_panel_is_first() {
 #[test]
 fn build_detail_lines_description_panel_present() {
     let task = json!({ "id": 1, "name": "T", "body": "<p>Some details here</p>" });
-    let lines = build_detail_content(&task, &[], &HashMap::new(), 80).lines;
+    let lines = build_detail_content(&task, &[], &HashMap::new(), 80, None, None).lines;
     let joined = lines.join("\n");
     assert!(
         joined.contains("Description"),
@@ -1899,7 +1902,7 @@ fn build_detail_lines_description_panel_present() {
 #[test]
 fn build_detail_lines_no_description_fallback() {
     let task = json!({ "id": 1, "name": "T", "body": null });
-    let lines = build_detail_content(&task, &[], &HashMap::new(), 80).lines;
+    let lines = build_detail_content(&task, &[], &HashMap::new(), 80, None, None).lines;
     let joined = lines.join("\n");
     assert!(
         joined.contains("(no description)"),
@@ -1910,7 +1913,7 @@ fn build_detail_lines_no_description_fallback() {
 #[test]
 fn build_detail_lines_no_comments_panel_when_empty() {
     let task = json!({ "id": 1, "name": "T" });
-    let lines = build_detail_content(&task, &[], &HashMap::new(), 80).lines;
+    let lines = build_detail_content(&task, &[], &HashMap::new(), 80, None, None).lines;
     let joined = lines.join("\n");
     // Comments panel must be absent; Details and Description panels ARE present
     assert!(
@@ -1932,7 +1935,7 @@ fn build_detail_lines_comments_panel_present_when_non_empty() {
         "created_on": 1614556800i64,
         "body_plain_text": "LGTM!"
     })];
-    let lines = build_detail_content(&task, &comments, &HashMap::new(), 60).lines;
+    let lines = build_detail_content(&task, &comments, &HashMap::new(), 60, None, None).lines;
     let joined = lines.join("\n");
     assert!(
         joined.contains("Comments"),
@@ -1961,7 +1964,7 @@ fn build_detail_lines_title_row_in_meta() {
         "project_id": 5,
         "project_name": "Acme"
     });
-    let lines = build_detail_content(&task, &[], &HashMap::new(), 80).lines;
+    let lines = build_detail_content(&task, &[], &HashMap::new(), 80, None, None).lines;
     let joined = lines.join("\n");
     assert!(
         joined.contains("Title"),
@@ -1988,7 +1991,8 @@ fn build_detail_lines_no_line_exceeds_inner_width() {
         "body_plain_text": "This is a fairly long comment body that should be word-wrapped to fit within the box"
     })];
     let inner_width = 50;
-    let lines = build_detail_content(&task, &comments, &HashMap::new(), inner_width).lines;
+    let lines =
+        build_detail_content(&task, &comments, &HashMap::new(), inner_width, None, None).lines;
     for line in &lines {
         let len = line.chars().count();
         assert!(
@@ -2014,7 +2018,7 @@ fn build_detail_lines_panels_appear_in_order() {
         "created_on": 1614556800i64,
         "body_plain_text": "A comment"
     })];
-    let lines = build_detail_content(&task, &comments, &HashMap::new(), 60).lines;
+    let lines = build_detail_content(&task, &comments, &HashMap::new(), 60, None, None).lines;
     let joined = lines.join("\n");
 
     // Find positions of panel labels
@@ -2041,7 +2045,7 @@ fn build_detail_lines_multiple_comments_in_outer_panel() {
         json!({ "created_by_name": "Alice", "created_on": 1614556800i64, "body_plain_text": "First" }),
         json!({ "created_by_name": "Bob", "created_on": 1614556801i64, "body_plain_text": "Second" }),
     ];
-    let lines = build_detail_content(&task, &comments, &HashMap::new(), 50).lines;
+    let lines = build_detail_content(&task, &comments, &HashMap::new(), 50, None, None).lines;
     let joined = lines.join("\n");
     assert!(
         joined.contains("Alice"),
@@ -2358,7 +2362,7 @@ fn build_detail_content_url_in_description_renders_inline() {
         "name": "T",
         "body": "<p>See https://example.com/info for details.</p>"
     });
-    let content = build_detail_content(&task, &[], &HashMap::new(), 80);
+    let content = build_detail_content(&task, &[], &HashMap::new(), 80, None, None);
     let joined = content.lines.join("\n");
     assert!(
         joined.contains("https://example.com/info"),
@@ -2374,7 +2378,7 @@ fn build_detail_content_url_in_comment_body_renders_inline() {
         "created_on": 1614556800i64,
         "body_plain_text": "Ref: https://api.example.com/v1"
     });
-    let content = build_detail_content(&task, &[comment], &HashMap::new(), 80);
+    let content = build_detail_content(&task, &[comment], &HashMap::new(), 80, None, None);
     let joined = content.lines.join("\n");
     assert!(
         joined.contains("https://api.example.com/v1"),
@@ -2385,7 +2389,7 @@ fn build_detail_content_url_in_comment_body_renders_inline() {
 #[test]
 fn build_detail_content_no_url_produces_lines_with_no_url() {
     let task = json!({ "id": 1, "name": "T", "body": "<p>No links here.</p>" });
-    let content = build_detail_content(&task, &[], &HashMap::new(), 80);
+    let content = build_detail_content(&task, &[], &HashMap::new(), 80, None, None);
     let joined = content.lines.join("\n");
     assert!(
         !joined.contains("https://"),
@@ -2559,7 +2563,7 @@ fn build_detail_content_with_list_body_produces_bullet_lines() {
         "name": "T",
         "body": "<ul><li>one</li><li>two</li></ul>"
     });
-    let content = build_detail_content(&task, &[], &HashMap::new(), 80);
+    let content = build_detail_content(&task, &[], &HashMap::new(), 80, None, None);
     let joined = content.lines.join("\n");
     assert!(
         joined.contains("\u{2022} one"),
@@ -2579,7 +2583,7 @@ fn build_detail_content_comment_with_list_body_produces_bullet_lines() {
         "created_on": 1614556800i64,
         "body": "<ul><li>item A</li><li>item B</li></ul>"
     });
-    let content = build_detail_content(&task, &[comment], &HashMap::new(), 80);
+    let content = build_detail_content(&task, &[comment], &HashMap::new(), 80, None, None);
     let joined = content.lines.join("\n");
     assert!(
         joined.contains("\u{2022} item A"),

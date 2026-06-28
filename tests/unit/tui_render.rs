@@ -236,7 +236,7 @@ fn build_and_render_detail_with_assets(
         "attachments": attachment_json
     });
     let user_map: HashMap<i64, String> = HashMap::new();
-    let content = build_detail_content(&task, &[], &user_map, inner_width);
+    let content = build_detail_content(&task, &[], &user_map, inner_width, None, None);
     let backend = TestBackend::new(width, height);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
@@ -883,7 +883,7 @@ fn build_detail_lines_with_comment_produces_boxed_lines_fitting_width() {
         "body": "<p>This is a test comment body for the box rendering test.</p>"
     });
     let user_map: HashMap<i64, String> = HashMap::new();
-    let lines = build_detail_content(&task, &[comment], &user_map, inner_width).lines;
+    let lines = build_detail_content(&task, &[comment], &user_map, inner_width, None, None).lines;
 
     assert!(!lines.is_empty(), "must produce at least one line");
 
@@ -1800,8 +1800,8 @@ fn build_detail_lines_reflow_at_different_widths_changes_output() {
     let user_map: HashMap<i64, String> = HashMap::new();
 
     let comments = [comment];
-    let lines_80 = build_detail_content(&task, &comments, &user_map, 80).lines;
-    let lines_40 = build_detail_content(&task, &comments, &user_map, 40).lines;
+    let lines_80 = build_detail_content(&task, &comments, &user_map, 80, None, None).lines;
+    let lines_40 = build_detail_content(&task, &comments, &user_map, 40, None, None).lines;
 
     // All lines at width 40 must be at most 40 chars
     for line in &lines_40 {
@@ -1849,7 +1849,7 @@ fn draw_detail_renders_single_global_content_block() {
         "body": "<p>A comment on this task.</p>"
     });
     let user_map: HashMap<i64, String> = HashMap::new();
-    let content_obj = build_detail_content(&task, &[comment], &user_map, 76);
+    let content_obj = build_detail_content(&task, &[comment], &user_map, 76, None, None);
     let lines = &content_obj.lines;
 
     let buf = render_detail_to_buf_with_name(lines, &[], 0, 80, 40, "Test Task");
@@ -1889,7 +1889,7 @@ fn draw_detail_title_row_present_after_task_row_in_details_panel() {
         "is_completed": false
     });
     let user_map: HashMap<i64, String> = HashMap::new();
-    let detail = build_detail_content(&task, &[], &user_map, 76);
+    let detail = build_detail_content(&task, &[], &user_map, 76, None, None);
     let buf = render_detail_to_buf_with_name(&detail.lines, &[], 0, 80, 30, "OSV-Scanner");
     let content = buf_to_string(&buf);
     set_language("en");
@@ -2051,6 +2051,10 @@ fn view_detail_footer_has_no_tab_switch_hint() {
             offset: 0,
             loading: false,
             rendered_width: 80,
+            compose: None,
+            current_user_id: None,
+            affordances: vec![],
+            confirm_delete: None,
         }],
         should_quit: false,
         header: Header::from_instances(&[], None),
@@ -2109,6 +2113,10 @@ fn view_detail_footer_without_assets_has_no_tab_hint() {
             offset: 0,
             loading: false,
             rendered_width: 80,
+            compose: None,
+            current_user_id: None,
+            affordances: vec![],
+            confirm_delete: None,
         }],
         should_quit: false,
         header: Header::from_instances(&[], None),
@@ -2500,7 +2508,7 @@ fn draw_detail_url_in_description_body_has_link_style() {
     });
     let user_map: HashMap<i64, String> = HashMap::new();
     let width: u16 = 80;
-    let content = build_detail_content(&task, &[], &user_map, (width - 2) as usize);
+    let content = build_detail_content(&task, &[], &user_map, (width - 2) as usize, None, None);
     let lines = content.lines;
 
     let joined = lines.join("\n");
@@ -2563,7 +2571,14 @@ fn draw_detail_url_in_comment_body_has_link_style() {
     });
     let user_map: HashMap<i64, String> = HashMap::new();
     let width: u16 = 80;
-    let content = build_detail_content(&task, &[comment], &user_map, (width - 2) as usize);
+    let content = build_detail_content(
+        &task,
+        &[comment],
+        &user_map,
+        (width - 2) as usize,
+        None,
+        None,
+    );
     let lines = content.lines;
 
     let joined = lines.join("\n");
@@ -2612,7 +2627,7 @@ fn draw_detail_border_and_no_url_lines_have_default_style() {
     });
     let user_map: HashMap<i64, String> = HashMap::new();
     let width: u16 = 80;
-    let lines = build_detail_content(&task, &[], &user_map, (width - 2) as usize).lines;
+    let lines = build_detail_content(&task, &[], &user_map, (width - 2) as usize, None, None).lines;
 
     let buf = render_detail_to_buf(&lines, &[], 0, width, 20);
 
@@ -3126,6 +3141,10 @@ mod footer_refresh_hint {
                 offset: 0,
                 loading: false,
                 rendered_width: 80,
+                compose: None,
+                current_user_id: None,
+                affordances: vec![],
+                confirm_delete: None,
             }],
             should_quit: false,
             header: Header::from_instances(&[], None),
@@ -3166,6 +3185,10 @@ mod footer_refresh_hint {
                 offset: 0,
                 loading: false,
                 rendered_width: 80,
+                compose: None,
+                current_user_id: None,
+                affordances: vec![],
+                confirm_delete: None,
             }],
             should_quit: false,
             header: Header::from_instances(&[], None),
@@ -3449,6 +3472,10 @@ mod footer_refresh_hint {
                 offset: 0,
                 loading: true,
                 rendered_width: usize::MAX,
+                compose: None,
+                current_user_id: None,
+                affordances: vec![],
+                confirm_delete: None,
             }],
             should_quit: false,
             header: Header::from_instances(&[], None),
@@ -3464,6 +3491,7 @@ mod footer_refresh_hint {
             assets: vec![],
             user_map: HashMap::new(),
             loaded_at: "2026-06-25T16:22:00".into(),
+            current_user_id: None,
         };
         let (model, _) = update(model, Msg::LoadedDetail(load));
         let content = render_model(&model);
@@ -3504,7 +3532,7 @@ fn draw_detail_comment_with_long_url_renders_inline_with_link_style() {
     let width: u16 = 80;
     let inner_width = (width - 2) as usize;
 
-    let content = build_detail_content(&task, &[comment], &user_map, inner_width);
+    let content = build_detail_content(&task, &[comment], &user_map, inner_width, None, None);
     let lines = content.lines;
 
     let joined = lines.join("\n");
@@ -3609,6 +3637,10 @@ mod v6_view {
                 offset: 0,
                 loading: false,
                 rendered_width: 120,
+                compose: None,
+                current_user_id: None,
+                affordances: vec![],
+                confirm_delete: None,
             }],
             should_quit: false,
             header: Header::from_instances(&[], None),
@@ -3905,7 +3937,7 @@ fn strong_tag_produces_bold_style_run() {
         "body": "<p>Before <strong>bold word</strong> after.</p>"
     });
     let user_map: HashMap<i64, String> = HashMap::new();
-    let content = build_detail_content(&task, &[], &user_map, 80);
+    let content = build_detail_content(&task, &[], &user_map, 80, None, None);
 
     assert_eq!(
         content.lines.len(),
@@ -3937,7 +3969,7 @@ fn b_tag_produces_bold_style_run() {
         "body": "<p>Before <b>bolded</b> after.</p>"
     });
     let user_map: HashMap<i64, String> = HashMap::new();
-    let content = build_detail_content(&task, &[], &user_map, 80);
+    let content = build_detail_content(&task, &[], &user_map, 80, None, None);
 
     let found = find_style_run_for_text(
         &content.lines,
@@ -3963,7 +3995,7 @@ fn em_tag_produces_italic_style_run() {
         "body": "<p>See <em>italic text</em> here.</p>"
     });
     let user_map: HashMap<i64, String> = HashMap::new();
-    let content = build_detail_content(&task, &[], &user_map, 80);
+    let content = build_detail_content(&task, &[], &user_map, 80, None, None);
 
     let found = find_style_run_for_text(
         &content.lines,
@@ -3989,7 +4021,7 @@ fn i_tag_produces_italic_style_run() {
         "body": "<p>Text <i>slanted</i> end.</p>"
     });
     let user_map: HashMap<i64, String> = HashMap::new();
-    let content = build_detail_content(&task, &[], &user_map, 80);
+    let content = build_detail_content(&task, &[], &user_map, 80, None, None);
 
     let found = find_style_run_for_text(
         &content.lines,
@@ -4015,7 +4047,7 @@ fn code_tag_produces_code_style_run() {
         "body": "<p>Run <code>cargo test</code> now.</p>"
     });
     let user_map: HashMap<i64, String> = HashMap::new();
-    let content = build_detail_content(&task, &[], &user_map, 80);
+    let content = build_detail_content(&task, &[], &user_map, 80, None, None);
 
     let found = find_style_run_for_text(
         &content.lines,
@@ -4043,7 +4075,7 @@ fn heading_tags_produce_bold_style_runs() {
             "body": html_body
         });
         let user_map: HashMap<i64, String> = HashMap::new();
-        let content = build_detail_content(&task, &[], &user_map, 80);
+        let content = build_detail_content(&task, &[], &user_map, 80, None, None);
 
         let found = find_style_run_for_text(
             &content.lines,
@@ -4073,7 +4105,7 @@ fn bold_span_across_wrap_boundary_keeps_style_on_all_fragments() {
         "body": html_body
     });
     let user_map: HashMap<i64, String> = HashMap::new();
-    let content = build_detail_content(&task, &[], &user_map, 40);
+    let content = build_detail_content(&task, &[], &user_map, 40, None, None);
 
     let bold_run_count = content
         .line_styles
@@ -4104,7 +4136,7 @@ fn line_styles_always_aligned_with_lines() {
         "body": "<p>Comment with <code>code</code> inline.</p>"
     });
     let user_map: HashMap<i64, String> = HashMap::new();
-    let content = build_detail_content(&task, &[comment], &user_map, 60);
+    let content = build_detail_content(&task, &[comment], &user_map, 60, None, None);
 
     assert_eq!(
         content.lines.len(),
@@ -4132,7 +4164,7 @@ fn build_detail_content_structured_path_preserves_plain_text() {
     });
     let user_map: HashMap<i64, String> = HashMap::new();
 
-    let content = build_detail_content(&task, &[comment], &user_map, 70);
+    let content = build_detail_content(&task, &[comment], &user_map, 70, None, None);
     let joined = content.lines.join("\n");
 
     assert!(
@@ -4185,7 +4217,7 @@ fn plain_body_produces_empty_style_runs_per_line() {
         "body": "<p>Just plain text here.</p>"
     });
     let user_map: HashMap<i64, String> = HashMap::new();
-    let content = build_detail_content(&task, &[], &user_map, 80);
+    let content = build_detail_content(&task, &[], &user_map, 80, None, None);
 
     let body_lines_with_style_runs: Vec<&str> = content
         .lines
@@ -4212,7 +4244,7 @@ fn style_run_start_is_offset_by_chrome() {
         "body": "<p><strong>starts bold</strong> rest of line.</p>"
     });
     let user_map: HashMap<i64, String> = HashMap::new();
-    let content = build_detail_content(&task, &[], &user_map, 80);
+    let content = build_detail_content(&task, &[], &user_map, 80, None, None);
 
     let bold_run = content
         .line_styles
@@ -4778,6 +4810,10 @@ fn hint_for_screen_detail_with_assets_has_no_ctrl_cmd_in_footer() {
         offset: 0,
         loading: false,
         rendered_width: usize::MAX,
+        compose: None,
+        current_user_id: None,
+        affordances: vec![],
+        confirm_delete: None,
     };
     let hint = hint_for_screen(&screen);
     assert!(
@@ -5587,4 +5623,334 @@ fn asset_row_cells_carry_link_style_structural_not_url_detection() {
             "separator row at y={sep_y} must NOT carry muted-green fg (unstyled blank row)"
         );
     }
+}
+
+// AC5: Render (TestBackend) — compose block visible when compose is active; absent when None.
+// Tests drive the REAL model -> reflow_detail -> draw_detail path, not compose_lines directly.
+
+mod compose_render {
+    use crate::i18n::set_language;
+    use crate::tui::model::{Compose, ComposeKind, ComposeStatus, Header, Model, Screen};
+    use crate::tui::screens::{draw_detail, DetailParams};
+    use ratatui::{backend::TestBackend, layout::Rect, Terminal};
+    use serde_json::Value;
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+
+    static LANG_MUTEX: Mutex<()> = Mutex::new(());
+
+    fn compose_editing(buffer: &str) -> Compose {
+        Compose {
+            kind: ComposeKind::New,
+            buffer: buffer.into(),
+            status: ComposeStatus::Editing,
+        }
+    }
+
+    fn make_detail_model(compose: Option<Compose>) -> Model {
+        Model {
+            stack: vec![Screen::Detail {
+                instance: "inst".into(),
+                project_id: 1,
+                task_id: 42,
+                task: Value::Null,
+                comments: vec![],
+                user_map: HashMap::new(),
+                lines: vec![],
+                line_styles: vec![],
+                assets: vec![],
+                offset: 0,
+                loading: false,
+                rendered_width: usize::MAX,
+                compose,
+                current_user_id: None,
+                affordances: vec![],
+                confirm_delete: None,
+            }],
+            should_quit: false,
+            header: Header::from_instances(&[], None),
+            viewport: (80, 24),
+            click_targets: vec![],
+            last_loaded: None,
+            selection: None,
+            copied_feedback: false,
+        }
+    }
+
+    fn render_model_after_reflow(model: &mut Model, width: u16, height: u16) -> String {
+        let inner_width = width.saturating_sub(2) as usize;
+        model.reflow_detail(inner_width);
+
+        let (lines, line_styles) = match model.top() {
+            Some(Screen::Detail {
+                lines, line_styles, ..
+            }) => (lines.clone(), line_styles.clone()),
+            _ => (vec![], vec![]),
+        };
+
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| {
+                draw_detail(
+                    frame,
+                    Rect::new(0, 0, width, height),
+                    DetailParams {
+                        lines: &lines,
+                        line_styles: &line_styles,
+                        assets: &[],
+                        offset: 0,
+                        loading: false,
+                        task_id: 42,
+                        task_name: "Task",
+                    },
+                );
+            })
+            .unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let area = buf.area();
+        let mut result = String::new();
+        for y in 0..area.height {
+            for x in 0..area.width {
+                result.push_str(buf.cell((x, y)).unwrap().symbol());
+            }
+            result.push('\n');
+        }
+        result
+    }
+
+    // AC5-part1: compose active with typed body — label, buffer lines, and hint are visible
+    // via the real model -> reflow_detail -> draw_detail path.
+    #[test]
+    fn compose_active_shows_label_buffer_and_hint() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let mut model = make_detail_model(Some(compose_editing("hello")));
+        let content = render_model_after_reflow(&mut model, 80, 24);
+        set_language("en");
+        assert!(
+            content.contains("Comment"),
+            "compose area must show the 'Comment' label: {content}"
+        );
+        assert!(
+            content.contains("hello"),
+            "compose area must show the typed buffer: {content}"
+        );
+        assert!(
+            content.contains("Ctrl+S send"),
+            "compose area must show the hint 'Ctrl+S send': {content}"
+        );
+        assert!(
+            content.contains("Esc cancel"),
+            "compose area must show 'Esc cancel' in the hint: {content}"
+        );
+    }
+
+    // AC5-part2: multiline compose buffer — both lines visible via the real reflow path.
+    #[test]
+    fn compose_active_multiline_buffer_both_lines_visible() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let mut model = make_detail_model(Some(compose_editing("line one\nline two")));
+        let content = render_model_after_reflow(&mut model, 80, 24);
+        set_language("en");
+        assert!(
+            content.contains("line one"),
+            "first line of buffer must be visible: {content}"
+        );
+        assert!(
+            content.contains("line two"),
+            "second line of buffer must be visible: {content}"
+        );
+    }
+
+    // AC5-part3: compose None — neither label, buffer, nor hint appear.
+    // This test FAILS if reflow_detail appends compose lines when compose is None.
+    #[test]
+    fn compose_inactive_shows_no_compose_content() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let mut model = make_detail_model(None);
+        let content = render_model_after_reflow(&mut model, 80, 24);
+        set_language("en");
+        assert!(
+            !content.contains("Ctrl+S send"),
+            "hint must NOT appear when compose is None: {content}"
+        );
+        assert!(
+            !content.contains("Esc cancel"),
+            "cancel hint must NOT appear when compose is None: {content}"
+        );
+    }
+
+    // AC5-part4 (pt_BR): compose active shows localized hint via the real reflow path.
+    #[test]
+    fn compose_active_shows_localized_hint_in_pt_br() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("pt_BR");
+        let mut model = make_detail_model(Some(compose_editing("texto")));
+        let content = render_model_after_reflow(&mut model, 80, 24);
+        set_language("en");
+        assert!(
+            content.contains("enviar"),
+            "pt_BR compose hint must contain 'enviar': {content}"
+        );
+        assert!(
+            content.contains("cancelar"),
+            "pt_BR compose hint must contain 'cancelar': {content}"
+        );
+        assert!(
+            content.contains("Comentário"),
+            "pt_BR compose label must be 'Comentário': {content}"
+        );
+    }
+}
+
+// ── Edit-comment affordance render tests (BDR 0024 / ADR 0036) ───────────────
+// AC1: build_detail_content gates the [editar] token to comments whose
+// created_by_id matches current_user_id.
+
+// AC1-part1: A comment whose created_by_id matches current_user_id carries
+// an edit affordance: the edit_affordances vec is non-empty and the header
+// line contains the edit token in brackets.
+#[test]
+fn edit_affordance_shown_for_own_comment() {
+    use crate::render::build_detail_content;
+    use serde_json::json;
+    use std::collections::HashMap;
+    let task = json!({"name": "T", "id": 1, "project_id": 1});
+    let comment = json!({
+        "id": 42,
+        "created_by_id": 7,
+        "created_by_name": "Alice",
+        "created_on": 1700000000u64,
+        "body": "<p>Hello</p>",
+        "body_plain_text": "Hello"
+    });
+    let user_map: HashMap<i64, String> = HashMap::new();
+    let content = build_detail_content(&task, &[comment], &user_map, 80, Some(7), None);
+    use crate::render::AffordanceKind;
+    // The affordance vec is the authoritative signal; also verify the header line text.
+    let edit_affs: Vec<_> = content
+        .affordances
+        .iter()
+        .filter(|a| matches!(a.kind, AffordanceKind::Edit(_)))
+        .collect();
+    assert!(
+        !edit_affs.is_empty(),
+        "comment owned by current_user_id=7 must produce a non-empty Edit affordance"
+    );
+    let AffordanceKind::Edit(cid) = edit_affs[0].kind else {
+        panic!("expected Edit kind")
+    };
+    assert_eq!(cid, 42);
+    // Header line must contain a bracketed edit token (language-neutral: look for "[e")
+    let header_line = content.lines.iter().find(|l| l.contains("Alice")).cloned();
+    let has_bracketed_token = header_line
+        .as_deref()
+        .map(|l| l.contains("[e") && l.contains(']'))
+        .unwrap_or(false);
+    assert!(
+        has_bracketed_token,
+        "own comment header must contain a bracketed edit token; lines={:?}",
+        content.lines
+    );
+}
+
+// AC1-part2: A comment owned by a DIFFERENT user must NOT show an edit affordance.
+#[test]
+fn edit_affordance_hidden_for_other_user_comment() {
+    use crate::render::{build_detail_content, AffordanceKind};
+    use serde_json::json;
+    use std::collections::HashMap;
+    let task = json!({"name": "T", "id": 1, "project_id": 1});
+    let comment = json!({
+        "id": 99,
+        "created_by_id": 99,
+        "created_by_name": "Bob",
+        "created_on": 1700000000u64,
+        "body": "<p>Other</p>",
+        "body_plain_text": "Other"
+    });
+    let user_map: HashMap<i64, String> = HashMap::new();
+    let content = build_detail_content(&task, &[comment], &user_map, 80, Some(7), None);
+    let edit_affs: Vec<_> = content
+        .affordances
+        .iter()
+        .filter(|a| matches!(a.kind, AffordanceKind::Edit(_)))
+        .collect();
+    assert!(
+        edit_affs.is_empty(),
+        "comment owned by user 99, current user 7: Edit affordances must be empty; got {:?}",
+        edit_affs
+    );
+}
+
+// AC1-part3: When current_user_id is None, edit affordances are absent.
+#[test]
+fn edit_affordance_hidden_when_current_user_id_is_none() {
+    use crate::render::{build_detail_content, AffordanceKind};
+    use serde_json::json;
+    use std::collections::HashMap;
+    let task = json!({"name": "T", "id": 1, "project_id": 1});
+    let comment = json!({
+        "id": 42,
+        "created_by_id": 7,
+        "created_by_name": "Alice",
+        "created_on": 1700000000u64,
+        "body": "<p>Hello</p>",
+        "body_plain_text": "Hello"
+    });
+    let user_map: HashMap<i64, String> = HashMap::new();
+    let content = build_detail_content(&task, &[comment], &user_map, 80, None, None);
+    let edit_affs: Vec<_> = content
+        .affordances
+        .iter()
+        .filter(|a| matches!(a.kind, AffordanceKind::Edit(_)))
+        .collect();
+    assert!(
+        edit_affs.is_empty(),
+        "current_user_id=None must produce no Edit affordances; got {:?}",
+        edit_affs
+    );
+}
+
+// AC1-part4: Edit affordances are populated exactly once (for the own comment).
+#[test]
+fn edit_affordances_populated_only_for_own_comment() {
+    use crate::render::{build_detail_content, AffordanceKind};
+    use serde_json::json;
+    use std::collections::HashMap;
+    let task = json!({"name": "T", "id": 1, "project_id": 1});
+    let own = json!({
+        "id": 10,
+        "created_by_id": 5,
+        "created_by_name": "Me",
+        "created_on": 1700000000u64,
+        "body_plain_text": "my comment"
+    });
+    let other = json!({
+        "id": 20,
+        "created_by_id": 6,
+        "created_by_name": "Them",
+        "created_on": 1700000001u64,
+        "body_plain_text": "their comment"
+    });
+    let user_map: HashMap<i64, String> = HashMap::new();
+    let content = build_detail_content(&task, &[own, other], &user_map, 80, Some(5), None);
+    let edit_affs: Vec<_> = content
+        .affordances
+        .iter()
+        .filter(|a| matches!(a.kind, AffordanceKind::Edit(_)))
+        .collect();
+    assert_eq!(
+        edit_affs.len(),
+        1,
+        "exactly one Edit affordance (for comment id=10); got {:?}",
+        edit_affs
+    );
+    let AffordanceKind::Edit(cid) = edit_affs[0].kind else {
+        panic!("expected Edit kind")
+    };
+    assert_eq!(cid, 10, "affordance must reference comment_id=10");
 }
