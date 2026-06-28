@@ -1,5 +1,5 @@
 use super::*;
-use crate::render::{Asset, StyleRun};
+use crate::render::Asset;
 use crate::tui::screens::asset_panel;
 use crossterm::event::KeyModifiers;
 use std::collections::HashMap;
