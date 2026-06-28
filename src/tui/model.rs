@@ -123,6 +123,49 @@ pub enum Cmd {
     },
     /// Copy the given text to the system clipboard (interpreted by the shell via arboard).
     CopyToClipboard(String),
+    SubmitComment {
+        instance: String,
+        project_id: i64,
+        task_id: i64,
+        body: String,
+    },
+    /// PUT an existing comment body (edit path).
+    UpdateComment {
+        instance: String,
+        comment_id: i64,
+        body: String,
+    },
+    /// DELETE an existing comment after the user confirms.
+    DeleteComment {
+        instance: String,
+        comment_id: i64,
+    },
+}
+
+/// What kind of comment compose operation is in progress.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ComposeKind {
+    New,
+    /// Editing an existing comment (PUT path). Carries the comment id being edited.
+    Edit {
+        comment_id: i64,
+    },
+}
+
+/// Current lifecycle phase of the compose area.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ComposeStatus {
+    Editing,
+    Submitting,
+    Error(String),
+}
+
+/// Transient state for the in-progress comment compose area.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Compose {
+    pub kind: ComposeKind,
+    pub buffer: String,
+    pub status: ComposeStatus,
 }
 
 /// Structured payload sent by spawn_load_detail phase 1.
@@ -138,6 +181,9 @@ pub struct DetailLoad {
     pub user_map: HashMap<i64, String>,
     /// ISO wall-clock string (YYYY-MM-DDTHH:MM:SSZ) stamped by the shell when the load completes.
     pub loaded_at: String,
+    /// The logged-in user's id for the instance that owns this task. Used to gate the
+    /// `[editar]` affordance to comments authored by the current user.
+    pub current_user_id: Option<i64>,
 }
 
 /// A screen on the navigation stack.
@@ -193,6 +239,18 @@ pub enum Screen {
         loading: bool,
         /// Width at which the cache was last built; usize::MAX means "not yet built".
         rendered_width: usize,
+        /// In-progress comment compose area; None when compose mode is inactive.
+        compose: Option<Compose>,
+        /// Logged-in user's id for this instance; used to gate [editar]/[excluir] affordances.
+        current_user_id: Option<i64>,
+        /// All clickable affordance spans rebuilt by reflow_detail.
+        ///
+        /// Each entry carries its `AffordanceKind` (Edit/Delete/Confirm/Cancel) so a
+        /// single linear scan over this vec replaces the four parallel affordance vecs
+        /// that were here before. Hit-tested by `affordance_at` in model.rs.
+        affordances: Vec<crate::render::LocalAffordance>,
+        /// When Some(id), the [confirmar]/[cancelar] inline prompt is shown for comment `id`.
+        confirm_delete: Option<i64>,
     },
 }
 
@@ -424,6 +482,22 @@ pub enum Msg {
     /// Background user directory resolved a display name for the header.
     /// Sets model.header.name when it was previously absent.
     HeaderNameResolved(String),
+    /// Open the compose area on the current Detail screen.
+    ComposeOpen,
+    /// Append a printable character to the compose buffer.
+    ComposeInput(char),
+    /// Insert a newline into the compose buffer (Enter key in compose mode).
+    ComposeNewline,
+    /// Delete the last character from the compose buffer.
+    ComposeBackspace,
+    /// Submit the current compose buffer as a new comment.
+    ComposeSubmit,
+    /// Cancel the compose area, discarding the buffer.
+    ComposeCancel,
+    /// The comment POST succeeded; refresh the detail view.
+    CommentMutationOk,
+    /// The comment POST failed; preserve the buffer and show an error.
+    CommentMutationErr(String),
 }
 
 impl Model {
@@ -488,6 +562,10 @@ impl Model {
             rendered_width,
             offset,
             loading,
+            compose,
+            current_user_id,
+            affordances,
+            confirm_delete,
             ..
         }) = self.top_mut()
         else {
@@ -498,11 +576,22 @@ impl Model {
             return;
         }
 
-        let content = crate::render::build_detail_content(task, comments, user_map, inner_width);
+        let compose_snapshot = compose.clone();
+        let uid = *current_user_id;
+        let cd = *confirm_delete;
+        let content =
+            crate::render::build_detail_content(task, comments, user_map, inner_width, uid, cd);
         *lines = content.lines;
         *line_styles = content.line_styles;
-        *rendered_width = inner_width;
+        *affordances = content.affordances;
 
+        if let Some(ref cp) = compose_snapshot {
+            let (compose_text, compose_styles) = crate::render::compose_block_lines(cp);
+            lines.extend(compose_text);
+            line_styles.extend(compose_styles);
+        }
+
+        *rendered_width = inner_width;
         clamp_offset(offset, lines.len());
     }
 
@@ -561,12 +650,50 @@ pub(crate) fn task_card_height(task: &TaskRow, card_inner_w: usize) -> u16 {
 ///
 /// All navigation, selection, and loader logic lives here so it is
 /// headlessly unit-testable with no terminal or async runtime.
+///
+/// Dispatches to family sub-handlers to keep each function within the
+/// cyclomatic-complexity budget (≤ 10).
 pub fn update(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
+    match msg {
+        m @ (Msg::Up
+        | Msg::ScrollUp
+        | Msg::Down
+        | Msg::ScrollDown
+        | Msg::PageUp
+        | Msg::PageDown) => update_scroll(model, m),
+        m @ (Msg::Click { .. } | Msg::Drag { .. } | Msg::MouseUp { .. }) => {
+            update_pointer(model, m)
+        }
+        m @ (Msg::Select | Msg::Back | Msg::Quit | Msg::Refresh) => update_navigation(model, m),
+        m @ (Msg::LoadedTasksByProject { .. }
+        | Msg::LoadedMineTasks { .. }
+        | Msg::LoadedDetail(_)
+        | Msg::UserMapResolved(_)
+        | Msg::AssetActionResult
+        | Msg::HeaderNameResolved(_)) => update_loaded(model, m),
+        m @ (Msg::ComposeOpen
+        | Msg::ComposeInput(_)
+        | Msg::ComposeNewline
+        | Msg::ComposeBackspace
+        | Msg::ComposeSubmit
+        | Msg::ComposeCancel
+        | Msg::CommentMutationOk
+        | Msg::CommentMutationErr(_)) => update_compose(model, m),
+    }
+}
+
+fn update_scroll(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
     match msg {
         Msg::Up | Msg::ScrollUp => (handle_up(model), vec![]),
         Msg::Down | Msg::ScrollDown => (handle_down(model), vec![]),
         Msg::PageUp => (handle_page_up(model), vec![]),
         Msg::PageDown => (handle_page_down(model), vec![]),
+        _ => (model, vec![]),
+    }
+}
+
+fn update_pointer(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
+    match msg {
         Msg::Click {
             column,
             row,
@@ -582,10 +709,22 @@ pub fn update(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
             row,
             modifiers,
         } => handle_mouse_up(model, column, row, modifiers),
+        _ => (model, vec![]),
+    }
+}
+
+fn update_navigation(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
+    match msg {
         Msg::Select => handle_select(model),
         Msg::Back => (handle_back(model), vec![]),
         Msg::Quit => (handle_quit(model), vec![]),
         Msg::Refresh => handle_refresh(model),
+        _ => (model, vec![]),
+    }
+}
+
+fn update_loaded(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
+    match msg {
         Msg::LoadedTasksByProject { groups, loaded_at } => {
             (handle_loaded_tasks(model, groups, loaded_at), vec![])
         }
@@ -596,6 +735,21 @@ pub fn update(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
         Msg::UserMapResolved(map) => (handle_user_map_resolved(model, map), vec![]),
         Msg::AssetActionResult => (model, vec![]),
         Msg::HeaderNameResolved(name) => (handle_header_name_resolved(model, name), vec![]),
+        _ => (model, vec![]),
+    }
+}
+
+fn update_compose(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
+    match msg {
+        Msg::ComposeOpen => (handle_compose_open(model), vec![]),
+        Msg::ComposeInput(c) => (handle_compose_input(model, c), vec![]),
+        Msg::ComposeNewline => (handle_compose_newline(model), vec![]),
+        Msg::ComposeBackspace => (handle_compose_backspace(model), vec![]),
+        Msg::ComposeSubmit => handle_compose_submit(model),
+        Msg::ComposeCancel => (handle_compose_cancel(model), vec![]),
+        Msg::CommentMutationOk => handle_comment_mutation_ok(model),
+        Msg::CommentMutationErr(msg) => (handle_comment_mutation_err(model, msg), vec![]),
+        _ => (model, vec![]),
     }
 }
 
@@ -700,7 +854,9 @@ fn handle_click_detail(
         modifiers.contains(KeyModifiers::CONTROL) || modifiers.contains(KeyModifiers::SUPER);
 
     if has_modifier {
-        // Modified press: body link (D1c) takes priority; fall through to asset panel.
+        if let Some(kind) = affordance_at(&model, column, row) {
+            return dispatch_affordance_click(model, kind);
+        }
         if let Some(cmd) = body_link_cmd_at(&model, column, row, modifiers) {
             return (model, vec![cmd]);
         }
@@ -726,6 +882,24 @@ fn handle_click_detail(
     let mut model = model;
     model.selection = None;
     (model, vec![])
+}
+
+/// Dispatch a click on a resolved affordance kind to the appropriate message handler.
+fn dispatch_affordance_click(
+    model: Model,
+    kind: crate::render::AffordanceKind,
+) -> (Model, Vec<Cmd>) {
+    use crate::render::AffordanceKind;
+    match kind {
+        AffordanceKind::Edit(comment_id) => {
+            (handle_edit_comment_request(model, comment_id), vec![])
+        }
+        AffordanceKind::Delete(comment_id) => {
+            (handle_delete_comment_request(model, comment_id), vec![])
+        }
+        AffordanceKind::Confirm => handle_confirm_delete(model),
+        AffordanceKind::Cancel => (handle_cancel_delete(model), vec![]),
+    }
 }
 
 /// Return true when `row` falls within the scrollable body text area of the Detail screen.
@@ -872,6 +1046,39 @@ fn extract_line_slice(
     };
 
     crate::render::slice_by_display_cols(trimmed, start_inner_col, end_inner_col)
+}
+
+/// Resolve a Ctrl/Cmd+click against the unified affordance list in the Detail body.
+///
+/// Translates the click to a scroll-aware (line_idx, col) coordinate, then does a
+/// single linear scan over `affordances` and returns the first span that contains
+/// the click. Returns `None` when the click is outside the text viewport or misses
+/// all spans.
+fn affordance_at(model: &Model, column: u16, row: u16) -> Option<crate::render::AffordanceKind> {
+    let Screen::Detail {
+        affordances,
+        offset,
+        ..
+    } = model.top()?
+    else {
+        return None;
+    };
+
+    let (_, viewport_rows) = model.viewport;
+    let text_top: u16 = 2;
+    let content_text_height = viewport_rows.saturating_sub(DETAIL_CHROME_ROWS);
+
+    if row < text_top || row >= text_top + content_text_height {
+        return None;
+    }
+
+    let line_idx = offset + (row - text_top) as usize;
+    let char_col = column as usize;
+
+    affordances
+        .iter()
+        .find(|a| a.line_idx == line_idx && char_col >= a.col_start && char_col < a.col_end)
+        .map(|a| a.kind.clone())
 }
 
 /// Try to resolve a body-link click in the Detail content text area.
@@ -1065,6 +1272,10 @@ fn handle_select(mut model: Model) -> (Model, Vec<Cmd>) {
                     offset: 0,
                     loading: true,
                     rendered_width: usize::MAX,
+                    compose: None,
+                    current_user_id: None,
+                    affordances: vec![],
+                    confirm_delete: None,
                 });
             }
         }
@@ -1194,6 +1405,9 @@ fn handle_loaded_detail(mut model: Model, load: DetailLoad) -> Model {
         line_styles: ref mut lss,
         rendered_width: ref mut rw,
         ref mut loading,
+        ref mut current_user_id,
+        ref mut affordances,
+        ref mut confirm_delete,
         ..
     }) = model.top_mut()
     {
@@ -1202,10 +1416,13 @@ fn handle_loaded_detail(mut model: Model, load: DetailLoad) -> Model {
         *a = load.assets;
         *um = load.user_map;
         *loading = false;
+        *current_user_id = load.current_user_id;
         // Invalidate line cache so reflow_detail rebuilds at current width.
         *ls = vec![];
         *lss = vec![];
         *rw = usize::MAX;
+        *affordances = vec![];
+        *confirm_delete = None;
     }
     model.last_loaded = Some(load.loaded_at);
     model
@@ -1231,6 +1448,291 @@ fn handle_user_map_resolved(mut model: Model, map: HashMap<i64, String>) -> Mode
 
 fn handle_header_name_resolved(mut model: Model, name: String) -> Model {
     model.header.name = Some(name);
+    model
+}
+
+fn handle_compose_open(mut model: Model) -> Model {
+    if let Some(Screen::Detail {
+        ref mut compose,
+        ref mut rendered_width,
+        ..
+    }) = model.top_mut()
+    {
+        if compose.is_none() {
+            *compose = Some(Compose {
+                kind: ComposeKind::New,
+                buffer: String::new(),
+                status: ComposeStatus::Editing,
+            });
+            *rendered_width = usize::MAX;
+        }
+    }
+    model
+}
+
+fn handle_compose_input(mut model: Model, c: char) -> Model {
+    if let Some(Screen::Detail {
+        compose: Some(ref mut cp),
+        ref mut rendered_width,
+        ..
+    }) = model.top_mut()
+    {
+        if cp.status == ComposeStatus::Editing {
+            cp.buffer.push(c);
+            *rendered_width = usize::MAX;
+        }
+    }
+    model
+}
+
+fn handle_compose_newline(mut model: Model) -> Model {
+    if let Some(Screen::Detail {
+        compose: Some(ref mut cp),
+        ref mut rendered_width,
+        ..
+    }) = model.top_mut()
+    {
+        if cp.status == ComposeStatus::Editing {
+            cp.buffer.push('\n');
+            *rendered_width = usize::MAX;
+        }
+    }
+    model
+}
+
+fn handle_compose_backspace(mut model: Model) -> Model {
+    if let Some(Screen::Detail {
+        compose: Some(ref mut cp),
+        ref mut rendered_width,
+        ..
+    }) = model.top_mut()
+    {
+        if cp.status == ComposeStatus::Editing {
+            cp.buffer.pop();
+            *rendered_width = usize::MAX;
+        }
+    }
+    model
+}
+
+fn handle_compose_submit(mut model: Model) -> (Model, Vec<Cmd>) {
+    let submit_info = extract_compose_submit_info(&model);
+
+    let Some((instance, project_id, task_id, kind, body)) = submit_info else {
+        return (model, vec![]);
+    };
+
+    if let Some(Screen::Detail {
+        compose: Some(ref mut cp),
+        ref mut rendered_width,
+        ..
+    }) = model.top_mut()
+    {
+        cp.status = ComposeStatus::Submitting;
+        *rendered_width = usize::MAX;
+    }
+
+    let cmd = match kind {
+        ComposeKind::New => Cmd::SubmitComment {
+            instance,
+            project_id,
+            task_id,
+            body,
+        },
+        ComposeKind::Edit { comment_id } => Cmd::UpdateComment {
+            instance,
+            comment_id,
+            body,
+        },
+    };
+    (model, vec![cmd])
+}
+
+/// Extract the fields needed to submit a compose buffer, or None when the guard fails.
+///
+/// Guard: compose must be `Some`, status must be `Editing`, and buffer must be non-empty.
+fn extract_compose_submit_info(model: &Model) -> Option<(String, i64, i64, ComposeKind, String)> {
+    match model.top() {
+        Some(Screen::Detail {
+            instance,
+            project_id,
+            task_id,
+            compose: Some(cp),
+            ..
+        }) if cp.status == ComposeStatus::Editing && !cp.buffer.is_empty() => Some((
+            instance.clone(),
+            *project_id,
+            *task_id,
+            cp.kind.clone(),
+            cp.buffer.clone(),
+        )),
+        _ => None,
+    }
+}
+
+fn handle_compose_cancel(mut model: Model) -> Model {
+    if let Some(Screen::Detail {
+        ref mut compose,
+        ref mut rendered_width,
+        ..
+    }) = model.top_mut()
+    {
+        *compose = None;
+        *rendered_width = usize::MAX;
+    }
+    model
+}
+
+/// Open the compose area pre-filled with the plain-text body of `comment_id`.
+///
+/// No-op when the top screen is not Detail or the comment is not found. Sets
+/// `ComposeKind::Edit{comment_id}` and invalidates the render cache so the compose
+/// block appears on the next reflow.
+fn handle_edit_comment_request(mut model: Model, comment_id: i64) -> Model {
+    let body = match model.top() {
+        Some(Screen::Detail { comments, .. }) => comments
+            .iter()
+            .find(|c| c.get("id").and_then(|v| v.as_i64()) == Some(comment_id))
+            .map(|c| {
+                c.get("body_plain_text")
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| {
+                        let html = c.get("body").and_then(|v| v.as_str()).unwrap_or("");
+                        crate::render::html_to_text(html)
+                    })
+            }),
+        _ => return model,
+    };
+
+    let Some(body) = body else {
+        return model;
+    };
+
+    if let Some(Screen::Detail {
+        ref mut compose,
+        ref mut rendered_width,
+        ..
+    }) = model.top_mut()
+    {
+        *compose = Some(Compose {
+            kind: ComposeKind::Edit { comment_id },
+            buffer: body,
+            status: ComposeStatus::Editing,
+        });
+        *rendered_width = usize::MAX;
+    }
+    model
+}
+
+/// Set `confirm_delete = Some(comment_id)` and invalidate the render cache so the
+/// inline confirm prompt appears on the next reflow. Emits no Cmd.
+fn handle_delete_comment_request(mut model: Model, comment_id: i64) -> Model {
+    if let Some(Screen::Detail {
+        ref mut confirm_delete,
+        ref mut rendered_width,
+        ..
+    }) = model.top_mut()
+    {
+        *confirm_delete = Some(comment_id);
+        *rendered_width = usize::MAX;
+    }
+    model
+}
+
+/// Emit `Cmd::DeleteComment` for the pending comment and clear `confirm_delete`.
+fn handle_confirm_delete(mut model: Model) -> (Model, Vec<Cmd>) {
+    let fields = match model.top() {
+        Some(Screen::Detail {
+            instance,
+            confirm_delete: Some(comment_id),
+            ..
+        }) => Some((instance.clone(), *comment_id)),
+        _ => None,
+    };
+
+    let Some((instance, comment_id)) = fields else {
+        return (model, vec![]);
+    };
+
+    if let Some(Screen::Detail {
+        ref mut confirm_delete,
+        ref mut rendered_width,
+        ..
+    }) = model.top_mut()
+    {
+        *confirm_delete = None;
+        *rendered_width = usize::MAX;
+    }
+
+    (
+        model,
+        vec![Cmd::DeleteComment {
+            instance,
+            comment_id,
+        }],
+    )
+}
+
+/// Dismiss the inline confirm prompt without deleting.
+fn handle_cancel_delete(mut model: Model) -> Model {
+    if let Some(Screen::Detail {
+        ref mut confirm_delete,
+        ref mut rendered_width,
+        ..
+    }) = model.top_mut()
+    {
+        *confirm_delete = None;
+        *rendered_width = usize::MAX;
+    }
+    model
+}
+
+fn handle_comment_mutation_ok(mut model: Model) -> (Model, Vec<Cmd>) {
+    let detail_fields = match model.top() {
+        Some(Screen::Detail {
+            instance,
+            project_id,
+            task_id,
+            ..
+        }) => Some((instance.clone(), *project_id, *task_id)),
+        _ => None,
+    };
+
+    if let Some(Screen::Detail {
+        ref mut compose,
+        ref mut confirm_delete,
+        ..
+    }) = model.top_mut()
+    {
+        *compose = None;
+        *confirm_delete = None;
+    }
+
+    let Some((instance, project_id, task_id)) = detail_fields else {
+        return (model, vec![]);
+    };
+
+    let cmd = Cmd::LoadDetail {
+        instance,
+        project_id,
+        task_id,
+        refresh: true,
+    };
+    (model, vec![cmd])
+}
+
+fn handle_comment_mutation_err(mut model: Model, msg: String) -> Model {
+    if let Some(Screen::Detail {
+        compose: Some(ref mut cp),
+        ref mut rendered_width,
+        ..
+    }) = model.top_mut()
+    {
+        cp.status = ComposeStatus::Error(msg);
+        *rendered_width = usize::MAX;
+    }
     model
 }
 

@@ -788,7 +788,8 @@ async fn load_task_core_assignee_line_shows_id_when_user_map_empty() {
 
     let empty_map = std::collections::HashMap::new();
     let lines =
-        crate::render::build_detail_content(&core.task, &core.comments, &empty_map, 80).lines;
+        crate::render::build_detail_content(&core.task, &core.comments, &empty_map, 80, None, None)
+            .lines;
 
     let assignee_line = lines
         .iter()
@@ -961,7 +962,8 @@ async fn load_task_core_enriches_task_with_project_name_from_cache() {
     );
 
     let empty_map = std::collections::HashMap::new();
-    let lines = crate::render::build_detail_content(&core.task, &[], &empty_map, 80).lines;
+    let lines =
+        crate::render::build_detail_content(&core.task, &[], &empty_map, 80, None, None).lines;
     let project_line = lines
         .iter()
         .find(|l| l.contains("Project"))
@@ -1003,7 +1005,8 @@ async fn load_task_core_project_name_fallback_when_cache_miss() {
     );
 
     let empty_map = std::collections::HashMap::new();
-    let lines = crate::render::build_detail_content(&core.task, &[], &empty_map, 80).lines;
+    let lines =
+        crate::render::build_detail_content(&core.task, &[], &empty_map, 80, None, None).lines;
     let project_line = lines
         .iter()
         .find(|l| l.contains("Project"))
