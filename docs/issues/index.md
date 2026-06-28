@@ -36,3 +36,4 @@ TUI/UX work (V/R/ARCH slices), tracing to
 | [0028](/issues/0028-assets-inline-scrollable-content.md) | DV | assets render inline in the globally-scrollable detail content (retire the fixed panel + cap) | closed | — |
 | [0029](/issues/0029-richtext-wrap-positional-style.md) | RT | rich-line wrap threads style positionally — fix repeated/substring word emphasis, delete style_of_word_in_rich_line | closed | — |
 | [0030](/issues/0030-tasks-card-layout-cache.md) | PERF | memoize the Tasks-screen card layout (heights + prefix-sum offsets, binary-search first-visible, u32 offsets) | closed | — |
+| [0031](/issues/0031-fix-inline-asset-link-style-click.md) | BUG | inline Anexos/Artefatos rows render plain (no link style) + read as not clickable — restore structural link styling, prove Ctrl/Cmd+click open | open | — |
