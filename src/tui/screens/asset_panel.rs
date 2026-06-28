@@ -162,6 +162,91 @@ pub fn render(frame: &mut Frame, area: ratatui::layout::Rect, assets: &[Asset]) 
     frame.render_widget(panel, area);
 }
 
+/// Produce the inline asset section as styled content lines, derived from `layout()`.
+///
+/// Returns `Vec::new()` when `assets` is empty (no header is emitted for an empty list).
+/// For non-empty assets the output is:
+///
+/// - row 0: the section header (`t("Artifacts")`) with a Bold `StyleRun` over the header text;
+/// - rows 1..: each `PanelRow` from `layout(assets, content_width)` mapped 1:1 in order:
+///   `Pad`/`Separator` → blank `""` with no style runs;
+///   `Asset{text,..}` → `" ".repeat(PANEL_HPAD) + text` with no style runs
+///   (link color is applied at render time via `asset_index_for_section_row`);
+///   `Hint(text)` → `" ".repeat(PANEL_HPAD) + text` with an Italic `StyleRun` over the hint text.
+///
+/// Both this function and `asset_index_for_section_row` call `layout()` as the single
+/// composition source so the header-offset contract (section row = layout row + 1) is
+/// maintained in one place.
+#[allow(dead_code)]
+pub fn section_lines(
+    assets: &[Asset],
+    content_width: usize,
+) -> Vec<(String, Vec<crate::render::StyleRun>)> {
+    let rows = layout(assets, content_width);
+    if rows.is_empty() {
+        return Vec::new();
+    }
+
+    let header_text = t("Artifacts");
+    let header_len = crate::render::display_width(&header_text);
+    let header_run = crate::render::StyleRun {
+        start: 0,
+        len: header_len,
+        style: crate::richtext::RichStyle::Bold,
+    };
+
+    let mut result: Vec<(String, Vec<crate::render::StyleRun>)> =
+        Vec::with_capacity(1 + rows.len());
+    result.push((header_text, vec![header_run]));
+
+    let hpad = " ".repeat(PANEL_HPAD);
+    for row in rows {
+        let (text, runs) = match row {
+            PanelRow::Pad | PanelRow::Separator => (String::new(), vec![]),
+            PanelRow::Asset { text, .. } => (format!("{hpad}{text}"), vec![]),
+            PanelRow::Hint(text) => {
+                let hint_line = format!("{hpad}{text}");
+                let hint_start = PANEL_HPAD;
+                let hint_len = crate::render::display_width(&text);
+                let run = crate::render::StyleRun {
+                    start: hint_start,
+                    len: hint_len,
+                    style: crate::richtext::RichStyle::Italic,
+                };
+                (hint_line, vec![run])
+            }
+        };
+        result.push((text, runs));
+    }
+
+    result
+}
+
+/// Map a 0-based row index into the `section_lines` vector to the owning asset index.
+///
+/// `interior_row == 0` is the header line and always returns `None`. For `interior_row >= 1`
+/// the function classifies `layout(assets, content_width)[interior_row - 1]`:
+/// `PanelRow::Asset{idx,..}` → `Some(idx)` (wrapped continuation lines share the same idx);
+/// `Pad`/`Separator`/`Hint` → `None`. Out-of-range `interior_row` → `None`.
+///
+/// Both this function and `section_lines` call `layout()` as the single composition source,
+/// so the header-offset invariant (section row = layout row + 1) is maintained in one place.
+#[allow(dead_code)]
+pub fn asset_index_for_section_row(
+    assets: &[Asset],
+    content_width: usize,
+    interior_row: usize,
+) -> Option<usize> {
+    if interior_row == 0 {
+        return None;
+    }
+    let rows = layout(assets, content_width);
+    match rows.get(interior_row - 1) {
+        Some(PanelRow::Asset { idx, .. }) => Some(*idx),
+        _ => None,
+    }
+}
+
 /// Map a screen row to the asset index at that position, or `None` for pad, separator, or hint rows.
 ///
 /// `panel_top` is the screen row of the panel's top border. `row` is the screen row being clicked.

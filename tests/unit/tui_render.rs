@@ -4825,13 +4825,103 @@ fn asset_link_row_underline_confined_to_token_not_leading_pad_or_trailing_fill()
 // the '[2]' marker in the buffer, feeds THAT row to the click handler, and asserts it
 // resolves to asset index 1. Also asserts [1] row → index 0 and a separator/pad row → None.
 // This prevents the test from passing while the live mapping is wrong.
+
+fn find_marker_row(buf: &ratatui::buffer::Buffer, width: u16, height: u16, marker: &str) -> u16 {
+    for y in 0..height {
+        let row_str: String = (0..width)
+            .map(|x| buf.cell((x, y)).unwrap().symbol().to_string())
+            .collect();
+        if row_str.contains(marker) {
+            return y;
+        }
+    }
+    panic!("marker '{marker}' not found in rendered buffer");
+}
+
+fn make_detail_model(
+    assets: Vec<Asset>,
+    viewport_w: u16,
+    viewport_h: u16,
+) -> crate::tui::model::Model {
+    use crate::tui::model::{Header, Screen};
+    use std::collections::HashMap;
+    crate::tui::model::Model {
+        stack: vec![Screen::Detail {
+            instance: "inst".into(),
+            project_id: 1,
+            task_id: 1,
+            task: serde_json::Value::Null,
+            comments: vec![],
+            user_map: HashMap::new(),
+            lines: vec!["body".to_string()],
+            line_styles: vec![],
+            assets,
+            offset: 0,
+            loading: false,
+            rendered_width: usize::MAX,
+        }],
+        should_quit: false,
+        header: Header::from_instances(&[], None),
+        viewport: (viewport_w, viewport_h),
+        click_targets: vec![],
+        last_loaded: None,
+        selection: None,
+        copied_feedback: false,
+    }
+}
+
+fn assert_ctrl_click_opens_url(
+    assets: Vec<Asset>,
+    viewport_w: u16,
+    viewport_h: u16,
+    row: u16,
+    expected_url: &str,
+    label: &str,
+) {
+    use crate::tui::model::{update, Msg};
+    use crossterm::event::KeyModifiers;
+    let (_, cmds) = update(
+        make_detail_model(assets, viewport_w, viewport_h),
+        Msg::Click {
+            column: 5,
+            row,
+            modifiers: KeyModifiers::CONTROL,
+        },
+    );
+    assert_eq!(cmds.len(), 1, "ctrl+click on {label} row must emit one cmd");
+    match &cmds[0] {
+        crate::tui::model::Cmd::OpenAsset { url, .. } => {
+            assert_eq!(url, expected_url, "{label} must resolve to {expected_url}");
+        }
+        other => panic!("expected OpenAsset for {label}, got {other:?}"),
+    }
+}
+
+fn assert_click_no_cmd(
+    assets: Vec<Asset>,
+    viewport_w: u16,
+    viewport_h: u16,
+    row: u16,
+    modifiers: crossterm::event::KeyModifiers,
+    label: &str,
+) {
+    use crate::tui::model::{update, Msg};
+    let (_, cmds) = update(
+        make_detail_model(assets, viewport_w, viewport_h),
+        Msg::Click {
+            column: 5,
+            row,
+            modifiers,
+        },
+    );
+    assert!(cmds.is_empty(), "click on {label} must return no cmd");
+}
+
 #[test]
 fn click_second_asset_row_derived_from_real_buffer_resolves_to_index_1() {
-    use crate::tui::model::{update, Header, Msg, Screen};
     use crate::tui::screens::detail::{draw_detail, DetailParams};
     use crossterm::event::KeyModifiers;
     use ratatui::{backend::TestBackend, layout::Rect, Terminal};
-    use std::collections::HashMap;
 
     let viewport_w = 80u16;
     let viewport_h = 30u16;
@@ -4874,148 +4964,66 @@ fn click_second_asset_row_derived_from_real_buffer_resolves_to_index_1() {
 
     let buf = terminal.backend().buffer();
 
-    // Scan all rows to find the rows containing "[1]", "[2]", "[3]".
-    let mut row_for = [None::<u16>; 4]; // index 1,2,3 used
-    for y in 0..viewport_h {
-        let row_str: String = (0..viewport_w)
-            .map(|x| buf.cell((x, y)).unwrap().symbol().to_string())
-            .collect();
-        for n in 1usize..=3 {
-            let marker = format!("[{n}]");
-            if row_str.contains(&marker) && row_for[n].is_none() {
-                row_for[n] = Some(y);
-            }
-        }
-    }
-
-    let row1 = row_for[1].expect("'[1]' marker must appear in the rendered buffer");
-    let row2 = row_for[2].expect("'[2]' marker must appear in the rendered buffer");
-    let row3 = row_for[3].expect("'[3]' marker must appear in the rendered buffer");
-
-    // The separator row is between [1] and [2] rows.
-    // It must be exactly row1 + 1 (since each short asset occupies 1 row).
+    // Locate the exact buffer rows for each asset marker and the separator.
+    let row1 = find_marker_row(buf, viewport_w, viewport_h, "[1]");
+    let row2 = find_marker_row(buf, viewport_w, viewport_h, "[2]");
+    let row3 = find_marker_row(buf, viewport_w, viewport_h, "[3]");
     let sep_row = row1 + 1;
+
     assert_eq!(
         sep_row + 1,
         row2,
         "separator must be at row1+1 and asset[2] at row1+2"
     );
 
-    let make_model = |assets: Vec<Asset>| crate::tui::model::Model {
-        stack: vec![Screen::Detail {
-            instance: "inst".into(),
-            project_id: 1,
-            task_id: 1,
-            task: serde_json::Value::Null,
-            comments: vec![],
-            user_map: HashMap::new(),
-            lines: vec!["body".to_string()],
-            line_styles: vec![],
-            assets,
-            offset: 0,
-            loading: false,
-            rendered_width: usize::MAX,
-        }],
-        should_quit: false,
-        header: Header::from_instances(&[], None),
-        viewport: (viewport_w, viewport_h),
-        click_targets: vec![],
-        last_loaded: None,
-        selection: None,
-        copied_feedback: false,
-    };
-
-    // Ctrl+click on buffer row containing "[1]" → must open first.pdf (index 0).
-    let (_, cmds) = update(
-        make_model(assets.clone()),
-        Msg::Click {
-            column: 5,
-            row: row1,
-            modifiers: KeyModifiers::CONTROL,
-        },
+    // Ctrl+click on each asset row must open the matching URL.
+    assert_ctrl_click_opens_url(
+        assets.clone(),
+        viewport_w,
+        viewport_h,
+        row1,
+        "https://example.com/first.pdf",
+        "'[1]' row",
     );
-    assert_eq!(cmds.len(), 1, "ctrl+click on '[1]' row must emit one cmd");
-    match &cmds[0] {
-        crate::tui::model::Cmd::OpenAsset { url, .. } => {
-            assert_eq!(
-                url, "https://example.com/first.pdf",
-                "'[1]' row (buffer row {row1}) must resolve to first.pdf (index 0)"
-            );
-        }
-        other => panic!("expected OpenAsset for '[1]' row, got {other:?}"),
-    }
-
-    // Ctrl+click on buffer row containing "[2]" → must open second.pdf (index 1).
-    let (_, cmds) = update(
-        make_model(assets.clone()),
-        Msg::Click {
-            column: 5,
-            row: row2,
-            modifiers: KeyModifiers::CONTROL,
-        },
+    assert_ctrl_click_opens_url(
+        assets.clone(),
+        viewport_w,
+        viewport_h,
+        row2,
+        "https://example.com/second.pdf",
+        "'[2]' row — off-by-one regression guard",
     );
-    assert_eq!(cmds.len(), 1, "ctrl+click on '[2]' row must emit one cmd");
-    match &cmds[0] {
-        crate::tui::model::Cmd::OpenAsset { url, .. } => {
-            assert_eq!(
-                url, "https://example.com/second.pdf",
-                "'[2]' row (buffer row {row2}) must resolve to second.pdf (index 1), \
-                 not first.pdf — off-by-one regression guard"
-            );
-        }
-        other => panic!("expected OpenAsset for '[2]' row, got {other:?}"),
-    }
-
-    // Ctrl+click on buffer row containing "[3]" → must open third.pdf (index 2).
-    let (_, cmds) = update(
-        make_model(assets.clone()),
-        Msg::Click {
-            column: 5,
-            row: row3,
-            modifiers: KeyModifiers::CONTROL,
-        },
-    );
-    assert_eq!(cmds.len(), 1, "ctrl+click on '[3]' row must emit one cmd");
-    match &cmds[0] {
-        crate::tui::model::Cmd::OpenAsset { url, .. } => {
-            assert_eq!(
-                url, "https://example.com/third.pdf",
-                "'[3]' row (buffer row {row3}) must resolve to third.pdf (index 2)"
-            );
-        }
-        other => panic!("expected OpenAsset for '[3]' row, got {other:?}"),
-    }
-
-    // Ctrl+click on the separator row → must resolve to None (no asset).
-    let (_, cmds) = update(
-        make_model(assets.clone()),
-        Msg::Click {
-            column: 5,
-            row: sep_row,
-            modifiers: KeyModifiers::CONTROL,
-        },
-    );
-    assert!(
-        cmds.is_empty(),
-        "click on separator row (row {sep_row}) must return no asset (None)"
+    assert_ctrl_click_opens_url(
+        assets.clone(),
+        viewport_w,
+        viewport_h,
+        row3,
+        "https://example.com/third.pdf",
+        "'[3]' row",
     );
 
-    // Click on the top vpad row (panel_top + 1) → must resolve to None.
+    // Ctrl+click on the separator row → no cmd (no asset).
+    assert_click_no_cmd(
+        assets.clone(),
+        viewport_w,
+        viewport_h,
+        sep_row,
+        KeyModifiers::CONTROL,
+        "separator row",
+    );
+
+    // Click on the top vpad row → no cmd (no asset).
     let inner_width = (viewport_w - 2) as usize;
     let panel_h = asset_panel_render_height(&assets, inner_width);
     let panel_top = viewport_h - panel_h;
     let top_vpad = panel_top + 1;
-    let (_, cmds) = update(
-        make_model(assets.clone()),
-        Msg::Click {
-            column: 5,
-            row: top_vpad,
-            modifiers: KeyModifiers::NONE,
-        },
-    );
-    assert!(
-        cmds.is_empty(),
-        "click on top vpad row (row {top_vpad}) must return no asset (None)"
+    assert_click_no_cmd(
+        assets.clone(),
+        viewport_w,
+        viewport_h,
+        top_vpad,
+        KeyModifiers::NONE,
+        "top vpad row",
     );
 }
 
@@ -5601,5 +5609,355 @@ mod panel_row_layout {
             panel_top_row.contains("Artifacts"),
             "Artifacts border must appear at row {expected_panel_top} (height()={expected_height}): {panel_top_row:?}"
         );
+    }
+}
+
+// --- S1: asset_panel inline building blocks (section_lines + asset_index_for_section_row) ---
+//
+// Tests derive expectations from the REAL layout() output to avoid hand-fabricating geometry.
+
+mod asset_panel_inline {
+    use crate::render::Asset;
+    use crate::richtext::RichStyle;
+    use crate::tui::screens::asset_panel::{
+        asset_index_for_section_row, layout, section_lines, PanelRow,
+    };
+
+    fn make_asset(name: &str) -> Asset {
+        Asset {
+            name: name.to_string(),
+            url: format!("https://example.com/{name}"),
+        }
+    }
+
+    // AC1: empty assets -> section_lines returns Vec::new() (no header emitted).
+    #[test]
+    fn section_lines_empty_assets_returns_empty() {
+        let lines = section_lines(&[], 60);
+        assert!(
+            lines.is_empty(),
+            "section_lines with empty assets must return Vec::new()"
+        );
+    }
+
+    // AC1: single asset -> header + layout-derived rows; header carries Bold StyleRun.
+    #[test]
+    fn section_lines_single_asset_has_header_then_layout_rows() {
+        let assets = vec![make_asset("report.pdf")];
+        let content_width = 60usize;
+        let lines = section_lines(&assets, content_width);
+        let layout_rows = layout(&assets, content_width);
+
+        assert!(
+            !lines.is_empty(),
+            "section_lines must not be empty for non-empty assets"
+        );
+        assert_eq!(
+            lines.len(),
+            1 + layout_rows.len(),
+            "section_lines.len() must equal 1 (header) + layout().len()"
+        );
+
+        let (header_text, header_runs) = &lines[0];
+        assert!(
+            !header_text.is_empty(),
+            "header line must have non-empty text"
+        );
+        assert_eq!(
+            header_runs.len(),
+            1,
+            "header line must carry exactly one StyleRun (Bold)"
+        );
+        let run = &header_runs[0];
+        assert_eq!(
+            run.style,
+            RichStyle::Bold,
+            "header StyleRun must be Bold; got {:?}",
+            run.style
+        );
+        assert_eq!(run.start, 0, "header Bold run must start at column 0");
+        assert_eq!(
+            run.len,
+            unicode_width::UnicodeWidthStr::width(header_text.as_str()),
+            "header Bold run len must span the full header text display width"
+        );
+    }
+
+    // AC1: single asset -> Pad/Separator rows map to blank "" with empty style vec;
+    //      Asset rows carry PANEL_HPAD prefix and empty style vec;
+    //      Hint row carries PANEL_HPAD prefix and Italic StyleRun over hint text.
+    #[test]
+    fn section_lines_row_kinds_match_layout_row_kinds() {
+        use crate::render::PANEL_HPAD;
+        let assets = vec![make_asset("alpha.pdf")];
+        let content_width = 60usize;
+        let lines = section_lines(&assets, content_width);
+        let layout_rows = layout(&assets, content_width);
+
+        for (section_idx, layout_row) in layout_rows.iter().enumerate() {
+            let (text, runs) = &lines[section_idx + 1];
+            match layout_row {
+                PanelRow::Pad | PanelRow::Separator => {
+                    assert!(
+                        text.is_empty(),
+                        "Pad/Separator must produce blank text at section_idx={section_idx}: {text:?}"
+                    );
+                    assert!(
+                        runs.is_empty(),
+                        "Pad/Separator must produce no style runs at section_idx={section_idx}"
+                    );
+                }
+                PanelRow::Asset {
+                    text: asset_text, ..
+                } => {
+                    let expected_prefix = " ".repeat(PANEL_HPAD);
+                    assert!(
+                        text.starts_with(&expected_prefix),
+                        "Asset line must start with PANEL_HPAD spaces at section_idx={section_idx}: {text:?}"
+                    );
+                    assert!(
+                        text.contains(asset_text.as_str()),
+                        "Asset line must contain the asset text at section_idx={section_idx}: {text:?}"
+                    );
+                    assert!(
+                        runs.is_empty(),
+                        "Asset line must carry no style runs (link color is deferred to S2): section_idx={section_idx}"
+                    );
+                }
+                PanelRow::Hint(hint_text) => {
+                    let expected_prefix = " ".repeat(PANEL_HPAD);
+                    assert!(
+                        text.starts_with(&expected_prefix),
+                        "Hint line must start with PANEL_HPAD spaces: {text:?}"
+                    );
+                    assert!(
+                        text.contains(hint_text.as_str()),
+                        "Hint line must contain the hint text: {text:?}"
+                    );
+                    assert_eq!(
+                        runs.len(),
+                        1,
+                        "Hint line must carry exactly one StyleRun (Italic)"
+                    );
+                    let run = &runs[0];
+                    assert_eq!(
+                        run.style,
+                        RichStyle::Italic,
+                        "Hint StyleRun must be Italic; got {:?}",
+                        run.style
+                    );
+                    assert_eq!(
+                        run.start, PANEL_HPAD,
+                        "Hint Italic run must start at PANEL_HPAD={PANEL_HPAD} (after the pad)"
+                    );
+                    let hint_dw = unicode_width::UnicodeWidthStr::width(hint_text.as_str());
+                    assert_eq!(
+                        run.len, hint_dw,
+                        "Hint Italic run len must span the hint text display width"
+                    );
+                }
+            }
+        }
+    }
+
+    // AC1: two assets -> a blank Separator line appears between the two asset rows.
+    #[test]
+    fn section_lines_two_assets_have_blank_separator_between_them() {
+        let assets = vec![make_asset("alpha.pdf"), make_asset("beta.pdf")];
+        let content_width = 60usize;
+        let lines = section_lines(&assets, content_width);
+        let layout_rows = layout(&assets, content_width);
+
+        let joined: Vec<&str> = lines.iter().map(|(t, _)| t.as_str()).collect();
+
+        let mut saw_asset = false;
+        let mut between_sep_idx: Option<usize> = None;
+        for (layout_idx, row) in layout_rows.iter().enumerate() {
+            match row {
+                PanelRow::Asset { .. } => saw_asset = true,
+                PanelRow::Separator if saw_asset => {
+                    between_sep_idx = Some(layout_idx + 1);
+                    break;
+                }
+                _ => {}
+            }
+        }
+
+        assert!(
+            between_sep_idx.is_some(),
+            "layout must contain a Separator after the first asset for two-asset input"
+        );
+        let section_idx = between_sep_idx.unwrap();
+        assert_eq!(
+            joined.get(section_idx),
+            Some(&""),
+            "section_lines must have blank row at section_idx={section_idx} (Separator between assets)"
+        );
+    }
+
+    // AC1: a label that wraps at content_width produces multiple consecutive Asset rows,
+    //      all with an empty style vec.
+    #[test]
+    fn section_lines_wrapped_label_produces_multiple_asset_rows_no_styles() {
+        let long_label = "a-very-long-filename-that-wraps-inside-the-content-width-area.pdf";
+        let content_width = 20usize;
+        let assets = vec![make_asset(long_label)];
+        let layout_rows = layout(&assets, content_width);
+
+        let asset_row_count = layout_rows
+            .iter()
+            .filter(|r| matches!(r, PanelRow::Asset { .. }))
+            .count();
+        assert!(
+            asset_row_count >= 2,
+            "wrapped label must produce at least 2 Asset rows in layout(); got {asset_row_count} (content_width={content_width})"
+        );
+
+        let lines = section_lines(&assets, content_width);
+        let asset_section_rows: Vec<_> = lines
+            .iter()
+            .skip(1)
+            .enumerate()
+            .filter(|(i, _)| matches!(layout_rows.get(*i), Some(PanelRow::Asset { .. })))
+            .collect();
+
+        assert!(
+            asset_section_rows.len() >= 2,
+            "section_lines must have at least 2 Asset rows for a wrapped label"
+        );
+        for (_, (_, runs)) in &asset_section_rows {
+            assert!(
+                runs.is_empty(),
+                "wrapped Asset lines must carry no style runs (link color deferred to S2)"
+            );
+        }
+    }
+
+    // AC2: asset_index_for_section_row -> row 0 (header) always returns None.
+    #[test]
+    fn asset_index_for_section_row_header_row_returns_none() {
+        let assets = vec![make_asset("file.pdf")];
+        let result = asset_index_for_section_row(&assets, 60, 0);
+        assert_eq!(result, None, "interior_row=0 (header) must return None");
+    }
+
+    // AC2: asset_index_for_section_row -> pad/separator/hint rows return None.
+    #[test]
+    fn asset_index_for_section_row_non_asset_rows_return_none() {
+        let assets = vec![make_asset("file.pdf")];
+        let content_width = 60usize;
+        let layout_rows = layout(&assets, content_width);
+
+        for (layout_idx, row) in layout_rows.iter().enumerate() {
+            let section_row = layout_idx + 1;
+            let result = asset_index_for_section_row(&assets, content_width, section_row);
+            match row {
+                PanelRow::Asset { .. } => {}
+                PanelRow::Pad | PanelRow::Separator | PanelRow::Hint(_) => {
+                    assert_eq!(
+                        result, None,
+                        "Pad/Separator/Hint at layout_idx={layout_idx} (section_row={section_row}) must return None"
+                    );
+                }
+            }
+        }
+    }
+
+    // AC2: asset_index_for_section_row -> each asset row returns Some(owning idx).
+    #[test]
+    fn asset_index_for_section_row_asset_rows_return_some_idx() {
+        let assets = vec![make_asset("alpha.pdf"), make_asset("beta.pdf")];
+        let content_width = 60usize;
+        let layout_rows = layout(&assets, content_width);
+
+        for (layout_idx, row) in layout_rows.iter().enumerate() {
+            if let PanelRow::Asset { idx, .. } = row {
+                let section_row = layout_idx + 1;
+                let result = asset_index_for_section_row(&assets, content_width, section_row);
+                assert_eq!(
+                    result,
+                    Some(*idx),
+                    "Asset row at layout_idx={layout_idx} (section_row={section_row}) must return Some({idx})"
+                );
+            }
+        }
+    }
+
+    // AC2: wrapped continuation lines for a multi-row label all return Some(same owning idx).
+    #[test]
+    fn asset_index_for_section_row_wrapped_continuation_returns_same_idx() {
+        let long_label = "a-very-long-filename-that-wraps-inside-the-content-width-area.pdf";
+        let content_width = 20usize;
+        let assets = vec![make_asset(long_label)];
+        let layout_rows = layout(&assets, content_width);
+
+        let asset_layout_indices: Vec<usize> = layout_rows
+            .iter()
+            .enumerate()
+            .filter_map(|(i, r)| {
+                if matches!(r, PanelRow::Asset { .. }) {
+                    Some(i)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        assert!(
+            asset_layout_indices.len() >= 2,
+            "need at least 2 wrapped rows to test continuation; got {} (content_width={content_width})",
+            asset_layout_indices.len()
+        );
+
+        for layout_idx in &asset_layout_indices {
+            let section_row = layout_idx + 1;
+            let result = asset_index_for_section_row(&assets, content_width, section_row);
+            assert_eq!(
+                result,
+                Some(0),
+                "every wrapped continuation row must return Some(0) for the sole asset; section_row={section_row}"
+            );
+        }
+    }
+
+    // AC2: out-of-range interior_row returns None.
+    #[test]
+    fn asset_index_for_section_row_out_of_range_returns_none() {
+        let assets = vec![make_asset("file.pdf")];
+        let content_width = 60usize;
+        let lines = section_lines(&assets, content_width);
+        let out_of_range = lines.len() + 10;
+        let result = asset_index_for_section_row(&assets, content_width, out_of_range);
+        assert_eq!(
+            result, None,
+            "out-of-range interior_row={out_of_range} must return None"
+        );
+    }
+
+    // AC2: empty assets -> asset_index_for_section_row always returns None (even row 0).
+    #[test]
+    fn asset_index_for_section_row_empty_assets_always_none() {
+        assert_eq!(asset_index_for_section_row(&[], 60, 0), None);
+        assert_eq!(asset_index_for_section_row(&[], 60, 1), None);
+        assert_eq!(asset_index_for_section_row(&[], 60, 99), None);
+    }
+
+    // AC3: section_lines.len() == 1 + layout().len() for non-empty assets (offset contract).
+    #[test]
+    fn section_lines_len_equals_one_plus_layout_len() {
+        let assets = vec![
+            make_asset("a.pdf"),
+            make_asset("b.pdf"),
+            make_asset("c.pdf"),
+        ];
+        for content_width in [20usize, 40, 60, 80] {
+            let lines = section_lines(&assets, content_width);
+            let layout_rows = layout(&assets, content_width);
+            assert_eq!(
+                lines.len(),
+                1 + layout_rows.len(),
+                "section_lines.len() must equal 1 + layout().len() at content_width={content_width}"
+            );
+        }
     }
 }
