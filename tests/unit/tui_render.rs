@@ -5268,3 +5268,338 @@ fn draw_detail_asset_panel_top_stays_in_lock_step_after_d1f() {
          (asset_panel_render_height now includes ASSET_HINT_ROWS): {top_row:?}"
     );
 }
+
+// AC4: Direct unit tests on Vec<PanelRow> — the layout is the test surface.
+// These assert the composition for all cases required by the acceptance criterion:
+// (a) empty list -> empty vec, (b) single asset, (c) two assets, (d) wrapped label.
+
+mod panel_row_layout {
+    use crate::render::{Asset, PANEL_VPAD};
+    use crate::tui::screens::asset_panel::{apply_cap, layout, PanelRow};
+
+    fn asset(name: &str) -> Asset {
+        Asset {
+            name: name.into(),
+            url: format!("https://example.com/{name}"),
+        }
+    }
+
+    fn count_pads(rows: &[PanelRow]) -> usize {
+        rows.iter().filter(|r| matches!(r, PanelRow::Pad)).count()
+    }
+
+    fn count_separators(rows: &[PanelRow]) -> usize {
+        rows.iter()
+            .filter(|r| matches!(r, PanelRow::Separator))
+            .count()
+    }
+
+    fn count_hints(rows: &[PanelRow]) -> usize {
+        rows.iter()
+            .filter(|r| matches!(r, PanelRow::Hint(_)))
+            .count()
+    }
+
+    fn asset_indices(rows: &[PanelRow]) -> Vec<usize> {
+        rows.iter()
+            .filter_map(|r| {
+                if let PanelRow::Asset { idx, .. } = r {
+                    Some(*idx)
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    // (a) Empty list -> empty vec.
+    #[test]
+    fn layout_empty_assets_returns_empty_vec() {
+        let rows = layout(&[], 80);
+        assert!(
+            rows.is_empty(),
+            "empty asset list must produce an empty layout vec"
+        );
+    }
+
+    // apply_cap of empty layout is also empty.
+    #[test]
+    fn apply_cap_empty_vec_returns_empty() {
+        let rows = apply_cap(vec![]);
+        assert!(rows.is_empty(), "apply_cap of empty vec must be empty");
+    }
+
+    // (b) Single asset: top pads, one Asset row, Separator, Hint, bottom pad.
+    #[test]
+    fn layout_single_asset_has_correct_composition() {
+        let assets = [asset("file.pdf")];
+        let rows = layout(&assets, 80);
+
+        assert!(
+            !rows.is_empty(),
+            "single asset must produce non-empty layout"
+        );
+
+        // top PANEL_VPAD pads at the start
+        for i in 0..PANEL_VPAD {
+            assert!(
+                matches!(rows[i], PanelRow::Pad),
+                "row {i} must be Pad (top vpad): got a different kind"
+            );
+        }
+
+        // exactly one Asset row
+        let asset_idxs = asset_indices(&rows);
+        assert_eq!(
+            asset_idxs,
+            vec![0],
+            "single asset must produce exactly one Asset row with idx=0"
+        );
+
+        // last PANEL_VPAD rows are Pad
+        for i in 0..PANEL_VPAD {
+            let row_idx = rows.len() - 1 - i;
+            assert!(
+                matches!(rows[row_idx], PanelRow::Pad),
+                "last {i} row must be Pad (bottom vpad)"
+            );
+        }
+
+        // exactly one Hint and the Hint comes before the trailing Pad(s)
+        assert_eq!(
+            count_hints(&rows),
+            1,
+            "single asset must have exactly one Hint row"
+        );
+        let hint_pos = rows
+            .iter()
+            .position(|r| matches!(r, PanelRow::Hint(_)))
+            .unwrap();
+        let last_pad_pos = rows.len() - 1;
+        assert!(
+            hint_pos < last_pad_pos,
+            "Hint must come before the trailing bottom Pad"
+        );
+
+        // no spurious separators (no between-asset separator for a single asset)
+        // there is one Separator (before Hint), so total separators = 1
+        assert_eq!(
+            count_separators(&rows),
+            1,
+            "single asset: only the Separator before the Hint, no between-asset separator"
+        );
+    }
+
+    // (c) Two assets: top pad, Asset[0], Separator(between), Asset[1], Separator(before hint), Hint, bottom pad.
+    #[test]
+    fn layout_two_assets_has_separator_between_and_hint_after() {
+        let assets = [asset("alpha.pdf"), asset("beta.pdf")];
+        let rows = layout(&assets, 80);
+
+        // Both asset indices appear in order
+        let asset_idxs = asset_indices(&rows);
+        assert_eq!(
+            asset_idxs,
+            vec![0, 1],
+            "two assets must produce Asset rows with idx 0 then 1"
+        );
+
+        // top pad at start
+        assert!(
+            matches!(rows[0], PanelRow::Pad),
+            "first row must be top Pad"
+        );
+
+        // exactly one Hint
+        assert_eq!(
+            count_hints(&rows),
+            1,
+            "two assets must have exactly one Hint row"
+        );
+
+        // 2 separators total: one between assets + one before hint
+        assert_eq!(
+            count_separators(&rows),
+            2,
+            "two assets: one between-asset Separator plus one before-Hint Separator = 2"
+        );
+
+        // pads = 2 (top + bottom)
+        assert_eq!(
+            count_pads(&rows),
+            2,
+            "two assets must have top + bottom Pads = 2"
+        );
+
+        // last row is Pad (bottom vpad)
+        assert!(
+            matches!(rows[rows.len() - 1], PanelRow::Pad),
+            "last row must be bottom Pad (bottom vpad)"
+        );
+    }
+
+    // (c) Separator between consecutive assets confirmed by position.
+    #[test]
+    fn layout_two_assets_separator_is_between_asset_rows() {
+        let assets = [asset("first.txt"), asset("second.txt")];
+        let rows = layout(&assets, 80);
+
+        // Find the two Asset rows
+        let a0_pos = rows
+            .iter()
+            .position(|r| matches!(r, PanelRow::Asset { idx: 0, .. }))
+            .unwrap();
+        let a1_pos = rows
+            .iter()
+            .position(|r| matches!(r, PanelRow::Asset { idx: 1, .. }))
+            .unwrap();
+        let between_pos = a0_pos + 1;
+        assert!(
+            between_pos < a1_pos,
+            "there must be at least one row between Asset[0] and Asset[1]"
+        );
+        assert!(
+            matches!(rows[between_pos], PanelRow::Separator),
+            "the row immediately after Asset[0] must be a Separator (between-asset blank)"
+        );
+    }
+
+    // (d) Wrapped label: a long asset name produces multiple Asset rows all sharing the same idx.
+    #[test]
+    fn layout_wrapped_label_produces_multiple_asset_rows_with_same_idx() {
+        // narrow content_width forces wrapping
+        let long_name = "ABCDEFGHIJKLMNOPQRSTUVWXYZ.pdf";
+        let assets = [Asset {
+            name: long_name.into(),
+            url: "https://example.com/long.pdf".into(),
+        }];
+        let narrow_content_width = 10;
+        let rows = layout(&assets, narrow_content_width);
+
+        let asset_rows: Vec<&PanelRow> = rows
+            .iter()
+            .filter(|r| matches!(r, PanelRow::Asset { .. }))
+            .collect();
+        assert!(
+            asset_rows.len() > 1,
+            "a long label at narrow width must produce more than one Asset row (wrapping)"
+        );
+        for row in &asset_rows {
+            if let PanelRow::Asset { idx, .. } = row {
+                assert_eq!(
+                    *idx, 0,
+                    "all wrapped Asset rows for a single asset must share idx=0"
+                );
+            }
+        }
+    }
+
+    // apply_cap with non-wrapping assets under the cap does not change the composition.
+    #[test]
+    fn apply_cap_small_list_preserves_composition() {
+        let assets = [asset("x.pdf"), asset("y.pdf")];
+        let rows = layout(&assets, 80);
+        let before_len = rows.len();
+        let capped = apply_cap(rows);
+        assert_eq!(
+            capped.len(),
+            before_len,
+            "apply_cap must not change the length when the asset list is well under the cap"
+        );
+        // Hint still present
+        assert_eq!(
+            count_hints(&capped),
+            1,
+            "Hint must still be present after apply_cap"
+        );
+        // bottom Pad still present
+        assert!(
+            matches!(capped[capped.len() - 1], PanelRow::Pad),
+            "last row must still be bottom Pad after apply_cap"
+        );
+    }
+
+    // apply_cap on a list that exceeds the cap: Hint is present, Asset rows appear,
+    // and the rendered buffer height matches height() exactly.
+    #[test]
+    fn apply_cap_large_list_body_capped_hint_appended() {
+        use crate::tui::screens::asset_panel::{asset_content_width, height, ASSET_HINT_ROWS};
+        use crate::tui::screens::draw_detail;
+        use crate::tui::screens::DetailParams;
+        use ratatui::{backend::TestBackend, layout::Rect, Terminal};
+
+        let many_assets: Vec<Asset> = (0..10).map(|i| asset(&format!("file{i}.pdf"))).collect();
+        let inner_width = 78usize;
+        let content_w = asset_content_width(inner_width);
+        let capped = apply_cap(layout(&many_assets, content_w));
+
+        // Hint is present in the capped vector
+        assert_eq!(count_hints(&capped), 1, "Hint must be present after cap");
+
+        // At least one Asset row is present
+        assert!(
+            !asset_indices(&capped).is_empty(),
+            "Asset rows must still appear after cap"
+        );
+
+        // The last Separator + Hint are ASSET_HINT_ROWS rows before the trailing Pad
+        let hint_pos = capped
+            .iter()
+            .rposition(|r| matches!(r, PanelRow::Hint(_)))
+            .unwrap();
+        let sep_pos = capped
+            .iter()
+            .rposition(|r| matches!(r, PanelRow::Separator))
+            .unwrap();
+        assert_eq!(
+            sep_pos + 1,
+            hint_pos,
+            "Separator must immediately precede Hint in the capped layout"
+        );
+        assert_eq!(
+            (hint_pos - sep_pos) as u16,
+            ASSET_HINT_ROWS - 1,
+            "gap from Separator to Hint must be ASSET_HINT_ROWS-1 (i.e. adjacent)"
+        );
+
+        // The rendered buffer places the Artifacts border at exactly the row computed by height().
+        let viewport_w = 80u16;
+        let viewport_h = 30u16;
+        let expected_height = height(&many_assets, inner_width);
+        let expected_panel_top = viewport_h - expected_height;
+
+        let backend = TestBackend::new(viewport_w, viewport_h);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| {
+                let empty_styles: Vec<Vec<crate::render::StyleRun>> = vec![vec![]; 1];
+                draw_detail(
+                    frame,
+                    Rect::new(0, 0, viewport_w, viewport_h),
+                    DetailParams {
+                        lines: &["body".to_string()],
+                        line_styles: &empty_styles,
+                        assets: &many_assets,
+                        offset: 0,
+                        loading: false,
+                        task_id: 1,
+                        task_name: "T",
+                    },
+                );
+            })
+            .unwrap();
+        let buf = terminal.backend().buffer();
+        let panel_top_row: String = (0..viewport_w)
+            .map(|x| {
+                buf.cell((x, expected_panel_top))
+                    .unwrap()
+                    .symbol()
+                    .to_string()
+            })
+            .collect();
+        assert!(
+            panel_top_row.contains("Artifacts"),
+            "Artifacts border must appear at row {expected_panel_top} (height()={expected_height}): {panel_top_row:?}"
+        );
+    }
+}

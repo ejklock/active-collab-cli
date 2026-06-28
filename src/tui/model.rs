@@ -1,5 +1,5 @@
 use crate::i18n::t;
-use crate::render::{asset_row_lines, Asset, MineTableRow, StyleRun, PANEL_HPAD, PANEL_VPAD};
+use crate::render::{Asset, MineTableRow, StyleRun};
 use crate::store::instances::Instance;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -912,49 +912,6 @@ fn is_mailto_url(url: &str) -> bool {
     url.starts_with("mailto:")
 }
 
-/// Walk the panel's row composition and return the index of the asset whose
-/// rendered rows contain `row`, or `None` for a border, pad, or separator row.
-///
-/// The composition mirrors `render_assets_panel`: top border (excluded by the
-/// caller), `PANEL_VPAD` blank rows, then each asset's `asset_row_lines` span
-/// with one blank separator between consecutive assets, then `PANEL_VPAD` blank
-/// rows, then the bottom border (also excluded by the caller).
-fn asset_index_at_panel_row(
-    assets: &[Asset],
-    content_width: usize,
-    panel_top: u16,
-    row: u16,
-    viewport_rows: u16,
-) -> Option<usize> {
-    let first_interior_row = panel_top + 1;
-    let last_interior_row = viewport_rows.saturating_sub(2);
-    if row < first_interior_row || row > last_interior_row {
-        return None;
-    }
-
-    let interior_row = (row - first_interior_row) as usize;
-    if interior_row < PANEL_VPAD {
-        return None; // top vpad blank row
-    }
-    let content_row = interior_row - PANEL_VPAD;
-
-    let mut cursor = 0usize;
-    for (i, asset) in assets.iter().enumerate() {
-        if i > 0 {
-            if content_row == cursor {
-                return None; // separator row between assets
-            }
-            cursor += 1;
-        }
-        let span = asset_row_lines(i + 1, asset, content_width).len();
-        if content_row < cursor + span {
-            return Some(i);
-        }
-        cursor += span;
-    }
-    None // bottom vpad or out-of-range row
-}
-
 /// Try to resolve a Ctrl/Cmd+click on an asset row in the Detail screen.
 ///
 /// Gates on `has_modifier` (Ctrl or Super/Cmd): a plain unmodified click returns
@@ -973,6 +930,7 @@ fn asset_panel_cmd_at(
     row: u16,
     modifiers: crossterm::event::KeyModifiers,
 ) -> Option<Cmd> {
+    use crate::tui::screens::asset_panel;
     use crate::tui::screens::asset_panel_render_height;
     use crossterm::event::KeyModifiers;
 
@@ -1001,11 +959,10 @@ fn asset_panel_cmd_at(
         return None;
     }
 
-    // content_width mirrors asset_content_width(inner_width) in detail.rs
-    let content_width = inner_width.saturating_sub(2 * PANEL_HPAD);
+    let content_width = asset_panel::asset_content_width(inner_width);
     let panel_top = viewport_rows.saturating_sub(panel_h);
 
-    let idx = asset_index_at_panel_row(assets, content_width, panel_top, row, viewport_rows)?;
+    let idx = asset_panel::index_at(assets, content_width, panel_top, row, viewport_rows)?;
     let asset = &assets[idx];
     Some(Cmd::OpenAsset {
         instance: instance.clone(),

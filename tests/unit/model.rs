@@ -1,6 +1,7 @@
 use super::*;
 use crate::render::Asset;
-use crate::tui::screens::detail::{asset_panel_render_height, draw_detail, DetailParams};
+use crate::tui::screens::asset_panel_render_height;
+use crate::tui::screens::detail::{draw_detail, DetailParams};
 use crossterm::event::KeyModifiers;
 use ratatui::{backend::TestBackend, layout::Rect, Terminal};
 use std::collections::HashMap;
@@ -22,7 +23,7 @@ struct PanelGeom {
 impl PanelGeom {
     fn compute(viewport_w: u16, viewport_h: u16, assets: &[Asset]) -> Option<Self> {
         use crate::render::PANEL_VPAD;
-        use crate::tui::screens::detail::ASSET_HINT_ROWS;
+        use crate::tui::screens::asset_panel::ASSET_HINT_ROWS;
         let inner_width = viewport_w.saturating_sub(2) as usize;
         let panel_h = asset_panel_render_height(assets, inner_width);
         if panel_h == 0 {
@@ -310,7 +311,7 @@ fn asset_panel_render_height_zero_for_empty_assets() {
 // Result: (2n+3).min(14) + 2.
 #[test]
 fn asset_panel_render_height_consistent_geometry_for_short_names() {
-    use crate::tui::screens::detail::ASSET_HINT_ROWS;
+    use crate::tui::screens::asset_panel::ASSET_HINT_ROWS;
     for (viewport_w, viewport_h, assets_count) in [
         (80u16, 24u16, 1usize),
         (80, 24, 3),
@@ -3595,7 +3596,7 @@ fn relative_due_overdue_many_days_returns_plural_label() {
 // For 3 short assets: old = (3+2+2+2).min(14) = 9; new = 9 + ASSET_HINT_ROWS.
 #[test]
 fn asset_panel_render_height_is_old_value_plus_asset_hint_rows() {
-    use crate::tui::screens::detail::ASSET_HINT_ROWS;
+    use crate::tui::screens::asset_panel::ASSET_HINT_ROWS;
 
     let assets: Vec<Asset> = (0..3)
         .map(|i| make_asset(&format!("f{i}.pdf"), &format!("https://x.com/f{i}.pdf")))
@@ -3678,7 +3679,7 @@ fn ctrl_click_asset_rows_unaffected_by_hint_rows() {
 fn ctrl_click_on_hint_row_is_noop() {
     use crate::render::PANEL_HPAD;
     use crate::render::PANEL_VPAD;
-    use crate::tui::screens::detail::ASSET_HINT_ROWS;
+    use crate::tui::screens::asset_panel::ASSET_HINT_ROWS;
 
     let assets = vec![make_asset("doc.pdf", "https://example.com/doc.pdf")];
     let viewport = (80u16, 30u16);

@@ -1,6 +1,6 @@
-use crate::i18n::t;
-use crate::render::{asset_row_lines, link_segments, Asset, StyleRun, PANEL_HPAD, PANEL_VPAD};
+use crate::render::{link_segments, Asset, StyleRun};
 use crate::richtext::RichStyle;
+use crate::tui::screens::asset_panel;
 use crate::tui::theme;
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
@@ -21,66 +21,14 @@ pub struct DetailParams<'a> {
     pub task_name: &'a str,
 }
 
-/// Height ceiling that bounds the asset card; sized to clear a common spaced
-/// multi-link card (4 rows + 3 separators + 2 vpad + 2 borders = 11).
-const ASSET_PANEL_MAX_ROWS: u16 = 14;
-
-/// Extra rows appended inside the Artifacts card after the asset list:
-/// one blank separator row + one italic footnote hint line.
-///
-/// Placed AFTER the asset rows so `asset_index_at_panel_row`'s asset walk
-/// requires no modification; clicks on these rows resolve to None.
-pub const ASSET_HINT_ROWS: u16 = 2;
-
-/// Width available for asset content rows inside the panel.
-///
-/// Removes `2 * PANEL_HPAD` from `panel_inner_width` so label text clears both
-/// border insets.  `panel_inner_width` is the panel area width minus 2 border
-/// columns (i.e. the inner ratatui content width for the asset panel block).
-fn asset_content_width(panel_inner_width: usize) -> usize {
-    panel_inner_width.saturating_sub(2 * PANEL_HPAD)
-}
-
-/// Wrapped panel height shared by the render and model paths.
-///
-/// Sums the wrapped row count for every asset (using `asset_content_width` so
-/// the wrap matches the renderer exactly), adds one blank separator row between
-/// consecutive assets, adds `PANEL_VPAD` blank rows at the interior top and
-/// bottom, and adds 2 for the panel borders.  The total is capped at
-/// `ASSET_PANEL_MAX_ROWS`.
-///
-/// `inner_width` is the asset panel's inner content width, equal to the chunk
-/// width minus 2 border columns (i.e. the ratatui Paragraph area width for the
-/// asset panel block).  Pass `area.width.saturating_sub(2)` from the renderer
-/// chunk, or `viewport_cols.saturating_sub(2)` from the model.
-///
-/// This is the authoritative wrapped-height computation reused by both the
-/// renderer (`draw_detail`) and the model hit-test helpers so that no second
-/// divergent count can exist.
-pub fn asset_panel_render_height(assets: &[Asset], inner_width: usize) -> u16 {
-    if assets.is_empty() {
-        return 0;
-    }
-    let content_w = asset_content_width(inner_width);
-    let row_count: usize = assets
-        .iter()
-        .enumerate()
-        .map(|(i, asset)| asset_row_lines(i + 1, asset, content_w).len())
-        .sum();
-    let separators = assets.len().saturating_sub(1);
-    let capped = (row_count as u16 + separators as u16 + 2 * PANEL_VPAD as u16 + 2)
-        .min(ASSET_PANEL_MAX_ROWS);
-    capped + ASSET_HINT_ROWS
-}
-
 /// Draw the Detail screen as a single scrollable content block with an optional
 /// fixed Artifacts panel below.
 ///
 /// The content block renders `lines` directly (the Título meta row inside the
-/// Details panel carries the task name).  The block border has no title.
+/// Details panel carries the task name). The block border has no title.
 /// When `assets` is non-empty the area is split vertically into a content chunk
-/// (Min(0)) and a fixed panel chunk whose height is given by `asset_panel_render_height`
-/// (capped at `ASSET_PANEL_MAX_ROWS`).
+/// (Min(0)) and a fixed panel chunk whose height is given by
+/// `asset_panel::height` (capped at `ASSET_PANEL_MAX_ROWS`).
 pub fn draw_detail(frame: &mut Frame, area: Rect, params: DetailParams<'_>) {
     let inner_width = area.width.saturating_sub(2) as usize;
 
@@ -90,13 +38,13 @@ pub fn draw_detail(frame: &mut Frame, area: Rect, params: DetailParams<'_>) {
         } else {
             format!(" {} ", params.task_name)
         };
-        let msg = Paragraph::new(t("Loading…"))
+        let msg = Paragraph::new(crate::i18n::t("Loading…"))
             .block(Block::default().borders(Borders::ALL).title(fallback_title));
         frame.render_widget(msg, area);
         return;
     }
 
-    let panel_height = asset_panel_render_height(params.assets, inner_width);
+    let panel_height = asset_panel::height(params.assets, inner_width);
 
     match panel_height {
         0 => render_content(frame, area, params.lines, params.line_styles, params.offset),
@@ -112,7 +60,7 @@ pub fn draw_detail(frame: &mut Frame, area: Rect, params: DetailParams<'_>) {
                 params.line_styles,
                 params.offset,
             );
-            render_assets_panel(frame, chunks[1], params.assets);
+            asset_panel::render(frame, chunks[1], params.assets);
         }
     }
 }
@@ -299,48 +247,4 @@ fn render_content(
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight);
         frame.render_stateful_widget(scrollbar, area, &mut scrollbar_state);
     }
-}
-
-fn render_assets_panel(frame: &mut Frame, area: ratatui::layout::Rect, assets: &[Asset]) {
-    let panel_title = format!(" {} ", t("Artifacts"));
-    let panel_inner_width = area.width.saturating_sub(2) as usize;
-    let content_w = asset_content_width(panel_inner_width);
-    let hpad = " ".repeat(PANEL_HPAD);
-
-    let mut rows: Vec<Line> = Vec::new();
-
-    for _ in 0..PANEL_VPAD {
-        rows.push(Line::raw(""));
-    }
-
-    for (i, asset) in assets.iter().enumerate() {
-        if i > 0 {
-            rows.push(Line::raw(""));
-        }
-        for row_text in asset_row_lines(i + 1, asset, content_w) {
-            rows.push(Line::from(vec![
-                Span::raw(hpad.clone()),
-                Span::styled(row_text, theme::asset_style()),
-            ]));
-        }
-    }
-
-    rows.push(Line::raw(""));
-    rows.push(Line::from(vec![
-        Span::raw(hpad.clone()),
-        Span::styled(t("Ctrl/Cmd+click to open"), theme::asset_hint_style()),
-    ]));
-
-    for _ in 0..PANEL_VPAD {
-        rows.push(Line::raw(""));
-    }
-
-    let panel = Paragraph::new(rows).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title(panel_title)
-            .title_style(theme::header_style()),
-    );
-
-    frame.render_widget(panel, area);
 }
