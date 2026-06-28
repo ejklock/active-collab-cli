@@ -61,6 +61,78 @@ impl Http {
         Ok((status, body))
     }
 
+    /// Authenticated POST with JSON body. Returns Ok((status, body)) for any
+    /// HTTP response. Only transport failures are Err.
+    pub async fn authed_post(
+        &self,
+        url: &str,
+        instance_base_url: &str,
+        token: &str,
+        body: &serde_json::Value,
+    ) -> Result<(u16, bytes::Bytes)> {
+        let mut builder = self
+            .client
+            .post(url)
+            .header(ACCEPT, ACCEPT_JSON)
+            .header(CONTENT_TYPE, "application/json")
+            .json(body);
+
+        if let Some((name, value)) = Self::host_gated_token_header(url, instance_base_url, token) {
+            builder = builder.header(name, value);
+        }
+
+        let resp = builder.send().await?;
+        let status = resp.status().as_u16();
+        let bytes = resp.bytes().await?;
+        Ok((status, bytes))
+    }
+
+    /// Authenticated PUT with JSON body. Returns Ok((status, body)) for any
+    /// HTTP response. Only transport failures are Err.
+    pub async fn authed_put(
+        &self,
+        url: &str,
+        instance_base_url: &str,
+        token: &str,
+        body: &serde_json::Value,
+    ) -> Result<(u16, bytes::Bytes)> {
+        let mut builder = self
+            .client
+            .put(url)
+            .header(ACCEPT, ACCEPT_JSON)
+            .header(CONTENT_TYPE, "application/json")
+            .json(body);
+
+        if let Some((name, value)) = Self::host_gated_token_header(url, instance_base_url, token) {
+            builder = builder.header(name, value);
+        }
+
+        let resp = builder.send().await?;
+        let status = resp.status().as_u16();
+        let bytes = resp.bytes().await?;
+        Ok((status, bytes))
+    }
+
+    /// Authenticated DELETE. Returns Ok((status, body)) for any HTTP response.
+    /// Only transport failures are Err.
+    pub async fn authed_delete(
+        &self,
+        url: &str,
+        instance_base_url: &str,
+        token: &str,
+    ) -> Result<(u16, bytes::Bytes)> {
+        let mut builder = self.client.delete(url).header(ACCEPT, ACCEPT_JSON);
+
+        if let Some((name, value)) = Self::host_gated_token_header(url, instance_base_url, token) {
+            builder = builder.header(name, value);
+        }
+
+        let resp = builder.send().await?;
+        let status = resp.status().as_u16();
+        let bytes = resp.bytes().await?;
+        Ok((status, bytes))
+    }
+
     /// Unauthenticated POST with JSON body. Returns Ok((status, body)) for
     /// any HTTP response. Only transport failures are Err.
     pub async fn post_json(
