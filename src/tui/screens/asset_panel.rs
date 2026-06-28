@@ -12,9 +12,6 @@ pub fn inline_content_width(inner_width: usize) -> usize {
 }
 
 /// A single interior row in the Artifacts panel, carrying its kind and wrapped text.
-///
-/// The layout is pure: no ratatui Style, no spans. Styling is applied at render time
-/// by mapping the variant to the appropriate theme function.
 pub enum PanelRow {
     Pad,
     Asset { idx: usize, text: String },
@@ -61,8 +58,8 @@ pub fn layout(assets: &[Asset], content_width: usize) -> Vec<PanelRow> {
 /// - row 0: the section header (`t("Artifacts")`) with a Bold `StyleRun` over the header text;
 /// - rows 1..: each `PanelRow` from `layout(assets, content_width)` mapped 1:1 in order:
 ///   `Pad`/`Separator` → blank `""` with no style runs;
-///   `Asset{text,..}` → `" ".repeat(PANEL_HPAD) + text` with no style runs
-///   (link color is applied at render time via `asset_index_for_section_row`);
+///   `Asset{text,..}` → `" ".repeat(PANEL_HPAD) + text` with a Link `StyleRun` over the asset token
+///   (layout emits link affordance structurally — it cannot be inferred from the visible text);
 ///   `Hint(text)` → `" ".repeat(PANEL_HPAD) + text` with an Italic `StyleRun` over the hint text.
 ///
 /// Both this function and `asset_index_for_section_row` call `layout()` as the single
@@ -93,7 +90,15 @@ pub fn section_lines(
     for row in rows {
         let (text, runs) = match row {
             PanelRow::Pad | PanelRow::Separator => (String::new(), vec![]),
-            PanelRow::Asset { text, .. } => (format!("{hpad}{text}"), vec![]),
+            PanelRow::Asset { text, .. } => {
+                let asset_line = format!("{hpad}{text}");
+                let run = crate::render::StyleRun {
+                    start: PANEL_HPAD,
+                    len: crate::render::display_width(&text),
+                    style: crate::richtext::RichStyle::Link,
+                };
+                (asset_line, vec![run])
+            }
             PanelRow::Hint(text) => {
                 let hint_line = format!("{hpad}{text}");
                 let hint_start = PANEL_HPAD;

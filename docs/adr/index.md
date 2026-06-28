@@ -33,3 +33,4 @@
 | [0029](/adr/0029-assets-inline-in-scrollable-detail-content.md) | Assets render inline in the globally-scrollable detail content — retire the fixed asset panel and its height cap; scroll-aware asset click | Accepted |
 | [0030](/adr/0030-richtext-wrap-positional-style.md) | Rich-line wrap threads span style positionally (per character), retiring the substring style lookup | Accepted |
 | [0031](/adr/0031-tasks-card-layout-cache.md) | Memoize the Tasks-screen card layout (prefix-sum offsets + binary-search first-visible) so per-event cost scales with the viewport, not the task count | Accepted |
+| [0032](/adr/0032-asset-row-link-style-structural.md) | Asset-row link styling is structural (a RichStyle::Link run emitted by the layout), not text-pattern URL detection | Accepted |
