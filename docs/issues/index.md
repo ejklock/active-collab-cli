@@ -32,3 +32,4 @@ TUI/UX work (V/R/ARCH slices), tracing to
 | [0024](/issues/0024-d1e-asset-activation-ctrl-cmd-click.md) | D1e | open assets via Ctrl/Cmd+click; remove the numeric 1-9 open + d+1-9 download shortcuts | closed | 0023 |
 | [0025](/issues/0025-d2-task-list-cards.md) | D2 | task list as per-task cards with a relative, colored due date (D2a shell, D2b project + due) | closed | — |
 | [0026](/issues/0026-d1f-asset-hint-in-card.md) | D1f | move the asset-open hint into the Anexos card (italic), out of the footer | closed | 0024 |
+| [0027](/issues/0027-arch-asset-panel-single-layout.md) | ARCH | one layout source of truth for the Anexos/Artefatos panel (asset_panel module) | open | — |
