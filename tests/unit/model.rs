@@ -34,6 +34,10 @@ fn detail_model_with_assets_and_viewport(
             offset: 0,
             loading: false,
             rendered_width: usize::MAX,
+            compose: None,
+            current_user_id: None,
+            affordances: vec![],
+            confirm_delete: None,
         }],
         should_quit: false,
         header: empty_header(),
@@ -108,6 +112,10 @@ fn detail_model_scrollable(lines: Vec<String>, assets: Vec<Asset>, viewport: (u1
             offset: 0,
             loading: false,
             rendered_width: usize::MAX,
+            compose: None,
+            current_user_id: None,
+            affordances: vec![],
+            confirm_delete: None,
         }],
         should_quit: false,
         header: empty_header(),
@@ -359,6 +367,10 @@ fn detail_model_with_lines_and_assets(
             offset,
             loading: false,
             rendered_width: usize::MAX,
+            compose: None,
+            current_user_id: None,
+            affordances: vec![],
+            confirm_delete: None,
         }],
         should_quit: false,
         header: empty_header(),
@@ -731,6 +743,10 @@ fn detail_model_for_selection(lines: Vec<String>, viewport: (u16, u16), offset: 
             offset,
             loading: false,
             rendered_width: usize::MAX,
+            compose: None,
+            current_user_id: None,
+            affordances: vec![],
+            confirm_delete: None,
         }],
         should_quit: false,
         header: empty_header(),
@@ -1578,6 +1594,10 @@ fn detail_footer_hint_with_assets_has_no_ctrl_cmd_reference() {
         offset: 0,
         loading: false,
         rendered_width: usize::MAX,
+        compose: None,
+        current_user_id: None,
+        affordances: vec![],
+        confirm_delete: None,
     };
     let hint = hint_for_screen(&screen);
     assert!(
@@ -1637,6 +1657,10 @@ fn detail_model_with_boxed_lines(lines: Vec<String>, viewport: (u16, u16), offse
             offset,
             loading: false,
             rendered_width: usize::MAX,
+            compose: None,
+            current_user_id: None,
+            affordances: vec![],
+            confirm_delete: None,
         }],
         should_quit: false,
         header: empty_header(),
@@ -2583,6 +2607,10 @@ fn detail_model_with_inline_assets(
             offset,
             loading: false,
             rendered_width: usize::MAX,
+            compose: None,
+            current_user_id: None,
+            affordances: vec![],
+            confirm_delete: None,
         }],
         should_quit: false,
         header: empty_header(),
@@ -2954,5 +2982,1015 @@ fn ctrl_click_with_empty_assets_emits_no_cmd() {
     assert!(
         !has_open,
         "empty assets: no OpenAsset must be emitted on any row"
+    );
+}
+
+// ── Compose mode tests (BDR 0024 / ADR 0034 / ADR 0035) ──────────────────────
+
+use crate::tui::model::{Compose, ComposeKind, ComposeStatus};
+
+fn detail_model_for_compose(instance: &str, project_id: i64, task_id: i64) -> Model {
+    Model {
+        stack: vec![Screen::Detail {
+            instance: instance.into(),
+            project_id,
+            task_id,
+            task: serde_json::Value::Null,
+            comments: vec![],
+            user_map: HashMap::new(),
+            lines: vec![],
+            line_styles: vec![],
+            assets: vec![],
+            offset: 0,
+            loading: false,
+            rendered_width: usize::MAX,
+            compose: None,
+            current_user_id: None,
+            affordances: vec![],
+            confirm_delete: None,
+        }],
+        should_quit: false,
+        header: empty_header(),
+        viewport: (80, 24),
+        click_targets: vec![],
+        last_loaded: None,
+        selection: None,
+        copied_feedback: false,
+    }
+}
+
+fn extract_compose(model: &Model) -> Option<&Compose> {
+    match model.top() {
+        Some(Screen::Detail { compose, .. }) => compose.as_ref(),
+        _ => None,
+    }
+}
+
+// AC1-part1: ComposeOpen on a Detail screen sets compose=Some(Editing, empty buffer).
+#[test]
+fn compose_open_on_detail_sets_editing_state_with_empty_buffer() {
+    let m = detail_model_for_compose("inst", 10, 42);
+    let (m, cmds) = update(m, Msg::ComposeOpen);
+    assert!(cmds.is_empty(), "ComposeOpen must emit no Cmd");
+    let cp = extract_compose(&m).expect("compose must be Some after ComposeOpen");
+    assert_eq!(cp.kind, ComposeKind::New);
+    assert_eq!(cp.buffer, "");
+    assert_eq!(cp.status, ComposeStatus::Editing);
+}
+
+// AC1-part2: ComposeOpen on a screen that already has compose active is a no-op.
+#[test]
+fn compose_open_when_already_active_is_noop() {
+    let mut m = detail_model_for_compose("inst", 10, 42);
+    if let Some(Screen::Detail {
+        ref mut compose, ..
+    }) = m.stack.last_mut()
+    {
+        *compose = Some(Compose {
+            kind: ComposeKind::New,
+            buffer: "existing".into(),
+            status: ComposeStatus::Editing,
+        });
+    }
+    let (m, _) = update(m, Msg::ComposeOpen);
+    let cp = extract_compose(&m).expect("compose must still be Some");
+    assert_eq!(cp.buffer, "existing", "existing buffer must be preserved");
+}
+
+// AC1-part3: ComposeInput appends a character to the buffer.
+#[test]
+fn compose_input_appends_character_to_buffer() {
+    let m = detail_model_for_compose("inst", 10, 42);
+    let (m, _) = update(m, Msg::ComposeOpen);
+    let (m, cmds) = update(m, Msg::ComposeInput('h'));
+    assert!(cmds.is_empty());
+    let (m, _) = update(m, Msg::ComposeInput('i'));
+    let cp = extract_compose(&m).expect("compose must be Some");
+    assert_eq!(cp.buffer, "hi");
+}
+
+// AC1-part4: ComposeNewline inserts '\n' — Enter is a newline, NOT submit.
+#[test]
+fn compose_newline_inserts_newline_not_submit() {
+    let m = detail_model_for_compose("inst", 10, 42);
+    let (m, _) = update(m, Msg::ComposeOpen);
+    let (m, _) = update(m, Msg::ComposeInput('a'));
+    let (m, cmds) = update(m, Msg::ComposeNewline);
+    assert!(
+        cmds.is_empty(),
+        "ComposeNewline must emit no Cmd (not a submit)"
+    );
+    let (m, _) = update(m, Msg::ComposeInput('b'));
+    let cp = extract_compose(&m).expect("compose must be Some");
+    assert_eq!(cp.buffer, "a\nb", "buffer must contain embedded newline");
+    assert!(
+        cp.buffer.contains('\n'),
+        "buffer must have \\n after ComposeNewline"
+    );
+}
+
+// AC1-part5: ComposeBackspace removes the last character.
+#[test]
+fn compose_backspace_removes_last_character() {
+    let m = detail_model_for_compose("inst", 10, 42);
+    let (m, _) = update(m, Msg::ComposeOpen);
+    let (m, _) = update(m, Msg::ComposeInput('a'));
+    let (m, _) = update(m, Msg::ComposeInput('b'));
+    let (m, cmds) = update(m, Msg::ComposeBackspace);
+    assert!(cmds.is_empty());
+    let cp = extract_compose(&m).expect("compose must be Some");
+    assert_eq!(cp.buffer, "a");
+}
+
+// AC1-part6: ComposeCancel clears compose and emits no Cmd.
+#[test]
+fn compose_cancel_clears_compose_and_emits_no_cmd() {
+    let m = detail_model_for_compose("inst", 10, 42);
+    let (m, _) = update(m, Msg::ComposeOpen);
+    let (m, _) = update(m, Msg::ComposeInput('x'));
+    let (m, cmds) = update(m, Msg::ComposeCancel);
+    assert!(cmds.is_empty(), "ComposeCancel must emit no Cmd");
+    assert!(
+        extract_compose(&m).is_none(),
+        "compose must be None after ComposeCancel"
+    );
+}
+
+// AC2-part1: ComposeSubmit on non-empty Editing buffer emits exactly one Cmd::SubmitComment
+// with the correct fields and sets status=Submitting.
+#[test]
+fn compose_submit_nonempty_buffer_emits_submit_comment_cmd() {
+    let m = detail_model_for_compose("myinst", 5, 99);
+    let (m, _) = update(m, Msg::ComposeOpen);
+    let (m, _) = update(m, Msg::ComposeInput('h'));
+    let (m, _) = update(m, Msg::ComposeInput('i'));
+    let (m, cmds) = update(m, Msg::ComposeSubmit);
+
+    assert_eq!(cmds.len(), 1, "must emit exactly one Cmd::SubmitComment");
+    match &cmds[0] {
+        Cmd::SubmitComment {
+            instance,
+            project_id,
+            task_id,
+            body,
+        } => {
+            assert_eq!(instance, "myinst");
+            assert_eq!(*project_id, 5);
+            assert_eq!(*task_id, 99);
+            assert_eq!(body, "hi");
+        }
+        other => panic!("expected Cmd::SubmitComment, got {other:?}"),
+    }
+    let cp = extract_compose(&m).expect("compose must be Some after submit (waiting for result)");
+    assert_eq!(
+        cp.status,
+        ComposeStatus::Submitting,
+        "status must be Submitting"
+    );
+}
+
+// AC2-part2: ComposeSubmit on an empty buffer emits no Cmd.
+#[test]
+fn compose_submit_empty_buffer_emits_no_cmd() {
+    let m = detail_model_for_compose("inst", 1, 1);
+    let (m, _) = update(m, Msg::ComposeOpen);
+    let (_m, cmds) = update(m, Msg::ComposeSubmit);
+    assert!(
+        cmds.is_empty(),
+        "ComposeSubmit on empty buffer must emit no Cmd"
+    );
+}
+
+// AC3-part1: CommentMutationOk clears compose AND emits exactly one Cmd::LoadDetail{refresh:true}.
+#[test]
+fn comment_mutation_ok_clears_compose_and_emits_load_detail_refresh() {
+    let m = detail_model_for_compose("inst", 7, 13);
+    let (m, _) = update(m, Msg::ComposeOpen);
+    let (m, _) = update(m, Msg::ComposeInput('x'));
+    let (m, cmds) = update(m, Msg::CommentMutationOk);
+
+    assert!(
+        extract_compose(&m).is_none(),
+        "compose must be None after CommentMutationOk"
+    );
+    assert_eq!(cmds.len(), 1, "must emit exactly one Cmd::LoadDetail");
+    match &cmds[0] {
+        Cmd::LoadDetail {
+            instance,
+            project_id,
+            task_id,
+            refresh,
+        } => {
+            assert_eq!(instance, "inst");
+            assert_eq!(*project_id, 7);
+            assert_eq!(*task_id, 13);
+            assert!(*refresh, "refresh must be true");
+        }
+        other => panic!("expected Cmd::LoadDetail, got {other:?}"),
+    }
+}
+
+// AC3-part2: CommentMutationErr keeps the buffer intact and sets status=Error(msg), emits no Cmd.
+#[test]
+fn comment_mutation_err_preserves_buffer_and_sets_error_status() {
+    let m = detail_model_for_compose("inst", 1, 1);
+    let (m, _) = update(m, Msg::ComposeOpen);
+    let (m, _) = update(m, Msg::ComposeInput('t'));
+    let (m, _) = update(m, Msg::ComposeInput('e'));
+    let (m, _) = update(m, Msg::ComposeInput('x'));
+    let (m, _) = update(m, Msg::ComposeInput('t'));
+    let (m, cmds) = update(m, Msg::CommentMutationErr("Network error".into()));
+
+    assert!(cmds.is_empty(), "CommentMutationErr must emit no Cmd");
+    let cp = extract_compose(&m).expect("compose must still be Some after error");
+    assert_eq!(cp.buffer, "text", "buffer must be preserved after error");
+    assert_eq!(
+        cp.status,
+        ComposeStatus::Error("Network error".into()),
+        "status must be Error(msg)"
+    );
+}
+
+// AC4-part1: map_compose_key_event maps Enter->ComposeNewline.
+#[test]
+fn map_compose_key_event_enter_yields_compose_newline() {
+    use crate::tui::events::map_compose_key_event;
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState};
+    let key = KeyEvent {
+        code: KeyCode::Enter,
+        modifiers: KeyModifiers::NONE,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+    assert!(
+        matches!(map_compose_key_event(key), Some(Msg::ComposeNewline)),
+        "Enter must map to ComposeNewline"
+    );
+}
+
+// AC4-part2: map_compose_key_event maps a printable char -> ComposeInput(c).
+#[test]
+fn map_compose_key_event_printable_char_yields_compose_input() {
+    use crate::tui::events::map_compose_key_event;
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState};
+    let key = KeyEvent {
+        code: KeyCode::Char('a'),
+        modifiers: KeyModifiers::NONE,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+    assert!(
+        matches!(map_compose_key_event(key), Some(Msg::ComposeInput('a'))),
+        "printable char must map to ComposeInput(char)"
+    );
+}
+
+// AC4-part3: map_compose_key_event maps Ctrl+S -> ComposeSubmit.
+#[test]
+fn map_compose_key_event_ctrl_s_yields_compose_submit() {
+    use crate::tui::events::map_compose_key_event;
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState};
+    let key = KeyEvent {
+        code: KeyCode::Char('s'),
+        modifiers: KeyModifiers::CONTROL,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+    assert!(
+        matches!(map_compose_key_event(key), Some(Msg::ComposeSubmit)),
+        "Ctrl+S must map to ComposeSubmit"
+    );
+}
+
+// AC4-part4: map_compose_key_event maps Esc -> ComposeCancel.
+#[test]
+fn map_compose_key_event_esc_yields_compose_cancel() {
+    use crate::tui::events::map_compose_key_event;
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState};
+    let key = KeyEvent {
+        code: KeyCode::Esc,
+        modifiers: KeyModifiers::NONE,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+    assert!(
+        matches!(map_compose_key_event(key), Some(Msg::ComposeCancel)),
+        "Esc must map to ComposeCancel"
+    );
+}
+
+// AC4-part5: map_browse_key_event maps plain 'c' -> ComposeOpen (not a selection or nav action).
+#[test]
+fn map_browse_key_event_plain_c_yields_compose_open() {
+    use crate::tui::events::map_browse_key_event;
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState};
+    let key = KeyEvent {
+        code: KeyCode::Char('c'),
+        modifiers: KeyModifiers::NONE,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+    assert!(
+        matches!(map_browse_key_event(key), Some(Msg::ComposeOpen)),
+        "plain 'c' must map to ComposeOpen"
+    );
+}
+
+// AC4-part6: map_browse_key_event still maps Ctrl+C -> Quit (not ComposeOpen).
+#[test]
+fn map_browse_key_event_ctrl_c_still_quits() {
+    use crate::tui::events::map_browse_key_event;
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState};
+    let key = KeyEvent {
+        code: KeyCode::Char('c'),
+        modifiers: KeyModifiers::CONTROL,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+    assert!(
+        matches!(map_browse_key_event(key), Some(Msg::Quit)),
+        "Ctrl+C must still map to Quit"
+    );
+}
+
+// AC1-multiline: a sequence of ComposeInput + ComposeNewline yields a buffer with '\n'.
+#[test]
+fn compose_multiline_buffer_contains_embedded_newline() {
+    let m = detail_model_for_compose("inst", 1, 1);
+    let (m, _) = update(m, Msg::ComposeOpen);
+    let (m, _) = update(m, Msg::ComposeInput('l'));
+    let (m, _) = update(m, Msg::ComposeInput('i'));
+    let (m, _) = update(m, Msg::ComposeInput('n'));
+    let (m, _) = update(m, Msg::ComposeInput('e'));
+    let (m, _) = update(m, Msg::ComposeInput('1'));
+    let (m, _) = update(m, Msg::ComposeNewline);
+    let (m, _) = update(m, Msg::ComposeInput('l'));
+    let (m, _) = update(m, Msg::ComposeInput('2'));
+    let cp = extract_compose(&m).expect("compose must be Some");
+    assert_eq!(
+        cp.buffer, "line1\nl2",
+        "buffer must contain embedded newline"
+    );
+    assert!(
+        cp.buffer.contains('\n'),
+        "\\n must be in buffer (Enter is newline, not submit)"
+    );
+}
+
+// ── Comment-edit-ui tests (BDR 0024 Sc.4-5 / ADR 0036) ───────────────────────
+
+/// Build a Detail model that has one owned comment (created_by_id == current_user_id)
+/// and one unowned comment. The model is reflowed at `width` so `edit_affordances`
+/// are populated.
+fn detail_model_with_comments_for_edit(
+    instance: &str,
+    project_id: i64,
+    task_id: i64,
+    current_user_id: Option<i64>,
+    width: u16,
+) -> Model {
+    use serde_json::json;
+    let own_comment = json!({
+        "id": 42i64,
+        "created_by_id": 7i64,
+        "created_by_name": "Me",
+        "created_on": 1700000000u64,
+        "body_plain_text": "My comment body"
+    });
+    let other_comment = json!({
+        "id": 99i64,
+        "created_by_id": 8i64,
+        "created_by_name": "Them",
+        "created_on": 1700000001u64,
+        "body_plain_text": "Their comment"
+    });
+    let mut m = Model {
+        stack: vec![Screen::Detail {
+            instance: instance.into(),
+            project_id,
+            task_id,
+            task: serde_json::Value::Null,
+            comments: vec![own_comment, other_comment],
+            user_map: std::collections::HashMap::new(),
+            lines: vec![],
+            line_styles: vec![],
+            assets: vec![],
+            offset: 0,
+            loading: false,
+            rendered_width: usize::MAX,
+            compose: None,
+            current_user_id,
+            affordances: vec![],
+            confirm_delete: None,
+        }],
+        should_quit: false,
+        header: empty_header(),
+        viewport: (width, 30),
+        click_targets: vec![],
+        last_loaded: None,
+        selection: None,
+        copied_feedback: false,
+    };
+    let inner_width = width.saturating_sub(2) as usize;
+    m.reflow_detail(inner_width);
+    m
+}
+
+// edit-AC4: ComposeSubmit with kind=Edit{comment_id} emits Cmd::UpdateComment
+// (NOT Cmd::SubmitComment), carries the correct instance / comment_id / body.
+// Drives the real Ctrl+click -> compose open -> submit path.
+#[test]
+fn compose_submit_with_edit_kind_emits_update_comment_cmd() {
+    use crossterm::event::KeyModifiers;
+
+    let m = detail_model_with_comments_for_edit("myinst", 5, 10, Some(7), 82);
+    let (click_row, click_col) = match m.top() {
+        Some(Screen::Detail { affordances, .. }) => {
+            let aff = affordances
+                .iter()
+                .find(|a| matches!(a.kind, crate::render::AffordanceKind::Edit(_)))
+                .expect("edit affordance must be non-empty after reflow with own comment");
+            let crate::render::AffordanceKind::Edit(cid) = aff.kind else {
+                panic!("expected Edit kind")
+            };
+            assert_eq!(cid, 42, "affordance must target comment_id=42");
+            (2u16 + aff.line_idx as u16, aff.col_start as u16)
+        }
+        _ => panic!("expected Detail screen"),
+    };
+
+    let (m, cmds_open) = update(
+        m,
+        Msg::Click {
+            column: click_col,
+            row: click_row,
+            modifiers: KeyModifiers::CONTROL,
+        },
+    );
+    assert!(cmds_open.is_empty(), "click must emit no Cmd");
+    let cp = extract_compose(&m).expect("compose must be Some after Ctrl+click on [editar]");
+    assert_eq!(cp.kind, ComposeKind::Edit { comment_id: 42 });
+
+    let (m, cmds) = update(m, Msg::ComposeSubmit);
+    assert_eq!(cmds.len(), 1, "must emit exactly one Cmd::UpdateComment");
+    match &cmds[0] {
+        Cmd::UpdateComment {
+            instance,
+            comment_id,
+            body,
+        } => {
+            assert_eq!(instance, "myinst");
+            assert_eq!(*comment_id, 42);
+            assert_eq!(body, "My comment body");
+        }
+        other => panic!("expected Cmd::UpdateComment, got {other:?}"),
+    }
+    let cp2 = extract_compose(&m).expect("compose must be Some while awaiting result");
+    assert_eq!(
+        cp2.status,
+        ComposeStatus::Submitting,
+        "status must be Submitting after submit"
+    );
+}
+
+// edit-AC4-B: ComposeSubmit with kind=New still emits Cmd::SubmitComment (regression guard).
+#[test]
+fn compose_submit_with_new_kind_still_emits_submit_comment_cmd() {
+    let m = detail_model_for_compose("myinst", 5, 99);
+    let (m, _) = update(m, Msg::ComposeOpen);
+    let (m, _) = update(m, Msg::ComposeInput('o'));
+    let (m, _) = update(m, Msg::ComposeInput('k'));
+    let (_, cmds) = update(m, Msg::ComposeSubmit);
+    assert_eq!(cmds.len(), 1, "must emit exactly one Cmd");
+    assert!(
+        matches!(cmds[0], Cmd::SubmitComment { .. }),
+        "kind=New must emit SubmitComment, not UpdateComment; got {:?}",
+        cmds[0]
+    );
+}
+
+// edit-AC2: A Ctrl/Cmd+click landing on the [editar] affordance opens compose
+// with kind=Edit (scroll-aware: verifies via affordance coordinates populated by
+// reflow_detail). A plain (unmodified) click on the same coordinates does NOT
+// open compose.
+#[test]
+fn ctrl_click_on_edit_affordance_opens_compose_edit() {
+    use crossterm::event::KeyModifiers;
+
+    // Build the model and extract the affordance coordinates before consuming it.
+    let m = detail_model_with_comments_for_edit("inst", 1, 1, Some(7), 82);
+    let (click_row, click_col, comment_id) = match m.top() {
+        Some(Screen::Detail { affordances, .. }) => {
+            let aff = affordances
+                .iter()
+                .find(|a| matches!(a.kind, crate::render::AffordanceKind::Edit(_)))
+                .expect("edit affordance must be non-empty after reflow with own comment");
+            let crate::render::AffordanceKind::Edit(cid) = aff.kind else {
+                panic!("expected Edit kind")
+            };
+            assert_eq!(cid, 42, "affordance must target comment_id=42");
+            // row=2 is text_top (row 0=header, row 1=title bar, row 2=first content line).
+            // At offset=0: click row = 2 + line_idx.
+            (2u16 + aff.line_idx as u16, aff.col_start as u16, cid)
+        }
+        _ => panic!("expected Detail screen"),
+    };
+
+    // Ctrl+click must open compose edit.
+    let (m_ctrl, cmds_ctrl) = update(
+        m,
+        Msg::Click {
+            column: click_col,
+            row: click_row,
+            modifiers: KeyModifiers::CONTROL,
+        },
+    );
+    assert!(
+        cmds_ctrl.is_empty(),
+        "edit affordance click must emit no Cmd"
+    );
+    let cp = extract_compose(&m_ctrl)
+        .expect("compose must be Some after Ctrl+click on [editar] affordance");
+    assert_eq!(
+        cp.kind,
+        ComposeKind::Edit { comment_id },
+        "compose kind must be Edit{{comment_id: {comment_id}}}"
+    );
+    assert_eq!(
+        cp.buffer, "My comment body",
+        "buffer must be pre-filled from body_plain_text"
+    );
+    assert_eq!(cp.status, ComposeStatus::Editing, "status must be Editing");
+}
+
+// edit-AC2-B: A plain (unmodified) click on the affordance coordinates does NOT
+// open compose (modifier gate is required for [editar] activation).
+#[test]
+fn plain_click_on_edit_affordance_coords_does_not_open_compose() {
+    use crossterm::event::KeyModifiers;
+
+    let m = detail_model_with_comments_for_edit("inst", 1, 1, Some(7), 82);
+    let (click_row, click_col) = match m.top() {
+        Some(Screen::Detail { affordances, .. }) => {
+            let aff = affordances
+                .iter()
+                .find(|a| matches!(a.kind, crate::render::AffordanceKind::Edit(_)))
+                .expect("edit affordance must be non-empty");
+            (2u16 + aff.line_idx as u16, aff.col_start as u16)
+        }
+        _ => panic!("expected Detail screen"),
+    };
+
+    let (m_plain, _) = update(
+        m,
+        Msg::Click {
+            column: click_col,
+            row: click_row,
+            modifiers: KeyModifiers::NONE,
+        },
+    );
+    assert!(
+        extract_compose(&m_plain).is_none(),
+        "plain click on affordance coords must NOT open compose"
+    );
+}
+
+// ── Comment-delete-ui tests (BDR 0024 Sc.6 / issue 0034) ─────────────────────
+
+/// Build a reflowed Detail model that has one owned comment (id=42, created_by_id=7)
+/// so `delete_affordances` is populated after `reflow_detail`.
+fn detail_model_with_comments_for_delete(
+    instance: &str,
+    project_id: i64,
+    task_id: i64,
+    current_user_id: Option<i64>,
+    width: u16,
+) -> Model {
+    detail_model_with_comments_for_edit(instance, project_id, task_id, current_user_id, width)
+}
+
+// ACd1-a: After reflow with an owned comment, the unified affordances vec contains
+// exactly one Delete entry targeting comment_id=42.
+#[test]
+fn delete_affordance_populated_for_own_comment() {
+    let m = detail_model_with_comments_for_delete("inst", 1, 1, Some(7), 82);
+    match m.top() {
+        Some(Screen::Detail { affordances, .. }) => {
+            let delete_affs: Vec<_> = affordances
+                .iter()
+                .filter(|a| matches!(a.kind, crate::render::AffordanceKind::Delete(_)))
+                .collect();
+            assert_eq!(
+                delete_affs.len(),
+                1,
+                "must have exactly one delete affordance for the owned comment"
+            );
+            let crate::render::AffordanceKind::Delete(cid) = delete_affs[0].kind else {
+                panic!("expected Delete kind")
+            };
+            assert_eq!(cid, 42, "delete affordance must target comment_id=42");
+        }
+        _ => panic!("expected Detail screen"),
+    }
+}
+
+// ACd1-b: Without an owned comment (`current_user_id=None`),
+// no Delete affordances exist.
+#[test]
+fn delete_affordance_absent_when_no_current_user() {
+    let m = detail_model_with_comments_for_delete("inst", 1, 1, None, 82);
+    match m.top() {
+        Some(Screen::Detail { affordances, .. }) => {
+            let has_delete = affordances
+                .iter()
+                .any(|a| matches!(a.kind, crate::render::AffordanceKind::Delete(_)));
+            assert!(
+                !has_delete,
+                "delete affordances must be absent when current_user_id=None"
+            );
+        }
+        _ => panic!("expected Detail screen"),
+    }
+}
+
+// ACd1-c: `Confirm` and `Cancel` affordances are absent when
+// `confirm_delete` is None (confirm prompt is not rendered).
+#[test]
+fn confirm_affordances_absent_when_confirm_delete_is_none() {
+    let m = detail_model_with_comments_for_delete("inst", 1, 1, Some(7), 82);
+    match m.top() {
+        Some(Screen::Detail {
+            affordances,
+            confirm_delete,
+            ..
+        }) => {
+            assert!(
+                confirm_delete.is_none(),
+                "confirm_delete must be None before any click"
+            );
+            let has_confirm = affordances
+                .iter()
+                .any(|a| matches!(a.kind, crate::render::AffordanceKind::Confirm));
+            let has_cancel = affordances
+                .iter()
+                .any(|a| matches!(a.kind, crate::render::AffordanceKind::Cancel));
+            assert!(
+                !has_confirm,
+                "Confirm affordances must be absent when confirm_delete=None"
+            );
+            assert!(
+                !has_cancel,
+                "Cancel affordances must be absent when confirm_delete=None"
+            );
+        }
+        _ => panic!("expected Detail screen"),
+    }
+}
+
+// ACd2-a: A Ctrl+click on the `[excluir]` affordance sets
+// `confirm_delete=Some(42)` and emits NO Cmd.
+#[test]
+fn ctrl_click_on_delete_affordance_sets_confirm_delete_no_cmd() {
+    let m = detail_model_with_comments_for_delete("inst", 1, 1, Some(7), 82);
+    let (click_row, click_col) = match m.top() {
+        Some(Screen::Detail { affordances, .. }) => {
+            let aff = affordances
+                .iter()
+                .find(|a| matches!(a.kind, crate::render::AffordanceKind::Delete(_)))
+                .expect("delete affordance must be non-empty after reflow with own comment");
+            let crate::render::AffordanceKind::Delete(cid) = aff.kind else {
+                panic!("expected Delete kind")
+            };
+            assert_eq!(cid, 42);
+            (2u16 + aff.line_idx as u16, aff.col_start as u16)
+        }
+        _ => panic!("expected Detail screen"),
+    };
+
+    let (m2, cmds) = update(
+        m,
+        Msg::Click {
+            column: click_col,
+            row: click_row,
+            modifiers: KeyModifiers::CONTROL,
+        },
+    );
+
+    assert!(
+        cmds.is_empty(),
+        "Ctrl+click on [excluir] must emit no Cmd; got {:?}",
+        cmds
+    );
+    match m2.top() {
+        Some(Screen::Detail { confirm_delete, .. }) => {
+            assert_eq!(
+                *confirm_delete,
+                Some(42),
+                "confirm_delete must be Some(42) after clicking [excluir]"
+            );
+        }
+        _ => panic!("expected Detail screen"),
+    }
+}
+
+// ACd2-b: A plain (unmodified) click on the `[excluir]` affordance coordinates
+// does NOT set `confirm_delete` (modifier gate is required).
+#[test]
+fn plain_click_on_delete_affordance_does_not_set_confirm_delete() {
+    let m = detail_model_with_comments_for_delete("inst", 1, 1, Some(7), 82);
+    let (click_row, click_col) = match m.top() {
+        Some(Screen::Detail { affordances, .. }) => {
+            let aff = affordances
+                .iter()
+                .find(|a| matches!(a.kind, crate::render::AffordanceKind::Delete(_)))
+                .expect("delete affordance must be non-empty");
+            (2u16 + aff.line_idx as u16, aff.col_start as u16)
+        }
+        _ => panic!("expected Detail screen"),
+    };
+
+    let (m2, _) = update(
+        m,
+        Msg::Click {
+            column: click_col,
+            row: click_row,
+            modifiers: KeyModifiers::NONE,
+        },
+    );
+
+    match m2.top() {
+        Some(Screen::Detail { confirm_delete, .. }) => {
+            assert!(
+                confirm_delete.is_none(),
+                "plain click on [excluir] coords must NOT set confirm_delete"
+            );
+        }
+        _ => panic!("expected Detail screen"),
+    }
+}
+
+// ACd2-c: After clicking `[excluir]`, the model is reflowed and
+// Confirm/Cancel affordances are non-empty (confirm prompt rendered).
+#[test]
+fn confirm_affordances_populated_after_delete_request() {
+    let m = detail_model_with_comments_for_delete("inst", 1, 1, Some(7), 82);
+    let (click_row, click_col) = match m.top() {
+        Some(Screen::Detail { affordances, .. }) => {
+            let aff = affordances
+                .iter()
+                .find(|a| matches!(a.kind, crate::render::AffordanceKind::Delete(_)))
+                .expect("delete affordance must be non-empty");
+            (2u16 + aff.line_idx as u16, aff.col_start as u16)
+        }
+        _ => panic!("expected Detail screen"),
+    };
+
+    let (mut m2, _) = update(
+        m,
+        Msg::Click {
+            column: click_col,
+            row: click_row,
+            modifiers: KeyModifiers::CONTROL,
+        },
+    );
+
+    let inner_width = (82u16.saturating_sub(2)) as usize;
+    m2.reflow_detail(inner_width);
+
+    match m2.top() {
+        Some(Screen::Detail {
+            affordances,
+            confirm_delete,
+            ..
+        }) => {
+            assert_eq!(*confirm_delete, Some(42));
+            let has_confirm = affordances
+                .iter()
+                .any(|a| matches!(a.kind, crate::render::AffordanceKind::Confirm));
+            let has_cancel = affordances
+                .iter()
+                .any(|a| matches!(a.kind, crate::render::AffordanceKind::Cancel));
+            assert!(
+                has_confirm,
+                "Confirm affordance must be populated after [excluir] click + reflow"
+            );
+            assert!(
+                has_cancel,
+                "Cancel affordance must be populated after [excluir] click + reflow"
+            );
+        }
+        _ => panic!("expected Detail screen"),
+    }
+}
+
+// ACd2-d: After the confirm prompt appears, a Ctrl+click on `[confirmar]` emits
+// exactly one `Cmd::DeleteComment{comment_id: 42}` with the correct instance.
+#[test]
+fn ctrl_click_on_confirmar_emits_delete_comment_cmd() {
+    let m = detail_model_with_comments_for_delete("myinst", 1, 1, Some(7), 82);
+    let (excluir_row, excluir_col) = match m.top() {
+        Some(Screen::Detail { affordances, .. }) => {
+            let aff = affordances
+                .iter()
+                .find(|a| matches!(a.kind, crate::render::AffordanceKind::Delete(_)))
+                .expect("delete affordance must be non-empty");
+            (2u16 + aff.line_idx as u16, aff.col_start as u16)
+        }
+        _ => panic!("expected Detail screen"),
+    };
+
+    let (mut m2, _) = update(
+        m,
+        Msg::Click {
+            column: excluir_col,
+            row: excluir_row,
+            modifiers: KeyModifiers::CONTROL,
+        },
+    );
+
+    let inner_width = (82u16.saturating_sub(2)) as usize;
+    m2.reflow_detail(inner_width);
+
+    let (confirmar_row, confirmar_col) = match m2.top() {
+        Some(Screen::Detail { affordances, .. }) => {
+            let aff = affordances
+                .iter()
+                .find(|a| matches!(a.kind, crate::render::AffordanceKind::Confirm))
+                .expect("Confirm affordance must be non-empty after reflow");
+            (2u16 + aff.line_idx as u16, aff.col_start as u16)
+        }
+        _ => panic!("expected Detail screen"),
+    };
+
+    let (_m3, cmds) = update(
+        m2,
+        Msg::Click {
+            column: confirmar_col,
+            row: confirmar_row,
+            modifiers: KeyModifiers::CONTROL,
+        },
+    );
+
+    assert_eq!(
+        cmds.len(),
+        1,
+        "Ctrl+click on [confirmar] must emit exactly one Cmd; got {:?}",
+        cmds
+    );
+    match &cmds[0] {
+        Cmd::DeleteComment {
+            instance,
+            comment_id,
+        } => {
+            assert_eq!(instance, "myinst");
+            assert_eq!(*comment_id, 42);
+        }
+        other => panic!("expected Cmd::DeleteComment, got {other:?}"),
+    }
+}
+
+// ACd2-e: After the confirm prompt appears, a Ctrl+click on `[cancelar]` clears
+// `confirm_delete` and emits NO Cmd.
+#[test]
+fn ctrl_click_on_cancelar_clears_confirm_delete_no_cmd() {
+    let m = detail_model_with_comments_for_delete("inst", 1, 1, Some(7), 82);
+    let (excluir_row, excluir_col) = match m.top() {
+        Some(Screen::Detail { affordances, .. }) => {
+            let aff = affordances
+                .iter()
+                .find(|a| matches!(a.kind, crate::render::AffordanceKind::Delete(_)))
+                .expect("delete affordance must be non-empty");
+            (2u16 + aff.line_idx as u16, aff.col_start as u16)
+        }
+        _ => panic!("expected Detail screen"),
+    };
+
+    let (mut m2, _) = update(
+        m,
+        Msg::Click {
+            column: excluir_col,
+            row: excluir_row,
+            modifiers: KeyModifiers::CONTROL,
+        },
+    );
+
+    let inner_width = (82u16.saturating_sub(2)) as usize;
+    m2.reflow_detail(inner_width);
+
+    let (cancelar_row, cancelar_col) = match m2.top() {
+        Some(Screen::Detail { affordances, .. }) => {
+            let aff = affordances
+                .iter()
+                .find(|a| matches!(a.kind, crate::render::AffordanceKind::Cancel))
+                .expect("Cancel affordance must be non-empty after reflow");
+            (2u16 + aff.line_idx as u16, aff.col_start as u16)
+        }
+        _ => panic!("expected Detail screen"),
+    };
+
+    let (m3, cmds) = update(
+        m2,
+        Msg::Click {
+            column: cancelar_col,
+            row: cancelar_row,
+            modifiers: KeyModifiers::CONTROL,
+        },
+    );
+
+    assert!(
+        cmds.is_empty(),
+        "Ctrl+click on [cancelar] must emit no Cmd; got {:?}",
+        cmds
+    );
+    match m3.top() {
+        Some(Screen::Detail { confirm_delete, .. }) => {
+            assert!(
+                confirm_delete.is_none(),
+                "confirm_delete must be None after clicking [cancelar]"
+            );
+        }
+        _ => panic!("expected Detail screen"),
+    }
+}
+
+// ACd3-a: `Msg::CommentMutationOk` triggers exactly one `Cmd::LoadDetail{refresh:true}`
+// and clears `confirm_delete`.
+#[test]
+fn comment_mutation_ok_after_delete_emits_load_detail_refresh() {
+    let mut m = detail_model_with_comments_for_delete("inst", 5, 10, Some(7), 82);
+    if let Some(Screen::Detail {
+        ref mut confirm_delete,
+        ..
+    }) = m.top_mut()
+    {
+        *confirm_delete = Some(42);
+    }
+
+    let (m2, cmds) = update(m, Msg::CommentMutationOk);
+
+    assert_eq!(
+        cmds.len(),
+        1,
+        "CommentMutationOk must emit exactly one Cmd; got {:?}",
+        cmds
+    );
+    match &cmds[0] {
+        Cmd::LoadDetail {
+            instance,
+            project_id,
+            task_id,
+            refresh,
+        } => {
+            assert_eq!(instance, "inst");
+            assert_eq!(*project_id, 5);
+            assert_eq!(*task_id, 10);
+            assert!(*refresh, "refresh must be true");
+        }
+        other => panic!("expected Cmd::LoadDetail, got {other:?}"),
+    }
+    match m2.top() {
+        Some(Screen::Detail { confirm_delete, .. }) => {
+            assert!(
+                confirm_delete.is_none(),
+                "confirm_delete must be cleared by CommentMutationOk"
+            );
+        }
+        _ => panic!("expected Detail screen"),
+    }
+}
+
+// ACd3-b: `Msg::CommentMutationErr` does NOT emit a refresh Cmd.
+// It leaves `confirm_delete` as-is and does not issue `Cmd::LoadDetail`.
+#[test]
+fn comment_mutation_err_does_not_emit_refresh() {
+    let mut m = detail_model_with_comments_for_delete("inst", 5, 10, Some(7), 82);
+
+    if let Some(Screen::Detail {
+        ref mut compose,
+        ref mut confirm_delete,
+        ..
+    }) = m.top_mut()
+    {
+        *confirm_delete = Some(42);
+        *compose = Some(crate::tui::model::Compose {
+            buffer: String::new(),
+            status: crate::tui::model::ComposeStatus::Submitting,
+            kind: crate::tui::model::ComposeKind::New,
+        });
+    }
+
+    let (_m2, cmds) = update(m, Msg::CommentMutationErr("network error".into()));
+
+    assert!(
+        cmds.is_empty(),
+        "CommentMutationErr must emit no Cmd (no refresh); got {:?}",
+        cmds
+    );
+    let has_load_detail = cmds
+        .iter()
+        .any(|c| matches!(c, Cmd::LoadDetail { refresh: true, .. }));
+    assert!(
+        !has_load_detail,
+        "CommentMutationErr must not emit Cmd::LoadDetail{{refresh:true}}"
     );
 }

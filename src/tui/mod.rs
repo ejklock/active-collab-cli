@@ -19,7 +19,7 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use events::{map_browse_key_event, map_browse_mouse_event};
+use events::{map_browse_key_event, map_browse_mouse_event, map_compose_key_event};
 use ratatui::{backend::CrosstermBackend, Terminal};
 use std::io;
 use std::path::{Path, PathBuf};
@@ -74,7 +74,22 @@ fn setup_terminal() -> io::Result<(TerminalGuard, Terminal<CrosstermBackend<io::
     Ok((guard, terminal))
 }
 
+/// Return true when compose mode is active on the top screen.
+fn compose_active(model: &Model) -> bool {
+    matches!(
+        model.top(),
+        Some(model::Screen::Detail {
+            compose: Some(_),
+            ..
+        })
+    )
+}
+
 /// Handle a crossterm input event: map to a Msg, run update, and dispatch commands.
+///
+/// When compose mode is active on the Detail screen, key events are routed through
+/// `map_compose_key_event` so typed characters append to the compose buffer rather
+/// than triggering browse navigation.
 fn handle_input_event(
     ev: Event,
     model: Model,
@@ -84,7 +99,13 @@ fn handle_input_event(
     tx: &mpsc::UnboundedSender<Msg>,
 ) -> Model {
     let msg_opt = match ev {
-        Event::Key(key) => map_browse_key_event(key),
+        Event::Key(key) => {
+            if compose_active(&model) {
+                map_compose_key_event(key)
+            } else {
+                map_browse_key_event(key)
+            }
+        }
         Event::Mouse(mouse) => map_browse_mouse_event(mouse),
         _ => None,
     };
@@ -383,6 +404,53 @@ struct DetailRequest {
     refresh: bool,
 }
 
+fn dispatch_comment_write(
+    cmd: Cmd,
+    targets: &[Instance],
+    http: &Http,
+    tx: &mpsc::UnboundedSender<Msg>,
+) {
+    match cmd {
+        Cmd::SubmitComment {
+            instance,
+            task_id,
+            body,
+            ..
+        } => spawn_comment_write(
+            targets,
+            http,
+            tx,
+            instance,
+            body,
+            CommentWrite::Create { task_id },
+        ),
+        Cmd::UpdateComment {
+            instance,
+            comment_id,
+            body,
+        } => spawn_comment_write(
+            targets,
+            http,
+            tx,
+            instance,
+            body,
+            CommentWrite::Update { comment_id },
+        ),
+        Cmd::DeleteComment {
+            instance,
+            comment_id,
+        } => spawn_comment_write(
+            targets,
+            http,
+            tx,
+            instance,
+            String::new(),
+            CommentWrite::Delete { comment_id },
+        ),
+        _ => unreachable!("dispatch_comment_write called with non-comment Cmd"),
+    }
+}
+
 fn dispatch_cmds(
     cmds: Vec<Cmd>,
     model: &mut Model,
@@ -434,14 +502,15 @@ fn dispatch_cmds(
                 spawn_open_asset(targets, &tx, instance, url);
             }
             Cmd::CopyToClipboard(text) => {
-                match write_clipboard(&text) {
-                    Ok(()) => model.copied_feedback = true,
-                    Err(_) => {
-                        // Clipboard unavailable (headless/no display): set feedback anyway
-                        // so the footer note still renders; the text is simply not in clipboard.
-                        model.copied_feedback = true;
-                    }
-                }
+                // Clipboard unavailable (headless/no display): set feedback anyway
+                // so the footer note still renders; the text is simply not in clipboard.
+                let _ = write_clipboard(&text);
+                model.copied_feedback = true;
+            }
+            cmd @ (Cmd::SubmitComment { .. }
+            | Cmd::UpdateComment { .. }
+            | Cmd::DeleteComment { .. }) => {
+                dispatch_comment_write(cmd, targets, http, &tx);
             }
         }
     }
@@ -502,6 +571,7 @@ fn spawn_load_detail(
                     assets: vec![],
                     user_map: std::collections::HashMap::new(),
                     loaded_at,
+                    current_user_id: None,
                 }));
                 return;
             }
@@ -510,6 +580,7 @@ fn spawn_load_detail(
         // Phase 1: load task content and send immediately with the cached user_map
         // (or empty if none). The shell will call reflow_detail before drawing.
         let cached_map = controller::cached_user_map(&db_path, &inst).unwrap_or_default();
+        let current_user_id = inst.user_id;
         let core = controller::load_task_core(
             db_path.clone(),
             inst.clone(),
@@ -527,6 +598,7 @@ fn spawn_load_detail(
             assets: core.assets.clone(),
             user_map: cached_map,
             loaded_at,
+            current_user_id,
         }));
 
         // Phase 2: refresh user directory in the background; send UserMapResolved
@@ -552,6 +624,54 @@ fn spawn_open_asset(
     tokio::spawn(async move {
         spawn_opener(inst, &url);
         let _ = tx.send(Msg::AssetActionResult);
+    });
+}
+
+enum CommentWrite {
+    Create { task_id: i64 },
+    Update { comment_id: i64 },
+    Delete { comment_id: i64 },
+}
+
+fn spawn_comment_write(
+    targets: &[Instance],
+    http: &Http,
+    tx: &mpsc::UnboundedSender<Msg>,
+    instance: String,
+    body: String,
+    write: CommentWrite,
+) {
+    let inst = targets.iter().find(|t| t.name == instance).cloned();
+    let http = http.clone();
+    let tx = tx.clone();
+    tokio::spawn(async move {
+        let Some(inst) = inst else {
+            let _ = tx.send(Msg::CommentMutationErr(crate::i18n::t(
+                "Failed to post comment",
+            )));
+            return;
+        };
+        let client = crate::client::ActiveCollabClient::new(inst, http);
+        let status_result: Result<u16, _> = match write {
+            CommentWrite::Create { task_id } => {
+                client.create_comment(task_id, &body).await.map(|(s, _)| s)
+            }
+            CommentWrite::Update { comment_id } => client
+                .update_comment(comment_id, &body)
+                .await
+                .map(|(s, _)| s),
+            CommentWrite::Delete { comment_id } => client.delete_comment(comment_id).await,
+        };
+        match status_result {
+            Ok(status) if (200..=299).contains(&(status as u32)) => {
+                let _ = tx.send(Msg::CommentMutationOk);
+            }
+            _ => {
+                let _ = tx.send(Msg::CommentMutationErr(crate::i18n::t(
+                    "Failed to post comment",
+                )));
+            }
+        }
     });
 }
 
