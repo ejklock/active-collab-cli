@@ -914,19 +914,6 @@ fn footer_style_is_light_grey_on_steel_bg_bold() {
     );
 }
 
-#[test]
-fn header_style_is_steel_bold() {
-    use ratatui::style::{Color, Modifier, Style};
-    let style = theme::header_style();
-    assert_eq!(
-        style,
-        Style::default()
-            .fg(Color::Rgb(140, 165, 196))
-            .add_modifier(Modifier::BOLD),
-        "header_style must be steel-blue+bold (sober palette)"
-    );
-}
-
 // U8-A1: selection_style — near-black on discreet amber, bold.
 #[test]
 fn selection_style_is_near_black_on_amber_bold() {
@@ -939,19 +926,6 @@ fn selection_style_is_near_black_on_amber_bold() {
             .bg(Color::Rgb(210, 160, 90))
             .add_modifier(Modifier::BOLD),
         "selection_style must be near-black on amber+bold (sober palette)"
-    );
-}
-
-#[test]
-fn asset_style_is_muted_green_underlined() {
-    use ratatui::style::{Color, Modifier, Style};
-    let style = theme::asset_style();
-    assert_eq!(
-        style,
-        Style::default()
-            .fg(Color::Rgb(120, 190, 130))
-            .add_modifier(Modifier::UNDERLINED),
-        "asset_style must be muted-green+underlined (sober palette)"
     );
 }
 
@@ -969,7 +943,7 @@ fn column_header_style_is_soft_cyan_bold() {
     );
 }
 
-// U1-A3: regression guards — header_style, footer_style, asset_style, SELECTION_SYMBOL unchanged
+// U1-A3: regression guard — SELECTION_SYMBOL unchanged
 #[test]
 fn selection_symbol_is_unchanged() {
     assert_eq!(
@@ -2642,7 +2616,7 @@ fn link_style_is_muted_green_underlined() {
         Style::default()
             .fg(Color::Rgb(120, 190, 130))
             .add_modifier(Modifier::UNDERLINED),
-        "link_style must be muted-green+underlined matching asset_style color"
+        "link_style must be muted-green+underlined (Color::Rgb(120, 190, 130))"
     );
 }
 
@@ -4781,7 +4755,7 @@ fn hint_for_screen_detail_with_assets_has_no_ctrl_cmd_in_footer() {
 
 mod panel_row_layout {
     use crate::render::{Asset, PANEL_VPAD};
-    use crate::tui::screens::asset_panel::{apply_cap, layout, PanelRow};
+    use crate::tui::screens::asset_panel::{layout, PanelRow};
 
     fn asset(name: &str) -> Asset {
         Asset {
@@ -4826,13 +4800,6 @@ mod panel_row_layout {
             rows.is_empty(),
             "empty asset list must produce an empty layout vec"
         );
-    }
-
-    // apply_cap of empty layout is also empty.
-    #[test]
-    fn apply_cap_empty_vec_returns_empty() {
-        let rows = apply_cap(vec![]);
-        assert!(rows.is_empty(), "apply_cap of empty vec must be empty");
     }
 
     // (b) Single asset: top pads, one Asset row, Separator, Hint, bottom pad.
@@ -4998,31 +4965,6 @@ mod panel_row_layout {
                 );
             }
         }
-    }
-
-    // apply_cap with non-wrapping assets under the cap does not change the composition.
-    #[test]
-    fn apply_cap_small_list_preserves_composition() {
-        let assets = [asset("x.pdf"), asset("y.pdf")];
-        let rows = layout(&assets, 80);
-        let before_len = rows.len();
-        let capped = apply_cap(rows);
-        assert_eq!(
-            capped.len(),
-            before_len,
-            "apply_cap must not change the length when the asset list is well under the cap"
-        );
-        // Hint still present
-        assert_eq!(
-            count_hints(&capped),
-            1,
-            "Hint must still be present after apply_cap"
-        );
-        // bottom Pad still present
-        assert!(
-            matches!(capped[capped.len() - 1], PanelRow::Pad),
-            "last row must still be bottom Pad after apply_cap"
-        );
     }
 }
 

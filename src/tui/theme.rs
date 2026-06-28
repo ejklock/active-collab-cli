@@ -27,24 +27,12 @@ pub fn column_header_style() -> Style {
     Style::default().fg(SOFT_CYAN).add_modifier(Modifier::BOLD)
 }
 
-/// Table header row — steel blue, bold.
-pub fn header_style() -> Style {
-    Style::default().fg(STEEL).add_modifier(Modifier::BOLD)
-}
-
 /// Status/hint bar — light grey on steel-blue band, bold.
 pub fn footer_style() -> Style {
     Style::default()
         .fg(LIGHT_GREY)
         .bg(STEEL_BG)
         .add_modifier(Modifier::BOLD)
-}
-
-/// Style for asset rows in the dedicated Artifacts panel — muted green, underlined.
-pub fn asset_style() -> Style {
-    Style::default()
-        .fg(MUTED_GREEN)
-        .add_modifier(Modifier::UNDERLINED)
 }
 
 /// Identity bar at the top of every screen — soft cyan on steel-blue band, bold.
@@ -87,11 +75,6 @@ pub fn copied_indicator_style() -> Style {
 /// Inline code spans in rich text — steel, dim.
 pub fn code_style() -> Style {
     Style::default().fg(STEEL).add_modifier(Modifier::DIM)
-}
-
-/// Card footnote hint inside the Artifacts panel — italic and dimmed.
-pub fn asset_hint_style() -> Style {
-    Style::default().add_modifier(Modifier::ITALIC | Modifier::DIM)
 }
 
 /// Due-date color for a task card's line 2, keyed on the DueStyle variant.
