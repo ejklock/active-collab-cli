@@ -5,6 +5,28 @@ use crossterm::event::KeyModifiers;
 use serde_json::json;
 use std::collections::HashMap;
 
+fn tasks_model_for_reflow(tasks: Vec<TaskRow>) -> Model {
+    Model {
+        stack: vec![Screen::Tasks {
+            project_name: "P".into(),
+            tasks,
+            selected: 0,
+            loading: false,
+            revalidating: false,
+            card_heights: vec![],
+            card_offsets: vec![],
+            rendered_width: usize::MAX,
+        }],
+        should_quit: false,
+        header: empty_header(),
+        viewport: (0, 0),
+        click_targets: vec![],
+        last_loaded: None,
+        selection: None,
+        copied_feedback: false,
+    }
+}
+
 fn empty_header() -> Header {
     Header::from_instances(&[], None)
 }
@@ -75,6 +97,9 @@ fn tasks_model(count: usize) -> Model {
                 selected: 0,
                 loading: false,
                 revalidating: false,
+                card_heights: vec![],
+                card_offsets: vec![],
+                rendered_width: usize::MAX,
             },
         ],
         should_quit: false,
@@ -318,6 +343,9 @@ fn empty_list_navigation_never_panics_or_quits_tasks() {
                 selected: 0,
                 loading: false,
                 revalidating: false,
+                card_heights: vec![],
+                card_offsets: vec![],
+                rendered_width: usize::MAX,
             },
         ],
         should_quit: false,
@@ -480,6 +508,9 @@ fn tasks_model_with_project_id(task_count: usize, project_id: i64) -> Model {
                 selected: 0,
                 loading: false,
                 revalidating: false,
+                card_heights: vec![],
+                card_offsets: vec![],
+                rendered_width: usize::MAX,
             },
         ],
         should_quit: false,
@@ -508,6 +539,9 @@ fn detail_model(line_count: usize, offset: usize) -> Model {
                 selected: 0,
                 loading: false,
                 revalidating: false,
+                card_heights: vec![],
+                card_offsets: vec![],
+                rendered_width: usize::MAX,
             },
             Screen::Detail {
                 instance: "inst".into(),
@@ -549,6 +583,9 @@ fn loading_detail_model() -> Model {
                 selected: 0,
                 loading: false,
                 revalidating: false,
+                card_heights: vec![],
+                card_offsets: vec![],
+                rendered_width: usize::MAX,
             },
             Screen::Detail {
                 instance: "inst".into(),
@@ -1000,6 +1037,9 @@ fn select_on_tasks_threads_instance_into_load_detail_cmd() {
                 selected: 0,
                 loading: false,
                 revalidating: false,
+                card_heights: vec![],
+                card_offsets: vec![],
+                rendered_width: usize::MAX,
             },
         ],
         should_quit: false,
@@ -1821,4 +1861,336 @@ fn detail_global_scroll_offset_advances_through_all_content() {
         }
         _ => panic!("expected Detail"),
     }
+}
+
+// ADR 0031 AC1: reflow_tasks at unchanged width + unchanged list is a no-op.
+// Verify by poisoning the cache with a sentinel, calling reflow_tasks at the same
+// width, and asserting the sentinel is still present (no rebuild occurred).
+#[test]
+fn reflow_tasks_unchanged_width_is_noop() {
+    let tasks = make_tasks(3);
+    let mut m = tasks_model_for_reflow(tasks);
+
+    m.reflow_tasks(40);
+    let heights_after_first = match m.stack.last() {
+        Some(Screen::Tasks {
+            card_heights,
+            rendered_width,
+            ..
+        }) => {
+            assert_eq!(
+                *rendered_width, 40,
+                "rendered_width must update on first call"
+            );
+            assert!(!card_heights.is_empty(), "heights must be built");
+            card_heights.clone()
+        }
+        _ => panic!("expected Tasks"),
+    };
+
+    if let Some(Screen::Tasks { card_heights, .. }) = m.stack.last_mut() {
+        card_heights[0] = 99;
+    }
+
+    m.reflow_tasks(40);
+    match m.stack.last() {
+        Some(Screen::Tasks { card_heights, .. }) => {
+            assert_eq!(
+                card_heights[0], 99,
+                "sentinel must survive same-width reflow: cache must not rebuild"
+            );
+        }
+        _ => panic!("expected Tasks"),
+    }
+
+    m.reflow_tasks(60);
+    match m.stack.last() {
+        Some(Screen::Tasks {
+            card_heights,
+            rendered_width,
+            ..
+        }) => {
+            assert_eq!(
+                *rendered_width, 60,
+                "rendered_width must update after width change"
+            );
+            assert_ne!(
+                card_heights[0], 99,
+                "sentinel must be gone: cache must rebuild on width change"
+            );
+            assert_eq!(
+                card_heights, &heights_after_first,
+                "heights must equal first build"
+            );
+        }
+        _ => panic!("expected Tasks"),
+    }
+}
+
+// ADR 0031 AC2: list swap (handle_loaded_mine_tasks) invalidates the cache;
+// changing only `selected` does NOT rebuild.
+#[test]
+fn reflow_tasks_list_swap_invalidates_cache_selected_change_does_not() {
+    let rows = vec![
+        MineTableRow {
+            instance: "i".into(),
+            project_id: 1,
+            task_number: 1,
+            task_id: 1,
+            name: "Task A".into(),
+            due_on: None,
+            project_name: None,
+        },
+        MineTableRow {
+            instance: "i".into(),
+            project_id: 1,
+            task_number: 2,
+            task_id: 2,
+            name: "Task B".into(),
+            due_on: None,
+            project_name: None,
+        },
+    ];
+    let (mut m, _) = init_mine(empty_header(), Some(rows));
+
+    m.reflow_tasks(40);
+    let heights_before = match m.stack.last() {
+        Some(Screen::Tasks { card_heights, .. }) => card_heights.clone(),
+        _ => panic!("expected Tasks"),
+    };
+    assert!(!heights_before.is_empty());
+
+    let (mut m2, _) = update(m, Msg::Down);
+    match m2.stack.last() {
+        Some(Screen::Tasks {
+            selected,
+            rendered_width,
+            ..
+        }) => {
+            assert_eq!(*selected, 1, "Down must advance selected");
+            assert_eq!(
+                *rendered_width, 40,
+                "selected change must NOT reset rendered_width"
+            );
+        }
+        _ => panic!("expected Tasks"),
+    }
+
+    let new_rows = vec![MineTableRow {
+        instance: "i".into(),
+        project_id: 1,
+        task_number: 99,
+        task_id: 99,
+        name: "Fresh Task".into(),
+        due_on: None,
+        project_name: None,
+    }];
+    let loaded_at = "2026-06-28T00:00:00Z".to_string();
+    let (m3, _) = update(
+        m2,
+        Msg::LoadedMineTasks {
+            rows: new_rows,
+            loaded_at,
+        },
+    );
+
+    match m3.stack.last() {
+        Some(Screen::Tasks {
+            rendered_width,
+            card_heights,
+            card_offsets,
+            ..
+        }) => {
+            assert_eq!(
+                *rendered_width,
+                usize::MAX,
+                "list swap must reset rendered_width to MAX"
+            );
+            assert!(card_heights.is_empty(), "list swap must clear card_heights");
+            assert!(card_offsets.is_empty(), "list swap must clear card_offsets");
+        }
+        _ => panic!("expected Tasks"),
+    }
+}
+
+// ADR 0031 AC2: every Screen::Tasks construction is born with empty caches + rendered_width usize::MAX.
+#[test]
+fn new_tasks_screen_born_with_empty_cache() {
+    let m = tasks_model_for_reflow(make_tasks(5));
+    match m.stack.last() {
+        Some(Screen::Tasks {
+            card_heights,
+            card_offsets,
+            rendered_width,
+            ..
+        }) => {
+            assert!(
+                card_heights.is_empty(),
+                "new Tasks screen must have empty card_heights"
+            );
+            assert!(
+                card_offsets.is_empty(),
+                "new Tasks screen must have empty card_offsets"
+            );
+            assert_eq!(
+                *rendered_width,
+                usize::MAX,
+                "new Tasks screen must have rendered_width = usize::MAX"
+            );
+        }
+        _ => panic!("expected Tasks"),
+    }
+
+    let m2 = projects_model(1);
+    let (m3, _) = update(m2, Msg::Select);
+    match m3.stack.last() {
+        Some(Screen::Tasks {
+            card_heights,
+            card_offsets,
+            rendered_width,
+            ..
+        }) => {
+            assert!(card_heights.is_empty());
+            assert!(card_offsets.is_empty());
+            assert_eq!(*rendered_width, usize::MAX);
+        }
+        _ => panic!("expected Tasks after Select"),
+    }
+}
+
+/// Linear-scan oracle for `first_visible_card` tests.
+///
+/// Returns the smallest index `first` such that
+/// `offsets[first] + visible_h >= offsets[selected + 1]`, or 0 when the
+/// selected card already fits in the viewport from position 0.
+/// This is the obviously-correct reference used to verify the production binary search.
+fn first_visible_linear_oracle(offsets: &[u32], selected: usize, visible_h: u16) -> usize {
+    if selected == 0 || visible_h == 0 {
+        return 0;
+    }
+    let sel_end = offsets[selected + 1];
+    let visible_h32 = visible_h as u32;
+    if sel_end <= visible_h32 {
+        return 0;
+    }
+    for (i, &start) in offsets[..=selected].iter().enumerate() {
+        if start + visible_h32 >= sel_end {
+            return i;
+        }
+    }
+    selected
+}
+
+// ADR 0031 AC3: first_visible_card calls the production binary search and returns
+// the same index as the linear oracle for every selected across the fixture,
+// including selection near the end, the exact-boundary case (kills < vs <= mutant),
+// and the card-taller-than-viewport case (kills dropped .min(selected) mutant).
+#[test]
+fn first_visible_card_binary_equals_linear_for_fixture() {
+    use crate::tui::screens::tasks::first_visible_card;
+
+    let card_inner_w: usize = 40;
+    let tasks: Vec<TaskRow> = (0..10)
+        .map(|i| TaskRow {
+            task_id: i,
+            task_number: i,
+            name: format!("Task {i}"),
+            instance: "inst".into(),
+            project_id: 0,
+            due_on: None,
+            project_name: None,
+        })
+        .collect();
+
+    let mut m = tasks_model_for_reflow(tasks.clone());
+    m.reflow_tasks(card_inner_w);
+    let (offsets, heights, rw) = match m.stack.last() {
+        Some(Screen::Tasks {
+            card_offsets,
+            card_heights,
+            rendered_width,
+            ..
+        }) => (card_offsets.clone(), card_heights.clone(), *rendered_width),
+        _ => panic!("expected Tasks"),
+    };
+    assert_eq!(
+        rw, card_inner_w,
+        "cache must be built at the expected width"
+    );
+
+    // Normal sweep: every selected with visible_h=8 (two cards fit at height 4 each).
+    let visible_h: u16 = 8;
+    for selected in 0..tasks.len() {
+        let got = first_visible_card(&offsets, rw, card_inner_w, &heights, selected, visible_h);
+        let want = first_visible_linear_oracle(&offsets, selected, visible_h);
+        assert_eq!(
+            got, want,
+            "selected={selected}: production first_visible_card={got} oracle={want}"
+        );
+    }
+
+    // Exact-boundary case: kills the `<` vs `<=` mutant on the partition_point predicate.
+    // Each card is 4 rows tall; offsets = [0, 4, 8, 12, ...].
+    // With visible_h=8 and selected=2: sel_end=12, offsets[1]+8=12 exactly.
+    // Correct answer: first=1 (window [4..12] covers sel_end=12).
+    // If predicate uses `<=` instead of `<`, partition_point skips index 1 and returns 2.
+    {
+        let (sel, vh, want) = (2, 8u16, 1usize);
+        let got = first_visible_card(&offsets, rw, card_inner_w, &heights, sel, vh);
+        assert_eq!(
+            got, want,
+            "boundary: selected={sel} visible_h={vh}: got={got} want={want}"
+        );
+    }
+
+    // Card-taller-than-viewport case: kills the dropped `.min(selected)` mutant.
+    // With visible_h=3, every card (height 4) exceeds the viewport.
+    // partition_point over offsets[..=selected] returns selected+1 (all satisfy predicate).
+    // .min(selected) clamps to `selected`; without it the result would be selected+1.
+    {
+        let vh = 3u16;
+        for selected in 1..tasks.len() {
+            let got = first_visible_card(&offsets, rw, card_inner_w, &heights, selected, vh);
+            assert_eq!(
+                got, selected,
+                "tall-card: selected={selected} visible_h={vh}: got={got} want={selected}"
+            );
+        }
+    }
+}
+
+// ADR 0031 AC4: card_offsets uses u32 — cumulative height beyond u16::MAX is exact.
+#[test]
+fn card_offsets_do_not_saturate_beyond_u16_max() {
+    let single_card_height: usize = 4;
+    let needed = (u16::MAX as usize / single_card_height) + 10;
+    let tasks: Vec<TaskRow> = (0..needed)
+        .map(|i| TaskRow {
+            task_id: i as i64,
+            task_number: i as i64,
+            name: "T".into(),
+            instance: "inst".into(),
+            project_id: 0,
+            due_on: None,
+            project_name: None,
+        })
+        .collect();
+
+    let mut m = tasks_model_for_reflow(tasks.clone());
+    m.reflow_tasks(40);
+
+    let total = match m.stack.last() {
+        Some(Screen::Tasks { card_offsets, .. }) => *card_offsets.last().unwrap(),
+        _ => panic!("expected Tasks"),
+    };
+
+    let expected: u32 = tasks.len() as u32 * single_card_height as u32;
+    assert!(
+        total > u16::MAX as u32,
+        "total rows must exceed u16::MAX to test non-saturation: total={total}"
+    );
+    assert_eq!(
+        total, expected,
+        "total rows must be exact (no u32 saturation): total={total} expected={expected}"
+    );
 }

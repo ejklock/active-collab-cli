@@ -142,6 +142,9 @@ fn render_tasks_to_buf_with_today(
                 false,
                 today,
                 &mut targets,
+                &[],
+                &[],
+                usize::MAX,
             );
         })
         .unwrap();
@@ -348,6 +351,9 @@ fn draw_my_tasks_title_renders_in_pt_br() {
                 false,
                 today_fixed(),
                 &mut targets,
+                &[],
+                &[],
+                usize::MAX,
             );
         })
         .unwrap();
@@ -551,6 +557,9 @@ fn draw_tasks_selected_card_all_rows_carry_selection_style() {
                 false,
                 today_fixed(),
                 &mut captured_targets,
+                &[],
+                &[],
+                usize::MAX,
             );
         })
         .unwrap();
@@ -596,6 +605,9 @@ fn draw_tasks_click_on_non_first_card_row_resolves_to_task_index() {
                 false,
                 today_fixed(),
                 &mut captured_targets,
+                &[],
+                &[],
+                usize::MAX,
             );
         })
         .unwrap();
@@ -718,6 +730,9 @@ fn draw_tasks_loading_shows_paragraph_not_table() {
                 false,
                 today_fixed(),
                 &mut targets,
+                &[],
+                &[],
+                usize::MAX,
             );
         })
         .unwrap();
@@ -1135,6 +1150,9 @@ fn draw_tasks_single_line_card_height_is_four_rows() {
                 false,
                 today_fixed(),
                 &mut targets,
+                &[],
+                &[],
+                usize::MAX,
             );
         })
         .unwrap();
@@ -1206,6 +1224,9 @@ fn draw_tasks_overdue_task_due_cells_carry_red_fg() {
                 false,
                 today_fixed(),
                 &mut targets,
+                &[],
+                &[],
+                usize::MAX,
             );
         })
         .unwrap();
@@ -1254,6 +1275,9 @@ fn draw_tasks_near_due_task_due_cells_carry_yellow_fg() {
                 false,
                 today_fixed(),
                 &mut targets,
+                &[],
+                &[],
+                usize::MAX,
             );
         })
         .unwrap();
@@ -1302,6 +1326,9 @@ fn draw_tasks_no_due_shows_sem_data_with_default_style() {
                 false,
                 today_fixed(),
                 &mut targets,
+                &[],
+                &[],
+                usize::MAX,
             );
         })
         .unwrap();
@@ -1356,6 +1383,9 @@ fn draw_tasks_selected_card_due_line_keeps_color_on_amber_bg() {
                 false,
                 today_fixed(),
                 &mut targets,
+                &[],
+                &[],
+                usize::MAX,
             );
         })
         .unwrap();
@@ -1420,6 +1450,9 @@ fn draw_tasks_due_line_with_project_name_shows_due_separator_project() {
                 false,
                 today_fixed(),
                 &mut targets,
+                &[],
+                &[],
+                usize::MAX,
             );
         })
         .unwrap();
@@ -1477,6 +1510,9 @@ fn draw_tasks_due_line_project_portion_has_default_style_not_due_color() {
                 false,
                 today_fixed(),
                 &mut targets,
+                &[],
+                &[],
+                usize::MAX,
             );
         })
         .unwrap();
@@ -1554,6 +1590,9 @@ fn draw_tasks_due_line_without_project_name_shows_no_separator() {
                 false,
                 today_fixed(),
                 &mut targets,
+                &[],
+                &[],
+                usize::MAX,
             );
         })
         .unwrap();
@@ -2772,6 +2811,9 @@ mod v2b_click_targets {
                 selected: 0,
                 loading: false,
                 revalidating: false,
+                card_heights: vec![],
+                card_offsets: vec![],
+                rendered_width: usize::MAX,
             }],
             should_quit: false,
             header: empty_header(),
@@ -2914,6 +2956,9 @@ mod v2b_click_targets {
                 selected: 7,
                 loading: false,
                 revalidating: false,
+                card_heights: vec![],
+                card_offsets: vec![],
+                rendered_width: usize::MAX,
             }],
             should_quit: false,
             header: empty_header(),

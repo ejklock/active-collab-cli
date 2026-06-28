@@ -1,5 +1,5 @@
 use crate::render::{display_width, wrap_text, PANEL_HPAD};
-use crate::tui::model::{relative_due, ClickTarget, TaskRow};
+use crate::tui::model::{relative_due, task_card_height, ClickTarget, TaskRow};
 use crate::tui::theme;
 use ratatui::{
     style::Style,
@@ -16,9 +16,23 @@ const BOX_H: &str = "\u{2500}";
 const BOX_V: &str = "\u{2502}";
 
 /// Width consumed by one card's left+right chrome: 2 border cols + 2×PANEL_HPAD.
-const CARD_CHROME: u16 = 2 + 2 * PANEL_HPAD as u16;
+pub(crate) const CARD_CHROME: u16 = 2 + 2 * PANEL_HPAD as u16;
+
+/// Compute the card inner width from the full terminal width.
+///
+/// The outer Tasks block has 1-col borders each side (2 total), and each card
+/// adds `CARD_CHROME` more columns. This is the single source of truth used by
+/// both `reflow_tasks` (pre-draw in the shell) and `draw_tasks` (render pass).
+pub fn tasks_card_inner_w(terminal_width: u16) -> usize {
+    terminal_width.saturating_sub(2).saturating_sub(CARD_CHROME) as usize
+}
 
 /// Draw the Tasks screen (project task list) as stacked bordered cards.
+///
+/// `card_heights` and `card_offsets` are the memoized layout cache from
+/// `Screen::Tasks`; `rendered_width` is the cache's build width. When the
+/// cache does not match the current `card_inner_w` (defensive floor), heights
+/// are computed inline for that one frame so rendering is never incorrect.
 #[allow(clippy::too_many_arguments)]
 pub fn draw_tasks(
     frame: &mut Frame,
@@ -30,6 +44,9 @@ pub fn draw_tasks(
     revalidating: bool,
     today: chrono::NaiveDate,
     targets: &mut Vec<ClickTarget>,
+    card_heights_cache: &[u16],
+    card_offsets_cache: &[u32],
+    cache_rendered_width: usize,
 ) {
     let title = if revalidating {
         format!(" {} ↻ ", project_name)
@@ -55,12 +72,25 @@ pub fn draw_tasks(
         return;
     }
 
-    let card_inner_w = inner.width.saturating_sub(CARD_CHROME) as usize;
-    let card_heights = build_card_heights(tasks, card_inner_w);
-    let total_rows: u16 = card_heights.iter().sum();
+    let card_inner_w = tasks_card_inner_w(inner.width + 2);
     let visible_h = inner.height;
 
-    let first_visible = first_visible_card(&card_heights, selected, visible_h);
+    let (card_heights, total_rows) = resolve_heights(
+        tasks,
+        card_inner_w,
+        card_heights_cache,
+        card_offsets_cache,
+        cache_rendered_width,
+    );
+
+    let first_visible = first_visible_card(
+        card_offsets_cache,
+        cache_rendered_width,
+        card_inner_w,
+        &card_heights,
+        selected,
+        visible_h,
+    );
 
     render_cards(
         frame,
@@ -74,7 +104,7 @@ pub fn draw_tasks(
         targets,
     );
 
-    if total_rows > visible_h {
+    if total_rows > visible_h as u32 {
         let total_cards = tasks.len();
         let mut sb_state = ScrollbarState::new(total_cards).position(selected);
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight);
@@ -82,41 +112,84 @@ pub fn draw_tasks(
     }
 }
 
-/// Return the height (in buffer rows) of each task card.
+/// Resolve card heights and total row count from the cache when valid, or compute inline.
 ///
-/// Each card = 2 border rows + wrapped line-1 rows + 1 (the due-date line-2).
-fn build_card_heights(tasks: &[TaskRow], card_inner_w: usize) -> Vec<u16> {
-    tasks
+/// Returns `(heights, total_rows_u32)`. The defensive floor activates when
+/// `cache_rendered_width != card_inner_w` or the cache length does not match
+/// the task count, ensuring a width-derivation mismatch never produces wrong output.
+fn resolve_heights<'a>(
+    tasks: &[TaskRow],
+    card_inner_w: usize,
+    cache_heights: &'a [u16],
+    cache_offsets: &[u32],
+    cache_rendered_width: usize,
+) -> (std::borrow::Cow<'a, [u16]>, u32) {
+    let cache_valid = cache_rendered_width == card_inner_w
+        && cache_heights.len() == tasks.len()
+        && cache_offsets.len() == tasks.len() + 1;
+
+    if cache_valid {
+        let total = *cache_offsets.last().unwrap_or(&0);
+        return (std::borrow::Cow::Borrowed(cache_heights), total);
+    }
+
+    let heights: Vec<u16> = tasks
         .iter()
-        .map(|t| card_height_for(t, card_inner_w))
-        .collect()
-}
-
-/// Height of a single task card: 2 border rows + wrapped line-1 row count + 1 for line-2 (due).
-fn card_height_for(task: &TaskRow, card_inner_w: usize) -> u16 {
-    let content = task_card_content(task);
-    let lines = wrap_text(&content, card_inner_w.max(1));
-    let body_rows = if lines.is_empty() { 1 } else { lines.len() };
-    // +1 for the due-date line (line 2); line 2 never wraps.
-    2 + body_rows as u16 + 1
-}
-
-/// Build the first-line content string for a task card: `#<number>  <name>`.
-fn task_card_content(task: &TaskRow) -> String {
-    format!("#{}  {}", task.task_number, task.name)
+        .map(|t| task_card_height(t, card_inner_w))
+        .collect();
+    let total: u32 = heights.iter().map(|&h| h as u32).sum();
+    (std::borrow::Cow::Owned(heights), total)
 }
 
 /// Compute the first-visible card index so the selected card is fully on screen.
 ///
-/// Scans forward from card 0; returns the smallest first-visible index such that
-/// the selected card's bottom row is within `visible_h`. Falls back to 0 when
-/// `selected` is 0 or the card fits without scrolling.
-fn first_visible_card(heights: &[u16], selected: usize, visible_h: u16) -> usize {
+/// Uses a binary search over the prefix-sum offsets (O(log T)) when the cache
+/// is valid. Falls back to a linear walk on the inline-computed heights when
+/// the cache does not match the current width (defensive floor).
+///
+/// Preserves the exact semantics of the previous linear implementation:
+/// - Returns 0 when `selected == 0` or `visible_h == 0`.
+/// - Returns 0 when the selected card fits without scrolling.
+/// - Otherwise returns the smallest first-visible index such that `sel_end`
+///   fits within `first_start + visible_h`.
+pub(crate) fn first_visible_card(
+    cache_offsets: &[u32],
+    cache_rendered_width: usize,
+    card_inner_w: usize,
+    inline_heights: &[u16],
+    selected: usize,
+    visible_h: u16,
+) -> usize {
     if selected == 0 || visible_h == 0 {
         return 0;
     }
 
-    // Cumulative y offsets (card i starts at cum[i])
+    let cache_valid =
+        cache_rendered_width == card_inner_w && cache_offsets.len() == inline_heights.len() + 1;
+
+    if cache_valid {
+        first_visible_binary(cache_offsets, selected, visible_h)
+    } else {
+        first_visible_linear(inline_heights, selected, visible_h)
+    }
+}
+
+/// Binary search over the prefix-sum offsets to find the first-visible card index.
+pub(crate) fn first_visible_binary(offsets: &[u32], selected: usize, visible_h: u16) -> usize {
+    let sel_end = offsets[selected + 1];
+    let visible_h32 = visible_h as u32;
+
+    if sel_end <= visible_h32 {
+        return 0;
+    }
+
+    // Find the smallest first in 0..=selected such that offsets[first] + visible_h >= sel_end.
+    let first = offsets[..=selected].partition_point(|&start| start + visible_h32 < sel_end);
+    first.min(selected)
+}
+
+/// Linear walk fallback used when the prefix-sum cache is not valid for this width.
+fn first_visible_linear(heights: &[u16], selected: usize, visible_h: u16) -> usize {
     let mut cum: Vec<u16> = Vec::with_capacity(heights.len());
     let mut acc = 0u16;
     for &h in heights {
@@ -125,13 +198,12 @@ fn first_visible_card(heights: &[u16], selected: usize, visible_h: u16) -> usize
     }
 
     let sel_start = cum[selected];
-    let sel_end = sel_start + heights[selected];
+    let sel_end = sel_start.saturating_add(heights[selected]);
 
     if sel_end <= visible_h {
         return 0;
     }
 
-    // Find the smallest first_visible such that sel_end fits in the window.
     for (first, &start) in cum.iter().enumerate().take(selected + 1) {
         let window_end = start.saturating_add(visible_h);
         if sel_end <= window_end {
@@ -232,6 +304,11 @@ fn render_single_card(
 
     let text = Text::from(lines);
     frame.render_widget(Paragraph::new(text), card_rect);
+}
+
+/// Build the first-line content string for a task card: `#<number>  <name>`.
+fn task_card_content(task: &TaskRow) -> String {
+    format!("#{}  {}", task.task_number, task.name)
 }
 
 /// Build the due-date content line (line 2) for a task card.

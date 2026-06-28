@@ -5,4 +5,4 @@ pub mod tasks;
 
 pub use detail::{draw_detail, DetailParams};
 pub use projects::draw_projects;
-pub use tasks::draw_tasks;
+pub use tasks::{draw_tasks, tasks_card_inner_w};

@@ -13,6 +13,7 @@ use crate::http::Http;
 use crate::render::MineTableRow;
 use crate::store::cache::{instances_key, TaskListCache};
 use crate::store::instances::Instance;
+use crate::tui::screens::tasks_card_inner_w;
 use crossterm::{
     event::{DisableMouseCapture, EnableMouseCapture, Event},
     execute,
@@ -207,11 +208,14 @@ async fn run_app(
     let mut heartbeat = tokio::time::interval(FRAME_PERIOD);
 
     loop {
-        // Reflow the Detail render cache to the current terminal width before drawing.
-        // The Detail block has a 1-col border each side, so inner = terminal width - 2.
+        // Reflow render caches to the current terminal width before drawing.
+        // Detail: 1-col border each side, so inner_width = terminal_width - 2.
+        // Tasks: uses tasks_card_inner_w (same formula as draw_tasks) to ensure
+        // the cache is built at exactly the width the renderer will use.
         if let Ok(size) = terminal.size() {
             model.viewport = (size.width, size.height);
             model.reflow_detail(size.width.saturating_sub(2) as usize);
+            model.reflow_tasks(tasks_card_inner_w(size.width));
         }
 
         let mut frame_targets: Vec<ClickTarget> = Vec::new();

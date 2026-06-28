@@ -164,6 +164,13 @@ pub enum Screen {
         /// True while an in-flight revalidation fetch is running on a warm-seeded mine list.
         /// Distinct from `loading`: revalidating keeps rows painted while the refresh runs.
         revalidating: bool,
+        /// Per-card heights (rows) computed by reflow_tasks; mirrors Detail's `lines` cache.
+        card_heights: Vec<u16>,
+        /// Prefix-sum y-offsets: card_offsets[i] is the cumulative row start of card i;
+        /// card_offsets[n] is the total row count. u32 avoids the u16 saturation ceiling.
+        card_offsets: Vec<u32>,
+        /// Width (card_inner_w) at which the cache was last built; usize::MAX means not-yet-built.
+        rendered_width: usize,
     },
     Detail {
         instance: String,
@@ -498,6 +505,56 @@ impl Model {
 
         clamp_offset(offset, lines.len());
     }
+
+    /// Rebuild the Tasks card-height cache if the card width changed.
+    ///
+    /// Guard clauses ensure this is a no-op when the top screen is not Tasks,
+    /// is still loading, or the cache is already current for `card_inner_w`.
+    ///
+    /// The cache depends only on `tasks` and `card_inner_w`, never on `selected`.
+    pub fn reflow_tasks(&mut self, card_inner_w: usize) {
+        let Some(Screen::Tasks {
+            tasks,
+            loading,
+            card_heights,
+            card_offsets,
+            rendered_width,
+            ..
+        }) = self.top_mut()
+        else {
+            return;
+        };
+
+        if *loading || *rendered_width == card_inner_w {
+            return;
+        }
+
+        *card_heights = tasks
+            .iter()
+            .map(|t| task_card_height(t, card_inner_w))
+            .collect();
+
+        let mut offsets = Vec::with_capacity(card_heights.len() + 1);
+        let mut acc: u32 = 0;
+        for &h in card_heights.iter() {
+            offsets.push(acc);
+            acc = acc.saturating_add(h as u32);
+        }
+        offsets.push(acc);
+        *card_offsets = offsets;
+        *rendered_width = card_inner_w;
+    }
+}
+
+/// Card height for a single task: 2 border rows + wrapped title rows + 1 due-date row.
+///
+/// Exposed for use by both `reflow_tasks` (model layer) and `draw_tasks` (view layer)
+/// so the height formula has a single source of truth.
+pub(crate) fn task_card_height(task: &TaskRow, card_inner_w: usize) -> u16 {
+    let content = format!("#{}  {}", task.task_number, task.name);
+    let lines = crate::render::wrap_text(&content, card_inner_w.max(1));
+    let body_rows = if lines.is_empty() { 1 } else { lines.len() };
+    2 + body_rows as u16 + 1
 }
 
 /// Pure update — returns new model and any effects to run.
@@ -979,6 +1036,9 @@ fn handle_select(mut model: Model) -> (Model, Vec<Cmd>) {
                     selected: 0,
                     loading: false,
                     revalidating: false,
+                    card_heights: Vec::new(),
+                    card_offsets: Vec::new(),
+                    rendered_width: usize::MAX,
                 });
             }
             SelectAction::PushDetail {
@@ -1092,12 +1152,19 @@ fn handle_loaded_mine_tasks(mut model: Model, rows: Vec<MineTableRow>, loaded_at
         tasks: ref mut t,
         loading: ref mut l,
         revalidating: ref mut rv,
+        card_heights: ref mut ch,
+        card_offsets: ref mut co,
+        rendered_width: ref mut rw,
         ..
     }) = model.top_mut()
     {
         *t = rows_to_task_rows(rows);
         *l = false;
         *rv = false;
+        // Invalidate card cache so reflow_tasks rebuilds at current width.
+        *ch = vec![];
+        *co = vec![];
+        *rw = usize::MAX;
     }
     model.last_loaded = Some(loaded_at);
     model
@@ -1202,6 +1269,9 @@ pub fn init_mine(header: Header, seed: Option<Vec<MineTableRow>>) -> (Model, Vec
             selected: 0,
             loading,
             revalidating,
+            card_heights: Vec::new(),
+            card_offsets: Vec::new(),
+            rendered_width: usize::MAX,
         }],
         should_quit: false,
         header,

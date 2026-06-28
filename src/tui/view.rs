@@ -175,6 +175,9 @@ pub fn view(model: &Model, frame: &mut Frame, targets: &mut Vec<ClickTarget>) {
             selected,
             loading,
             revalidating,
+            card_heights,
+            card_offsets,
+            rendered_width,
             ..
         } => {
             let today = chrono::Local::now().date_naive();
@@ -188,6 +191,9 @@ pub fn view(model: &Model, frame: &mut Frame, targets: &mut Vec<ClickTarget>) {
                 *revalidating,
                 today,
                 targets,
+                card_heights,
+                card_offsets,
+                *rendered_width,
             );
         }
         Screen::Detail {
