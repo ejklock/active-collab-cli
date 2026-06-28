@@ -34,4 +34,4 @@ TUI/UX work (V/R/ARCH slices), tracing to
 | [0026](/issues/0026-d1f-asset-hint-in-card.md) | D1f | move the asset-open hint into the Anexos card (italic), out of the footer | closed | 0024 |
 | [0027](/issues/0027-arch-asset-panel-single-layout.md) | ARCH | one layout source of truth for the Anexos/Artefatos panel (asset_panel module) | closed | — |
 | [0028](/issues/0028-assets-inline-scrollable-content.md) | DV | assets render inline in the globally-scrollable detail content (retire the fixed panel + cap) | closed | — |
-| [0029](/issues/0029-richtext-wrap-positional-style.md) | RT | rich-line wrap threads style positionally — fix repeated/substring word emphasis, delete style_of_word_in_rich_line | open | — |
+| [0029](/issues/0029-richtext-wrap-positional-style.md) | RT | rich-line wrap threads style positionally — fix repeated/substring word emphasis, delete style_of_word_in_rich_line | closed | — |

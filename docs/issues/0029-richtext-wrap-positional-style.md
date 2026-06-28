@@ -2,7 +2,7 @@
 type: Issue
 title: "Rich-line wrap threads style positionally — fix repeated/substring word emphasis, delete style_of_word_in_rich_line"
 description: Replace wrap_rich's flatten-then-rematch styling (style_of_word_in_rich_line returns the first span whose text contains the word) with per-character style threading, so repeated words and substring words keep their own emphasis. Delete the substring lookup. Preserve the public wrap_rich contract and single-span wrap behavior.
-status: open
+status: closed
 labels: [tui, render, richtext, wrap, correctness, bug]
 blocked_by:
 tracker:
@@ -76,3 +76,28 @@ the wrapped spans positionally and is correct); the CLI plain path.
 
 Single vertical slice (one production file + its unit tests): rewrite the wrap to
 thread per-char style, delete the substring lookup, add the disambiguation tests.
+
+### Resolution
+
+Closed. Delivered in one slice (two rounds), opus-reviewed and green:
+
+- `8a1095b` docs — ADR 0030 / BDR 0023 / this issue.
+- `908d81e` fix — `expand_to_styled_chars` converts each source `RichLine` to an
+  ordered `Vec<(char, RichStyle)>` once; the greedy width-wrap runs over those styled
+  chars and coalesces each word's chars into spans via `push_rich_span`. A word
+  crossing an emphasis boundary keeps both styles as adjacent spans by construction.
+  `style_of_word_in_rich_line` and the `style_for_word` closure are deleted (no
+  callers). `wrap_rich`'s public signature, the empty/whitespace/over-width edges,
+  and `RichSpan` are unchanged.
+
+**Reviewer round-1 catch (TE):** the substring no-inherit test was first written as
+`['cat ' Plain, 'category' Bold]`. Under the reverted first-contains mutant, word
+`cat` matches span[0] `'cat '` → Plain — the exact value the test asserts, so the
+mutant **survived**. Round 2 reordered the fixture to `['category ' Bold, 'cat'
+Plain]` (larger styled token first): the mutant now resolves `cat` to Bold ≠ the
+asserted Plain → **killed**. Production code was correct throughout; only the test
+fixture moved.
+
+Final: `cargo test -- --test-threads=1` = 868 unit + 31 comment-policy passed;
+`clippy -D warnings` / `fmt --check` clean (dev-container authoritative — the
+quality-gate image's clippy is the known `linker cc not found` false-negative).
