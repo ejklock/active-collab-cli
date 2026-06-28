@@ -473,6 +473,8 @@ pub struct MineTableRow {
     pub name: String,
     #[serde(default)]
     pub due_on: Option<String>,
+    #[serde(default)]
+    pub project_name: Option<String>,
 }
 
 /// Parity: render.py render_mine_table.

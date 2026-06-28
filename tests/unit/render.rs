@@ -694,6 +694,7 @@ fn render_mine_table_row_left_aligns_integers() {
         task_id: 100,
         name: "A task".to_owned(),
         due_on: None,
+        project_name: None,
     }];
     let s = render_mine_table(&rows);
     let data_line = s.lines().nth(2).unwrap();
@@ -719,6 +720,7 @@ fn render_mine_table_multi_row_body_order_preserved() {
             task_id: 1001,
             name: "First".to_owned(),
             due_on: None,
+            project_name: None,
         },
         MineTableRow {
             instance: "beta".to_owned(),
@@ -727,6 +729,7 @@ fn render_mine_table_multi_row_body_order_preserved() {
             task_id: 2002,
             name: "Second".to_owned(),
             due_on: None,
+            project_name: None,
         },
     ];
     let s = render_mine_table(&rows);

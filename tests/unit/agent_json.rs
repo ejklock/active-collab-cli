@@ -321,6 +321,7 @@ fn sample_mine_rows() -> Vec<crate::render::MineTableRow> {
             task_id: 75159,
             name: "Fix the widget".to_owned(),
             due_on: None,
+            project_name: None,
         },
         crate::render::MineTableRow {
             instance: "personal".to_owned(),
@@ -329,6 +330,7 @@ fn sample_mine_rows() -> Vec<crate::render::MineTableRow> {
             task_id: 500,
             name: "Another task".to_owned(),
             due_on: None,
+            project_name: None,
         },
     ]
 }
@@ -430,6 +432,7 @@ fn sample_task_row(
         instance: "work".to_owned(),
         project_id,
         due_on: None,
+        project_name: None,
     }
 }
 

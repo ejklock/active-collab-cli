@@ -22,6 +22,7 @@ fn make_groups(count: usize) -> Vec<ProjectGroup> {
                 instance: "inst".into(),
                 project_id: i as i64,
                 due_on: None,
+                project_name: None,
             }],
         })
         .collect()
@@ -36,6 +37,7 @@ fn make_tasks(count: usize) -> Vec<TaskRow> {
             instance: "inst".into(),
             project_id: 0,
             due_on: None,
+            project_name: None,
         })
         .collect()
 }
@@ -453,6 +455,7 @@ fn make_tasks_with_project_id(count: usize, project_id: i64) -> Vec<TaskRow> {
             instance: "inst".into(),
             project_id,
             due_on: None,
+            project_name: None,
         })
         .collect()
 }
@@ -976,6 +979,7 @@ fn select_on_tasks_threads_instance_into_load_detail_cmd() {
                         instance: "second-inst".into(),
                         project_id: 10,
                         due_on: None,
+                        project_name: None,
                     }],
                 }],
                 selected: 0,
@@ -991,6 +995,7 @@ fn select_on_tasks_threads_instance_into_load_detail_cmd() {
                     instance: "second-inst".into(),
                     project_id: 10,
                     due_on: None,
+                    project_name: None,
                 }],
                 selected: 0,
                 loading: false,
@@ -1053,6 +1058,7 @@ fn make_mine_row(task_id: i64, task_number: i64, project_id: i64, instance: &str
         task_id,
         name: format!("Task {task_id}"),
         due_on: None,
+        project_name: None,
     }
 }
 

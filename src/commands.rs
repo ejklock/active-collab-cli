@@ -721,6 +721,7 @@ fn mine_task_to_row(task: crate::models::MineTask) -> MineTableRow {
         task_id: task.id,
         name: task.name,
         due_on: task.due_on,
+        project_name: None,
     }
 }
 

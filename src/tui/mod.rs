@@ -345,6 +345,7 @@ fn write_mine_snapshot(model: &Model, targets: &[Instance], db_path: &Path) {
             task_id: t.task_id,
             name: t.name.clone(),
             due_on: t.due_on.clone(),
+            project_name: t.project_name.clone(),
         })
         .collect();
     let Ok(list_json) = serde_json::to_string(&rows) else {
@@ -403,8 +404,10 @@ fn dispatch_cmds(
                 let targets = targets.to_vec();
                 let http = http.clone();
                 let tx = tx.clone();
+                let db_path = db_path.to_path_buf();
                 tokio::spawn(async move {
                     let rows = crate::commands::collect_mine_rows(&targets, &http).await;
+                    let rows = controller::attach_project_names(&db_path, rows);
                     let loaded_at = crate::store::now_brt_iso();
                     let _ = tx.send(Msg::LoadedMineTasks { rows, loaded_at });
                 });

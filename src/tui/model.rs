@@ -68,6 +68,8 @@ pub struct TaskRow {
     pub project_id: i64,
     #[serde(default)]
     pub due_on: Option<String>,
+    #[serde(default)]
+    pub project_name: Option<String>,
 }
 
 /// Style classification produced by `relative_due`.
@@ -1158,6 +1160,7 @@ fn rows_to_task_rows(rows: Vec<MineTableRow>) -> Vec<TaskRow> {
             instance: r.instance,
             project_id: r.project_id,
             due_on: r.due_on,
+            project_name: r.project_name,
         })
         .collect()
 }

@@ -2,7 +2,7 @@ use crate::client::ActiveCollabClient;
 use crate::config::Config;
 use crate::http::Http;
 use crate::models::MineTask;
-use crate::render::{is_openable_url, Asset};
+use crate::render::{is_openable_url, Asset, MineTableRow};
 use crate::store::cache::{ProjectNamesCache, TaskCache, UserMapCache};
 use crate::store::instances::Instance;
 use crate::store::Store;
@@ -118,6 +118,30 @@ fn try_project_names_cache_write(
     }
 }
 
+/// Resolve each row's `project_name` from the per-instance project-names cache
+/// (ADR 0014).
+///
+/// The cache is read at most once per distinct instance (memoised in a local map).
+/// When a cache entry is absent (cold cache) or the project id is not present,
+/// `project_name` is left as `None` — never wrong, gracefully absent
+/// (ADR 0026 amendment).
+///
+/// Per-instance isolation (ADR 0018 / B1): a project id cached under instance A
+/// is never resolved for a row on instance B.
+pub fn attach_project_names(db_path: &Path, rows: Vec<MineTableRow>) -> Vec<MineTableRow> {
+    let mut instance_cache: HashMap<String, Option<HashMap<i64, String>>> = HashMap::new();
+
+    rows.into_iter()
+        .map(|mut row| {
+            let names = instance_cache
+                .entry(row.instance.clone())
+                .or_insert_with(|| fresh_project_names_cache_read(db_path, &row.instance));
+            row.project_name = names.as_ref().and_then(|m| m.get(&row.project_id).cloned());
+            row
+        })
+        .collect()
+}
+
 async fn fetch_project_names(client: &ActiveCollabClient) -> HashMap<i64, String> {
     let (status, body) = match client.list_projects().await {
         Ok(pair) => pair,
@@ -173,6 +197,7 @@ fn build_groups(
             instance: instance_name,
             project_id: pid,
             due_on: None,
+            project_name: None,
         });
     }
 

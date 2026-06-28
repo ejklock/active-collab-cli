@@ -2972,6 +2972,7 @@ fn sample_mine_rows() -> Vec<MineTableRow> {
             task_id: 100,
             name: "Task Alpha".into(),
             due_on: None,
+            project_name: None,
         },
         MineTableRow {
             instance: "inst-b".into(),
@@ -2980,6 +2981,7 @@ fn sample_mine_rows() -> Vec<MineTableRow> {
             task_id: 200,
             name: "Task Beta".into(),
             due_on: None,
+            project_name: None,
         },
     ]
 }
@@ -3078,6 +3080,7 @@ fn loaded_mine_tasks_replaces_rows_clears_revalidating_stamps_last_loaded() {
         task_id: 300,
         name: "Task Gamma".into(),
         due_on: None,
+        project_name: None,
     }];
     let loaded_at = "2026-06-26T12:00:00Z".to_string();
     let (updated, cmds) = update(
@@ -3371,6 +3374,7 @@ fn mine_row_with_due(due_on: Option<&str>) -> MineTableRow {
         task_id: 1,
         name: "Task".into(),
         due_on: due_on.map(str::to_owned),
+        project_name: None,
     }
 }
 
@@ -3400,6 +3404,7 @@ fn mine_table_row_serde_round_trip_preserves_due_on() {
         task_id: 1,
         name: "Task".into(),
         due_on: Some("2026-07-15".into()),
+        project_name: None,
     };
     let json = serde_json::to_string(&row).unwrap();
     let decoded: MineTableRow = serde_json::from_str(&json).unwrap();
@@ -3413,6 +3418,82 @@ fn mine_table_row_old_snapshot_missing_due_on_deserializes_to_none() {
     assert_eq!(
         row.due_on, None,
         "old snapshot without due_on must deserialize to None"
+    );
+}
+
+// --- D2d-i: project_name threading and serde ---
+
+// AC3: project_name threads MineTableRow → rows_to_task_rows → TaskRow.
+#[test]
+fn project_name_threads_mine_table_row_to_task_row_via_init_mine() {
+    use crate::tui::model::init_mine;
+    let rows = vec![
+        MineTableRow {
+            instance: "inst".into(),
+            project_id: 10,
+            task_number: 1,
+            task_id: 1,
+            name: "Task A".into(),
+            due_on: None,
+            project_name: Some("My Project".into()),
+        },
+        MineTableRow {
+            instance: "inst".into(),
+            project_id: 20,
+            task_number: 2,
+            task_id: 2,
+            name: "Task B".into(),
+            due_on: None,
+            project_name: None,
+        },
+    ];
+    let (model, _) = init_mine(empty_header(), Some(rows));
+    match model.stack.last() {
+        Some(Screen::Tasks { tasks, .. }) => {
+            assert_eq!(
+                tasks[0].project_name.as_deref(),
+                Some("My Project"),
+                "project_name must thread from MineTableRow into TaskRow"
+            );
+            assert_eq!(
+                tasks[1].project_name, None,
+                "None project_name must thread through unchanged"
+            );
+        }
+        _ => panic!("expected Tasks screen"),
+    }
+}
+
+// AC3 (serde): MineTableRow round-trip preserves project_name.
+#[test]
+fn mine_table_row_serde_round_trip_preserves_project_name() {
+    let row = MineTableRow {
+        instance: "inst".into(),
+        project_id: 1,
+        task_number: 1,
+        task_id: 1,
+        name: "Task".into(),
+        due_on: None,
+        project_name: Some("Acme Corp".into()),
+    };
+    let json = serde_json::to_string(&row).unwrap();
+    let decoded: MineTableRow = serde_json::from_str(&json).unwrap();
+    assert_eq!(
+        decoded.project_name.as_deref(),
+        Some("Acme Corp"),
+        "project_name must survive a serde round-trip"
+    );
+}
+
+// AC3 (old snapshot): an old snapshot JSON without the project_name field
+// must deserialize to None (serde default).
+#[test]
+fn mine_table_row_old_snapshot_missing_project_name_deserializes_to_none() {
+    let json = r#"{"instance":"inst","project_id":1,"task_number":1,"task_id":1,"name":"Task","due_on":null}"#;
+    let row: MineTableRow = serde_json::from_str(json).unwrap();
+    assert_eq!(
+        row.project_name, None,
+        "old snapshot without project_name must deserialize to None"
     );
 }
 

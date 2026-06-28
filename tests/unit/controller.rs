@@ -1800,3 +1800,110 @@ fn extract_assets_empty_when_no_body_or_attachments() {
     let assets = extract_assets(&task, &[]);
     assert!(assets.is_empty());
 }
+
+// --- D2d-i: attach_project_names ---
+
+fn make_mine_row(instance: &str, project_id: i64, task_id: i64) -> crate::render::MineTableRow {
+    crate::render::MineTableRow {
+        instance: instance.to_owned(),
+        project_id,
+        task_number: task_id,
+        task_id,
+        name: format!("Task {task_id}"),
+        due_on: None,
+        project_name: None,
+    }
+}
+
+// D2d-i AC1: warm cache → Some(name) for a known project_id.
+#[test]
+fn attach_project_names_warm_cache_resolves_name() {
+    let (_dir, db_path) = make_db_path();
+    let names: std::collections::HashMap<i64, String> =
+        [(10i64, "Alpha Project".to_string())].into_iter().collect();
+    seed_project_names_cache(&db_path, "inst-a", &names);
+
+    let rows = vec![make_mine_row("inst-a", 10, 1)];
+    let result = attach_project_names(&db_path, rows);
+
+    assert_eq!(
+        result[0].project_name.as_deref(),
+        Some("Alpha Project"),
+        "warm cache must resolve the project name for a known project_id"
+    );
+}
+
+// D2d-i AC1 (cold path): cold cache → project_name is None.
+#[test]
+fn attach_project_names_cold_cache_yields_none() {
+    let (_dir, db_path) = make_db_path();
+
+    let rows = vec![make_mine_row("inst-cold", 99, 2)];
+    let result = attach_project_names(&db_path, rows);
+
+    assert_eq!(
+        result[0].project_name, None,
+        "cold cache must leave project_name as None"
+    );
+}
+
+// D2d-i AC1 (absent id): project_id present in warm cache but this id is not in the map → None.
+#[test]
+fn attach_project_names_absent_id_in_warm_cache_yields_none() {
+    let (_dir, db_path) = make_db_path();
+    let names: std::collections::HashMap<i64, String> =
+        [(10i64, "Known Project".to_string())].into_iter().collect();
+    seed_project_names_cache(&db_path, "inst-b", &names);
+
+    let rows = vec![make_mine_row("inst-b", 999, 3)];
+    let result = attach_project_names(&db_path, rows);
+
+    assert_eq!(
+        result[0].project_name, None,
+        "project_id absent from warm cache must yield None"
+    );
+}
+
+// D2d-i AC2: per-instance isolation — project_id cached under instance A must NOT
+// resolve for a row on instance B.
+#[test]
+fn attach_project_names_cross_instance_isolation() {
+    let (_dir, db_path) = make_db_path();
+    let names: std::collections::HashMap<i64, String> =
+        [(100i64, "Instance A Project".to_string())]
+            .into_iter()
+            .collect();
+    seed_project_names_cache(&db_path, "inst-a", &names);
+
+    let rows = vec![make_mine_row("inst-b", 100, 4)];
+    let result = attach_project_names(&db_path, rows);
+
+    assert_eq!(
+        result[0].project_name, None,
+        "project_id cached under inst-a must NOT resolve for a row on inst-b"
+    );
+}
+
+// D2d-i: cache is read at most once per instance (memoisation correctness).
+// Two rows on the same instance must both resolve, even though the reader
+// is called only once.
+#[test]
+fn attach_project_names_memoises_per_instance_read() {
+    let (_dir, db_path) = make_db_path();
+    let names: std::collections::HashMap<i64, String> = [
+        (1i64, "Project One".to_string()),
+        (2i64, "Project Two".to_string()),
+    ]
+    .into_iter()
+    .collect();
+    seed_project_names_cache(&db_path, "inst-m", &names);
+
+    let rows = vec![
+        make_mine_row("inst-m", 1, 10),
+        make_mine_row("inst-m", 2, 11),
+    ];
+    let result = attach_project_names(&db_path, rows);
+
+    assert_eq!(result[0].project_name.as_deref(), Some("Project One"));
+    assert_eq!(result[1].project_name.as_deref(), Some("Project Two"));
+}

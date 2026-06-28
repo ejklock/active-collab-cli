@@ -40,6 +40,7 @@ fn make_groups(names: &[&str]) -> Vec<ProjectGroup> {
                 instance: "inst".into(),
                 project_id: i as i64,
                 due_on: None,
+                project_name: None,
             }],
         })
         .collect()
@@ -60,6 +61,7 @@ fn make_groups_with_instance(names_and_instances: &[(&str, &str)]) -> Vec<Projec
                 instance: inst.to_string(),
                 project_id: i as i64,
                 due_on: None,
+                project_name: None,
             }],
         })
         .collect()
@@ -76,6 +78,7 @@ fn make_tasks(names: &[&str]) -> Vec<TaskRow> {
             instance: format!("instance{i}"),
             project_id: 0,
             due_on: None,
+            project_name: None,
         })
         .collect()
 }
@@ -1148,6 +1151,7 @@ fn draw_tasks_due_line_shows_relative_due_text() {
         instance: "inst".into(),
         project_id: 0,
         due_on: Some("2025-06-17".into()),
+        project_name: None,
     };
     let buf = render_tasks_to_buf_with_today(&[task], 0, 80, 10, today_fixed());
     set_language("en");
@@ -1173,6 +1177,7 @@ fn draw_tasks_overdue_task_due_cells_carry_red_fg() {
         instance: "inst".into(),
         project_id: 0,
         due_on: Some("2025-06-10".into()), // 5 days before today_fixed()
+        project_name: None,
     };
     let backend = TestBackend::new(80, 10);
     let mut terminal = Terminal::new(backend).unwrap();
@@ -1220,6 +1225,7 @@ fn draw_tasks_near_due_task_due_cells_carry_yellow_fg() {
         instance: "inst".into(),
         project_id: 0,
         due_on: Some("2025-06-16".into()), // 1 day after today_fixed() => Near
+        project_name: None,
     };
     let backend = TestBackend::new(80, 10);
     let mut terminal = Terminal::new(backend).unwrap();
@@ -1267,6 +1273,7 @@ fn draw_tasks_no_due_shows_sem_data_with_default_style() {
         instance: "inst".into(),
         project_id: 0,
         due_on: None,
+        project_name: None,
     };
     let backend = TestBackend::new(80, 10);
     let mut terminal = Terminal::new(backend).unwrap();
@@ -1320,6 +1327,7 @@ fn draw_tasks_selected_card_due_line_keeps_color_on_amber_bg() {
         instance: "inst".into(),
         project_id: 0,
         due_on: Some("2025-06-10".into()), // overdue: 5 days before today_fixed()
+        project_name: None,
     };
     let backend = TestBackend::new(80, 20);
     let mut terminal = Terminal::new(backend).unwrap();
@@ -2456,6 +2464,7 @@ mod v2b_click_targets {
             instance: "inst".into(),
             project_id: 0,
             due_on: None,
+            project_name: None,
         }
     }
 
@@ -2799,6 +2808,7 @@ mod footer_refresh_hint {
                         instance: "inst".into(),
                         project_id: 0,
                         due_on: None,
+                        project_name: None,
                     }],
                 }],
                 selected: 0,
