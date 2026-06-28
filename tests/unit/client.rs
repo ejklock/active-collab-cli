@@ -472,6 +472,158 @@ async fn redirect_to_second_host_is_not_followed() {
 }
 
 #[tokio::test]
+async fn create_comment_posts_to_correct_path_with_body() {
+    let server = MockServer::start().await;
+    let comment = serde_json::json!({ "id": 10, "body": "hello" });
+    Mock::given(method("POST"))
+        .and(path("/api/v1/comments/task/42"))
+        .and(body_json(serde_json::json!({ "body": "hello" })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(comment.clone()))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = make_client(&server.uri());
+    let (status, payload) = client.create_comment(42, "hello").await.unwrap();
+    assert_eq!(status, 200);
+    assert_eq!(payload.unwrap(), comment);
+    server.verify().await;
+}
+
+#[tokio::test]
+async fn create_comment_non_2xx_returns_status_with_none() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/comments/task/42"))
+        .respond_with(ResponseTemplate::new(403).set_body_string("forbidden"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = make_client(&server.uri());
+    let (status, payload) = client.create_comment(42, "hello").await.unwrap();
+    assert_eq!(status, 403);
+    assert!(payload.is_none());
+}
+
+#[tokio::test]
+async fn create_comment_attaches_token_header() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/comments/task/5"))
+        .and(header("x-angie-authapitoken", "test-token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({ "id": 1 })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = make_client(&server.uri());
+    let (status, _) = client.create_comment(5, "text").await.unwrap();
+    assert_eq!(status, 200);
+    server.verify().await;
+}
+
+#[tokio::test]
+async fn update_comment_puts_to_correct_path_with_body() {
+    let server = MockServer::start().await;
+    let comment = serde_json::json!({ "id": 99, "body": "updated text" });
+    Mock::given(method("PUT"))
+        .and(path("/api/v1/comments/99"))
+        .and(body_json(serde_json::json!({ "body": "updated text" })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(comment.clone()))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = make_client(&server.uri());
+    let (status, payload) = client.update_comment(99, "updated text").await.unwrap();
+    assert_eq!(status, 200);
+    assert_eq!(payload.unwrap(), comment);
+    server.verify().await;
+}
+
+#[tokio::test]
+async fn update_comment_non_2xx_returns_status_with_none() {
+    let server = MockServer::start().await;
+    Mock::given(method("PUT"))
+        .and(path("/api/v1/comments/99"))
+        .respond_with(ResponseTemplate::new(404).set_body_string("not found"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = make_client(&server.uri());
+    let (status, payload) = client.update_comment(99, "text").await.unwrap();
+    assert_eq!(status, 404);
+    assert!(payload.is_none());
+}
+
+#[tokio::test]
+async fn update_comment_attaches_token_header() {
+    let server = MockServer::start().await;
+    Mock::given(method("PUT"))
+        .and(path("/api/v1/comments/7"))
+        .and(header("x-angie-authapitoken", "test-token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({ "id": 7 })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = make_client(&server.uri());
+    let (status, _) = client.update_comment(7, "new text").await.unwrap();
+    assert_eq!(status, 200);
+    server.verify().await;
+}
+
+#[tokio::test]
+async fn delete_comment_sends_delete_to_correct_path() {
+    let server = MockServer::start().await;
+    Mock::given(method("DELETE"))
+        .and(path("/api/v1/comments/55"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(""))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = make_client(&server.uri());
+    let status = client.delete_comment(55).await.unwrap();
+    assert_eq!(status, 200);
+    server.verify().await;
+}
+
+#[tokio::test]
+async fn delete_comment_returns_non_2xx_status() {
+    let server = MockServer::start().await;
+    Mock::given(method("DELETE"))
+        .and(path("/api/v1/comments/55"))
+        .respond_with(ResponseTemplate::new(403).set_body_string("forbidden"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = make_client(&server.uri());
+    let status = client.delete_comment(55).await.unwrap();
+    assert_eq!(status, 403);
+}
+
+#[tokio::test]
+async fn delete_comment_attaches_token_header() {
+    let server = MockServer::start().await;
+    Mock::given(method("DELETE"))
+        .and(path("/api/v1/comments/12"))
+        .and(header("x-angie-authapitoken", "test-token"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(""))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = make_client(&server.uri());
+    let status = client.delete_comment(12).await.unwrap();
+    assert_eq!(status, 200);
+    server.verify().await;
+}
+
+#[tokio::test]
 async fn base_url_trailing_slash_is_trimmed() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
