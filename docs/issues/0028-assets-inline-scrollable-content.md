@@ -2,7 +2,7 @@
 type: Issue
 title: "Assets render inline in the globally-scrollable detail content (retire the fixed asset panel + cap)"
 description: Fold the Anexos/Artefatos list out of the fixed bottom panel and into the single globally-scrollable detail content so every attachment is reachable by scrolling; replace the fixed-panel asset click with the scroll-aware (offset) hit-test the body links use; retire ASSET_PANEL_MAX_ROWS, apply_cap, the panel height and block render; carry the D1d breathing room and the D1f italic hint inline.
-status: open
+status: closed
 labels: [tui, ux, detail, assets, scroll, layout]
 blocked_by:
 tracker:
@@ -84,3 +84,31 @@ styled lines + the pure line→asset-index map (cap/height/block-render retired)
 unit-tested behind the existing panel; (2) cut over — `build_detail_content` splices
 the section, `draw_detail` renders one scroll region, `model` geometry + asset click
 go scroll-aware, fixed-panel path removed. Each slice stays green.
+
+### Resolution
+
+Closed. Delivered in five slices, each reviewed (opus) and green:
+
+- **S1** (`c41ebf3`) — `asset_panel::section_lines` (header + 1:1 `layout()` mapping,
+  Bold/Italic emphasis runs) and `asset_index_for_section_row` (row→owning-asset map),
+  both deriving from the one `layout()` vector. Additive.
+- **S2a** (`85e1b71`) — removed the fixed-panel-coupled tests ahead of the cutover
+  (test-only, suite green) so the atomic cutover fit the per-slice file budget.
+- **S2b** (`7e11c85`) — the atomic cutover: `build_detail_content` splices
+  `section_lines`; `draw_detail` renders one scrollable region; `asset_panel_cmd_at`
+  is scroll-aware; `detail_max_offset` / `is_in_body_area` / `body_link_cmd_at` drop
+  the panel-height term.
+- **S3** (`3dbd099`, `3e6ea6d`) — deleted the dead fixed-panel code, the three
+  orphaned `theme` fns, and the obsolete tests.
+
+**Design deviation from the planned scope:** the asset section's start is **recomputed**
+on demand (`asset_section_start = lines.len() − section_lines(assets, width).len()`)
+rather than stored as a field on `DetailContent` / `Screen::Detail`. Both the render
+splice and the click hit-test derive the section from the **same** asset list and the
+**same** `asset_panel::inline_content_width(inner_width)`, so they cannot drift — this
+kept `build_detail_content`'s signature and the `Screen::Detail` shape unchanged (no
+out-of-scope test/construction churn). The `mod.rs` `asset_panel_render_height`
+re-export was removed in S2b (when its last caller went) rather than S3.
+
+Final integration: `cargo test` 864 unit + 31 comment-policy = **895 passed**,
+warning-free; `clippy -D warnings` / `fmt --check` / comment-policy clean.
