@@ -24,3 +24,4 @@
 | [0020](/bdr/0020-task-list-cards.md) | The task list shows a bordered card per task with a relative, colored due date (D2) | Accepted |
 | [0021](/bdr/0021-asset-open-hint-in-card.md) | The asset-open hint lives inside the Anexos card in italic, not in the footer (D1f) | Superseded by 0022 |
 | [0022](/bdr/0022-assets-inline-scrollable-detail-content.md) | Assets are part of the scrollable detail content: every attachment reachable by scrolling, opens on Ctrl/Cmd+click at any scroll position | Accepted |
+| [0023](/bdr/0023-richtext-wrap-positional-style.md) | Rich-text wrap: each wrapped word keeps its own source emphasis, even when the word repeats or is a substring of a styled token | Accepted |
