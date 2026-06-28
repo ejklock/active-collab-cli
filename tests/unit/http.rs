@@ -140,6 +140,218 @@ async fn redirect_is_not_followed_and_status_returned() {
 }
 
 #[tokio::test]
+async fn authed_post_attaches_token_to_same_host() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/comments/task/42"))
+        .and(wiremock::matchers::header(TOKEN_HEADER, "my-token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({ "id": 1 })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let http = Http::new().unwrap();
+    let url = format!("{}/api/v1/comments/task/42", server.uri());
+    let body = serde_json::json!({ "body": "hello" });
+    let (status, _) = http
+        .authed_post(&url, &server.uri(), "my-token", &body)
+        .await
+        .unwrap();
+    assert_eq!(status, 200);
+    server.verify().await;
+}
+
+#[tokio::test]
+async fn authed_post_no_token_for_foreign_host() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/comments/task/42"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({ "id": 1 })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let http = Http::new().unwrap();
+    let url = format!("{}/api/v1/comments/task/42", server.uri());
+    let body = serde_json::json!({ "body": "hello" });
+    http.authed_post(
+        &url,
+        "https://different-instance.example.com",
+        "secret",
+        &body,
+    )
+    .await
+    .unwrap();
+
+    let reqs = server.received_requests().await.unwrap();
+    assert_eq!(reqs.len(), 1);
+    assert!(
+        reqs[0].headers.get("x-angie-authapitoken").is_none(),
+        "token must not be attached to a foreign-host POST"
+    );
+}
+
+#[tokio::test]
+async fn authed_post_returns_status_and_body_on_2xx() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/comments/task/1"))
+        .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({ "id": 5 })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let http = Http::new().unwrap();
+    let url = format!("{}/api/v1/comments/task/1", server.uri());
+    let body = serde_json::json!({ "body": "text" });
+    let (status, bytes) = http
+        .authed_post(&url, &server.uri(), "tok", &body)
+        .await
+        .unwrap();
+    assert_eq!(status, 201);
+    assert!(!bytes.is_empty());
+}
+
+#[tokio::test]
+async fn authed_put_attaches_token_to_same_host() {
+    let server = MockServer::start().await;
+    Mock::given(method("PUT"))
+        .and(path("/api/v1/comments/99"))
+        .and(wiremock::matchers::header(TOKEN_HEADER, "my-token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({ "id": 99 })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let http = Http::new().unwrap();
+    let url = format!("{}/api/v1/comments/99", server.uri());
+    let body = serde_json::json!({ "body": "updated" });
+    let (status, _) = http
+        .authed_put(&url, &server.uri(), "my-token", &body)
+        .await
+        .unwrap();
+    assert_eq!(status, 200);
+    server.verify().await;
+}
+
+#[tokio::test]
+async fn authed_put_no_token_for_foreign_host() {
+    let server = MockServer::start().await;
+    Mock::given(method("PUT"))
+        .and(path("/api/v1/comments/99"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({ "id": 99 })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let http = Http::new().unwrap();
+    let url = format!("{}/api/v1/comments/99", server.uri());
+    let body = serde_json::json!({ "body": "updated" });
+    http.authed_put(
+        &url,
+        "https://different-instance.example.com",
+        "secret",
+        &body,
+    )
+    .await
+    .unwrap();
+
+    let reqs = server.received_requests().await.unwrap();
+    assert_eq!(reqs.len(), 1);
+    assert!(
+        reqs[0].headers.get("x-angie-authapitoken").is_none(),
+        "token must not be attached to a foreign-host PUT"
+    );
+}
+
+#[tokio::test]
+async fn authed_put_returns_status_and_body_on_2xx() {
+    let server = MockServer::start().await;
+    Mock::given(method("PUT"))
+        .and(path("/api/v1/comments/7"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({ "id": 7, "body": "new" })),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let http = Http::new().unwrap();
+    let url = format!("{}/api/v1/comments/7", server.uri());
+    let body = serde_json::json!({ "body": "new" });
+    let (status, bytes) = http
+        .authed_put(&url, &server.uri(), "tok", &body)
+        .await
+        .unwrap();
+    assert_eq!(status, 200);
+    assert!(!bytes.is_empty());
+}
+
+#[tokio::test]
+async fn authed_delete_attaches_token_to_same_host() {
+    let server = MockServer::start().await;
+    Mock::given(method("DELETE"))
+        .and(path("/api/v1/comments/55"))
+        .and(wiremock::matchers::header(TOKEN_HEADER, "my-token"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(""))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let http = Http::new().unwrap();
+    let url = format!("{}/api/v1/comments/55", server.uri());
+    let (status, _) = http
+        .authed_delete(&url, &server.uri(), "my-token")
+        .await
+        .unwrap();
+    assert_eq!(status, 200);
+    server.verify().await;
+}
+
+#[tokio::test]
+async fn authed_delete_no_token_for_foreign_host() {
+    let server = MockServer::start().await;
+    Mock::given(method("DELETE"))
+        .and(path("/api/v1/comments/55"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(""))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let http = Http::new().unwrap();
+    let url = format!("{}/api/v1/comments/55", server.uri());
+    http.authed_delete(&url, "https://different-instance.example.com", "secret")
+        .await
+        .unwrap();
+
+    let reqs = server.received_requests().await.unwrap();
+    assert_eq!(reqs.len(), 1);
+    assert!(
+        reqs[0].headers.get("x-angie-authapitoken").is_none(),
+        "token must not be attached to a foreign-host DELETE"
+    );
+}
+
+#[tokio::test]
+async fn authed_delete_returns_status() {
+    let server = MockServer::start().await;
+    Mock::given(method("DELETE"))
+        .and(path("/api/v1/comments/3"))
+        .respond_with(ResponseTemplate::new(204).set_body_string(""))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let http = Http::new().unwrap();
+    let url = format!("{}/api/v1/comments/3", server.uri());
+    let (status, _) = http
+        .authed_delete(&url, &server.uri(), "tok")
+        .await
+        .unwrap();
+    assert_eq!(status, 204);
+}
+
+#[tokio::test]
 async fn post_json_sends_correct_content_type_and_body() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))

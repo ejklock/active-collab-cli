@@ -176,6 +176,63 @@ impl ActiveCollabClient {
     pub async fn test_connectivity(&self) -> Result<(u16, bytes::Bytes)> {
         self.list_projects().await
     }
+
+    /// POST /api/v1/comments/task/{task_id}. Returns (status, Some(comment))
+    /// on 2xx, (status, None) otherwise.
+    pub async fn create_comment(&self, task_id: i64, body: &str) -> Result<(u16, Option<Value>)> {
+        let base = self.instance.base_url.trim_end_matches('/');
+        let url = format!("{}/api/v1/comments/task/{}", base, task_id);
+        let payload = serde_json::json!({ "body": body });
+        let (status, raw) = self
+            .http
+            .authed_post(
+                &url,
+                &self.instance.base_url,
+                &self.instance.token,
+                &payload,
+            )
+            .await?;
+        if (200..=299).contains(&status) {
+            return Ok((status, serde_json::from_slice(&raw).ok()));
+        }
+        Ok((status, None))
+    }
+
+    /// PUT /api/v1/comments/{comment_id}. Returns (status, Some(comment))
+    /// on 2xx, (status, None) otherwise.
+    pub async fn update_comment(
+        &self,
+        comment_id: i64,
+        body: &str,
+    ) -> Result<(u16, Option<Value>)> {
+        let base = self.instance.base_url.trim_end_matches('/');
+        let url = format!("{}/api/v1/comments/{}", base, comment_id);
+        let payload = serde_json::json!({ "body": body });
+        let (status, raw) = self
+            .http
+            .authed_put(
+                &url,
+                &self.instance.base_url,
+                &self.instance.token,
+                &payload,
+            )
+            .await?;
+        if (200..=299).contains(&status) {
+            return Ok((status, serde_json::from_slice(&raw).ok()));
+        }
+        Ok((status, None))
+    }
+
+    /// DELETE /api/v1/comments/{comment_id}. Returns the response status.
+    pub async fn delete_comment(&self, comment_id: i64) -> Result<u16> {
+        let base = self.instance.base_url.trim_end_matches('/');
+        let url = format!("{}/api/v1/comments/{}", base, comment_id);
+        let (status, _) = self
+            .http
+            .authed_delete(&url, &self.instance.base_url, &self.instance.token)
+            .await?;
+        Ok(status)
+    }
 }
 
 fn resolve_display_name(user: &Value) -> String {
