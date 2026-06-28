@@ -240,6 +240,8 @@ fn render_single_card(
 ///
 /// The due fg color (red/yellow/default) is applied over the base_style background
 /// so the urgency color survives even when the card is selected (amber bg).
+/// When project_name is Some(non-empty), appends ' · <project>' after the due text
+/// in the default style (no urgency color on the project portion).
 fn due_line(
     task: &TaskRow,
     card_inner_w: usize,
@@ -248,15 +250,67 @@ fn due_line(
     today: chrono::NaiveDate,
 ) -> Line<'static> {
     let (due_text, due_kind) = relative_due(task.due_on.as_deref(), today);
-    let fitted = fit_to_card_width(&due_text, card_inner_w);
     let due_fg = theme::due_style(due_kind);
     // Merge: keep the base bg (selection or default) but override fg with urgency color.
     let due_cell_style = base_style.patch(due_fg);
-    Line::from(vec![
-        Span::styled(format!("{BOX_V}{hpad}"), base_style),
-        Span::styled(fitted, due_cell_style),
-        Span::styled(format!("{hpad}{BOX_V}"), base_style),
-    ])
+
+    let project = task.project_name.as_deref().filter(|n| !n.is_empty());
+
+    match project {
+        Some(proj) => {
+            let separator = " \u{00B7} ";
+            let composed = format!("{due_text}{separator}{proj}");
+            let (due_part, proj_part) =
+                split_due_project(&due_text, separator, proj, &composed, card_inner_w);
+            let used = display_width(&due_part) + display_width(&proj_part);
+            let padding = card_inner_w.saturating_sub(used);
+            Line::from(vec![
+                Span::styled(format!("{BOX_V}{hpad}"), base_style),
+                Span::styled(due_part, due_cell_style),
+                Span::styled(proj_part, base_style),
+                Span::styled(format!("{}{hpad}{BOX_V}", " ".repeat(padding)), base_style),
+            ])
+        }
+        None => {
+            let fitted = fit_to_card_width(&due_text, card_inner_w);
+            Line::from(vec![
+                Span::styled(format!("{BOX_V}{hpad}"), base_style),
+                Span::styled(fitted, due_cell_style),
+                Span::styled(format!("{hpad}{BOX_V}"), base_style),
+            ])
+        }
+    }
+}
+
+/// Split the composed `due · project` string into (due_part, proj_part) that together
+/// fit within `card_inner_w` display columns.
+///
+/// Preserves the due text at full width; truncates only the project suffix when
+/// the total exceeds the card width. When even the due text alone would exceed
+/// the width, the project part is simply omitted.
+fn split_due_project(
+    due_text: &str,
+    separator: &str,
+    proj: &str,
+    composed: &str,
+    card_inner_w: usize,
+) -> (String, String) {
+    let total_w = display_width(composed);
+    if total_w <= card_inner_w {
+        return (due_text.to_string(), format!("{separator}{proj}"));
+    }
+    let due_w = display_width(due_text);
+    let sep_w = display_width(separator);
+    let available_for_proj = card_inner_w.saturating_sub(due_w + sep_w);
+    if available_for_proj == 0 {
+        // Not enough room for separator + any project chars; return only due text.
+        return (
+            truncate_to_display_width(due_text, card_inner_w),
+            String::new(),
+        );
+    }
+    let truncated_proj = truncate_to_display_width(proj, available_for_proj);
+    (due_text.to_string(), format!("{separator}{truncated_proj}"))
 }
 
 /// Pad or truncate `s` to exactly `width` display columns.

@@ -1378,6 +1378,193 @@ fn draw_tasks_selected_card_due_line_keeps_color_on_amber_bg() {
     );
 }
 
+// D2d-ii-AC1: when TaskRow.project_name is Some(non-empty), card line 2 shows
+// '<relative due> · <project name>'. Verified against the REAL TestBackend buffer.
+#[test]
+fn draw_tasks_due_line_with_project_name_shows_due_separator_project() {
+    let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+    set_language("pt_BR");
+    let task = TaskRow {
+        task_id: 1,
+        task_number: 1,
+        name: "Task Alpha".into(),
+        instance: "inst".into(),
+        project_id: 0,
+        due_on: Some("2025-06-10".into()), // 5 days before today_fixed() => overdue
+        project_name: Some("My Project".into()),
+    };
+    let backend = TestBackend::new(80, 10);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut targets: Vec<crate::tui::model::ClickTarget> = vec![];
+    terminal
+        .draw(|frame| {
+            draw_tasks(
+                frame,
+                Rect::new(0, 0, 80, 10),
+                "Project A",
+                &[task],
+                0,
+                false,
+                false,
+                today_fixed(),
+                &mut targets,
+            );
+        })
+        .unwrap();
+    set_language("en");
+    let buf = terminal.backend().buffer();
+    let card = targets.iter().find(|t| t.index == 0).unwrap();
+    let due_row = card.y_end - 2;
+    let row_text: String = (0..80u16)
+        .map(|x| buf.cell((x, due_row)).unwrap().symbol().to_string())
+        .collect();
+    assert!(
+        row_text.contains("My Project"),
+        "due line must contain the project name 'My Project': {row_text}"
+    );
+    assert!(
+        row_text.contains('\u{00B7}'),
+        "due line must contain the '·' separator when project_name is Some: {row_text}"
+    );
+    // The due text portion must also appear (overdue => "atrasada" in pt-BR).
+    assert!(
+        row_text.to_lowercase().contains("atrasada")
+            || row_text.to_lowercase().contains("venceu")
+            || row_text.contains("vence"),
+        "due line must contain the due label before the separator: {row_text}"
+    );
+}
+
+// D2d-ii-AC2: the due portion of line 2 keeps its DueStyle color (overdue red) while
+// the ' · <project>' portion uses the default style (no red fg on project cells).
+// Verified by reading per-cell styles from the REAL buffer.
+#[test]
+fn draw_tasks_due_line_project_portion_has_default_style_not_due_color() {
+    use ratatui::style::Color;
+    let task = TaskRow {
+        task_id: 1,
+        task_number: 1,
+        name: "Task Beta".into(),
+        instance: "inst".into(),
+        project_id: 0,
+        due_on: Some("2025-06-10".into()), // overdue => red fg on due cells
+        project_name: Some("Acme Corp".into()),
+    };
+    let backend = TestBackend::new(80, 10);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut targets: Vec<crate::tui::model::ClickTarget> = vec![];
+    terminal
+        .draw(|frame| {
+            draw_tasks(
+                frame,
+                Rect::new(0, 0, 80, 10),
+                "Project A",
+                &[task],
+                0,
+                false,
+                false,
+                today_fixed(),
+                &mut targets,
+            );
+        })
+        .unwrap();
+    let buf = terminal.backend().buffer();
+    let due_red = Color::Rgb(220, 80, 80);
+    let card = targets.iter().find(|t| t.index == 0).unwrap();
+    let due_row = card.y_end - 2;
+
+    // Find the '·' separator column in the due row.
+    let separator_x = (0..80u16).find(|&x| {
+        buf.cell((x, due_row))
+            .map(|c| c.symbol().contains('\u{00B7}'))
+            .unwrap_or(false)
+    });
+    assert!(
+        separator_x.is_some(),
+        "due row must contain the '·' separator when project_name is Some: \
+         row y={due_row}, content={:?}",
+        (0..80u16)
+            .map(|x| buf.cell((x, due_row)).unwrap().symbol().to_string())
+            .collect::<String>()
+    );
+
+    // Cells before the separator (due portion) must carry red fg.
+    let sep_x = separator_x.unwrap();
+    let due_cells_have_red = (0..sep_x).any(|x| {
+        buf.cell((x, due_row))
+            .map(|c| c.style().fg == Some(due_red))
+            .unwrap_or(false)
+    });
+    assert!(
+        due_cells_have_red,
+        "cells before the separator must carry overdue red fg (D2d-ii-AC2)"
+    );
+
+    // Cells at and after the separator (project portion) must NOT carry red fg.
+    let proj_cells_have_red = (sep_x..80u16).any(|x| {
+        buf.cell((x, due_row))
+            .map(|c| c.style().fg == Some(due_red))
+            .unwrap_or(false)
+    });
+    assert!(
+        !proj_cells_have_red,
+        "cells at/after the separator must NOT carry red fg (project uses default style, D2d-ii-AC2)"
+    );
+}
+
+// D2d-ii-AC3: when TaskRow.project_name is None, card line 2 shows only the due text
+// with NO trailing ' · ' separator (graceful cold-cache degrade).
+#[test]
+fn draw_tasks_due_line_without_project_name_shows_no_separator() {
+    let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+    set_language("pt_BR");
+    let task = TaskRow {
+        task_id: 1,
+        task_number: 1,
+        name: "Task Gamma".into(),
+        instance: "inst".into(),
+        project_id: 0,
+        due_on: Some("2025-06-10".into()), // overdue
+        project_name: None,
+    };
+    let backend = TestBackend::new(80, 10);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut targets: Vec<crate::tui::model::ClickTarget> = vec![];
+    terminal
+        .draw(|frame| {
+            draw_tasks(
+                frame,
+                Rect::new(0, 0, 80, 10),
+                "Project A",
+                &[task],
+                0,
+                false,
+                false,
+                today_fixed(),
+                &mut targets,
+            );
+        })
+        .unwrap();
+    set_language("en");
+    let buf = terminal.backend().buffer();
+    let card = targets.iter().find(|t| t.index == 0).unwrap();
+    let due_row = card.y_end - 2;
+    let row_text: String = (0..80u16)
+        .map(|x| buf.cell((x, due_row)).unwrap().symbol().to_string())
+        .collect();
+    assert!(
+        !row_text.contains('\u{00B7}'),
+        "due line must NOT contain '·' separator when project_name is None: {row_text}"
+    );
+    // The due text must still appear (overdue => "atrasada" in pt-BR).
+    assert!(
+        row_text.to_lowercase().contains("atrasada")
+            || row_text.to_lowercase().contains("venceu")
+            || row_text.contains("vence"),
+        "due line must still contain the due text when project_name is None: {row_text}"
+    );
+}
+
 // V1-A1: draw_projects wide terminal shows full name without ellipsis.
 #[test]
 fn draw_projects_wide_terminal_short_name_no_ellipsis() {
