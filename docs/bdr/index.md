@@ -22,3 +22,4 @@
 | [0018](/bdr/0018-asset-card-breathing-room.md) | Anexos/Artefatos card has breathing room: a blank line between links and interior padding (D1d) | Accepted |
 | [0019](/bdr/0019-asset-activation-ctrl-cmd-click.md) | Assets open on Ctrl/Cmd+click; the numeric 1-9 open and d+1-9 download shortcuts are removed (D1e) | Accepted |
 | [0020](/bdr/0020-task-list-cards.md) | The task list shows a bordered card per task with a relative, colored due date (D2) | Accepted |
+| [0021](/bdr/0021-asset-open-hint-in-card.md) | The asset-open hint lives inside the Anexos card in italic, not in the footer (D1f) | Accepted |
