@@ -53,6 +53,7 @@ fn emphasis_style(rs: RichStyle) -> Style {
         RichStyle::Code => theme::code_style(),
         RichStyle::Strike => Style::default().add_modifier(Modifier::CROSSED_OUT),
         RichStyle::Underline => Style::default().add_modifier(Modifier::UNDERLINED),
+        RichStyle::Link => theme::link_style(),
         RichStyle::Plain => Style::default(),
     }
 }

@@ -5120,9 +5120,26 @@ mod asset_panel_inline {
                         text.contains(asset_text.as_str()),
                         "Asset line must contain the asset text at section_idx={section_idx}: {text:?}"
                     );
-                    assert!(
-                        runs.is_empty(),
-                        "Asset line must carry no style runs (link color is deferred to S2): section_idx={section_idx}"
+                    assert_eq!(
+                        runs.len(),
+                        1,
+                        "Asset line must carry exactly one StyleRun (Link) at section_idx={section_idx}"
+                    );
+                    let run = &runs[0];
+                    assert_eq!(
+                        run.style,
+                        RichStyle::Link,
+                        "Asset StyleRun must be Link at section_idx={section_idx}; got {:?}",
+                        run.style
+                    );
+                    assert_eq!(
+                        run.start, PANEL_HPAD,
+                        "Asset Link run must start at PANEL_HPAD={PANEL_HPAD}"
+                    );
+                    let asset_dw = crate::render::display_width(asset_text.as_str());
+                    assert_eq!(
+                        run.len, asset_dw,
+                        "Asset Link run len must span the asset text display width"
                     );
                 }
                 PanelRow::Hint(hint_text) => {
@@ -5227,9 +5244,16 @@ mod asset_panel_inline {
             "section_lines must have at least 2 Asset rows for a wrapped label"
         );
         for (_, (_, runs)) in &asset_section_rows {
-            assert!(
-                runs.is_empty(),
-                "wrapped Asset lines must carry no style runs (link color deferred to S2)"
+            assert_eq!(
+                runs.len(),
+                1,
+                "wrapped Asset lines must carry exactly one Link StyleRun"
+            );
+            assert_eq!(
+                runs[0].style,
+                RichStyle::Link,
+                "wrapped Asset StyleRun must be Link; got {:?}",
+                runs[0].style
             );
         }
     }
@@ -5435,4 +5459,132 @@ fn draw_detail_assets_inline_ptbr_artifacts_label() {
         content.contains("relatorio.pdf"),
         "asset label must appear inline in pt-BR render: {content}"
     );
+}
+
+// AC1 (fix-inline-asset-link-style-click): asset row cells carry link_style() (muted green +
+// UNDERLINED) for a non-URL label.  This is STRUCTURAL styling emitted as a Link StyleRun from
+// section_lines(), not URL-text detection — the exact regression that ADR 0032 fixes.
+//
+// The test pins three invariants simultaneously:
+//   1. Asset token cells → link_style fg (muted green) + UNDERLINED modifier.
+//   2. Hint row cells    → italic modifier (not muted green).
+//   3. Separator rows    → unstyled (no muted green, no italic).
+//
+// Flipping RichStyle::Link's mapping away from link_style, or dropping the Link run from
+// section_lines, or emitting a Plain run, each cause at least one assertion to fail.
+#[test]
+fn asset_row_cells_carry_link_style_structural_not_url_detection() {
+    use ratatui::style::{Color, Modifier};
+    let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+    set_language("en");
+
+    // "report.pdf" contains no URL token — link color must come from the structural Link run.
+    let attachments = &[("report.pdf", "https://example.com/report.pdf")];
+    let buf = build_and_render_detail_with_assets(attachments, 0, 80, 30);
+
+    let muted_green = Color::Rgb(120, 190, 130);
+
+    // Scan all rows to find the asset row (contains "[1]") and a separator/hint row.
+    let area = buf.area();
+    let mut asset_row_y: Option<u16> = None;
+    let mut hint_row_y: Option<u16> = None;
+    let mut separator_row_y: Option<u16> = None;
+
+    // Row text helper: collect symbols from a buffer row.
+    let row_text = |y: u16| -> String {
+        (0..area.width)
+            .map(|x| buf.cell((x, y)).unwrap().symbol().to_string())
+            .collect()
+    };
+
+    for y in 0..area.height {
+        let text = row_text(y);
+        if text.contains("[1]") && text.contains("report.pdf") && asset_row_y.is_none() {
+            asset_row_y = Some(y);
+        }
+        if text.contains("Ctrl") && hint_row_y.is_none() {
+            hint_row_y = Some(y);
+        }
+        // A separator row is a line that is all spaces within the border (between asset + hint).
+        if text.trim() == "" && y > 1 && separator_row_y.is_none() {
+            if let Some(ary) = asset_row_y {
+                if y > ary {
+                    separator_row_y = Some(y);
+                }
+            }
+        }
+    }
+
+    let asset_y = asset_row_y.expect("asset row containing '[1] ... report.pdf' must be in buffer");
+    let hint_y = hint_row_y.expect("hint row containing 'Ctrl' must be in buffer");
+
+    // 1. Asset token cells must carry muted-green fg AND UNDERLINED modifier.
+    let asset_text = row_text(asset_y);
+    // Find the column where "[1]" starts (the opening bracket).
+    let bracket_start_col = {
+        let mut col = None;
+        let mut x = 0u16;
+        let mut seen = String::new();
+        while x < area.width {
+            let sym = buf.cell((x, asset_y)).unwrap().symbol();
+            seen.push_str(sym);
+            if seen.contains("[1]") && col.is_none() {
+                // col is at the '[' character: backtrack by 2 chars
+                col = Some(x.saturating_sub(2));
+            }
+            x += 1;
+        }
+        col.expect("'[1]' must appear on the asset row")
+    };
+    // Check that cells in the asset token range carry link_style: muted green fg + UNDERLINED.
+    let mut found_link_cell = false;
+    for x in bracket_start_col..area.width {
+        let cell = buf.cell((x, asset_y)).unwrap();
+        if cell.symbol() == " " && x > bracket_start_col + 2 {
+            break;
+        }
+        if cell.style().fg == Some(muted_green)
+            && cell.style().add_modifier.contains(Modifier::UNDERLINED)
+        {
+            found_link_cell = true;
+            break;
+        }
+    }
+    assert!(
+        found_link_cell,
+        "asset row at y={asset_y} must have at least one cell with muted-green fg + UNDERLINED \
+         (structural Link run, not URL detection): row={asset_text:?}"
+    );
+
+    // 2. Hint row cells must carry ITALIC (not muted green).
+    let hint_cells_have_italic = (0..area.width).any(|x| {
+        let cell = buf.cell((x, hint_y)).unwrap();
+        cell.symbol() != " " && cell.style().add_modifier.contains(Modifier::ITALIC)
+    });
+    assert!(
+        hint_cells_have_italic,
+        "hint row at y={hint_y} must have italic cells (Italic StyleRun)"
+    );
+    let hint_cells_have_muted_green = (0..area.width).any(|x| {
+        buf.cell((x, hint_y))
+            .map(|c| c.style().fg == Some(muted_green))
+            .unwrap_or(false)
+    });
+    assert!(
+        !hint_cells_have_muted_green,
+        "hint row at y={hint_y} must NOT have muted-green fg (it is italic, not a link)"
+    );
+
+    // 3. A separator row (blank row between asset section rows) must be unstyled.
+    if let Some(sep_y) = separator_row_y {
+        let sep_has_muted_green = (0..area.width).any(|x| {
+            buf.cell((x, sep_y))
+                .map(|c| c.style().fg == Some(muted_green))
+                .unwrap_or(false)
+        });
+        assert!(
+            !sep_has_muted_green,
+            "separator row at y={sep_y} must NOT carry muted-green fg (unstyled blank row)"
+        );
+    }
 }
