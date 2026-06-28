@@ -2,7 +2,7 @@
 type: Issue
 title: "Fix inline Anexos/Artefatos rows rendering as plain text (no link style) and reading as not clickable"
 description: Regression from the derived asset label (ADR 0023, commit 3a961d6). The inline asset row `[n] ↗ {label}` no longer contains a URL token, so link_segments() finds nothing and styled_line_with_runs applies no link style — asset rows render plain and read as not clickable. Fix structurally per ADR 0032 (emit a RichStyle::Link run from the layout); add the missing end-to-end Ctrl/Cmd+click open test.
-status: open
+status: closed
 labels: [tui, render, assets, link, regression, bug]
 blocked_by:
 tracker:
@@ -76,3 +76,30 @@ hit-test logic (verified, not modified).
 Single vertical slice: add the variant + mapping, emit the run, prove style + click with
 the two new tests. Observable end-to-end (open the detail view, the attachment reads as a
 link and opens on Ctrl/Cmd+click).
+
+### Resolution
+
+Closed by commit `eff0b97` (implementation) on top of `1c0eb37` (docs trail). Pipeline:
+Coder → quality-gate → Reviewer (opus), approved.
+
+- **Fix.** `RichStyle::Link` added (`src/richtext.rs`), mapped to `theme::link_style()` at
+  the single emphasis-style site (`src/tui/screens/detail.rs` `emphasis_style()`).
+  `section_lines()` (`src/tui/screens/asset_panel.rs`) now emits a `Link` `StyleRun`
+  (`start = PANEL_HPAD`, `len = display_width(text)`) per `PanelRow::Asset`, mirroring the
+  `Hint` italic run; the inaccurate "styling applied at render time" doc comments were
+  replaced with the real mechanism. `link_segments` / body-link detection unchanged.
+- **Tests.** `tests/unit/tui_render.rs` asserts (buffer-derived) the asset-token cells
+  carry muted-green fg + UNDERLINED for a non-URL label (`report.pdf`), pinning the
+  structural regression; hint stays italic-not-green, separator unstyled.
+  `tests/unit/model.rs` drives `update()` with a Ctrl+click on an asset content row →
+  `Cmd::OpenAsset{url}`, and an unmodified click on the same row → no open (the Ctrl/Cmd
+  gate). Two pre-ADR-0032 tests asserting empty asset runs were updated to assert the Link
+  run.
+- **Diagnosis correction.** The reported "not clickable" was the missing visual affordance,
+  not a broken hit-test: `asset_panel_cmd_at` was structurally intact (now proven by the
+  end-to-end test).
+- **Gates.** Dev container authoritative: 875 tests + 31 comment_policy green, clippy
+  `--all-targets -D warnings` clean, fmt clean. Reviewer confirmed all three mutants
+  (Link mapping, the emitted run, the Ctrl/Cmd gate) are killed by the new tests.
+- **Residue (non-blocking).** One test retains a stale `_no_styles` name suffix though it
+  now asserts a Link run — cosmetic only.
