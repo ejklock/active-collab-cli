@@ -9,6 +9,8 @@ use ratatui::{
 
 /// Height ceiling that bounds the asset card; sized to clear a common spaced
 /// multi-link card (4 rows + 3 separators + 2 vpad + 2 borders = 11).
+// removed in the issue 0028 cleanup slice (S3)
+#[allow(dead_code)]
 const ASSET_PANEL_MAX_ROWS: u16 = 14;
 
 /// Extra rows appended inside the Artifacts card after the asset list:
@@ -16,6 +18,8 @@ const ASSET_PANEL_MAX_ROWS: u16 = 14;
 ///
 /// Placed AFTER the capped asset region so `index_at` returns None for them,
 /// and clicks on these rows resolve to nothing.
+// removed in the issue 0028 cleanup slice (S3)
+#[allow(dead_code)]
 pub const ASSET_HINT_ROWS: u16 = 2;
 
 /// Width available for asset content rows inside the panel.
@@ -25,6 +29,16 @@ pub const ASSET_HINT_ROWS: u16 = 2;
 /// columns (i.e. the inner ratatui content width for the asset panel block).
 pub fn asset_content_width(panel_inner_width: usize) -> usize {
     panel_inner_width.saturating_sub(2 * PANEL_HPAD)
+}
+
+/// Width available for inline asset content rows in the global scrollable detail body.
+///
+/// `inner_width` is the detail content block's inner width (viewport_cols minus 2
+/// border columns). Subtracts `PANEL_HPAD` for the left indent used by section_lines.
+/// This is the ONE canonical width formula shared by the render splice (build_detail_content)
+/// and the click hit-test (asset_panel_cmd_at), so wrap count and row→asset map cannot drift.
+pub fn inline_content_width(inner_width: usize) -> usize {
+    inner_width.saturating_sub(PANEL_HPAD)
 }
 
 /// A single interior row in the Artifacts panel, carrying its kind and wrapped text.
@@ -81,6 +95,8 @@ pub fn layout(assets: &[Asset], content_width: usize) -> Vec<PanelRow> {
 /// `min(body, ASSET_PANEL_MAX_ROWS − 2)` interior rows; the trailing Separator + Hint +
 /// bottom-pad are re-appended after the cap. When the body exceeds the cap the bottom-pad
 /// is dropped (ratatui clips overflow anyway — this just keeps the vector honest).
+// removed in the issue 0028 cleanup slice (S3)
+#[allow(dead_code)]
 pub fn apply_cap(rows: Vec<PanelRow>) -> Vec<PanelRow> {
     if rows.is_empty() {
         return rows;
@@ -109,6 +125,8 @@ pub fn apply_cap(rows: Vec<PanelRow>) -> Vec<PanelRow> {
 /// `inner_width` is the asset panel's inner content width, equal to the chunk
 /// width minus 2 border columns (i.e. `area.width.saturating_sub(2)` from the
 /// renderer chunk, or `viewport_cols.saturating_sub(2)` from the model).
+// removed in the issue 0028 cleanup slice (S3)
+#[allow(dead_code)]
 pub fn height(assets: &[Asset], inner_width: usize) -> u16 {
     if assets.is_empty() {
         return 0;
@@ -131,6 +149,8 @@ pub fn height(assets: &[Asset], inner_width: usize) -> u16 {
 /// lines; `Asset` and `Hint` receive the leading `PANEL_HPAD` space plus the
 /// appropriate theme style (asset_style or asset_hint_style). No Color or Style
 /// literals appear here — all styling is via theme:: calls.
+// removed in the issue 0028 cleanup slice (S3)
+#[allow(dead_code)]
 pub fn render(frame: &mut Frame, area: ratatui::layout::Rect, assets: &[Asset]) {
     let panel_title = format!(" {} ", t("Artifacts"));
     let panel_inner_width = area.width.saturating_sub(2) as usize;
@@ -177,7 +197,6 @@ pub fn render(frame: &mut Frame, area: ratatui::layout::Rect, assets: &[Asset]) 
 /// Both this function and `asset_index_for_section_row` call `layout()` as the single
 /// composition source so the header-offset contract (section row = layout row + 1) is
 /// maintained in one place.
-#[allow(dead_code)]
 pub fn section_lines(
     assets: &[Asset],
     content_width: usize,
@@ -231,7 +250,6 @@ pub fn section_lines(
 ///
 /// Both this function and `section_lines` call `layout()` as the single composition source,
 /// so the header-offset invariant (section row = layout row + 1) is maintained in one place.
-#[allow(dead_code)]
 pub fn asset_index_for_section_row(
     assets: &[Asset],
     content_width: usize,
@@ -252,6 +270,8 @@ pub fn asset_index_for_section_row(
 /// `panel_top` is the screen row of the panel's top border. `row` is the screen row being clicked.
 /// `viewport_rows` is the total terminal height. Returns `Some(idx)` only when the row maps to a
 /// `PanelRow::Asset { idx, .. }` inside the capped interior.
+// removed in the issue 0028 cleanup slice (S3)
+#[allow(dead_code)]
 pub fn index_at(
     assets: &[Asset],
     content_width: usize,

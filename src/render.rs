@@ -1507,8 +1507,10 @@ fn extract_comment_body_rich(
 /// Build the full detail content for the TUI detail view.
 ///
 /// URLs in the description and comment bodies are rendered inline as `text [url]`
-/// (no separate URL list). `line_styles` is a parallel channel index-aligned with
-/// `lines`; both vecs are always the same length.
+/// (no separate URL list). Assets are rendered inline at the end of the content
+/// via `asset_panel::section_lines`, so every attachment is reachable by scrolling.
+/// `line_styles` is a parallel channel index-aligned with `lines`; both vecs are
+/// always the same length.
 /// Pure: no I/O, no async, no time access.
 pub fn build_detail_content(
     task: &Value,
@@ -1516,6 +1518,8 @@ pub fn build_detail_content(
     user_map: &HashMap<i64, String>,
     inner_width: usize,
 ) -> DetailContent {
+    use crate::tui::screens::asset_panel;
+
     let mut collector = LinkCollector::new();
     let mut lines: Vec<String> = vec![];
     let mut line_styles: Vec<Vec<StyleRun>> = vec![];
@@ -1541,6 +1545,18 @@ pub fn build_detail_content(
             build_comment_lines_with_collector(comments, inner_width, &mut collector);
         lines.extend(comment_lines);
         line_styles.extend(comment_styles);
+    }
+
+    let assets = crate::controller::extract_assets(task, comments);
+    if !assets.is_empty() {
+        lines.push(String::new());
+        line_styles.push(vec![]);
+
+        let content_width = asset_panel::inline_content_width(inner_width);
+        for (text, runs) in asset_panel::section_lines(&assets, content_width) {
+            lines.push(text);
+            line_styles.push(runs);
+        }
     }
 
     debug_assert_eq!(

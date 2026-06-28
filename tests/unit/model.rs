@@ -1,5 +1,6 @@
 use super::*;
-use crate::render::Asset;
+use crate::render::{Asset, StyleRun};
+use crate::tui::screens::asset_panel;
 use crossterm::event::KeyModifiers;
 use std::collections::HashMap;
 
@@ -2538,5 +2539,349 @@ fn relative_due_overdue_many_days_returns_plural_label() {
     assert!(
         !label.contains(" 1 "),
         "plural overdue must not contain singular '1': {label}"
+    );
+}
+
+// --- S2b: assets-inline geometry and scroll-aware click tests (BDR 0022) ---
+
+/// Build a Detail model with inline asset section pre-spliced into `lines`.
+///
+/// Uses `asset_panel::section_lines` to append the asset section so the
+/// geometry (lines.len(), section_start) matches what build_detail_content produces.
+fn detail_model_with_inline_assets(
+    body_lines: Vec<String>,
+    assets: Vec<Asset>,
+    offset: usize,
+    viewport: (u16, u16),
+) -> Model {
+    let inner_width = viewport.0.saturating_sub(2) as usize;
+    let content_width = asset_panel::inline_content_width(inner_width);
+
+    let mut lines = body_lines;
+    let mut line_styles: Vec<Vec<crate::render::StyleRun>> = vec![vec![]; lines.len()];
+
+    if !assets.is_empty() {
+        lines.push(String::new());
+        line_styles.push(vec![]);
+        for (text, runs) in asset_panel::section_lines(&assets, content_width) {
+            lines.push(text);
+            line_styles.push(runs);
+        }
+    }
+
+    Model {
+        stack: vec![Screen::Detail {
+            instance: "inst".into(),
+            project_id: 1,
+            task_id: 1,
+            task: serde_json::Value::Null,
+            comments: vec![],
+            user_map: HashMap::new(),
+            lines,
+            line_styles,
+            assets,
+            offset,
+            loading: false,
+            rendered_width: usize::MAX,
+        }],
+        should_quit: false,
+        header: empty_header(),
+        viewport,
+        click_targets: vec![],
+        last_loaded: None,
+        selection: None,
+        copied_feedback: false,
+    }
+}
+
+// AC2 (BDR 0022 Sc.2): detail_max_offset no longer subtracts any panel height.
+// For a viewport of 24 rows, DETAIL_CHROME_ROWS=4, text_vh=20.
+// With 30 body lines + blank + 6 asset-section lines = 37 total lines, max = 37-20 = 17.
+// (Before: subtracting panel height would have reduced text_vh further.)
+#[test]
+fn detail_max_offset_with_inline_assets_does_not_subtract_panel_height() {
+    use crate::tui::model::detail_max_offset;
+    use crate::tui::screens::asset_panel;
+
+    let assets = vec![make_asset("doc.pdf", "https://example.com/doc.pdf")];
+    // Simulate: 30 body lines + 1 blank + 6 asset-section rows = 37 total
+    // section_lines for 1 short-name asset at inner_width 78 (80-2) should be 6 rows
+    let inner_width = 78usize;
+    let content_width = asset_panel::inline_content_width(inner_width);
+    let section_len = asset_panel::section_lines(&assets, content_width).len();
+    let lines_len = 30 + 1 + section_len; // body + blank + section
+
+    let max = detail_max_offset(24, 80, lines_len, &assets);
+    let expected = lines_len.saturating_sub(20); // text_vh=24-4=20
+    assert_eq!(
+        max, expected,
+        "detail_max_offset must use full text_vh=20 (no panel subtracted): max={max} expected={expected}"
+    );
+}
+
+// AC2 (BDR 0022 Sc.7): empty asset list yields no inline section.
+// Lines are just body lines, and detail_max_offset behaves the same as before.
+#[test]
+fn detail_max_offset_empty_assets_no_inline_section() {
+    use crate::tui::model::detail_max_offset;
+
+    let max = detail_max_offset(24, 80, 25, &[]);
+    // text_vh = 24 - 4 = 20, max = 25 - 20 = 5
+    assert_eq!(
+        max, 5,
+        "empty assets: max must be lines_len - text_vh = 25 - 20 = 5"
+    );
+}
+
+// AC2 (BDR 0022 Sc.2): last asset row is reachable at max scroll offset.
+// With 1 body line + blank + 6 section rows = 8 total lines, viewport_rows=24,
+// text_vh=20, max=8-20=0 (all fits), so the asset section is always visible at offset=0.
+// For the long list scenario: 25 body lines + blank + 6 section = 32 lines;
+// max=32-20=12; at offset=12 the visible range is [12..31] inclusive (rows 2..21),
+// which covers the last section rows at lines[31]=section_row5 (visible).
+#[test]
+fn last_asset_row_reachable_at_max_scroll_offset() {
+    use crate::tui::model::detail_max_offset;
+    use crate::tui::screens::asset_panel;
+
+    let assets = vec![make_asset("doc.pdf", "https://example.com/doc.pdf")];
+    let inner_width = 78usize;
+    let content_width = asset_panel::inline_content_width(inner_width);
+    let section_len = asset_panel::section_lines(&assets, content_width).len();
+    // 25 body lines + 1 blank separator + section
+    let total_lines = 25 + 1 + section_len;
+
+    let viewport_rows = 24u16;
+    let max_offset = detail_max_offset(viewport_rows, 80, total_lines, &assets);
+
+    // At max_offset, the visible range is [max_offset .. max_offset + text_vh - 1]
+    // The last line index is total_lines - 1
+    // text_vh = viewport_rows - 4 = 20
+    let text_vh = (viewport_rows as usize).saturating_sub(4);
+    let last_visible = max_offset + text_vh - 1;
+    assert!(
+        last_visible >= total_lines - 1,
+        "last asset section row (index {}) must be visible at max offset {}; last_visible={}",
+        total_lines - 1,
+        max_offset,
+        last_visible
+    );
+}
+
+// AC3 (BDR 0022 Sc.5): Ctrl+click on a visible asset row emits OpenAsset for that asset.
+// Model: 5 body lines + blank + section (6 rows) = 12 total lines.
+// Viewport 80x24, offset=0, text_top=2.
+// asset_section_start = 12 - 6 = 6.
+// Row 2 (text_top) → line_idx=0, row 3 → line_idx=1, ..., row 8 → line_idx=6 (section[0]=header).
+// Row 10 → line_idx=8 (section[2]=Asset{idx:0, [1] ↗ doc.pdf}).
+// Actually: section_lines output order: [header, pad, asset, sep, hint, pad]
+// So section row 2 (interior_row=2) → layout[1]=Asset{idx:0} → Some(0).
+// At viewport_rows=24, text_top=2, row=10 → line_idx=0+8=8, section_start=6, interior=2 → asset[0].
+#[test]
+fn ctrl_click_on_visible_asset_row_emits_open_asset() {
+    let assets = vec![make_asset("doc.pdf", "https://example.com/doc.pdf")];
+    // 5 body lines so section starts at line 6 (5 body + 1 blank)
+    let body: Vec<String> = (0..5).map(|i| format!("body line {i}")).collect();
+    let m = detail_model_with_inline_assets(body, assets, 0, (80, 24));
+
+    // asset_section_start = total_lines - section_len
+    // section_len=6, total_lines=5+1+6=12, asset_section_start=6
+    // interior_row=2 corresponds to Asset{idx:0} (see section_lines layout)
+    // line_idx = asset_section_start + interior_row = 6 + 2 = 8
+    // row = text_top + (line_idx - offset) = 2 + 8 = 10
+    let (_m, cmds) = update(
+        m,
+        Msg::Click {
+            column: 5,
+            row: 10,
+            modifiers: crossterm::event::KeyModifiers::CONTROL,
+        },
+    );
+    assert_eq!(cmds.len(), 1, "Ctrl+click on asset row must emit one cmd");
+    match &cmds[0] {
+        Cmd::OpenAsset { instance, url } => {
+            assert_eq!(instance, "inst");
+            assert_eq!(url, "https://example.com/doc.pdf");
+        }
+        other => panic!("expected OpenAsset, got {other:?}"),
+    }
+}
+
+// AC3 (BDR 0022 Sc.6): Ctrl+click on the section header row (interior_row=0) emits NO cmd.
+#[test]
+fn ctrl_click_on_asset_section_header_row_emits_no_cmd() {
+    let assets = vec![make_asset("doc.pdf", "https://example.com/doc.pdf")];
+    let body: Vec<String> = (0..5).map(|i| format!("body line {i}")).collect();
+    let m = detail_model_with_inline_assets(body, assets, 0, (80, 24));
+
+    // line_idx = asset_section_start + 0 = 6
+    // row = text_top + 6 = 8
+    let (_m, cmds) = update(
+        m,
+        Msg::Click {
+            column: 5,
+            row: 8,
+            modifiers: crossterm::event::KeyModifiers::CONTROL,
+        },
+    );
+    assert!(
+        cmds.is_empty(),
+        "Ctrl+click on asset header row must emit no cmd (None from asset_index_for_section_row)"
+    );
+}
+
+// AC3 (BDR 0022 Sc.5): plain (unmodified) click on an asset row emits NO OpenAsset.
+// It falls through to is_in_body_area selection (assets are selectable body content).
+#[test]
+fn plain_click_on_asset_row_emits_no_open_asset() {
+    let assets = vec![make_asset("doc.pdf", "https://example.com/doc.pdf")];
+    let body: Vec<String> = (0..5).map(|i| format!("body line {i}")).collect();
+    let m = detail_model_with_inline_assets(body, assets, 0, (80, 24));
+
+    // row 10 = asset row (Asset{idx:0}), but plain click → no OpenAsset
+    let (_m, cmds) = update(
+        m,
+        Msg::Click {
+            column: 5,
+            row: 10,
+            modifiers: crossterm::event::KeyModifiers::NONE,
+        },
+    );
+    let has_open_asset = cmds.iter().any(|c| matches!(c, Cmd::OpenAsset { .. }));
+    assert!(
+        !has_open_asset,
+        "plain click on asset row must NOT emit OpenAsset: {cmds:?}"
+    );
+}
+
+// AC3 (BDR 0022 Sc.6): Ctrl+click on a blank separator row (interior_row=3) emits no cmd.
+#[test]
+fn ctrl_click_on_separator_row_emits_no_cmd() {
+    let assets = vec![make_asset("doc.pdf", "https://example.com/doc.pdf")];
+    let body: Vec<String> = (0..5).map(|i| format!("body line {i}")).collect();
+    let m = detail_model_with_inline_assets(body, assets, 0, (80, 24));
+
+    // section_lines: [header(0), pad(1), asset(2), sep(3), hint(4), pad(5)]
+    // interior_row=3 → Separator → None
+    // line_idx = 6 + 3 = 9, row = 2 + 9 = 11
+    let (_m, cmds) = update(
+        m,
+        Msg::Click {
+            column: 5,
+            row: 11,
+            modifiers: crossterm::event::KeyModifiers::CONTROL,
+        },
+    );
+    assert!(
+        cmds.is_empty(),
+        "Ctrl+click on separator row must emit no cmd"
+    );
+}
+
+// AC3 (BDR 0022 Sc.6): Ctrl+click on the italic hint row (interior_row=4) emits no cmd.
+#[test]
+fn ctrl_click_on_hint_row_emits_no_cmd() {
+    let assets = vec![make_asset("doc.pdf", "https://example.com/doc.pdf")];
+    let body: Vec<String> = (0..5).map(|i| format!("body line {i}")).collect();
+    let m = detail_model_with_inline_assets(body, assets, 0, (80, 24));
+
+    // interior_row=4 → Hint → None
+    // line_idx = 6 + 4 = 10, row = 2 + 10 = 12
+    let (_m, cmds) = update(
+        m,
+        Msg::Click {
+            column: 5,
+            row: 12,
+            modifiers: crossterm::event::KeyModifiers::CONTROL,
+        },
+    );
+    assert!(cmds.is_empty(), "Ctrl+click on hint row must emit no cmd");
+}
+
+// AC3 (BDR 0022 Sc.6): Ctrl+click on asset row at a non-zero scroll offset opens the correct asset.
+// With offset=5, the body line at line_idx=6+2=8 is the asset row at section interior_row=2.
+// But viewport row for that line: row = text_top + (line_idx - offset) = 2 + (8-5) = 5.
+#[test]
+fn ctrl_click_on_asset_row_at_nonzero_offset_is_scroll_aware() {
+    let assets = vec![
+        make_asset("first.pdf", "https://example.com/first.pdf"),
+        make_asset("second.pdf", "https://example.com/second.pdf"),
+    ];
+    // 10 body lines → section_start = 10 + 1 = 11
+    // section_lines for 2 assets: [hdr, pad, A0, sep, A1, sep, hint, pad] = 8 rows
+    // asset_section_start = 11, total = 11 + 8 = 19
+    // interior_row=2 → A0 → assets[0] (first.pdf)
+    // interior_row=4 → A1 → assets[1] (second.pdf)
+    let body: Vec<String> = (0..10).map(|i| format!("body line {i}")).collect();
+    let offset = 5usize;
+    let m = detail_model_with_inline_assets(body, assets, offset, (80, 24));
+
+    // For asset[0] (interior_row=2): line_idx = 11 + 2 = 13
+    // row = text_top + (line_idx - offset) = 2 + (13 - 5) = 10
+    let (_m, cmds) = update(
+        m,
+        Msg::Click {
+            column: 5,
+            row: 10,
+            modifiers: crossterm::event::KeyModifiers::CONTROL,
+        },
+    );
+    assert_eq!(cmds.len(), 1, "scroll-aware Ctrl+click must emit one cmd");
+    match &cmds[0] {
+        Cmd::OpenAsset { url, .. } => {
+            assert_eq!(
+                url, "https://example.com/first.pdf",
+                "scroll-aware click must open the asset at line_idx=13 (first.pdf)"
+            );
+        }
+        other => panic!("expected OpenAsset, got {other:?}"),
+    }
+}
+
+// AC2 (BDR 0022 Sc.2): is_in_body_area includes asset section rows (no panel_h subtracted).
+// With viewport 80x24, text_top=2, content_text_height=20:
+// rows 2..21 are all "in body area". Row 21 is just outside.
+#[test]
+fn is_in_body_area_includes_asset_rows_no_panel_height_subtracted() {
+    let assets = vec![make_asset("doc.pdf", "https://example.com/doc.pdf")];
+    let body: Vec<String> = (0..5).map(|i| format!("body line {i}")).collect();
+    let m = detail_model_with_inline_assets(body, assets, 0, (80, 24));
+
+    // Row 19 (= text_top + 17) is within content_text_height=20 rows (rows 2..21)
+    // Previously, with panel_h subtracted, asset rows might have been outside the body area.
+    // Now, row 19 is always in the body area.
+    let (m_after, _) = update(
+        m,
+        Msg::Click {
+            column: 5,
+            row: 19,
+            modifiers: crossterm::event::KeyModifiers::NONE,
+        },
+    );
+    // A plain click in the body area sets selection (not a no-op)
+    assert!(
+        m_after.selection.is_some(),
+        "row 19 must be in body area after removal of panel_h subtraction"
+    );
+}
+
+// AC3 (BDR 0022 Sc.5): empty assets list → no inline section → no OpenAsset on any row.
+#[test]
+fn ctrl_click_with_empty_assets_emits_no_cmd() {
+    let body: Vec<String> = (0..5).map(|i| format!("body line {i}")).collect();
+    let m = detail_model_with_inline_assets(body, vec![], 0, (80, 24));
+
+    let (_m, cmds) = update(
+        m,
+        Msg::Click {
+            column: 5,
+            row: 5,
+            modifiers: crossterm::event::KeyModifiers::CONTROL,
+        },
+    );
+    let has_open = cmds.iter().any(|c| matches!(c, Cmd::OpenAsset { .. }));
+    assert!(
+        !has_open,
+        "empty assets: no OpenAsset must be emitted on any row"
     );
 }

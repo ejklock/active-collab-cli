@@ -240,14 +240,13 @@ const DETAIL_CONTENT_BLOCK_BORDER_COLS: u16 = 1;
 
 /// True maximum scroll offset for the Detail screen.
 ///
-/// Uses the width-aware wrapped asset-panel height (same formula as `draw_detail`)
-/// so the scroll clamp accounts for asset labels that wrap across multiple rows.
+/// Assets are now inline in `lines` (no separate fixed panel), so the text
+/// viewport spans the full content area: `viewport_rows - DETAIL_CHROME_ROWS`.
 /// Reads only its arguments — no terminal, time, or async sources — so it is
 /// safe to call from the pure TEA update loop.
 ///
-/// `viewport_cols` is the full terminal width; `inner_width` passed to
-/// `asset_panel_render_height` is derived as `viewport_cols.saturating_sub(2)`,
-/// mirroring how `draw_detail` computes it.
+/// The `assets` and `viewport_cols` parameters are retained for call-site
+/// compatibility; Rust does not warn on unused fn params.
 ///
 /// When the viewport is too small to show any text rows the function clamps
 /// `text_viewport_height` to 1 (guaranteeing max = lines_len - 1), which is
@@ -259,13 +258,8 @@ pub fn detail_max_offset(
     lines_len: usize,
     assets: &[Asset],
 ) -> usize {
-    use crate::tui::screens::asset_panel_render_height;
-    let inner_width = viewport_cols.saturating_sub(2) as usize;
-    let panel_h = asset_panel_render_height(assets, inner_width);
-    let raw = viewport_rows
-        .saturating_sub(DETAIL_CHROME_ROWS)
-        .saturating_sub(panel_h) as usize;
-    let text_viewport_height = raw.max(1);
+    let _ = (viewport_cols, assets);
+    let text_viewport_height = (viewport_rows.saturating_sub(DETAIL_CHROME_ROWS) as usize).max(1);
     lines_len.saturating_sub(text_viewport_height)
 }
 
@@ -678,17 +672,16 @@ fn handle_click_detail(
 }
 
 /// Return true when `row` falls within the scrollable body text area of the Detail screen.
+///
+/// Assets are now inline in the scrollable body, so the body spans the full
+/// content area (viewport_rows - DETAIL_CHROME_ROWS rows starting at text_top=2).
 fn is_in_body_area(model: &Model, row: u16) -> bool {
-    use crate::tui::screens::asset_panel_render_height;
-    let Some(Screen::Detail { assets, .. }) = model.top() else {
+    let Some(Screen::Detail { .. }) = model.top() else {
         return false;
     };
-    let (viewport_cols, viewport_rows) = model.viewport;
+    let (_viewport_cols, viewport_rows) = model.viewport;
     let text_top: u16 = 2;
-    let inner_width = viewport_cols.saturating_sub(2) as usize;
-    let panel_h = asset_panel_render_height(assets, inner_width);
-    let content_text_height =
-        viewport_rows.saturating_sub(DETAIL_CHROME_ROWS.saturating_add(panel_h));
+    let content_text_height = viewport_rows.saturating_sub(DETAIL_CHROME_ROWS);
     row >= text_top && row < text_top + content_text_height
 }
 
@@ -752,24 +745,13 @@ fn handle_mouse_up(
 /// Coordinates are viewport (row, col); the body area starts at text_top=2.
 /// Returns text in reading order (anchor normalized to be before cursor).
 fn extract_selected_text(model: &Model, sel: &Selection) -> String {
-    use crate::tui::screens::asset_panel_render_height;
-
-    let Screen::Detail {
-        lines,
-        assets,
-        offset,
-        ..
-    } = model.top().expect("detail screen")
-    else {
+    let Screen::Detail { lines, offset, .. } = model.top().expect("detail screen") else {
         return String::new();
     };
 
-    let (viewport_cols, viewport_rows) = model.viewport;
+    let (_viewport_cols, viewport_rows) = model.viewport;
     let text_top: u16 = 2;
-    let inner_width = viewport_cols.saturating_sub(2) as usize;
-    let panel_h = asset_panel_render_height(assets, inner_width);
-    let content_text_height =
-        viewport_rows.saturating_sub(DETAIL_CHROME_ROWS.saturating_add(panel_h));
+    let content_text_height = viewport_rows.saturating_sub(DETAIL_CHROME_ROWS);
 
     let ((top_row, top_col), (bot_row, bot_col)) = sel.normalized();
 
@@ -845,15 +827,14 @@ fn extract_line_slice(
 ///
 /// When the modifier gate passes, resolves the URL via `resolve_wrapped_url` so a
 /// click on any wrapped fragment of a long `[url]` token returns the complete URL
-/// (BDR 0014 Sc.7). Uses the wrapped asset-panel height (same as `draw_detail`) so
-/// the body hit region stops above the real panel top even when asset labels wrap.
+/// (BDR 0014 Sc.7). Assets are now inline in the scrollable body, so the body hit
+/// region spans the full content area (no panel height subtracted).
 fn body_link_cmd_at(
     model: &Model,
     column: u16,
     row: u16,
     modifiers: crossterm::event::KeyModifiers,
 ) -> Option<Cmd> {
-    use crate::tui::screens::asset_panel_render_height;
     use crossterm::event::KeyModifiers;
 
     let has_modifier =
@@ -864,7 +845,6 @@ fn body_link_cmd_at(
 
     let Screen::Detail {
         instance,
-        assets,
         lines,
         offset,
         ..
@@ -876,9 +856,7 @@ fn body_link_cmd_at(
     let (viewport_cols, viewport_rows) = model.viewport;
     let text_top: u16 = 2;
     let inner_width = viewport_cols.saturating_sub(2) as usize;
-    let panel_h = asset_panel_render_height(assets, inner_width);
-    let content_text_height =
-        viewport_rows.saturating_sub(DETAIL_CHROME_ROWS.saturating_add(panel_h));
+    let content_text_height = viewport_rows.saturating_sub(DETAIL_CHROME_ROWS);
 
     if row < text_top || row >= text_top + content_text_height {
         return None;
@@ -912,26 +890,25 @@ fn is_mailto_url(url: &str) -> bool {
     url.starts_with("mailto:")
 }
 
-/// Try to resolve a Ctrl/Cmd+click on an asset row in the Detail screen.
+/// Try to resolve a Ctrl/Cmd+click on an inline asset row in the Detail screen.
 ///
 /// Gates on `has_modifier` (Ctrl or Super/Cmd): a plain unmodified click returns
 /// `None` so the caller can keep it reserved for V6 text selection.
 ///
-/// Uses the width-aware wrapped panel height (same as `draw_detail`) so that:
-///   - the panel's top row is computed correctly when asset labels wrap,
-///   - a click on any continuation row of a wrapped label resolves to the
-///     owning asset rather than the following (mis-shifted) one.
+/// Assets are now part of the global scrollable body. The click is resolved
+/// scroll-aware: `line_idx = offset + (row - text_top)`, then checked against
+/// the asset section at the tail of `lines`. Uses the same `inline_content_width`
+/// formula as `build_detail_content` so render and hit-test cannot drift.
 ///
-/// Returns `Some(Cmd::OpenAsset)` when the click lands on an asset row inside
-/// the panel. Returns `None` for any click that misses the panel, falls on a
-/// border row, or lacks a Ctrl/Cmd/Super modifier.
+/// Returns `Some(Cmd::OpenAsset)` when the click lands on an asset data row.
+/// Returns `None` for the section header, blank separator, italic hint row,
+/// any row outside the text viewport, or a plain unmodified click.
 fn asset_panel_cmd_at(
     model: &Model,
     row: u16,
     modifiers: crossterm::event::KeyModifiers,
 ) -> Option<Cmd> {
     use crate::tui::screens::asset_panel;
-    use crate::tui::screens::asset_panel_render_height;
     use crossterm::event::KeyModifiers;
 
     let has_modifier =
@@ -940,10 +917,12 @@ fn asset_panel_cmd_at(
         return None;
     }
 
-    let (viewport_cols, viewport_rows) = model.viewport;
-
     let Screen::Detail {
-        instance, assets, ..
+        instance,
+        assets,
+        lines,
+        offset,
+        ..
     } = model.top()?
     else {
         return None;
@@ -953,20 +932,36 @@ fn asset_panel_cmd_at(
         return None;
     }
 
+    let (viewport_cols, viewport_rows) = model.viewport;
+    let text_top: u16 = 2;
     let inner_width = viewport_cols.saturating_sub(2) as usize;
-    let panel_h = asset_panel_render_height(assets, inner_width);
-    if panel_h == 0 {
+    let content_text_height = viewport_rows.saturating_sub(DETAIL_CHROME_ROWS);
+
+    if row < text_top || row >= text_top + content_text_height {
         return None;
     }
 
-    let content_width = asset_panel::asset_content_width(inner_width);
-    let panel_top = viewport_rows.saturating_sub(panel_h);
+    let line_idx = offset + (row - text_top) as usize;
+    if line_idx >= lines.len() {
+        return None;
+    }
 
-    let idx = asset_panel::index_at(assets, content_width, panel_top, row, viewport_rows)?;
-    let asset = &assets[idx];
+    let width = asset_panel::inline_content_width(inner_width);
+    let section_len = asset_panel::section_lines(assets, width).len();
+    if section_len == 0 {
+        return None;
+    }
+
+    let asset_section_start = lines.len().saturating_sub(section_len);
+    if line_idx < asset_section_start {
+        return None;
+    }
+
+    let interior_row = line_idx - asset_section_start;
+    let idx = asset_panel::asset_index_for_section_row(assets, width, interior_row)?;
     Some(Cmd::OpenAsset {
         instance: instance.clone(),
-        url: asset.url.clone(),
+        url: assets[idx].url.clone(),
     })
 }
 

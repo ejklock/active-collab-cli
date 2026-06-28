@@ -1,9 +1,8 @@
 use crate::render::{link_segments, Asset, StyleRun};
 use crate::richtext::RichStyle;
-use crate::tui::screens::asset_panel;
 use crate::tui::theme;
 use ratatui::{
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span, Text},
     widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap},
@@ -14,6 +13,8 @@ use ratatui::{
 pub struct DetailParams<'a> {
     pub lines: &'a [String],
     pub line_styles: &'a [Vec<StyleRun>],
+    // populated by view.rs; retained for call-site stability (view.rs is out of scope)
+    #[allow(dead_code)]
     pub assets: &'a [Asset],
     pub offset: usize,
     pub loading: bool,
@@ -21,17 +22,14 @@ pub struct DetailParams<'a> {
     pub task_name: &'a str,
 }
 
-/// Draw the Detail screen as a single scrollable content block with an optional
-/// fixed Artifacts panel below.
+/// Draw the Detail screen as a single globally-scrollable bordered content block.
 ///
 /// The content block renders `lines` directly (the Título meta row inside the
 /// Details panel carries the task name). The block border has no title.
-/// When `assets` is non-empty the area is split vertically into a content chunk
-/// (Min(0)) and a fixed panel chunk whose height is given by
-/// `asset_panel::height` (capped at `ASSET_PANEL_MAX_ROWS`).
+/// Assets are already part of `lines` via `build_detail_content`, so this
+/// function always calls `render_content` on the full area — there is no
+/// separate Artifacts panel or vertical split.
 pub fn draw_detail(frame: &mut Frame, area: Rect, params: DetailParams<'_>) {
-    let inner_width = area.width.saturating_sub(2) as usize;
-
     if params.loading {
         let fallback_title = if params.task_name.is_empty() {
             format!(" #{} ", params.task_id)
@@ -44,25 +42,7 @@ pub fn draw_detail(frame: &mut Frame, area: Rect, params: DetailParams<'_>) {
         return;
     }
 
-    let panel_height = asset_panel::height(params.assets, inner_width);
-
-    match panel_height {
-        0 => render_content(frame, area, params.lines, params.line_styles, params.offset),
-        ph => {
-            let chunks = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([Constraint::Min(0), Constraint::Length(ph)])
-                .split(area);
-            render_content(
-                frame,
-                chunks[0],
-                params.lines,
-                params.line_styles,
-                params.offset,
-            );
-            asset_panel::render(frame, chunks[1], params.assets);
-        }
-    }
+    render_content(frame, area, params.lines, params.line_styles, params.offset);
 }
 
 /// Build a ratatui `Style` for the given `RichStyle` emphasis kind.
