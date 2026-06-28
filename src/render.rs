@@ -1004,7 +1004,9 @@ fn hard_split_word(
 ///
 /// Mirrors `wrap_text`'s greedy display-width algorithm but operates on
 /// `Vec<RichSpan>` so that a span whose style is Bold/Italic/Code carries that
-/// style on every wrapped fragment (BDR S9).  Empty input yields an empty Vec.
+/// style on every wrapped fragment.  Style is threaded per-character so repeated
+/// words with different emphasis and substring words each keep their own style
+/// (ADR 0030, BDR 0023).  Empty input yields an empty Vec.
 pub fn wrap_rich(line: &crate::richtext::RichLine, width: usize) -> Vec<crate::richtext::RichLine> {
     use crate::richtext::RichLine;
     if line.is_empty() || width == 0 {
@@ -1015,23 +1017,19 @@ pub fn wrap_rich(line: &crate::richtext::RichLine, width: usize) -> Vec<crate::r
         return vec![line.clone()];
     }
 
+    let styled_chars = expand_to_styled_chars(line);
     let mut result: Vec<RichLine> = Vec::new();
     let mut current: RichLine = Vec::new();
     let mut current_dw = 0usize;
+    let mut first_segment = true;
 
-    for input_line in plain.split('\n') {
-        if !current.is_empty() {
+    for segment in styled_chars.split(|(ch, _)| *ch == '\n') {
+        if !first_segment && !current.is_empty() {
             result.push(std::mem::take(&mut current));
             current_dw = 0;
         }
-        wrap_rich_single_line(
-            input_line,
-            line,
-            width,
-            &mut result,
-            &mut current,
-            &mut current_dw,
-        );
+        first_segment = false;
+        wrap_rich_single_line(segment, width, &mut result, &mut current, &mut current_dw);
     }
 
     if !current.is_empty() {
@@ -1043,13 +1041,26 @@ pub fn wrap_rich(line: &crate::richtext::RichLine, width: usize) -> Vec<crate::r
     result
 }
 
-/// Wrap a single plain-text input line, preserving span styles from the original `RichLine`.
+/// Expand a `RichLine` to an ordered sequence of `(char, RichStyle)` pairs.
 ///
-/// Because the plain text was derived from the rich spans in order, we re-derive
-/// the style for each word by scanning the span sequence proportionally to byte position.
+/// This is the single place where per-character origin is preserved: each span
+/// contributes its characters tagged with that span's style.  The wrap operates
+/// on this stream instead of re-deriving style by substring matching.
+fn expand_to_styled_chars(
+    line: &crate::richtext::RichLine,
+) -> Vec<(char, crate::richtext::RichStyle)> {
+    line.iter()
+        .flat_map(|span| span.text.chars().map(move |ch| (ch, span.style)))
+        .collect()
+}
+
+/// Wrap a single segment of styled characters (between hard newlines) using greedy width.
+///
+/// Words are maximal non-whitespace runs in the styled-char stream.  Each word's
+/// characters carry their per-character style through to the output spans, so a word
+/// that straddles an emphasis boundary keeps both styles as adjacent spans.
 fn wrap_rich_single_line(
-    plain_line: &str,
-    rich_source: &crate::richtext::RichLine,
+    styled_chars: &[(char, crate::richtext::RichStyle)],
     width: usize,
     result: &mut Vec<crate::richtext::RichLine>,
     current: &mut crate::richtext::RichLine,
@@ -1057,92 +1068,99 @@ fn wrap_rich_single_line(
 ) {
     use crate::richtext::RichStyle;
 
-    let style_for_word =
-        |word: &str| -> RichStyle { style_of_word_in_rich_line(word, rich_source) };
+    let mut i = 0;
+    while i < styled_chars.len() {
+        // Skip whitespace (but not newlines — those are already split out).
+        if styled_chars[i].0.is_ascii_whitespace() {
+            i += 1;
+            continue;
+        }
 
-    for word in plain_line.split_whitespace() {
-        let word_dw = display_width(word);
-        let word_style = style_for_word(word);
+        // Collect one word: a maximal run of non-whitespace styled chars.
+        let word_start = i;
+        while i < styled_chars.len() && !styled_chars[i].0.is_ascii_whitespace() {
+            i += 1;
+        }
+        let word_chars = &styled_chars[word_start..i];
+        let word_dw = word_display_width(word_chars);
 
         if *current_dw == 0 {
-            append_rich_word(
-                word, word_dw, word_style, width, current, current_dw, result,
-            );
+            append_rich_word(word_chars, word_dw, width, current, current_dw, result);
             continue;
         }
 
         if *current_dw + 1 + word_dw <= width {
             push_rich_span(current, " ", RichStyle::Plain);
-            push_rich_span(current, word, word_style);
+            emit_styled_chars(current, word_chars);
             *current_dw += 1 + word_dw;
             continue;
         }
 
         result.push(std::mem::take(current));
         *current_dw = 0;
-        append_rich_word(
-            word, word_dw, word_style, width, current, current_dw, result,
-        );
+        append_rich_word(word_chars, word_dw, width, current, current_dw, result);
     }
 }
 
-/// Find the dominant style for `word` by scanning `rich_source` for an exact text match.
-///
-/// Falls back to Plain when the word is not found (e.g. after normalization).
-fn style_of_word_in_rich_line(
-    word: &str,
-    rich_source: &crate::richtext::RichLine,
-) -> crate::richtext::RichStyle {
-    use crate::richtext::RichStyle;
-    for span in rich_source {
-        if span.text.contains(word) {
-            return span.style;
-        }
+/// Compute the display width of a slice of styled characters.
+fn word_display_width(chars: &[(char, crate::richtext::RichStyle)]) -> usize {
+    chars
+        .iter()
+        .map(|(ch, _)| unicode_width::UnicodeWidthChar::width(*ch).unwrap_or(0))
+        .sum()
+}
+
+/// Push each styled character onto the current line via `push_rich_span`, coalescing runs.
+fn emit_styled_chars(
+    current: &mut crate::richtext::RichLine,
+    chars: &[(char, crate::richtext::RichStyle)],
+) {
+    for (ch, style) in chars {
+        let mut buf = [0u8; 4];
+        let s = ch.encode_utf8(&mut buf);
+        push_rich_span(current, s, *style);
     }
-    RichStyle::Plain
 }
 
 /// Append a word (or hard-split it) to the current rich line being built.
 fn append_rich_word(
-    word: &str,
+    word_chars: &[(char, crate::richtext::RichStyle)],
     word_dw: usize,
-    style: crate::richtext::RichStyle,
     width: usize,
     current: &mut crate::richtext::RichLine,
     current_dw: &mut usize,
     result: &mut Vec<crate::richtext::RichLine>,
 ) {
     if word_dw <= width {
-        push_rich_span(current, word, style);
+        emit_styled_chars(current, word_chars);
         *current_dw = word_dw;
     } else {
-        hard_split_rich_word(word, style, width, current, current_dw, result);
+        hard_split_rich_word(word_chars, width, current, current_dw, result);
     }
 }
 
 /// Hard-split a word wider than `width` columns, flushing full chunks as separate lines.
+///
+/// Each character retains its per-character style when placed into a chunk.
 fn hard_split_rich_word(
-    word: &str,
-    style: crate::richtext::RichStyle,
+    word_chars: &[(char, crate::richtext::RichStyle)],
     width: usize,
     current: &mut crate::richtext::RichLine,
     current_dw: &mut usize,
     result: &mut Vec<crate::richtext::RichLine>,
 ) {
     let mut acc = 0usize;
-    let mut chunk = String::new();
-    for ch in word.chars() {
-        let cw = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+    for (ch, style) in word_chars {
+        let cw = unicode_width::UnicodeWidthChar::width(*ch).unwrap_or(0);
         if acc + cw > width {
-            push_rich_span(current, &chunk, style);
             result.push(std::mem::take(current));
-            chunk.clear();
             acc = 0;
         }
-        chunk.push(ch);
+        let mut buf = [0u8; 4];
+        let s = ch.encode_utf8(&mut buf);
+        push_rich_span(current, s, *style);
         acc += cw;
     }
-    push_rich_span(current, &chunk, style);
     *current_dw = acc;
 }
 

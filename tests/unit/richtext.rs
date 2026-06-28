@@ -750,3 +750,174 @@ fn underline_style_survives_wrap() {
         }
     }
 }
+
+// --- BDR 0023: positional style threading (disambiguation tests) —————————————
+
+/// BDR 0023 Sc.1 — a word repeated in the same source line with different emphasis
+/// keeps each occurrence's own style after wrapping.
+///
+/// Source: ["format the " Plain, "format" Bold, " call" Plain]
+/// Wide enough to stay on one line; first "format" must be Plain, second must be Bold.
+#[test]
+fn repeated_word_keeps_per_occurrence_style() {
+    use crate::render::wrap_rich;
+    use crate::richtext::{RichSpan, RichStyle};
+
+    let line = vec![
+        RichSpan {
+            text: "format the ".to_string(),
+            style: RichStyle::Plain,
+        },
+        RichSpan {
+            text: "format".to_string(),
+            style: RichStyle::Bold,
+        },
+        RichSpan {
+            text: " call".to_string(),
+            style: RichStyle::Plain,
+        },
+    ];
+    // Width 80 keeps everything on one line.
+    let wrapped = wrap_rich(&line, 80);
+    assert_eq!(wrapped.len(), 1, "should fit on one line: {wrapped:?}");
+
+    let row = &wrapped[0];
+    // Collect non-space spans to find the two "format" occurrences.
+    let format_spans: Vec<_> = row.iter().filter(|s| s.text.contains("format")).collect();
+    assert_eq!(
+        format_spans.len(),
+        2,
+        "expected two spans containing 'format': {row:?}"
+    );
+    assert_eq!(
+        format_spans[0].style,
+        RichStyle::Plain,
+        "first 'format' must be Plain: {row:?}"
+    );
+    assert_eq!(
+        format_spans[1].style,
+        RichStyle::Bold,
+        "second 'format' must be Bold: {row:?}"
+    );
+}
+
+/// BDR 0023 Sc.2 — a short word that is a substring of a larger styled token
+/// does not inherit the larger token's style.
+///
+/// Source: ["category " Bold, "cat" Plain]
+/// The Bold "category" span comes FIRST so the first-contains mutant (which
+/// would return the style of the first span whose text contains "cat") would
+/// pick Bold for "cat" — killing the mutant when the test asserts Plain.
+/// The correct per-char-threading code still yields Plain for "cat".
+#[test]
+fn substring_word_does_not_inherit_larger_token_style() {
+    use crate::render::wrap_rich;
+    use crate::richtext::{RichSpan, RichStyle};
+
+    let line = vec![
+        RichSpan {
+            text: "category ".to_string(),
+            style: RichStyle::Bold,
+        },
+        RichSpan {
+            text: "cat".to_string(),
+            style: RichStyle::Plain,
+        },
+    ];
+    let wrapped = wrap_rich(&line, 80);
+    assert_eq!(wrapped.len(), 1, "should fit on one line: {wrapped:?}");
+
+    let row = &wrapped[0];
+    let cat_span = row
+        .iter()
+        .find(|s| s.text.trim() == "cat")
+        .expect("must have a span for 'cat'");
+    assert_eq!(
+        cat_span.style,
+        RichStyle::Plain,
+        "'cat' must stay Plain, not inherit Bold from 'category': {row:?}"
+    );
+}
+
+/// BDR 0023 Sc.4 — a word that straddles an emphasis boundary keeps both styles
+/// as adjacent spans in the wrapped output.
+///
+/// Source: ["fo" Bold, "o" Plain] — no whitespace, one display word "foo".
+#[test]
+fn cross_boundary_word_keeps_both_styles() {
+    use crate::render::wrap_rich;
+    use crate::richtext::{RichSpan, RichStyle};
+
+    let line = vec![
+        RichSpan {
+            text: "fo".to_string(),
+            style: RichStyle::Bold,
+        },
+        RichSpan {
+            text: "o".to_string(),
+            style: RichStyle::Plain,
+        },
+    ];
+    let wrapped = wrap_rich(&line, 80);
+    assert_eq!(wrapped.len(), 1, "should fit on one line: {wrapped:?}");
+
+    let row = &wrapped[0];
+    let bold_part = row.iter().find(|s| s.style == RichStyle::Bold);
+    let plain_part = row.iter().find(|s| s.style == RichStyle::Plain);
+    assert!(
+        bold_part.is_some(),
+        "wrapped output must include a Bold span for 'fo': {row:?}"
+    );
+    assert!(
+        plain_part.is_some(),
+        "wrapped output must include a Plain span for 'o': {row:?}"
+    );
+    let bold_text = &bold_part.unwrap().text;
+    let plain_text = &plain_part.unwrap().text;
+    assert!(
+        bold_text.contains('f') && bold_text.contains('o'),
+        "Bold span must contain 'fo': {row:?}"
+    );
+    assert_eq!(plain_text, "o", "Plain span must be 'o': {row:?}");
+}
+
+/// BDR 0023 Sc.5 — a styled word that falls after a wrap break keeps its style;
+/// the word before the break keeps its own style unchanged.
+///
+/// Source: ["plain " Plain (repeated to fill ~38 chars), "bold" Bold]
+/// Width 40 forces a break before "bold"; "bold" on row 2 must be Bold.
+#[test]
+fn style_after_wrap_break_is_preserved() {
+    use crate::render::wrap_rich;
+    use crate::richtext::{RichSpan, RichStyle};
+
+    // "plain " * 7 trimmed = "plain plain plain plain plain plain plain" = 41 chars.
+    // At width 40, "bold" won't fit after the filler, so it wraps to the next row.
+    let filler = "plain ".repeat(7).trim_end().to_string();
+    let line = vec![
+        RichSpan {
+            text: filler,
+            style: RichStyle::Plain,
+        },
+        RichSpan {
+            text: " bold".to_string(),
+            style: RichStyle::Bold,
+        },
+    ];
+    let wrapped = wrap_rich(&line, 40);
+    assert!(
+        wrapped.len() >= 2,
+        "line should wrap to at least 2 rows: {wrapped:?}"
+    );
+
+    // The last row must contain the Bold "bold" word.
+    let last_row = wrapped.last().unwrap();
+    let bold_span = last_row
+        .iter()
+        .find(|s| s.style == RichStyle::Bold)
+        .expect("last row must contain a Bold span: {last_row:?}");
+    assert!(
+        bold_span.text.contains("bold"),
+        "Bold span must contain 'bold': {last_row:?}"
+    );
+}
