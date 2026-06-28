@@ -134,6 +134,65 @@ Background results (e.g. `Msg::LoadedTasksByProject`) are delivered over a
 loop. The model is updated and the screen repainted as soon as the result
 arrives — no input event is required.
 
+## Write / comment-mutation data flow
+
+The app's first **write** path ([PRD 0002](/prd/0002-task-comment-authoring.md))
+creates/edits/deletes a comment on the open task. It reuses the same TEA effect
+machinery as reads: a pure `update()` emits a write `Cmd`, the shell spawns it as a
+background task, and the 2xx result feeds a **server-truth refresh**
+([ADR 0035](/adr/0035-server-truth-refresh-after-comment-mutation.md)) rather than an
+optimistic local edit.
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant Shell as shell (event loop)
+    participant App as app (update, pure)
+    participant Spawn as spawn_submit/delete (tokio task)
+    participant API as client/http (authed write)
+    participant Server as ActiveCollab
+
+    User->>Shell: c / type / Ctrl+S (or [editar]/[excluir] click)
+    Note over Shell: compose active → map_compose_key_event<br/>(else map_browse_key_event)
+    Shell->>App: Msg (ComposeInput · ComposeSubmit · DeleteCommentRequest · confirm)
+    App-->>Shell: Model + Cmd::SubmitComment / Cmd::DeleteComment
+    Shell->>Spawn: dispatch_cmds → spawn write
+    Spawn->>API: create/update/delete_comment (token only to instance host)
+    API->>Server: POST/PUT/DELETE /api/v1/comments/...
+    Server-->>API: 2xx | 4xx/5xx
+    alt 2xx
+        Spawn-->>Shell: Msg::CommentMutationOk
+        Shell->>App: CommentMutationOk
+        App-->>Shell: clear compose + Cmd::LoadDetail { refresh: true }
+        Note over Shell,Server: thread re-derived from a fresh fetch (read flow above)
+    else failure
+        Spawn-->>Shell: Msg::CommentMutationErr(reason)
+        Shell->>App: CommentMutationErr
+        App-->>Shell: keep buffer + compose status = Error (no refresh)
+    end
+```
+
+**Write boundaries / fitness:**
+
+- **`client/http` stays the only outbound-network boundary**, and **token
+  host-isolation extends to writes**: `authed_post`/`authed_put`/`authed_delete` attach
+  `X-Angie-AuthApiToken` only via the same `host_gated_token_header` gate as
+  `authed_get` ([ADR 0033](/adr/0033-authenticated-write-seam-comment-client.md)).
+  Gate-checked by a negative test (no token off-host).
+- **`tui/model.update` stays pure** through the write path: it owns the compose state
+  machine (`Screen::Detail.compose`, `confirm_delete`) and emits write `Cmd`s, but never
+  performs I/O. The shell owns the mode-aware key mapping (which keys are *text*) and the
+  spawned write ([ADR 0034](/adr/0034-comment-compose-mode-multiline.md)).
+- **No optimistic mutation:** the mutation arms construct no synthetic comment; the
+  thread is always re-derived from the server after a 2xx
+  ([ADR 0035](/adr/0035-server-truth-refresh-after-comment-mutation.md)). Gate-checked by
+  a unit test asserting `CommentMutationOk` emits exactly one `LoadDetail { refresh:true }`.
+- **Edit/delete target a comment** via permission-aware `[editar]`/`[excluir]` click
+  targets rendered only on the user's own comments (`created_by_id == instance.user_id`),
+  reusing the scroll-aware asset click-map
+  ([ADR 0036](/adr/0036-permission-aware-comment-targeting.md)). The local own-check is an
+  affordance filter; the **server** (`canEdit`/`canDelete`) is the authorization boundary.
+
 ## Quality gates
 
 The Rust crate enforces a comment policy via the `comment_policy` integration test (`tests/comment_policy.rs`), run as part of `cargo test`. It forbids banner/divider comments (e.g. `// ----`, `// === Section ===`, box-drawing chars) and commented-out Rust code, while allowing doc comments (`///`, `//!`) and ordinary prose why-comments that explain non-obvious intent.

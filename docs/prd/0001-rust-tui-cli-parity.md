@@ -43,7 +43,10 @@ cross-platform input**, and a **real async model** for a responsive UI.
 
 ## Non-goals
 
-- Writing to ActiveCollab (create/edit/comment) — read/browse only.
+- Writing to ActiveCollab (create/edit/comment) — read/browse only. _(The
+  create/edit/delete-comment portion of this non-goal is later lifted, for comments
+  only, by [PRD 0002](/prd/0002-task-comment-authoring.md); all other writes remain
+  out of scope.)_
 - Re-implementing the git-branch-from-task helper (removed).
 - Encrypting secrets at rest in this phase (tokens stay plaintext in SQLite;
   follow-up ADR).
