@@ -127,13 +127,11 @@ fn first_visible_card(heights: &[u16], selected: usize, visible_h: u16) -> usize
     let sel_start = cum[selected];
     let sel_end = sel_start + heights[selected];
 
-    // If selected card fits from offset 0, no scrolling needed
     if sel_end <= visible_h {
         return 0;
     }
 
     // Find the smallest first_visible such that sel_end fits in the window.
-    // Walk first_visible forward until window [cum[first], cum[first]+visible_h) contains sel_end.
     for (first, &start) in cum.iter().enumerate().take(selected + 1) {
         let window_end = start.saturating_add(visible_h);
         if sel_end <= window_end {
