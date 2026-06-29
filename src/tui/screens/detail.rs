@@ -68,6 +68,8 @@ fn emphasis_style(rs: RichStyle) -> Style {
         RichStyle::Strike => Style::default().add_modifier(Modifier::CROSSED_OUT),
         RichStyle::Underline => Style::default().add_modifier(Modifier::UNDERLINED),
         RichStyle::Link => theme::link_style(),
+        RichStyle::EditAffordance => theme::edit_affordance_style(),
+        RichStyle::DeleteAffordance => theme::delete_affordance_style(),
         RichStyle::Plain => Style::default(),
     }
 }

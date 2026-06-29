@@ -42,3 +42,4 @@
 | [0038](/adr/0038-detail-footer-contextual-hint-and-status-line.md) | The detail footer becomes two regions — a context-aware instruction line plus a thin transient status line | Accepted |
 | [0039](/adr/0039-reusable-modal-overlay-for-compose-and-confirm.md) | A reusable centered modal overlay (dimmed backdrop) renders the comment compose and the delete-confirm, replacing their inline-spliced rendering | Accepted |
 | [0040](/adr/0040-non-interactive-comment-write-command.md) | A non-interactive `comment` CLI command posts a comment as the logged-in user, reusing the authenticated client seam and extending the agent --json contract to a write | Accepted |
+| [0041](/adr/0041-comment-affordance-colored-links-and-yes-no-confirm.md) | Comment edit/delete affordances render as structurally-emitted colored links (edit cyan, delete destructive red); the delete-confirm modal presents Sim/Não buttons | Accepted |

@@ -50,6 +50,20 @@ pub fn link_style() -> Style {
         .add_modifier(Modifier::UNDERLINED)
 }
 
+/// Edit affordance on own-comment card headers — soft cyan + underlined.
+pub fn edit_affordance_style() -> Style {
+    Style::default()
+        .fg(SOFT_CYAN)
+        .add_modifier(Modifier::UNDERLINED)
+}
+
+/// Delete affordance on own-comment card headers — destructive red + underlined.
+pub fn delete_affordance_style() -> Style {
+    Style::default()
+        .fg(DUE_RED)
+        .add_modifier(Modifier::UNDERLINED)
+}
+
 /// Badge style (amber, bold) — retained for theme-consistency tests.
 #[allow(dead_code)]
 pub fn badge_style() -> Style {

@@ -1693,11 +1693,47 @@ fn build_comment_card(ctx: CommentCardCtx<'_>) -> CommentCard {
         (None, None)
     };
 
+    let mut line_styles = line_styles;
+    push_affordance_style_runs(&mut line_styles, edit_span, delete_span);
+
     CommentCard {
         lines,
         line_styles,
         edit_span,
         delete_span,
+    }
+}
+
+/// Push `StyleRun`s for the edit and delete affordance spans onto `line_styles[0]`.
+///
+/// Reuses the exact (start, len) coordinates already computed for the hit-test
+/// (single source of truth, ADR 0032 / ADR 0041). No-op when a span is `None`.
+fn push_affordance_style_runs(
+    line_styles: &mut [Vec<StyleRun>],
+    edit_span: Option<(usize, usize)>,
+    delete_span: Option<(usize, usize)>,
+) {
+    use crate::richtext::RichStyle;
+    if edit_span.is_none() && delete_span.is_none() {
+        return;
+    }
+    let header_runs = match line_styles.first_mut() {
+        Some(r) => r,
+        None => return,
+    };
+    if let Some((start, end)) = edit_span {
+        header_runs.push(StyleRun {
+            start,
+            len: end - start,
+            style: RichStyle::EditAffordance,
+        });
+    }
+    if let Some((start, end)) = delete_span {
+        header_runs.push(StyleRun {
+            start,
+            len: end - start,
+            style: RichStyle::DeleteAffordance,
+        });
     }
 }
 
