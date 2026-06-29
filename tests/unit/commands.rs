@@ -1987,3 +1987,376 @@ async fn mine_core_json_mode_empty_rows_yields_count_zero_exit_0() {
     let tasks = obj["tasks"].as_array().expect("tasks must be an array");
     assert!(tasks.is_empty(), "tasks array must be empty");
 }
+
+fn comment_inst(base_url: &str) -> Instance {
+    Instance {
+        name: "testinst".to_owned(),
+        base_url: base_url.to_owned(),
+        email: "user@example.com".to_owned(),
+        token: "tok-comment".to_owned(),
+        user_id: Some(1),
+    }
+}
+
+fn comment_response(comment_id: i64) -> serde_json::Value {
+    serde_json::json!({ "id": comment_id, "body": "some body" })
+}
+
+#[tokio::test]
+async fn comment_core_flag_body_explicit_ref_calls_create_comment_and_returns_0() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/comments/task/75346"))
+        .and(body_json(
+            serde_json::json!({ "body": "Deploy em homolog." }),
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(comment_response(101)))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let inst = comment_inst(&server.uri());
+    let client = ActiveCollabClient::new(inst.clone(), make_http());
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    let code = comment_core(
+        Some("524/75346"),
+        None,
+        "Deploy em homolog.",
+        &inst,
+        &client,
+        false,
+        &mut out,
+        &mut err,
+    )
+    .await;
+
+    server.verify().await;
+    assert_eq!(code, 0, "err: {}", output_str(&err));
+    let s = output_str(&out);
+    assert!(
+        s.contains("101"),
+        "confirmation must contain comment_id: {s}"
+    );
+    assert!(
+        s.contains("75346"),
+        "confirmation must contain task_id: {s}"
+    );
+    assert!(
+        s.contains("524"),
+        "confirmation must contain project_id: {s}"
+    );
+}
+
+#[tokio::test]
+async fn comment_core_multiline_stdin_body_passed_verbatim() {
+    let server = MockServer::start().await;
+    let multiline = "Linha 1\nLinha 2\nLinha 3";
+    Mock::given(method("POST"))
+        .and(path("/api/v1/comments/task/75346"))
+        .and(body_json(serde_json::json!({ "body": multiline })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(comment_response(202)))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let inst = comment_inst(&server.uri());
+    let client = ActiveCollabClient::new(inst.clone(), make_http());
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    let code = comment_core(
+        Some("524/75346"),
+        None,
+        multiline,
+        &inst,
+        &client,
+        false,
+        &mut out,
+        &mut err,
+    )
+    .await;
+
+    server.verify().await;
+    assert_eq!(code, 0, "err: {}", output_str(&err));
+}
+
+#[tokio::test]
+async fn comment_core_json_flag_stdout_is_exact_minified_result_line() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/comments/task/75346"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(comment_response(123)))
+        .mount(&server)
+        .await;
+
+    let inst = comment_inst(&server.uri());
+    let client = ActiveCollabClient::new(inst.clone(), make_http());
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    let code = comment_core(
+        Some("524/75346"),
+        None,
+        "ok",
+        &inst,
+        &client,
+        true,
+        &mut out,
+        &mut err,
+    )
+    .await;
+
+    assert_eq!(code, 0, "err: {}", output_str(&err));
+    let s = output_str(&out);
+    let trimmed = s.trim_end_matches('\n');
+    assert!(
+        !trimmed.contains('\n'),
+        "json output must be a single line: {s:?}"
+    );
+    let obj: serde_json::Value = serde_json::from_str(trimmed).expect("stdout must be valid JSON");
+    assert_eq!(obj["ok"], true, "ok must be true");
+    assert_eq!(obj["comment_id"], 123);
+    assert_eq!(obj["task_id"], 75346);
+    assert_eq!(obj["project_id"], 524);
+    assert!(
+        output_str(&err).is_empty(),
+        "stderr must be empty on success"
+    );
+}
+
+#[tokio::test]
+async fn comment_core_empty_body_returns_exit2_and_no_create_comment_call() {
+    let server = MockServer::start().await;
+    // No mock set up — any POST to create_comment would fail the test via unexpected request.
+
+    let inst = comment_inst(&server.uri());
+    let client = ActiveCollabClient::new(inst.clone(), make_http());
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    let code = comment_core(
+        Some("524/75346"),
+        None,
+        "",
+        &inst,
+        &client,
+        false,
+        &mut out,
+        &mut err,
+    )
+    .await;
+
+    assert_eq!(code, 2, "empty body must return exit code 2");
+    let e = output_str(&err);
+    assert!(
+        e.contains("no comment body"),
+        "error must mention 'no comment body': {e}"
+    );
+    assert!(
+        output_str(&out).is_empty(),
+        "stdout must be empty when body is missing"
+    );
+}
+
+#[tokio::test]
+async fn comment_core_whitespace_only_body_returns_exit2() {
+    let inst = comment_inst("http://127.0.0.1:1");
+    let client = ActiveCollabClient::new(inst.clone(), make_http());
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    let code = comment_core(
+        Some("524/75346"),
+        None,
+        "   \n  ",
+        &inst,
+        &client,
+        false,
+        &mut out,
+        &mut err,
+    )
+    .await;
+
+    assert_eq!(code, 2, "whitespace-only body must return exit code 2");
+    assert!(output_str(&err).contains("no comment body"));
+}
+
+#[tokio::test]
+async fn comment_core_branch_resolved_task_posts_to_branch_task() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/comments/task/75159"))
+        .and(body_json(serde_json::json!({ "body": "branch comment" })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(comment_response(50)))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let inst = comment_inst(&server.uri());
+    let client = ActiveCollabClient::new(inst.clone(), make_http());
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    let code = comment_core(
+        None,
+        Some("feature/665-75159"),
+        "branch comment",
+        &inst,
+        &client,
+        false,
+        &mut out,
+        &mut err,
+    )
+    .await;
+
+    server.verify().await;
+    assert_eq!(code, 0, "branch-resolved task must return 0");
+    let s = output_str(&out);
+    assert!(
+        s.contains("75159"),
+        "confirmation must contain task_id: {s}"
+    );
+}
+
+#[tokio::test]
+async fn comment_core_no_ref_and_no_branch_returns_exit2_without_write() {
+    let server = MockServer::start().await;
+
+    let inst = comment_inst(&server.uri());
+    let client = ActiveCollabClient::new(inst.clone(), make_http());
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    let code = comment_core(
+        None,
+        None,
+        "some body",
+        &inst,
+        &client,
+        false,
+        &mut out,
+        &mut err,
+    )
+    .await;
+
+    assert_eq!(code, 2, "no task ref should return exit 2");
+    assert!(
+        !output_str(&out).contains("posted"),
+        "must not print success when task not found"
+    );
+}
+
+#[tokio::test]
+async fn comment_core_unresolvable_branch_returns_exit2_without_write() {
+    let server = MockServer::start().await;
+
+    let inst = comment_inst(&server.uri());
+    let client = ActiveCollabClient::new(inst.clone(), make_http());
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    let code = comment_core(
+        None,
+        Some("main"),
+        "some body",
+        &inst,
+        &client,
+        false,
+        &mut out,
+        &mut err,
+    )
+    .await;
+
+    assert_eq!(code, 2, "non-task branch must return exit 2");
+    let e = output_str(&err);
+    assert!(
+        e.contains("main"),
+        "error must mention the branch name: {e}"
+    );
+    assert!(
+        output_str(&out).is_empty(),
+        "stdout must be empty when branch unresolvable"
+    );
+}
+
+#[tokio::test]
+async fn comment_core_http_4xx_returns_nonzero_without_success_line() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/comments/task/75346"))
+        .respond_with(ResponseTemplate::new(403).set_body_string("forbidden"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let inst = comment_inst(&server.uri());
+    let client = ActiveCollabClient::new(inst.clone(), make_http());
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    let code = comment_core(
+        Some("524/75346"),
+        None,
+        "body text",
+        &inst,
+        &client,
+        false,
+        &mut out,
+        &mut err,
+    )
+    .await;
+
+    server.verify().await;
+    assert_ne!(code, 0, "HTTP 4xx must not return exit 0");
+    assert!(
+        !output_str(&out).contains("posted"),
+        "success line must not appear on HTTP error"
+    );
+    assert!(
+        output_str(&err).contains("403"),
+        "stderr must mention the HTTP status: {}",
+        output_str(&err)
+    );
+}
+
+#[tokio::test]
+async fn comment_core_http_failure_with_json_flag_emits_error_object() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/comments/task/75346"))
+        .respond_with(ResponseTemplate::new(500).set_body_string("server error"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let inst = comment_inst(&server.uri());
+    let client = ActiveCollabClient::new(inst.clone(), make_http());
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    let code = comment_core(
+        Some("524/75346"),
+        None,
+        "body text",
+        &inst,
+        &client,
+        true,
+        &mut out,
+        &mut err,
+    )
+    .await;
+
+    server.verify().await;
+    assert_ne!(code, 0, "HTTP 5xx with --json must not return exit 0");
+    let s = output_str(&out);
+    let trimmed = s.trim_end_matches('\n');
+    let obj: serde_json::Value =
+        serde_json::from_str(trimmed).expect("stdout must be valid JSON on --json failure");
+    assert_eq!(obj["ok"], false, "ok must be false on failure");
+    assert!(
+        obj.get("error").is_some(),
+        "error field must be present: {obj}"
+    );
+}

@@ -573,3 +573,61 @@ fn browse_object_empty_groups_yields_empty_projects_array() {
         "empty groups must yield empty projects array"
     );
 }
+
+// --- ADR 0040: comment_result and comment_error shapes ---
+
+#[test]
+fn comment_result_exact_minified_string() {
+    let line = comment_result(123, 75346, 524);
+    assert_eq!(
+        line, r#"{"ok":true,"comment_id":123,"task_id":75346,"project_id":524}"#,
+        "comment_result must match the exact minified contract"
+    );
+}
+
+#[test]
+fn comment_result_is_valid_json_with_ok_true() {
+    let line = comment_result(1, 2, 3);
+    let obj: serde_json::Value = serde_json::from_str(&line).expect("must be valid JSON");
+    assert_eq!(obj["ok"], true);
+    assert_eq!(obj["comment_id"], 1);
+    assert_eq!(obj["task_id"], 2);
+    assert_eq!(obj["project_id"], 3);
+}
+
+#[test]
+fn comment_result_is_single_minified_line() {
+    let line = comment_result(100, 200, 300);
+    assert!(
+        !line.contains('\n'),
+        "comment_result must not contain newlines: {line:?}"
+    );
+    assert!(
+        !line.contains("  "),
+        "comment_result must not contain 2-space indent: {line:?}"
+    );
+}
+
+#[test]
+fn comment_error_exact_minified_string() {
+    let line = comment_error("HTTP 403 posting comment to task 524/75346");
+    let obj: serde_json::Value = serde_json::from_str(&line).expect("must be valid JSON");
+    assert_eq!(obj["ok"], false, "ok must be false in error shape");
+    assert!(
+        obj.get("error").is_some(),
+        "error field must be present: {obj}"
+    );
+    assert!(
+        obj["error"].as_str().unwrap_or("").contains("403"),
+        "error message must contain the provided reason"
+    );
+}
+
+#[test]
+fn comment_error_is_single_minified_line() {
+    let line = comment_error("some failure");
+    assert!(
+        !line.contains('\n'),
+        "comment_error must not contain newlines: {line:?}"
+    );
+}

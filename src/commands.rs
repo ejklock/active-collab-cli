@@ -670,6 +670,135 @@ pub async fn current_core(
     do_get_task(inst, cache, client, pid, tid, flags, out, err).await
 }
 
+fn resolve_task_ref_for_comment(
+    task_ref: Option<&str>,
+    branch: Option<&str>,
+    err: &mut dyn Write,
+) -> Result<(i64, i64), i32> {
+    if let Some(r) = task_ref {
+        return parse_task_ref(r, err);
+    }
+    let branch = match branch {
+        Some(b) => b,
+        None => {
+            writeln!(
+                err,
+                "{}",
+                t("Error: no task ref given and not in a git repository or HEAD is detached.")
+            )
+            .ok();
+            return Err(2);
+        }
+    };
+    match parse_branch_ref(branch) {
+        Some(ids) => Ok(ids),
+        None => {
+            writeln!(
+                err,
+                "{}",
+                t(&format!(
+                    "Error: no task ref given and branch '{branch}' does not match \
+                     expected pattern (feature|hotfix|fix)/PROJECT_ID-TASK_ID.",
+                    branch = branch
+                ))
+            )
+            .ok();
+            Err(2)
+        }
+    }
+}
+
+fn write_comment_success(
+    comment_id: i64,
+    task_id: i64,
+    project_id: i64,
+    json: bool,
+    out: &mut dyn Write,
+) {
+    if json {
+        writeln!(
+            out,
+            "{}",
+            crate::agent_json::comment_result(comment_id, task_id, project_id)
+        )
+        .ok();
+    } else {
+        writeln!(
+            out,
+            "{}",
+            t(&format!(
+                "Comment posted (comment_id={comment_id}, task {project_id}/{task_id}).",
+                comment_id = comment_id,
+                project_id = project_id,
+                task_id = task_id
+            ))
+        )
+        .ok();
+    }
+}
+
+fn write_comment_failure(reason: &str, json: bool, out: &mut dyn Write, err: &mut dyn Write) {
+    if json {
+        writeln!(out, "{}", crate::agent_json::comment_error(reason)).ok();
+    } else {
+        writeln!(err, "Error: {reason}").ok();
+    }
+}
+
+/// Non-interactive comment post (ADR 0040, BDR 0027).
+///
+/// Resolves the task, guards against an empty body, posts via
+/// `client.create_comment`, and writes the result to the injected writers.
+/// Returns an exit code: 0 success, 2 usage error, non-zero runtime failure.
+#[allow(clippy::too_many_arguments)]
+pub async fn comment_core(
+    task_ref: Option<&str>,
+    branch: Option<&str>,
+    body: &str,
+    _instance: &Instance,
+    client: &ActiveCollabClient,
+    json: bool,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    if body.trim().is_empty() {
+        writeln!(err, "{}", t("no comment body")).ok();
+        return 2;
+    }
+
+    let (project_id, task_id) = match resolve_task_ref_for_comment(task_ref, branch, err) {
+        Ok(ids) => ids,
+        Err(code) => return code,
+    };
+
+    let result = client.create_comment(task_id, body).await;
+
+    match result {
+        Err(e) => {
+            write_comment_failure(&e.to_string(), json, out, err);
+            1
+        }
+        Ok((status, comment_opt)) if (200u16..=299).contains(&status) => {
+            let comment_id = comment_opt
+                .as_ref()
+                .and_then(|c| c.get("id").and_then(|v| v.as_i64()))
+                .unwrap_or(0);
+            write_comment_success(comment_id, task_id, project_id, json, out);
+            0
+        }
+        Ok((status, _)) => {
+            let reason = format!(
+                "HTTP {status} posting comment to task {project_id}/{task_id}",
+                status = status,
+                project_id = project_id,
+                task_id = task_id
+            );
+            write_comment_failure(&reason, json, out, err);
+            1
+        }
+    }
+}
+
 /// Parity: Python _render_mine_table (aggregation loop).
 ///
 /// For each target instance, builds a client and fetches open tasks. Maps each
