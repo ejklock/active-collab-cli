@@ -1724,7 +1724,7 @@ fn build_body_lines_no_line_exceeds_inner_width() {
 #[test]
 fn build_comment_lines_empty_for_zero_comments() {
     let mut collector = LinkCollector::new();
-    let (lines, _, _) = build_comment_lines_with_collector(&[], 80, &mut collector, None, None);
+    let (lines, _, _, _) = build_comment_lines_with_collector(&[], 80, &mut collector, None);
     assert!(
         lines.is_empty(),
         "must return empty vec for no comments: {:?}",
@@ -1740,8 +1740,7 @@ fn build_comment_lines_returns_outer_panel_for_single_comment() {
         "body_plain_text": "LGTM!"
     })];
     let mut collector = LinkCollector::new();
-    let (lines, _, _) =
-        build_comment_lines_with_collector(&comments, 60, &mut collector, None, None);
+    let (lines, _, _, _) = build_comment_lines_with_collector(&comments, 60, &mut collector, None);
     let joined = lines.join("\n");
     // Must be wrapped in an outer panel
     assert!(
@@ -1777,8 +1776,7 @@ fn build_comment_lines_returns_outer_panel_for_multiple_comments() {
         }),
     ];
     let mut collector = LinkCollector::new();
-    let (lines, _, _) =
-        build_comment_lines_with_collector(&comments, 60, &mut collector, None, None);
+    let (lines, _, _, _) = build_comment_lines_with_collector(&comments, 60, &mut collector, None);
     let joined = lines.join("\n");
     assert!(
         lines[0].contains("Comments"),
@@ -1815,8 +1813,8 @@ fn build_comment_lines_no_line_exceeds_inner_width() {
     })];
     let inner_width = 40;
     let mut collector = LinkCollector::new();
-    let (lines, _, _) =
-        build_comment_lines_with_collector(&comments, inner_width, &mut collector, None, None);
+    let (lines, _, _, _) =
+        build_comment_lines_with_collector(&comments, inner_width, &mut collector, None);
     for line in &lines {
         let len = line.chars().count();
         assert!(
@@ -1838,7 +1836,7 @@ fn build_detail_lines_first_line_is_details_panel_top_border() {
         "name": "Fix bug",
         "is_completed": false,
     });
-    let lines = build_detail_content(&task, &[], &HashMap::new(), 80, None, None).lines;
+    let lines = build_detail_content(&task, &[], &HashMap::new(), 80, None).lines;
     assert!(!lines.is_empty(), "must produce lines");
     let first = &lines[0];
     assert!(
@@ -1866,7 +1864,7 @@ fn build_detail_lines_details_panel_is_first() {
         "name": "My Task",
         "is_completed": false
     });
-    let lines = build_detail_content(&task, &[], &HashMap::new(), 60, None, None).lines;
+    let lines = build_detail_content(&task, &[], &HashMap::new(), 60, None).lines;
     assert!(
         !lines.is_empty(),
         "must have at least one line: {:?}",
@@ -1887,7 +1885,7 @@ fn build_detail_lines_details_panel_is_first() {
 #[test]
 fn build_detail_lines_description_panel_present() {
     let task = json!({ "id": 1, "name": "T", "body": "<p>Some details here</p>" });
-    let lines = build_detail_content(&task, &[], &HashMap::new(), 80, None, None).lines;
+    let lines = build_detail_content(&task, &[], &HashMap::new(), 80, None).lines;
     let joined = lines.join("\n");
     assert!(
         joined.contains("Description"),
@@ -1902,7 +1900,7 @@ fn build_detail_lines_description_panel_present() {
 #[test]
 fn build_detail_lines_no_description_fallback() {
     let task = json!({ "id": 1, "name": "T", "body": null });
-    let lines = build_detail_content(&task, &[], &HashMap::new(), 80, None, None).lines;
+    let lines = build_detail_content(&task, &[], &HashMap::new(), 80, None).lines;
     let joined = lines.join("\n");
     assert!(
         joined.contains("(no description)"),
@@ -1913,7 +1911,7 @@ fn build_detail_lines_no_description_fallback() {
 #[test]
 fn build_detail_lines_no_comments_panel_when_empty() {
     let task = json!({ "id": 1, "name": "T" });
-    let lines = build_detail_content(&task, &[], &HashMap::new(), 80, None, None).lines;
+    let lines = build_detail_content(&task, &[], &HashMap::new(), 80, None).lines;
     let joined = lines.join("\n");
     // Comments panel must be absent; Details and Description panels ARE present
     assert!(
@@ -1935,7 +1933,7 @@ fn build_detail_lines_comments_panel_present_when_non_empty() {
         "created_on": 1614556800i64,
         "body_plain_text": "LGTM!"
     })];
-    let lines = build_detail_content(&task, &comments, &HashMap::new(), 60, None, None).lines;
+    let lines = build_detail_content(&task, &comments, &HashMap::new(), 60, None).lines;
     let joined = lines.join("\n");
     assert!(
         joined.contains("Comments"),
@@ -1964,7 +1962,7 @@ fn build_detail_lines_title_row_in_meta() {
         "project_id": 5,
         "project_name": "Acme"
     });
-    let lines = build_detail_content(&task, &[], &HashMap::new(), 80, None, None).lines;
+    let lines = build_detail_content(&task, &[], &HashMap::new(), 80, None).lines;
     let joined = lines.join("\n");
     assert!(
         joined.contains("Title"),
@@ -1991,8 +1989,7 @@ fn build_detail_lines_no_line_exceeds_inner_width() {
         "body_plain_text": "This is a fairly long comment body that should be word-wrapped to fit within the box"
     })];
     let inner_width = 50;
-    let lines =
-        build_detail_content(&task, &comments, &HashMap::new(), inner_width, None, None).lines;
+    let lines = build_detail_content(&task, &comments, &HashMap::new(), inner_width, None).lines;
     for line in &lines {
         let len = line.chars().count();
         assert!(
@@ -2018,7 +2015,7 @@ fn build_detail_lines_panels_appear_in_order() {
         "created_on": 1614556800i64,
         "body_plain_text": "A comment"
     })];
-    let lines = build_detail_content(&task, &comments, &HashMap::new(), 60, None, None).lines;
+    let lines = build_detail_content(&task, &comments, &HashMap::new(), 60, None).lines;
     let joined = lines.join("\n");
 
     // Find positions of panel labels
@@ -2045,7 +2042,7 @@ fn build_detail_lines_multiple_comments_in_outer_panel() {
         json!({ "created_by_name": "Alice", "created_on": 1614556800i64, "body_plain_text": "First" }),
         json!({ "created_by_name": "Bob", "created_on": 1614556801i64, "body_plain_text": "Second" }),
     ];
-    let lines = build_detail_content(&task, &comments, &HashMap::new(), 50, None, None).lines;
+    let lines = build_detail_content(&task, &comments, &HashMap::new(), 50, None).lines;
     let joined = lines.join("\n");
     assert!(
         joined.contains("Alice"),
@@ -2362,7 +2359,7 @@ fn build_detail_content_url_in_description_renders_inline() {
         "name": "T",
         "body": "<p>See https://example.com/info for details.</p>"
     });
-    let content = build_detail_content(&task, &[], &HashMap::new(), 80, None, None);
+    let content = build_detail_content(&task, &[], &HashMap::new(), 80, None);
     let joined = content.lines.join("\n");
     assert!(
         joined.contains("https://example.com/info"),
@@ -2378,7 +2375,7 @@ fn build_detail_content_url_in_comment_body_renders_inline() {
         "created_on": 1614556800i64,
         "body_plain_text": "Ref: https://api.example.com/v1"
     });
-    let content = build_detail_content(&task, &[comment], &HashMap::new(), 80, None, None);
+    let content = build_detail_content(&task, &[comment], &HashMap::new(), 80, None);
     let joined = content.lines.join("\n");
     assert!(
         joined.contains("https://api.example.com/v1"),
@@ -2389,7 +2386,7 @@ fn build_detail_content_url_in_comment_body_renders_inline() {
 #[test]
 fn build_detail_content_no_url_produces_lines_with_no_url() {
     let task = json!({ "id": 1, "name": "T", "body": "<p>No links here.</p>" });
-    let content = build_detail_content(&task, &[], &HashMap::new(), 80, None, None);
+    let content = build_detail_content(&task, &[], &HashMap::new(), 80, None);
     let joined = content.lines.join("\n");
     assert!(
         !joined.contains("https://"),
@@ -2563,7 +2560,7 @@ fn build_detail_content_with_list_body_produces_bullet_lines() {
         "name": "T",
         "body": "<ul><li>one</li><li>two</li></ul>"
     });
-    let content = build_detail_content(&task, &[], &HashMap::new(), 80, None, None);
+    let content = build_detail_content(&task, &[], &HashMap::new(), 80, None);
     let joined = content.lines.join("\n");
     assert!(
         joined.contains("\u{2022} one"),
@@ -2583,7 +2580,7 @@ fn build_detail_content_comment_with_list_body_produces_bullet_lines() {
         "created_on": 1614556800i64,
         "body": "<ul><li>item A</li><li>item B</li></ul>"
     });
-    let content = build_detail_content(&task, &[comment], &HashMap::new(), 80, None, None);
+    let content = build_detail_content(&task, &[comment], &HashMap::new(), 80, None);
     let joined = content.lines.join("\n");
     assert!(
         joined.contains("\u{2022} item A"),
@@ -2799,5 +2796,136 @@ fn slice_by_display_cols_emoji_then_accented_text() {
     assert_eq!(
         result, " ProForce]",
         "after a 2-wide emoji, cols [2,12) must yield the next 10 chars: got {result:?}"
+    );
+}
+
+// ── AC3: Affordance StyleRun structural equality (ADR 0032 / ADR 0041) ────────
+
+// Own-comment: build_detail_content emits an EditAffordance StyleRun on the card
+// header line whose (start, len) equals the hit-test affordance's (col_start,
+// col_end - col_start) — single source of truth (plan step 5).
+#[test]
+fn own_comment_edit_style_run_coords_equal_affordance_coords() {
+    use crate::richtext::RichStyle;
+    use std::collections::HashMap;
+
+    let own_comment = json!({
+        "id": 42i64,
+        "created_by_id": 7i64,
+        "created_by_name": "Me",
+        "created_on": 1700000000u64,
+        "body_plain_text": "Hello"
+    });
+    let user_map: HashMap<i64, String> = HashMap::new();
+    let task = json!({ "name": "T", "id": 1, "project_id": 1, "is_completed": false });
+    let content = build_detail_content(&task, &[own_comment], &user_map, 80, Some(7));
+
+    let edit_aff = content
+        .affordances
+        .iter()
+        .find(|a| matches!(a.kind, AffordanceKind::Edit(_)))
+        .expect("own comment must have an Edit affordance");
+
+    let header_line = edit_aff.line_idx;
+    let runs = content
+        .line_styles
+        .get(header_line)
+        .expect("line_styles must exist for the header line");
+
+    let edit_run = runs
+        .iter()
+        .find(|r| r.style == RichStyle::EditAffordance)
+        .expect("header line must contain an EditAffordance StyleRun");
+
+    assert_eq!(
+        edit_run.start, edit_aff.col_start,
+        "EditAffordance run start must equal affordance col_start (single source of truth)"
+    );
+    assert_eq!(
+        edit_run.len,
+        edit_aff.col_end - edit_aff.col_start,
+        "EditAffordance run len must equal affordance col_end - col_start"
+    );
+}
+
+// Own-comment: build_detail_content emits a DeleteAffordance StyleRun on the card
+// header line whose (start, len) equals the hit-test affordance's coordinates.
+#[test]
+fn own_comment_delete_style_run_coords_equal_affordance_coords() {
+    use crate::richtext::RichStyle;
+    use std::collections::HashMap;
+
+    let own_comment = json!({
+        "id": 42i64,
+        "created_by_id": 7i64,
+        "created_by_name": "Me",
+        "created_on": 1700000000u64,
+        "body_plain_text": "Hello"
+    });
+    let user_map: HashMap<i64, String> = HashMap::new();
+    let task = json!({ "name": "T", "id": 1, "project_id": 1, "is_completed": false });
+    let content = build_detail_content(&task, &[own_comment], &user_map, 80, Some(7));
+
+    let delete_aff = content
+        .affordances
+        .iter()
+        .find(|a| matches!(a.kind, AffordanceKind::Delete(_)))
+        .expect("own comment must have a Delete affordance");
+
+    let header_line = delete_aff.line_idx;
+    let runs = content
+        .line_styles
+        .get(header_line)
+        .expect("line_styles must exist for the header line");
+
+    let delete_run = runs
+        .iter()
+        .find(|r| r.style == RichStyle::DeleteAffordance)
+        .expect("header line must contain a DeleteAffordance StyleRun");
+
+    assert_eq!(
+        delete_run.start, delete_aff.col_start,
+        "DeleteAffordance run start must equal affordance col_start (single source of truth)"
+    );
+    assert_eq!(
+        delete_run.len,
+        delete_aff.col_end - delete_aff.col_start,
+        "DeleteAffordance run len must equal affordance col_end - col_start"
+    );
+}
+
+// Other-user comment: no affordance StyleRuns emitted, no affordances registered.
+#[test]
+fn other_comment_has_no_affordance_style_runs_and_no_affordances() {
+    use crate::richtext::RichStyle;
+    use std::collections::HashMap;
+
+    let other_comment = json!({
+        "id": 99i64,
+        "created_by_id": 8i64,
+        "created_by_name": "Them",
+        "created_on": 1700000001u64,
+        "body_plain_text": "Their comment"
+    });
+    let user_map: HashMap<i64, String> = HashMap::new();
+    let task = json!({ "name": "T", "id": 1, "project_id": 1, "is_completed": false });
+    let content = build_detail_content(&task, &[other_comment], &user_map, 80, Some(7));
+
+    let has_affordance = content
+        .affordances
+        .iter()
+        .any(|a| matches!(a.kind, AffordanceKind::Edit(_) | AffordanceKind::Delete(_)));
+    assert!(
+        !has_affordance,
+        "comment by another user must have no Edit/Delete affordances"
+    );
+
+    let has_style_run = content.line_styles.iter().any(|runs| {
+        runs.iter()
+            .any(|r| r.style == RichStyle::EditAffordance || r.style == RichStyle::DeleteAffordance)
+    });
+    assert!(
+        !has_style_run,
+        "comment by another user must have no EditAffordance or DeleteAffordance StyleRuns"
     );
 }

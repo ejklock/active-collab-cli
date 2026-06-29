@@ -21,6 +21,7 @@ fn tasks_model_for_reflow(tasks: Vec<TaskRow>) -> Model {
         header: empty_header(),
         viewport: (0, 0),
         click_targets: vec![],
+        modal_button_targets: vec![],
         last_loaded: None,
         selection: None,
         copied_feedback: false,
@@ -76,6 +77,7 @@ fn projects_model(count: usize) -> Model {
         header: empty_header(),
         viewport: (0, 0),
         click_targets: vec![],
+        modal_button_targets: vec![],
         last_loaded: None,
         selection: None,
         copied_feedback: false,
@@ -106,6 +108,7 @@ fn tasks_model(count: usize) -> Model {
         header: empty_header(),
         viewport: (0, 0),
         click_targets: vec![],
+        modal_button_targets: vec![],
         last_loaded: None,
         selection: None,
         copied_feedback: false,
@@ -124,6 +127,7 @@ fn loading_projects_model() -> Model {
         header: empty_header(),
         viewport: (0, 0),
         click_targets: vec![],
+        modal_button_targets: vec![],
         last_loaded: None,
         selection: None,
         copied_feedback: false,
@@ -304,6 +308,7 @@ fn empty_list_navigation_never_panics_or_quits_projects() {
         header: empty_header(),
         viewport: (0, 0),
         click_targets: vec![],
+        modal_button_targets: vec![],
         last_loaded: None,
         selection: None,
         copied_feedback: false,
@@ -352,6 +357,7 @@ fn empty_list_navigation_never_panics_or_quits_tasks() {
         header: empty_header(),
         viewport: (0, 0),
         click_targets: vec![],
+        modal_button_targets: vec![],
         last_loaded: None,
         selection: None,
         copied_feedback: false,
@@ -465,6 +471,7 @@ fn select_on_empty_projects_is_a_noop() {
         header: empty_header(),
         viewport: (0, 0),
         click_targets: vec![],
+        modal_button_targets: vec![],
         last_loaded: None,
         selection: None,
         copied_feedback: false,
@@ -517,6 +524,7 @@ fn tasks_model_with_project_id(task_count: usize, project_id: i64) -> Model {
         header: empty_header(),
         viewport: (0, 0),
         click_targets: vec![],
+        modal_button_targets: vec![],
         last_loaded: None,
         selection: None,
         copied_feedback: false,
@@ -560,12 +568,15 @@ fn detail_model(line_count: usize, offset: usize) -> Model {
                 current_user_id: None,
                 affordances: vec![],
                 confirm_delete: None,
+                focused_comment: None,
+                comment_spans: vec![],
             },
         ],
         should_quit: false,
         header: empty_header(),
         viewport: (0, 0),
         click_targets: vec![],
+        modal_button_targets: vec![],
         last_loaded: None,
         selection: None,
         copied_feedback: false,
@@ -608,12 +619,15 @@ fn loading_detail_model() -> Model {
                 current_user_id: None,
                 affordances: vec![],
                 confirm_delete: None,
+                focused_comment: None,
+                comment_spans: vec![],
             },
         ],
         should_quit: false,
         header: empty_header(),
         viewport: (0, 0),
         click_targets: vec![],
+        modal_button_targets: vec![],
         last_loaded: None,
         selection: None,
         copied_feedback: false,
@@ -714,7 +728,7 @@ fn back_on_detail_pops_to_tasks() {
 #[test]
 fn detail_scroll_down_increments_offset() {
     let m = detail_model(5, 0);
-    let (m, _) = update(m, Msg::Down);
+    let (m, _) = update(m, Msg::ScrollDown);
     match m.stack.last() {
         Some(Screen::Detail { offset, .. }) => assert_eq!(*offset, 1),
         _ => panic!("expected Detail"),
@@ -724,7 +738,7 @@ fn detail_scroll_down_increments_offset() {
 #[test]
 fn detail_scroll_up_decrements_offset() {
     let m = detail_model(5, 2);
-    let (m, _) = update(m, Msg::Up);
+    let (m, _) = update(m, Msg::ScrollUp);
     match m.stack.last() {
         Some(Screen::Detail { offset, .. }) => assert_eq!(*offset, 1),
         _ => panic!("expected Detail"),
@@ -734,7 +748,7 @@ fn detail_scroll_up_decrements_offset() {
 #[test]
 fn detail_scroll_up_at_zero_stays_zero() {
     let m = detail_model(5, 0);
-    let (m, _) = update(m, Msg::Up);
+    let (m, _) = update(m, Msg::ScrollUp);
     match m.stack.last() {
         Some(Screen::Detail { offset, .. }) => assert_eq!(*offset, 0),
         _ => panic!("expected Detail"),
@@ -745,7 +759,7 @@ fn detail_scroll_up_at_zero_stays_zero() {
 #[test]
 fn detail_scroll_down_at_last_line_clamps() {
     let m = detail_model(3, 2);
-    let (m, _) = update(m, Msg::Down);
+    let (m, _) = update(m, Msg::ScrollDown);
     match m.stack.last() {
         Some(Screen::Detail { offset, .. }) => assert_eq!(*offset, 2),
         _ => panic!("expected Detail"),
@@ -1055,6 +1069,7 @@ fn select_on_tasks_threads_instance_into_load_detail_cmd() {
         header: empty_header(),
         viewport: (0, 0),
         click_targets: vec![],
+        modal_button_targets: vec![],
         last_loaded: None,
         selection: None,
         copied_feedback: false,
@@ -1367,11 +1382,14 @@ fn reflow_detail_builds_lines_and_is_memoized() {
             current_user_id: None,
             affordances: vec![],
             confirm_delete: None,
+            focused_comment: None,
+            comment_spans: vec![],
         }],
         should_quit: false,
         header: empty_header(),
         viewport: (0, 0),
         click_targets: vec![],
+        modal_button_targets: vec![],
         last_loaded: None,
         selection: None,
         copied_feedback: false,
@@ -1467,11 +1485,14 @@ fn reflow_detail_lines_fit_inner_width() {
             current_user_id: None,
             affordances: vec![],
             confirm_delete: None,
+            focused_comment: None,
+            comment_spans: vec![],
         }],
         should_quit: false,
         header: empty_header(),
         viewport: (0, 0),
         click_targets: vec![],
+        modal_button_targets: vec![],
         last_loaded: None,
         selection: None,
         copied_feedback: false,
@@ -1515,11 +1536,14 @@ fn reflow_detail_rebuilds_on_width_change() {
             current_user_id: None,
             affordances: vec![],
             confirm_delete: None,
+            focused_comment: None,
+            comment_spans: vec![],
         }],
         should_quit: false,
         header: empty_header(),
         viewport: (0, 0),
         click_targets: vec![],
+        modal_button_targets: vec![],
         last_loaded: None,
         selection: None,
         copied_feedback: false,
@@ -1561,11 +1585,14 @@ fn reflow_detail_is_noop_while_loading() {
             current_user_id: None,
             affordances: vec![],
             confirm_delete: None,
+            focused_comment: None,
+            comment_spans: vec![],
         }],
         should_quit: false,
         header: empty_header(),
         viewport: (0, 0),
         click_targets: vec![],
+        modal_button_targets: vec![],
         last_loaded: None,
         selection: None,
         copied_feedback: false,
@@ -1613,11 +1640,14 @@ fn reflow_detail_clamps_offset_when_content_shortens() {
             current_user_id: None,
             affordances: vec![],
             confirm_delete: None,
+            focused_comment: None,
+            comment_spans: vec![],
         }],
         should_quit: false,
         header: empty_header(),
         viewport: (0, 0),
         click_targets: vec![],
+        modal_button_targets: vec![],
         last_loaded: None,
         selection: None,
         copied_feedback: false,
@@ -1665,11 +1695,14 @@ fn user_map_resolved_updates_map_and_invalidates_cache() {
             current_user_id: None,
             affordances: vec![],
             confirm_delete: None,
+            focused_comment: None,
+            comment_spans: vec![],
         }],
         should_quit: false,
         header: empty_header(),
         viewport: (0, 0),
         click_targets: vec![],
+        modal_button_targets: vec![],
         last_loaded: None,
         selection: None,
         copied_feedback: false,
@@ -1742,11 +1775,14 @@ fn progressive_paint_assignee_fills_in_after_user_map_resolved() {
             current_user_id: None,
             affordances: vec![],
             confirm_delete: None,
+            focused_comment: None,
+            comment_spans: vec![],
         }],
         should_quit: false,
         header: empty_header(),
         viewport: (0, 0),
         click_targets: vec![],
+        modal_button_targets: vec![],
         last_loaded: None,
         selection: None,
         copied_feedback: false,
@@ -1826,6 +1862,7 @@ fn header_name_resolved_fills_name_and_header_line_shows_it() {
         header,
         viewport: (0, 0),
         click_targets: vec![],
+        modal_button_targets: vec![],
         last_loaded: None,
         selection: None,
         copied_feedback: false,
@@ -1875,32 +1912,35 @@ fn detail_global_scroll_offset_advances_through_all_content() {
             current_user_id: None,
             affordances: vec![],
             confirm_delete: None,
+            focused_comment: None,
+            comment_spans: vec![],
         }],
         should_quit: false,
         header: empty_header(),
         viewport: (0, 0),
         click_targets: vec![],
+        modal_button_targets: vec![],
         last_loaded: None,
         selection: None,
         copied_feedback: false,
     };
 
-    let (m, _) = update(m, Msg::Down);
-    let (m, _) = update(m, Msg::Down);
+    let (m, _) = update(m, Msg::ScrollDown);
+    let (m, _) = update(m, Msg::ScrollDown);
     match m.stack.last() {
         Some(Screen::Detail { offset, .. }) => {
             assert_eq!(
                 *offset, 2,
-                "two Down presses must advance single offset to 2"
+                "two ScrollDown presses must advance single offset to 2"
             );
         }
         _ => panic!("expected Detail"),
     }
 
-    let (m, _) = update(m, Msg::Up);
+    let (m, _) = update(m, Msg::ScrollUp);
     match m.stack.last() {
         Some(Screen::Detail { offset, .. }) => {
-            assert_eq!(*offset, 1, "Up must decrement single offset");
+            assert_eq!(*offset, 1, "ScrollUp must decrement single offset");
         }
         _ => panic!("expected Detail"),
     }

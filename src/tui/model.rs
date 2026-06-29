@@ -105,6 +105,24 @@ pub struct ClickTarget {
     pub index: usize,
 }
 
+/// A click-target for one of the two confirm-modal buttons.
+///
+/// Geometry is derived from the modal Rect that `render_modal` returns —
+/// single-sourced so the hit-test matches what was drawn. Written by the
+/// shell after each draw (via `set_modal_button_targets`) and consumed by
+/// `handle_click_detail` on a plain left-click.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ModalButtonTarget {
+    /// Left terminal column (inclusive).
+    pub x_start: u16,
+    /// One past the last terminal column (exclusive).
+    pub x_end: u16,
+    /// Terminal row the button occupies.
+    pub row: u16,
+    /// `true` → confirms the delete; `false` → cancels it.
+    pub is_confirm: bool,
+}
+
 /// Elm-style effect: what the shell should do after a pure update.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Cmd {
@@ -251,6 +269,11 @@ pub enum Screen {
         affordances: Vec<crate::render::LocalAffordance>,
         /// When Some(id), the [confirmar]/[cancelar] inline prompt is shown for comment `id`.
         confirm_delete: Option<i64>,
+        /// Index of the currently-focused comment card; None when the thread has no comments.
+        focused_comment: Option<usize>,
+        /// Per-card global line ranges `(start_line, line_count)`, parallel to `comments`.
+        /// Rebuilt by reflow_detail on the same rendered_width invalidation as `lines`.
+        comment_spans: Vec<(usize, usize)>,
     },
 }
 
@@ -417,6 +440,11 @@ pub struct Model {
     /// Empty until the first draw; stale during the frame that produces it (acceptable
     /// because clicks arrive in the following event loop iteration).
     pub click_targets: Vec<ClickTarget>,
+    /// Hit-map for the two confirm-modal buttons, set by the shell after each draw.
+    ///
+    /// Geometry is derived from the modal Rect returned by `render_modal` — single-sourced
+    /// so the hit-test always matches what was drawn. Empty when no confirm modal is open.
+    pub modal_button_targets: Vec<ModalButtonTarget>,
     /// ISO wall-clock string (YYYY-MM-DDTHH:MM:SSZ) of when the currently-displayed data was loaded.
     /// None until the first load completes; stamped exclusively by the shell via Msg payloads.
     pub last_loaded: Option<String>,
@@ -498,6 +526,14 @@ pub enum Msg {
     CommentMutationOk,
     /// The comment POST failed; preserve the buffer and show an error.
     CommentMutationErr(String),
+    /// Move the comment-card focus cursor forward by one card (j / Down in Detail browse mode).
+    FocusNextComment,
+    /// Move the comment-card focus cursor backward by one card (k / Up in Detail browse mode).
+    FocusPrevComment,
+    /// Confirm the pending delete (Enter key in confirm sub-mode).
+    ConfirmDeleteComment,
+    /// Cancel the pending delete (Esc key in confirm sub-mode).
+    CancelDeleteComment,
 }
 
 impl Model {
@@ -523,6 +559,7 @@ impl Model {
             header,
             viewport: (0, 0),
             click_targets: vec![],
+            modal_button_targets: vec![],
             last_loaded: None,
             selection: None,
             copied_feedback: false,
@@ -535,6 +572,15 @@ impl Model {
     /// `viewport` write pattern. Only the shell touches this field.
     pub fn set_click_targets(&mut self, targets: Vec<ClickTarget>) {
         self.click_targets = targets;
+    }
+
+    /// Replace the confirm-modal button targets recorded by the last render pass.
+    ///
+    /// Geometry is single-sourced from the modal Rect `render_modal` returns.
+    /// Called by the shell immediately after `set_click_targets`. Empty when no
+    /// confirm modal was rendered.
+    pub fn set_modal_button_targets(&mut self, targets: Vec<ModalButtonTarget>) {
+        self.modal_button_targets = targets;
     }
 
     pub fn top(&self) -> Option<&Screen> {
@@ -562,10 +608,9 @@ impl Model {
             rendered_width,
             offset,
             loading,
-            compose,
             current_user_id,
             affordances,
-            confirm_delete,
+            comment_spans,
             ..
         }) = self.top_mut()
         else {
@@ -576,20 +621,13 @@ impl Model {
             return;
         }
 
-        let compose_snapshot = compose.clone();
         let uid = *current_user_id;
-        let cd = *confirm_delete;
         let content =
-            crate::render::build_detail_content(task, comments, user_map, inner_width, uid, cd);
+            crate::render::build_detail_content(task, comments, user_map, inner_width, uid);
         *lines = content.lines;
         *line_styles = content.line_styles;
         *affordances = content.affordances;
-
-        if let Some(ref cp) = compose_snapshot {
-            let (compose_text, compose_styles) = crate::render::compose_block_lines(cp);
-            lines.extend(compose_text);
-            line_styles.extend(compose_styles);
-        }
+        *comment_spans = content.comment_spans;
 
         *rendered_width = inner_width;
         clamp_offset(offset, lines.len());
@@ -679,13 +717,19 @@ pub fn update(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
         | Msg::ComposeCancel
         | Msg::CommentMutationOk
         | Msg::CommentMutationErr(_)) => update_compose(model, m),
+        Msg::FocusNextComment => (handle_focus_next(model), vec![]),
+        Msg::FocusPrevComment => (handle_focus_prev(model), vec![]),
+        Msg::ConfirmDeleteComment => handle_confirm_delete(model),
+        Msg::CancelDeleteComment => (handle_cancel_delete(model), vec![]),
     }
 }
 
 fn update_scroll(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
     match msg {
-        Msg::Up | Msg::ScrollUp => (handle_up(model), vec![]),
-        Msg::Down | Msg::ScrollDown => (handle_down(model), vec![]),
+        Msg::Up => (handle_up(model), vec![]),
+        Msg::ScrollUp => (handle_scroll_up(model), vec![]),
+        Msg::Down => (handle_down(model), vec![]),
+        Msg::ScrollDown => (handle_scroll_down(model), vec![]),
         Msg::PageUp => (handle_page_up(model), vec![]),
         Msg::PageDown => (handle_page_down(model), vec![]),
         _ => (model, vec![]),
@@ -753,7 +797,42 @@ fn update_compose(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
     }
 }
 
-fn handle_up(mut model: Model) -> Model {
+fn handle_up(model: Model) -> Model {
+    match model.top() {
+        Some(Screen::Detail { .. }) => handle_focus_prev(model),
+        Some(_) => {
+            let mut model = model;
+            let sel = model.top().map(|s| s.selected()).unwrap_or(0);
+            if let Some(screen) = model.top_mut() {
+                screen.set_selected(sel.saturating_sub(1));
+            }
+            model
+        }
+        None => model,
+    }
+}
+
+fn handle_down(model: Model) -> Model {
+    let (viewport_cols, viewport_rows) = model.viewport;
+    match model.top() {
+        Some(Screen::Detail { .. }) => handle_focus_next(model),
+        Some(screen) => {
+            let count = screen.row_count();
+            let sel = screen.selected();
+            let _ = (viewport_cols, viewport_rows);
+            let mut model = model;
+            if count > 0 {
+                if let Some(screen) = model.top_mut() {
+                    screen.set_selected((sel + 1).min(count - 1));
+                }
+            }
+            model
+        }
+        None => model,
+    }
+}
+
+fn handle_scroll_up(mut model: Model) -> Model {
     match model.top_mut() {
         Some(Screen::Detail { offset, .. }) => {
             *offset = offset.saturating_sub(1);
@@ -767,7 +846,7 @@ fn handle_up(mut model: Model) -> Model {
     model
 }
 
-fn handle_down(mut model: Model) -> Model {
+fn handle_scroll_down(mut model: Model) -> Model {
     let (viewport_cols, viewport_rows) = model.viewport;
     match model.top_mut() {
         Some(Screen::Detail {
@@ -813,6 +892,107 @@ fn handle_page_down(mut model: Model) -> Model {
     model
 }
 
+fn handle_focus_next(mut model: Model) -> Model {
+    let info = focus_move_info(&model);
+    let Some((focused, comment_count, comment_spans, viewport)) = info else {
+        return model;
+    };
+    if comment_count == 0 {
+        return model;
+    }
+    let new_focus = match focused {
+        None => 0,
+        Some(i) => (i + 1).min(comment_count - 1),
+    };
+    apply_focus(&mut model, new_focus, &comment_spans, viewport);
+    model
+}
+
+fn handle_focus_prev(mut model: Model) -> Model {
+    let info = focus_move_info(&model);
+    let Some((focused, comment_count, comment_spans, viewport)) = info else {
+        return model;
+    };
+    if comment_count == 0 {
+        return model;
+    }
+    let new_focus = match focused {
+        None => 0,
+        Some(0) => 0,
+        Some(i) => i - 1,
+    };
+    apply_focus(&mut model, new_focus, &comment_spans, viewport);
+    model
+}
+
+type FocusMoveInfo = Option<(Option<usize>, usize, Vec<(usize, usize)>, (u16, u16))>;
+
+fn focus_move_info(model: &Model) -> FocusMoveInfo {
+    match model.top() {
+        Some(Screen::Detail {
+            comments,
+            focused_comment,
+            comment_spans,
+            ..
+        }) => Some((
+            *focused_comment,
+            comments.len(),
+            comment_spans.clone(),
+            model.viewport,
+        )),
+        _ => None,
+    }
+}
+
+fn apply_focus(
+    model: &mut Model,
+    new_focus: usize,
+    comment_spans: &[(usize, usize)],
+    viewport: (u16, u16),
+) {
+    if let Some(Screen::Detail {
+        focused_comment,
+        offset,
+        lines,
+        assets,
+        ..
+    }) = model.top_mut()
+    {
+        *focused_comment = Some(new_focus);
+        if let Some(&(card_start, card_count)) = comment_spans.get(new_focus) {
+            let (viewport_cols, viewport_rows) = viewport;
+            let max = detail_max_offset(viewport_rows, viewport_cols, lines.len(), assets);
+            *offset = scroll_offset_for_card(*offset, card_start, card_count, viewport_rows, max);
+        }
+    }
+}
+
+/// Derive the scroll offset so that the card at `[card_start, card_start + card_count)`
+/// is fully visible within `viewport_rows` (minus chrome).
+///
+/// - Card below viewport end → scroll down so card's last line is the last visible line.
+/// - Card above viewport start → scroll up so card's first line is the first visible line.
+/// - Card already fully visible → offset unchanged.
+pub(crate) fn scroll_offset_for_card(
+    current_offset: usize,
+    card_start: usize,
+    card_count: usize,
+    viewport_rows: u16,
+    max_offset: usize,
+) -> usize {
+    let text_vh = (viewport_rows.saturating_sub(DETAIL_CHROME_ROWS) as usize).max(1);
+    let card_end = card_start + card_count;
+    let viewport_end = current_offset + text_vh;
+
+    if card_end > viewport_end {
+        card_end.saturating_sub(text_vh).min(max_offset)
+    } else if card_start < current_offset {
+        card_start.min(max_offset)
+    } else {
+        current_offset
+    }
+}
+
 fn handle_click(
     model: Model,
     column: u16,
@@ -843,6 +1023,29 @@ fn handle_click_list(model: Model, row: u16) -> (Model, Vec<Cmd>) {
     handle_select(model)
 }
 
+fn confirm_modal_is_open(model: &Model) -> bool {
+    matches!(
+        model.top(),
+        Some(Screen::Detail {
+            confirm_delete: Some(_),
+            ..
+        })
+    )
+}
+
+fn dispatch_confirm_modal_click(model: Model, column: u16, row: u16) -> (Model, Vec<Cmd>) {
+    let hit = model
+        .modal_button_targets
+        .iter()
+        .find(|t| row == t.row && column >= t.x_start && column < t.x_end)
+        .cloned();
+    match hit {
+        Some(btn) if btn.is_confirm => handle_confirm_delete(model),
+        Some(_) => (handle_cancel_delete(model), vec![]),
+        None => (model, vec![]),
+    }
+}
+
 fn handle_click_detail(
     model: Model,
     column: u16,
@@ -852,6 +1055,10 @@ fn handle_click_detail(
     use crossterm::event::KeyModifiers;
     let has_modifier =
         modifiers.contains(KeyModifiers::CONTROL) || modifiers.contains(KeyModifiers::SUPER);
+
+    if confirm_modal_is_open(&model) {
+        return dispatch_confirm_modal_click(model, column, row);
+    }
 
     if has_modifier {
         if let Some(kind) = affordance_at(&model, column, row) {
@@ -866,7 +1073,6 @@ fn handle_click_detail(
         return (model, vec![]);
     }
 
-    // Unmodified press on the body area: start a selection, clear any prior copied feedback.
     if is_in_body_area(&model, row) {
         let mut model = model;
         model.copied_feedback = false;
@@ -877,8 +1083,8 @@ fn handle_click_detail(
         return (model, vec![]);
     }
 
-    // Unmodified press outside the body (e.g. asset panel): clear selection, no asset action.
-    // Plain click on an asset row is reserved for V6 text selection and must not open an asset.
+    // Plain click outside the body (e.g. asset panel): clear selection, no asset action.
+    // Reserved for V6 text selection — must not open an asset on plain click.
     let mut model = model;
     model.selection = None;
     (model, vec![])
@@ -897,8 +1103,6 @@ fn dispatch_affordance_click(
         AffordanceKind::Delete(comment_id) => {
             (handle_delete_comment_request(model, comment_id), vec![])
         }
-        AffordanceKind::Confirm => handle_confirm_delete(model),
-        AffordanceKind::Cancel => (handle_cancel_delete(model), vec![]),
     }
 }
 
@@ -1229,7 +1433,16 @@ fn asset_panel_cmd_at(
     })
 }
 
-fn handle_select(mut model: Model) -> (Model, Vec<Cmd>) {
+fn handle_select(model: Model) -> (Model, Vec<Cmd>) {
+    // When the delete-confirm modal is open, Enter confirms the delete.
+    if let Some(Screen::Detail {
+        confirm_delete: Some(_),
+        ..
+    }) = model.top()
+    {
+        return handle_confirm_delete(model);
+    }
+    let mut model = model;
     let mut cmds = vec![];
     if let Some(action) = select_action(&model.stack) {
         match action {
@@ -1276,6 +1489,8 @@ fn handle_select(mut model: Model) -> (Model, Vec<Cmd>) {
                     current_user_id: None,
                     affordances: vec![],
                     confirm_delete: None,
+                    focused_comment: None,
+                    comment_spans: vec![],
                 });
             }
         }
@@ -1283,7 +1498,16 @@ fn handle_select(mut model: Model) -> (Model, Vec<Cmd>) {
     (model, cmds)
 }
 
-fn handle_back(mut model: Model) -> Model {
+fn handle_back(model: Model) -> Model {
+    // When the delete-confirm modal is open, Esc cancels the delete (not Back).
+    if let Some(Screen::Detail {
+        confirm_delete: Some(_),
+        ..
+    }) = model.top()
+    {
+        return handle_cancel_delete(model);
+    }
+    let mut model = model;
     if model.stack.len() <= 1 {
         model.should_quit = true;
     } else {
@@ -1408,6 +1632,8 @@ fn handle_loaded_detail(mut model: Model, load: DetailLoad) -> Model {
         ref mut current_user_id,
         ref mut affordances,
         ref mut confirm_delete,
+        ref mut focused_comment,
+        ref mut comment_spans,
         ..
     }) = model.top_mut()
     {
@@ -1423,6 +1649,8 @@ fn handle_loaded_detail(mut model: Model, load: DetailLoad) -> Model {
         *rw = usize::MAX;
         *affordances = vec![];
         *confirm_delete = None;
+        *focused_comment = None;
+        *comment_spans = vec![];
     }
     model.last_loaded = Some(load.loaded_at);
     model
@@ -1779,6 +2007,7 @@ pub fn init_mine(header: Header, seed: Option<Vec<MineTableRow>>) -> (Model, Vec
         header,
         viewport: (0, 0),
         click_targets: vec![],
+        modal_button_targets: vec![],
         last_loaded: None,
         selection: None,
         copied_feedback: false,

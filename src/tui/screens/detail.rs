@@ -20,6 +20,10 @@ pub struct DetailParams<'a> {
     pub loading: bool,
     pub task_id: i64,
     pub task_name: &'a str,
+    /// Index of the focused comment card; `None` when nothing is focused.
+    pub focused_comment: Option<usize>,
+    /// Per-card line ranges `(start_line, line_count)` in global `lines`.
+    pub comment_spans: &'a [(usize, usize)],
 }
 
 /// Draw the Detail screen as a single globally-scrollable bordered content block.
@@ -42,7 +46,17 @@ pub fn draw_detail(frame: &mut Frame, area: Rect, params: DetailParams<'_>) {
         return;
     }
 
-    render_content(frame, area, params.lines, params.line_styles, params.offset);
+    let focused_span = params
+        .focused_comment
+        .and_then(|idx| params.comment_spans.get(idx).copied());
+    render_content(
+        frame,
+        area,
+        params.lines,
+        params.line_styles,
+        params.offset,
+        focused_span,
+    );
 }
 
 /// Build a ratatui `Style` for the given `RichStyle` emphasis kind.
@@ -54,6 +68,8 @@ fn emphasis_style(rs: RichStyle) -> Style {
         RichStyle::Strike => Style::default().add_modifier(Modifier::CROSSED_OUT),
         RichStyle::Underline => Style::default().add_modifier(Modifier::UNDERLINED),
         RichStyle::Link => theme::link_style(),
+        RichStyle::EditAffordance => theme::edit_affordance_style(),
+        RichStyle::DeleteAffordance => theme::delete_affordance_style(),
         RichStyle::Plain => Style::default(),
     }
 }
@@ -188,6 +204,7 @@ fn render_content(
     lines: &[String],
     line_styles: &[Vec<StyleRun>],
     offset: usize,
+    focused_span: Option<(usize, usize)>,
 ) {
     let block = Block::default().borders(Borders::ALL);
     let inner = block.inner(area);
@@ -197,13 +214,19 @@ fn render_content(
         return;
     }
 
+    let focus_style = theme::focused_comment_style();
     let text: Text = Text::from(
         lines
             .iter()
             .enumerate()
             .map(|(i, l)| {
                 let runs = line_styles.get(i).map(|v| v.as_slice()).unwrap_or(&[]);
-                styled_line_with_runs(l, runs)
+                let line = styled_line_with_runs(l, runs);
+                if is_in_focused_span(i, focused_span) {
+                    line.patch_style(focus_style)
+                } else {
+                    line
+                }
             })
             .collect::<Vec<_>>(),
     );
@@ -227,5 +250,13 @@ fn render_content(
             .position(eff);
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight);
         frame.render_stateful_widget(scrollbar, area, &mut scrollbar_state);
+    }
+}
+
+/// Return true when global line index `i` falls within the focused card span.
+fn is_in_focused_span(i: usize, span: Option<(usize, usize)>) -> bool {
+    match span {
+        Some((start, count)) => i >= start && i < start + count,
+        None => false,
     }
 }
