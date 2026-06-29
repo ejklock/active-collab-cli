@@ -127,12 +127,17 @@ sequenceDiagram
         Cache-->>Ctl: cached task
     else miss or refresh
         Ctl->>API: fetch (token only to instance host)
-        API-->>Ctl: payload
-        Ctl->>Cache: write
+        alt 200
+            API-->>Ctl: payload
+            Ctl->>Cache: write
+        else 401 (token revoked)
+            API-->>Ctl: 401
+            Note over Ctl,Shell: distinct unauthorized signal,<br/>never collapsed to empty (ADR 0042)
+        end
     end
-    Ctl-->>Shell: Msg::Loaded(data)
+    Ctl-->>Shell: Msg::Loaded(data | unauthorized)
     Shell->>App: Msg::Loaded
-    App-->>Shell: Model with data
+    App-->>Shell: Model with data (or auth_error → re-auth status line)
     Shell-->>User: re-render (loader hidden)
 ```
 
@@ -233,6 +238,27 @@ sequenceDiagram
   and no task / no instance / an HTTP error exits non-zero with no false success. Deleting
   the command leaves the TUI write intact — it is a non-interactive adapter over the one
   write seam, not a second implementation.
+
+## Auth-failure (401) handling
+
+ActiveCollab's API token is **durable** — there is no refresh-token endpoint; it is
+valid until revoked (logout, password change, admin removal)
+([ADR 0042](/adr/0042-detect-401-and-guide-reauthentication.md)). A revoked token makes
+every authenticated request return **HTTP 401**, which is detected as a **distinct
+condition and never collapsed into empty data**:
+
+- **Status-returning methods** (`fetch_task`, `create/update/delete_comment`) expose the
+  status; callers branch on `HTTP_UNAUTHORIZED` (a shared `401` constant).
+- **Collapsing methods** (`fetch_open_tasks`) raise a typed **`Unauthorized`** error on
+  401 (other non-200 stays the empty default); existing `.unwrap_or_default()` callers
+  swallow it unchanged, so the change is non-breaking.
+
+Each surface translates the 401 into one shared, actionable re-auth message
+(`i18n::t(...)`, pt-BR in `locales/pt_BR.json`): the **CLI** (`get`/`current`/`mine`/
+`comment`) prints it and **exits non-zero**; the **TUI** sets a `Screen::Detail.auth_error`
+flag rendered in the **thin status line** ([ADR 0038](/adr/0038-detail-footer-contextual-hint-and-status-line.md)),
+pointing the user to `ac setup add`. Recovery is **re-authentication** (re-running the
+idempotent `setup add`), not a token refresh; there is no in-app re-auth modal.
 
 ## Quality gates
 

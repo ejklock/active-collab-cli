@@ -1,6 +1,6 @@
 use crate::agent_json;
-use crate::client::ActiveCollabClient;
-use crate::http::Http;
+use crate::client::{ActiveCollabClient, Unauthorized};
+use crate::http::{Http, HTTP_UNAUTHORIZED};
 use crate::i18n::{t, SUPPORTED};
 use crate::render::{self, MineTableRow};
 use crate::store::cache::TaskCache;
@@ -496,6 +496,7 @@ pub struct DisplayFlags {
 ///
 /// Returns (task, comments) from cache or API, or None on HTTP error.
 /// When `refresh` is false and the cache has a hit, no network call is made.
+#[allow(clippy::too_many_arguments)]
 pub async fn load_task(
     cache: &TaskCache<'_>,
     client: &ActiveCollabClient,
@@ -504,6 +505,7 @@ pub async fn load_task(
     tid: i64,
     refresh: bool,
     no_comments: bool,
+    err: &mut dyn Write,
 ) -> Option<(Value, Vec<Value>)> {
     if !refresh {
         if let Ok(Some(cached)) = cache.read(instance_name, pid, tid) {
@@ -518,13 +520,27 @@ pub async fn load_task(
     }
 
     let (status, payload_opt) = client.fetch_task(pid, tid).await.ok()?;
+    if status == HTTP_UNAUTHORIZED {
+        writeln!(
+            err,
+            "{}",
+            t("Token invalid or revoked — run `ac setup add` to re-authenticate.")
+        )
+        .ok();
+        return None;
+    }
     if status != 200 {
-        render::print_error(&t(&format!(
-            "Error: task {p}/{t} not found (HTTP {status}).",
-            p = pid,
-            t = tid,
-            status = status
-        )));
+        writeln!(
+            err,
+            "{}",
+            t(&format!(
+                "Error: task {p}/{t} not found (HTTP {status}).",
+                p = pid,
+                t = tid,
+                status = status
+            ))
+        )
+        .ok();
         return None;
     }
 
@@ -564,7 +580,7 @@ pub async fn do_get_task(
     tid: i64,
     flags: &DisplayFlags,
     out: &mut dyn Write,
-    _err: &mut dyn Write,
+    err: &mut dyn Write,
 ) -> i32 {
     let result = load_task(
         cache,
@@ -574,6 +590,7 @@ pub async fn do_get_task(
         tid,
         flags.refresh,
         flags.no_comments,
+        err,
     )
     .await;
 
@@ -786,6 +803,15 @@ pub async fn comment_core(
             write_comment_success(comment_id, task_id, project_id, json, out);
             0
         }
+        Ok((HTTP_UNAUTHORIZED, _)) => {
+            write_comment_failure(
+                &t("Token invalid or revoked — run `ac setup add` to re-authenticate."),
+                json,
+                out,
+                err,
+            );
+            1
+        }
         Ok((status, _)) => {
             let reason = format!(
                 "HTTP {status} posting comment to task {project_id}/{task_id}",
@@ -852,6 +878,47 @@ fn mine_task_to_row(task: crate::models::MineTask) -> MineTableRow {
         due_on: task.due_on,
         project_name: None,
     }
+}
+
+/// Auth-aware mine aggregation for the CLI path.
+///
+/// Mirrors collect_mine_rows but propagates Unauthorized rather than swallowing it.
+/// On 401 from any target instance, returns Err(Unauthorized). Other non-200 errors
+/// from an instance are silently skipped (unchanged behaviour for transient failures).
+async fn fetch_mine_rows_checked(
+    targets: &[Instance],
+    http: &Http,
+) -> anyhow::Result<Vec<MineTableRow>> {
+    let timer = std::time::Instant::now();
+
+    let mut set: tokio::task::JoinSet<(usize, anyhow::Result<Vec<crate::models::MineTask>>)> =
+        tokio::task::JoinSet::new();
+
+    for (idx, inst) in targets.iter().enumerate() {
+        let client = ActiveCollabClient::new(inst.clone(), http.clone());
+        set.spawn(async move { (idx, client.fetch_open_tasks().await) });
+    }
+
+    let mut per_index: Vec<Vec<crate::models::MineTask>> =
+        (0..targets.len()).map(|_| Vec::new()).collect();
+
+    while let Some(joined) = set.join_next().await {
+        if let Ok((idx, result)) = joined {
+            match result {
+                Ok(tasks) => per_index[idx] = tasks,
+                Err(e) if e.is::<Unauthorized>() => return Err(e),
+                Err(_) => {}
+            }
+        }
+    }
+
+    let rows = per_index
+        .into_iter()
+        .flat_map(|tasks| tasks.into_iter().map(mine_task_to_row))
+        .collect();
+
+    crate::timing::record("mine_list_load", timer.elapsed());
+    Ok(rows)
 }
 
 /// The outcome of `mine_core` for the caller to act on.
@@ -929,7 +996,22 @@ pub async fn mine_core(
         return MineOutcome::TuiLaunch { targets };
     }
 
-    let rows = collect_mine_rows(&targets, http).await;
+    let rows = match fetch_mine_rows_checked(&targets, http).await {
+        Ok(r) => r,
+        Err(e) if e.is::<Unauthorized>() => {
+            writeln!(
+                err,
+                "{}",
+                t("Token invalid or revoked — run `ac setup add` to re-authenticate.")
+            )
+            .ok();
+            return MineOutcome::Done(1);
+        }
+        Err(e) => {
+            writeln!(err, "Error fetching tasks: {e}").ok();
+            return MineOutcome::Done(1);
+        }
+    };
 
     if json {
         let line = serde_json::to_string(&agent_json::mine_object(&rows))
