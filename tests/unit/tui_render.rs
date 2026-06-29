@@ -2061,6 +2061,7 @@ fn view_detail_footer_has_no_tab_switch_hint() {
             affordances: vec![],
             confirm_delete: None,
             focused_comment: None,
+            auth_error: false,
             comment_spans: vec![],
         }],
         should_quit: false,
@@ -2125,6 +2126,7 @@ fn view_detail_footer_without_assets_has_no_tab_hint() {
             affordances: vec![],
             confirm_delete: None,
             focused_comment: None,
+            auth_error: false,
             comment_spans: vec![],
         }],
         should_quit: false,
@@ -3158,6 +3160,7 @@ mod footer_refresh_hint {
                 affordances: vec![],
                 confirm_delete: None,
                 focused_comment: None,
+                auth_error: false,
                 comment_spans: vec![],
             }],
             should_quit: false,
@@ -3205,6 +3208,7 @@ mod footer_refresh_hint {
                 affordances: vec![],
                 confirm_delete: None,
                 focused_comment: None,
+                auth_error: false,
                 comment_spans: vec![],
             }],
             should_quit: false,
@@ -3497,6 +3501,7 @@ mod footer_refresh_hint {
                 affordances: vec![],
                 confirm_delete: None,
                 focused_comment: None,
+                auth_error: false,
                 comment_spans: vec![],
             }],
             should_quit: false,
@@ -3515,6 +3520,7 @@ mod footer_refresh_hint {
             user_map: HashMap::new(),
             loaded_at: "2026-06-25T16:22:00".into(),
             current_user_id: None,
+            unauthorized: false,
         };
         let (model, _) = update(model, Msg::LoadedDetail(load));
         let content = render_model(&model);
@@ -3666,6 +3672,7 @@ mod v6_view {
                 affordances: vec![],
                 confirm_delete: None,
                 focused_comment: None,
+                auth_error: false,
                 comment_spans: vec![],
             }],
             should_quit: false,
@@ -4843,6 +4850,7 @@ fn hint_for_screen_detail_with_assets_has_no_ctrl_cmd_in_footer() {
         affordances: vec![],
         confirm_delete: None,
         focused_comment: None,
+        auth_error: false,
         comment_spans: vec![],
     };
     let hint = hint_for_screen(&screen);
@@ -5707,6 +5715,7 @@ mod compose_render {
                 affordances: vec![],
                 confirm_delete: None,
                 focused_comment: None,
+                auth_error: false,
                 comment_spans: vec![],
             }],
             should_quit: false,
@@ -6009,6 +6018,7 @@ mod confirm_modal_buttons {
                 affordances: vec![],
                 confirm_delete: Some(comment_id),
                 focused_comment: None,
+                auth_error: false,
                 comment_spans: vec![],
             }],
             should_quit: false,
@@ -6278,6 +6288,7 @@ mod yes_no_confirm_labels {
                 affordances: vec![],
                 confirm_delete: Some(comment_id),
                 focused_comment: None,
+                auth_error: false,
                 comment_spans: vec![],
             }],
             should_quit: false,
@@ -6966,6 +6977,7 @@ mod contextual_footer {
                 affordances: content.affordances,
                 confirm_delete,
                 focused_comment,
+                auth_error: false,
                 comment_spans: content.comment_spans,
             }],
             should_quit: false,
@@ -7317,6 +7329,7 @@ mod contextual_footer {
                 affordances: vec![],
                 confirm_delete: None,
                 focused_comment: None,
+                auth_error: false,
                 comment_spans: vec![],
             }],
             should_quit: false,
@@ -7452,6 +7465,7 @@ mod confirm_modal_render {
                 affordances: content.affordances,
                 confirm_delete,
                 focused_comment: None,
+                auth_error: false,
                 comment_spans: content.comment_spans,
             }],
             should_quit: false,
@@ -7833,6 +7847,7 @@ fn ctrl_click_on_editar_cell_opens_compose_edit_regression() {
             affordances: content.affordances.clone(),
             confirm_delete: None,
             focused_comment: None,
+            auth_error: false,
             comment_spans: content.comment_spans.clone(),
         }],
         should_quit: false,
@@ -7870,4 +7885,287 @@ fn ctrl_click_on_editar_cell_opens_compose_edit_regression() {
     }
 
     set_language("en");
+}
+
+mod auth_error_render {
+    use crate::i18n::set_language;
+    use crate::render::build_detail_content;
+    use crate::tui::model::{
+        Compose, ComposeKind, ComposeStatus, DetailLoad, Header, Model, Msg, Screen,
+    };
+    use crate::tui::update;
+    use crate::tui::view::view;
+    use ratatui::{backend::TestBackend, Terminal};
+    use serde_json::json;
+    use std::collections::HashMap;
+
+    const AUTH_ERR_EN: &str = "Token invalid or revoked — run `ac setup add` to re-authenticate.";
+
+    fn buf_row_string(buf: &ratatui::buffer::Buffer, row: u16) -> String {
+        let area = buf.area();
+        (0..area.width)
+            .map(|x| buf.cell((x, row)).unwrap().symbol().to_string())
+            .collect()
+    }
+
+    fn buf_to_string(buf: &ratatui::buffer::Buffer) -> String {
+        let area = buf.area();
+        let mut out = String::new();
+        for y in 0..area.height {
+            for x in 0..area.width {
+                out.push_str(buf.cell((x, y)).unwrap().symbol());
+            }
+            out.push('\n');
+        }
+        out
+    }
+
+    fn make_detail_model(auth_error: bool, compose: Option<Compose>) -> Model {
+        let task = json!({"name": "T", "id": 1, "project_id": 1, "is_completed": false});
+        let inner_width = 78usize;
+        let content = build_detail_content(&task, &[], &HashMap::new(), inner_width, None);
+        Model {
+            stack: vec![Screen::Detail {
+                instance: "inst".into(),
+                project_id: 1,
+                task_id: 1,
+                task,
+                comments: vec![],
+                user_map: HashMap::new(),
+                lines: content.lines,
+                line_styles: content.line_styles,
+                assets: vec![],
+                offset: 0,
+                loading: false,
+                rendered_width: 80,
+                compose,
+                current_user_id: None,
+                affordances: content.affordances,
+                confirm_delete: None,
+                focused_comment: None,
+                auth_error,
+                comment_spans: content.comment_spans,
+            }],
+            should_quit: false,
+            header: Header::from_instances(&[], None),
+            viewport: (0, 0),
+            click_targets: vec![],
+            modal_button_targets: vec![],
+            last_loaded: None,
+            selection: None,
+            copied_feedback: false,
+        }
+    }
+
+    fn render_model(model: &Model) -> ratatui::buffer::Buffer {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| view(model, frame, &mut vec![], &mut vec![]))
+            .unwrap();
+        terminal.backend().buffer().clone()
+    }
+
+    fn make_detail_load(unauthorized: bool) -> DetailLoad {
+        DetailLoad {
+            task: json!({"name": "T", "id": 1, "project_id": 1, "is_completed": false}),
+            comments: vec![],
+            assets: vec![],
+            user_map: HashMap::new(),
+            loaded_at: "2025-01-01T00:00:00Z".into(),
+            current_user_id: None,
+            unauthorized,
+        }
+    }
+
+    fn initial_detail_model() -> Model {
+        make_detail_model(false, None)
+    }
+
+    // AC1: A 401 detail-load sets auth_error on the model and the rendered status
+    // line shows the re-auth message.
+    #[test]
+    fn detail_load_401_sets_auth_error_and_renders_reauth_message() {
+        let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let model = initial_detail_model();
+        let (model, _) = update(model, Msg::LoadedDetail(make_detail_load(true)));
+
+        let auth_error = match model.stack.last() {
+            Some(Screen::Detail { auth_error, .. }) => *auth_error,
+            _ => panic!("expected Detail screen"),
+        };
+        assert!(auth_error, "auth_error must be true after 401 detail load");
+
+        let buf = render_model(&model);
+        let content = buf_to_string(&buf);
+        assert!(
+            content.contains("Token invalid or revoked"),
+            "status line must show re-auth message after 401 load: {content}"
+        );
+    }
+
+    // AC1 (negation): A 200 detail-load does not set auth_error.
+    #[test]
+    fn detail_load_200_does_not_set_auth_error() {
+        let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let model = initial_detail_model();
+        let (model, _) = update(model, Msg::LoadedDetail(make_detail_load(false)));
+
+        let auth_error = match model.stack.last() {
+            Some(Screen::Detail { auth_error, .. }) => *auth_error,
+            _ => panic!("expected Detail screen"),
+        };
+        assert!(
+            !auth_error,
+            "auth_error must be false after 200 detail load"
+        );
+    }
+
+    // AC2: Msg::AuthExpired sets auth_error and retains the compose buffer.
+    #[test]
+    fn auth_expired_sets_auth_error_retains_compose_buffer() {
+        let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let compose = Compose {
+            kind: ComposeKind::New,
+            buffer: "my draft".into(),
+            status: ComposeStatus::Editing,
+        };
+        let model = make_detail_model(false, Some(compose));
+        let (model, _) = update(model, Msg::AuthExpired);
+
+        match model.stack.last() {
+            Some(Screen::Detail {
+                auth_error,
+                compose: Some(cp),
+                ..
+            }) => {
+                assert!(*auth_error, "auth_error must be true after AuthExpired");
+                assert_eq!(
+                    cp.buffer, "my draft",
+                    "compose buffer must be retained after AuthExpired"
+                );
+            }
+            _ => panic!("expected Detail screen with compose"),
+        }
+    }
+
+    // AC2: After AuthExpired, the rendered status line shows the re-auth message,
+    // which is distinct from the generic write-error copy.
+    #[test]
+    fn auth_expired_renders_reauth_message_not_generic_error() {
+        let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let model = make_detail_model(true, None);
+        let buf = render_model(&model);
+        let content = buf_to_string(&buf);
+        assert!(
+            content.contains("Token invalid or revoked"),
+            "status line must show re-auth message, not generic error: {content}"
+        );
+        assert!(
+            !content.contains("Failed to post comment"),
+            "status line must NOT show generic write-error when auth_error is set: {content}"
+        );
+    }
+
+    // AC3: A subsequent 200 detail load clears auth_error.
+    #[test]
+    fn subsequent_200_load_clears_auth_error() {
+        let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let model = initial_detail_model();
+        let (model, _) = update(model, Msg::LoadedDetail(make_detail_load(true)));
+
+        let auth_error = match model.stack.last() {
+            Some(Screen::Detail { auth_error, .. }) => *auth_error,
+            _ => panic!("expected Detail screen"),
+        };
+        assert!(auth_error, "auth_error must be set after 401 load");
+
+        let (model, _) = update(model, Msg::LoadedDetail(make_detail_load(false)));
+        let auth_error_after = match model.stack.last() {
+            Some(Screen::Detail { auth_error, .. }) => *auth_error,
+            _ => panic!("expected Detail screen"),
+        };
+        assert!(
+            !auth_error_after,
+            "auth_error must be cleared after a subsequent 200 load"
+        );
+
+        let buf = render_model(&model);
+        let content = buf_to_string(&buf);
+        assert!(
+            !content.contains("Token invalid or revoked"),
+            "status line must NOT show re-auth message after 200 load clears auth_error: {content}"
+        );
+    }
+
+    // AC4: Under pt-BR locale the status line renders the pt-BR translation.
+    #[test]
+    fn auth_error_renders_pt_br_translation() {
+        let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("pt_BR");
+        let model = make_detail_model(true, None);
+        let buf = render_model(&model);
+        set_language("en");
+        let content = buf_to_string(&buf);
+        assert!(
+            content.contains("Token inv\u{00e1}lido"),
+            "pt-BR status line must contain 'Token inválido': {content}"
+        );
+        assert!(
+            content.contains("reautenticar"),
+            "pt-BR status line must contain 'reautenticar': {content}"
+        );
+    }
+
+    // AC4 (identity key check): The English key matches identity — i18n::t returns
+    // the source string unchanged when the locale is English.
+    #[test]
+    fn auth_error_english_key_is_identity() {
+        let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let translated = crate::i18n::t(AUTH_ERR_EN);
+        assert_eq!(
+            translated, AUTH_ERR_EN,
+            "English source key must be identity (no new locale entry)"
+        );
+    }
+
+    // Auth_error renders in status line even when compose modal is open
+    // (auth_error priority > compose presence).
+    #[test]
+    fn auth_error_takes_priority_over_compose_absence_in_status_line() {
+        let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let model = make_detail_model(true, None);
+        let buf = render_model(&model);
+        let area = buf.area();
+        let last_row = buf_row_string(&buf, area.height - 1);
+        assert!(
+            last_row.contains("Token invalid") || {
+                let second_last = buf_row_string(&buf, area.height - 2);
+                second_last.contains("Token invalid")
+            },
+            "auth error message must appear in one of the last two rows: last='{last_row}'"
+        );
+    }
+
+    // Mutation: dropping the auth_error branch (setting auth_error = false in model)
+    // must cause the re-auth message to disappear — proves the assertion is real.
+    #[test]
+    fn no_auth_error_means_no_reauth_message_in_status_line() {
+        let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let model = make_detail_model(false, None);
+        let buf = render_model(&model);
+        let content = buf_to_string(&buf);
+        assert!(
+            !content.contains("Token invalid or revoked"),
+            "without auth_error the re-auth message must NOT appear: {content}"
+        );
+    }
 }

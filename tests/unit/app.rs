@@ -569,6 +569,7 @@ fn detail_model(line_count: usize, offset: usize) -> Model {
                 affordances: vec![],
                 confirm_delete: None,
                 focused_comment: None,
+                auth_error: false,
                 comment_spans: vec![],
             },
         ],
@@ -620,6 +621,7 @@ fn loading_detail_model() -> Model {
                 affordances: vec![],
                 confirm_delete: None,
                 focused_comment: None,
+                auth_error: false,
                 comment_spans: vec![],
             },
         ],
@@ -683,6 +685,7 @@ fn make_detail_load(task: serde_json::Value, user_map: HashMap<i64, String>) -> 
         user_map,
         loaded_at: "2026-06-25T14:00:00Z".into(),
         current_user_id: None,
+        unauthorized: false,
     }
 }
 
@@ -1104,6 +1107,7 @@ fn loaded_detail_stores_assets_on_screen() {
         user_map: HashMap::new(),
         loaded_at: "2026-06-25T14:00:00Z".into(),
         current_user_id: None,
+        unauthorized: false,
     };
     let (m, _) = update(m, Msg::LoadedDetail(load));
     match m.stack.last() {
@@ -1383,6 +1387,7 @@ fn reflow_detail_builds_lines_and_is_memoized() {
             affordances: vec![],
             confirm_delete: None,
             focused_comment: None,
+            auth_error: false,
             comment_spans: vec![],
         }],
         should_quit: false,
@@ -1486,6 +1491,7 @@ fn reflow_detail_lines_fit_inner_width() {
             affordances: vec![],
             confirm_delete: None,
             focused_comment: None,
+            auth_error: false,
             comment_spans: vec![],
         }],
         should_quit: false,
@@ -1537,6 +1543,7 @@ fn reflow_detail_rebuilds_on_width_change() {
             affordances: vec![],
             confirm_delete: None,
             focused_comment: None,
+            auth_error: false,
             comment_spans: vec![],
         }],
         should_quit: false,
@@ -1586,6 +1593,7 @@ fn reflow_detail_is_noop_while_loading() {
             affordances: vec![],
             confirm_delete: None,
             focused_comment: None,
+            auth_error: false,
             comment_spans: vec![],
         }],
         should_quit: false,
@@ -1641,6 +1649,7 @@ fn reflow_detail_clamps_offset_when_content_shortens() {
             affordances: vec![],
             confirm_delete: None,
             focused_comment: None,
+            auth_error: false,
             comment_spans: vec![],
         }],
         should_quit: false,
@@ -1696,6 +1705,7 @@ fn user_map_resolved_updates_map_and_invalidates_cache() {
             affordances: vec![],
             confirm_delete: None,
             focused_comment: None,
+            auth_error: false,
             comment_spans: vec![],
         }],
         should_quit: false,
@@ -1756,6 +1766,7 @@ fn progressive_paint_assignee_fills_in_after_user_map_resolved() {
         user_map: HashMap::new(),
         loaded_at: "2026-06-25T14:00:00Z".into(),
         current_user_id: None,
+        unauthorized: false,
     };
     let m = Model {
         stack: vec![Screen::Detail {
@@ -1776,6 +1787,7 @@ fn progressive_paint_assignee_fills_in_after_user_map_resolved() {
             affordances: vec![],
             confirm_delete: None,
             focused_comment: None,
+            auth_error: false,
             comment_spans: vec![],
         }],
         should_quit: false,
@@ -1913,6 +1925,7 @@ fn detail_global_scroll_offset_advances_through_all_content() {
             affordances: vec![],
             confirm_delete: None,
             focused_comment: None,
+            auth_error: false,
             comment_spans: vec![],
         }],
         should_quit: false,

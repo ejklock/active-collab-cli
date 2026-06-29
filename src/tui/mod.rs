@@ -595,6 +595,7 @@ fn spawn_load_detail(
                     user_map: std::collections::HashMap::new(),
                     loaded_at,
                     current_user_id: None,
+                    unauthorized: false,
                 }));
                 return;
             }
@@ -622,6 +623,7 @@ fn spawn_load_detail(
             user_map: cached_map,
             loaded_at,
             current_user_id,
+            unauthorized: core.unauthorized,
         }));
 
         // Phase 2: refresh user directory in the background; send UserMapResolved
@@ -688,6 +690,9 @@ fn spawn_comment_write(
         match status_result {
             Ok(status) if (200..=299).contains(&(status as u32)) => {
                 let _ = tx.send(Msg::CommentMutationOk);
+            }
+            Ok(status) if status == crate::http::HTTP_UNAUTHORIZED => {
+                let _ = tx.send(Msg::AuthExpired);
             }
             _ => {
                 let _ = tx.send(Msg::CommentMutationErr(crate::i18n::t(
