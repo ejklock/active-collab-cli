@@ -2798,3 +2798,134 @@ fn slice_by_display_cols_emoji_then_accented_text() {
         "after a 2-wide emoji, cols [2,12) must yield the next 10 chars: got {result:?}"
     );
 }
+
+// ── AC3: Affordance StyleRun structural equality (ADR 0032 / ADR 0041) ────────
+
+// Own-comment: build_detail_content emits an EditAffordance StyleRun on the card
+// header line whose (start, len) equals the hit-test affordance's (col_start,
+// col_end - col_start) — single source of truth (plan step 5).
+#[test]
+fn own_comment_edit_style_run_coords_equal_affordance_coords() {
+    use crate::richtext::RichStyle;
+    use std::collections::HashMap;
+
+    let own_comment = json!({
+        "id": 42i64,
+        "created_by_id": 7i64,
+        "created_by_name": "Me",
+        "created_on": 1700000000u64,
+        "body_plain_text": "Hello"
+    });
+    let user_map: HashMap<i64, String> = HashMap::new();
+    let task = json!({ "name": "T", "id": 1, "project_id": 1, "is_completed": false });
+    let content = build_detail_content(&task, &[own_comment], &user_map, 80, Some(7));
+
+    let edit_aff = content
+        .affordances
+        .iter()
+        .find(|a| matches!(a.kind, AffordanceKind::Edit(_)))
+        .expect("own comment must have an Edit affordance");
+
+    let header_line = edit_aff.line_idx;
+    let runs = content
+        .line_styles
+        .get(header_line)
+        .expect("line_styles must exist for the header line");
+
+    let edit_run = runs
+        .iter()
+        .find(|r| r.style == RichStyle::EditAffordance)
+        .expect("header line must contain an EditAffordance StyleRun");
+
+    assert_eq!(
+        edit_run.start, edit_aff.col_start,
+        "EditAffordance run start must equal affordance col_start (single source of truth)"
+    );
+    assert_eq!(
+        edit_run.len,
+        edit_aff.col_end - edit_aff.col_start,
+        "EditAffordance run len must equal affordance col_end - col_start"
+    );
+}
+
+// Own-comment: build_detail_content emits a DeleteAffordance StyleRun on the card
+// header line whose (start, len) equals the hit-test affordance's coordinates.
+#[test]
+fn own_comment_delete_style_run_coords_equal_affordance_coords() {
+    use crate::richtext::RichStyle;
+    use std::collections::HashMap;
+
+    let own_comment = json!({
+        "id": 42i64,
+        "created_by_id": 7i64,
+        "created_by_name": "Me",
+        "created_on": 1700000000u64,
+        "body_plain_text": "Hello"
+    });
+    let user_map: HashMap<i64, String> = HashMap::new();
+    let task = json!({ "name": "T", "id": 1, "project_id": 1, "is_completed": false });
+    let content = build_detail_content(&task, &[own_comment], &user_map, 80, Some(7));
+
+    let delete_aff = content
+        .affordances
+        .iter()
+        .find(|a| matches!(a.kind, AffordanceKind::Delete(_)))
+        .expect("own comment must have a Delete affordance");
+
+    let header_line = delete_aff.line_idx;
+    let runs = content
+        .line_styles
+        .get(header_line)
+        .expect("line_styles must exist for the header line");
+
+    let delete_run = runs
+        .iter()
+        .find(|r| r.style == RichStyle::DeleteAffordance)
+        .expect("header line must contain a DeleteAffordance StyleRun");
+
+    assert_eq!(
+        delete_run.start, delete_aff.col_start,
+        "DeleteAffordance run start must equal affordance col_start (single source of truth)"
+    );
+    assert_eq!(
+        delete_run.len,
+        delete_aff.col_end - delete_aff.col_start,
+        "DeleteAffordance run len must equal affordance col_end - col_start"
+    );
+}
+
+// Other-user comment: no affordance StyleRuns emitted, no affordances registered.
+#[test]
+fn other_comment_has_no_affordance_style_runs_and_no_affordances() {
+    use crate::richtext::RichStyle;
+    use std::collections::HashMap;
+
+    let other_comment = json!({
+        "id": 99i64,
+        "created_by_id": 8i64,
+        "created_by_name": "Them",
+        "created_on": 1700000001u64,
+        "body_plain_text": "Their comment"
+    });
+    let user_map: HashMap<i64, String> = HashMap::new();
+    let task = json!({ "name": "T", "id": 1, "project_id": 1, "is_completed": false });
+    let content = build_detail_content(&task, &[other_comment], &user_map, 80, Some(7));
+
+    let has_affordance = content
+        .affordances
+        .iter()
+        .any(|a| matches!(a.kind, AffordanceKind::Edit(_) | AffordanceKind::Delete(_)));
+    assert!(
+        !has_affordance,
+        "comment by another user must have no Edit/Delete affordances"
+    );
+
+    let has_style_run = content.line_styles.iter().any(|runs| {
+        runs.iter()
+            .any(|r| r.style == RichStyle::EditAffordance || r.style == RichStyle::DeleteAffordance)
+    });
+    assert!(
+        !has_style_run,
+        "comment by another user must have no EditAffordance or DeleteAffordance StyleRuns"
+    );
+}

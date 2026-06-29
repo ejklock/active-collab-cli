@@ -45,3 +45,5 @@ TUI/UX work (V/R/ARCH slices), tracing to
 | [0037](/issues/0037-modal-primitive-and-compose.md) | M1 | reusable modal primitive (centered overlay + dimmed backdrop) + migrate the comment compose to it (slice 1) | closed | — |
 | [0038](/issues/0038-confirm-delete-modal.md) | M2 | migrate the delete-confirm to the reusable modal (buttons + Enter/Esc), out of the comment card (slice 2) | closed | 0037 |
 | [0039](/issues/0039-non-tty-comment-command.md) | A1 | non-TTY `comment` command — post a comment to a task as the logged-in user (-m or stdin, --json result) | closed | — |
+| [0040](/issues/0040-comment-affordance-colored-links.md) | L1 | comment edit/delete affordances as colored underlined links ([editar] cyan, [excluir] red), emitted structurally | open | — |
+| [0041](/issues/0041-yes-no-confirm-modal.md) | L2 | delete-confirm modal presents Sim/Não buttons (relabel [confirmar]/[cancelar]) | open | — |

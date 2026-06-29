@@ -15,6 +15,18 @@ pub enum RichStyle {
     /// Used when linkness is a structural layout fact (e.g. asset rows), not
     /// inferred from visible URL text. Body links use the `link_segments` path.
     Link,
+    /// Layout-emitted edit affordance: soft cyan + underlined.
+    ///
+    /// Applied structurally to the `[editar]` token span on own-comment card
+    /// headers — same coordinates as the hit-test span (single source of truth,
+    /// ADR 0032 / ADR 0041).
+    EditAffordance,
+    /// Layout-emitted delete affordance: destructive red + underlined.
+    ///
+    /// Applied structurally to the `[excluir]` token span on own-comment card
+    /// headers — same coordinates as the hit-test span (single source of truth,
+    /// ADR 0032 / ADR 0041).
+    DeleteAffordance,
 }
 
 /// A single styled text fragment within a rich line.
