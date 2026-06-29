@@ -1,10 +1,23 @@
 #![allow(dead_code)]
 
-use crate::http::Http;
+use crate::http::{Http, HTTP_UNAUTHORIZED};
 use crate::models::MineTask;
 use crate::store::instances::Instance;
 use anyhow::Result;
 use serde_json::Value;
+
+/// Typed error raised by fetch_open_tasks when the server returns HTTP 401.
+/// Carried by anyhow::Result so callers can downcast and surface re-auth guidance.
+#[derive(Debug)]
+pub struct Unauthorized;
+
+impl std::fmt::Display for Unauthorized {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "HTTP 401 Unauthorized")
+    }
+}
+
+impl std::error::Error for Unauthorized {}
 
 pub struct ActiveCollabClient {
     instance: Instance,
@@ -136,6 +149,9 @@ impl ActiveCollabClient {
             .http
             .authed_get(&url, &self.instance.base_url, &self.instance.token)
             .await?;
+        if status == HTTP_UNAUTHORIZED {
+            return Err(Unauthorized.into());
+        }
         if status != 200 {
             return Ok(vec![]);
         }

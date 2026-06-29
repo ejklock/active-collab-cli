@@ -2299,6 +2299,120 @@ async fn comment_core_no_ref_and_no_branch_returns_exit2_without_write() {
 }
 
 #[tokio::test]
+async fn mine_core_401_prints_reauth_message_and_returns_exit1() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/users/42/tasks"))
+        .respond_with(ResponseTemplate::new(401).set_body_string("unauthorized"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let (_dir, store) = make_store();
+    let inst = Instance {
+        name: "revoked".to_owned(),
+        base_url: server.uri(),
+        email: "x@x.com".to_owned(),
+        token: "bad-token".to_owned(),
+        user_id: Some(42),
+    };
+    InstanceRepository::new(store.conn()).save(&inst).unwrap();
+
+    let repo = InstanceRepository::new(store.conn());
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    let outcome = mine_core(&repo, &make_http(), None, false, false, &mut out, &mut err).await;
+    let code = mine_outcome_code(outcome);
+
+    assert_eq!(code, 1, "401 must yield non-zero exit");
+    let e = output_str(&err);
+    assert!(
+        e.contains("Token invalid or revoked"),
+        "re-auth message must appear in stderr: {e}"
+    );
+    assert!(
+        e.contains("ac setup add"),
+        "re-auth guidance must name the command: {e}"
+    );
+    assert!(
+        !output_str(&out).contains("INSTANCE"),
+        "table header must NOT be printed on 401: {}",
+        output_str(&out)
+    );
+    assert!(
+        !output_str(&out).contains("No open tasks"),
+        "empty-table message must NOT be printed on 401: {}",
+        output_str(&out)
+    );
+}
+
+#[tokio::test]
+async fn mine_core_401_json_mode_prints_reauth_message_and_returns_exit1() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/users/42/tasks"))
+        .respond_with(ResponseTemplate::new(401).set_body_string("unauthorized"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let (_dir, store) = make_store();
+    let inst = Instance {
+        name: "revoked-json".to_owned(),
+        base_url: server.uri(),
+        email: "x@x.com".to_owned(),
+        token: "bad-token".to_owned(),
+        user_id: Some(42),
+    };
+    InstanceRepository::new(store.conn()).save(&inst).unwrap();
+
+    let repo = InstanceRepository::new(store.conn());
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    let outcome = mine_core(&repo, &make_http(), None, true, false, &mut out, &mut err).await;
+    let code = mine_outcome_code(outcome);
+
+    assert_eq!(code, 1, "401 in json mode must yield non-zero exit");
+    let e = output_str(&err);
+    assert!(
+        e.contains("Token invalid or revoked"),
+        "re-auth message must appear on 401 json mode: {e}"
+    );
+    assert!(
+        output_str(&out).is_empty(),
+        "stdout must be empty on 401: {}",
+        output_str(&out)
+    );
+}
+
+#[tokio::test]
+async fn collect_mine_rows_401_returns_empty_via_unwrap_or_default_seam() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/users/42/tasks"))
+        .respond_with(ResponseTemplate::new(401).set_body_string("unauthorized"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let inst = Instance {
+        name: "tui-401".to_owned(),
+        base_url: server.uri(),
+        email: "x@x.com".to_owned(),
+        token: "bad-token".to_owned(),
+        user_id: Some(42),
+    };
+    let rows = collect_mine_rows(&[inst], &make_http()).await;
+
+    assert!(
+        rows.is_empty(),
+        "collect_mine_rows on 401 must yield empty rows (TUI non-breaking seam)"
+    );
+}
+
+#[tokio::test]
 async fn comment_core_unresolvable_branch_returns_exit2_without_write() {
     let server = MockServer::start().await;
 
