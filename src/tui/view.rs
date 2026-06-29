@@ -110,13 +110,19 @@ fn is_own_comment_focused(
 
 /// Derive the transient status string for the Detail footer status row.
 ///
-/// When `compose` is `Some`, compose hint/status are owned by the modal overlay
-/// (ADR 0039 §5) — the footer only shows `Copiado ✓` in that case.
-/// When `compose` is `None`, the priority is: Submitting > Error > copied_feedback.
+/// Priority (highest first): auth_error > copied_feedback.
+/// When `compose` is `Some`, the modal overlay owns the compose hint/status (ADR 0039 §5);
+/// the footer still shows auth_error or copied_feedback if either is set.
 pub(crate) fn detail_status_line(
     compose: Option<&Compose>,
     copied_feedback: bool,
+    auth_error: bool,
 ) -> Option<String> {
+    if auth_error {
+        return Some(t(
+            "Token invalid or revoked — run `ac setup add` to re-authenticate.",
+        ));
+    }
     if compose.is_some() {
         return if copied_feedback {
             Some(t("Copiado ✓"))
@@ -259,8 +265,13 @@ pub fn view(
     let header_height = header_wrapped.len().max(1) as u16;
 
     let hint_text = hint_for_screen(screen);
-    let status_line = if let Screen::Detail { compose, .. } = screen {
-        detail_status_line(compose.as_ref(), model.copied_feedback)
+    let status_line = if let Screen::Detail {
+        compose,
+        auth_error,
+        ..
+    } = screen
+    {
+        detail_status_line(compose.as_ref(), model.copied_feedback, *auth_error)
     } else {
         None
     };

@@ -1,5 +1,7 @@
 #![allow(dead_code)]
 
+pub const HTTP_UNAUTHORIZED: u16 = 401;
+
 use anyhow::Result;
 use reqwest::header::{HeaderName, HeaderValue, ACCEPT, CONTENT_TYPE};
 use reqwest::redirect;

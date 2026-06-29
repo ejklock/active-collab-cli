@@ -858,7 +858,17 @@ async fn load_task_cache_hit_returns_data_without_network() {
     let client = ActiveCollabClient::new(inst.clone(), make_http());
     let flags_refresh = false;
 
-    let result = load_task(&cache, &client, "inst", 10, 99, flags_refresh, false).await;
+    let result = load_task(
+        &cache,
+        &client,
+        "inst",
+        10,
+        99,
+        flags_refresh,
+        false,
+        &mut Vec::new(),
+    )
+    .await;
     assert!(result.is_some(), "expected cache hit");
     let (returned_task, returned_comments) = result.unwrap();
     assert_eq!(returned_task["name"], "Cached task");
@@ -892,7 +902,17 @@ async fn load_task_cache_miss_fetches_and_writes_cache() {
     };
     let client = ActiveCollabClient::new(inst.clone(), make_http());
 
-    let result = load_task(&cache, &client, "inst", 10, 99, false, false).await;
+    let result = load_task(
+        &cache,
+        &client,
+        "inst",
+        10,
+        99,
+        false,
+        false,
+        &mut Vec::new(),
+    )
+    .await;
     server.verify().await;
     assert!(result.is_some());
     let (task, comments) = result.unwrap();
@@ -926,7 +946,17 @@ async fn load_task_non_200_returns_none() {
     };
     let client = ActiveCollabClient::new(inst, make_http());
 
-    let result = load_task(&cache, &client, "inst", 10, 99, false, false).await;
+    let result = load_task(
+        &cache,
+        &client,
+        "inst",
+        10,
+        99,
+        false,
+        false,
+        &mut Vec::new(),
+    )
+    .await;
     assert!(result.is_none());
 }
 
@@ -966,7 +996,17 @@ async fn load_task_refresh_bypasses_cache() {
     };
     let client = ActiveCollabClient::new(inst, make_http());
 
-    let result = load_task(&cache, &client, "inst", 10, 99, true, false).await;
+    let result = load_task(
+        &cache,
+        &client,
+        "inst",
+        10,
+        99,
+        true,
+        false,
+        &mut Vec::new(),
+    )
+    .await;
     server.verify().await;
     let (task, _) = result.unwrap();
     assert_eq!(task["name"], "Fresh task");
@@ -997,7 +1037,17 @@ async fn load_task_no_comments_flag_returns_empty_comments() {
     };
     let client = ActiveCollabClient::new(inst, make_http());
 
-    let result = load_task(&cache, &client, "inst", 10, 99, false, true).await;
+    let result = load_task(
+        &cache,
+        &client,
+        "inst",
+        10,
+        99,
+        false,
+        true,
+        &mut Vec::new(),
+    )
+    .await;
     let (_, comments) = result.unwrap();
     assert!(comments.is_empty(), "no_comments should suppress comments");
 }
@@ -2249,6 +2299,120 @@ async fn comment_core_no_ref_and_no_branch_returns_exit2_without_write() {
 }
 
 #[tokio::test]
+async fn mine_core_401_prints_reauth_message_and_returns_exit1() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/users/42/tasks"))
+        .respond_with(ResponseTemplate::new(401).set_body_string("unauthorized"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let (_dir, store) = make_store();
+    let inst = Instance {
+        name: "revoked".to_owned(),
+        base_url: server.uri(),
+        email: "x@x.com".to_owned(),
+        token: "bad-token".to_owned(),
+        user_id: Some(42),
+    };
+    InstanceRepository::new(store.conn()).save(&inst).unwrap();
+
+    let repo = InstanceRepository::new(store.conn());
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    let outcome = mine_core(&repo, &make_http(), None, false, false, &mut out, &mut err).await;
+    let code = mine_outcome_code(outcome);
+
+    assert_eq!(code, 1, "401 must yield non-zero exit");
+    let e = output_str(&err);
+    assert!(
+        e.contains("Token invalid or revoked"),
+        "re-auth message must appear in stderr: {e}"
+    );
+    assert!(
+        e.contains("ac setup add"),
+        "re-auth guidance must name the command: {e}"
+    );
+    assert!(
+        !output_str(&out).contains("INSTANCE"),
+        "table header must NOT be printed on 401: {}",
+        output_str(&out)
+    );
+    assert!(
+        !output_str(&out).contains("No open tasks"),
+        "empty-table message must NOT be printed on 401: {}",
+        output_str(&out)
+    );
+}
+
+#[tokio::test]
+async fn mine_core_401_json_mode_prints_reauth_message_and_returns_exit1() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/users/42/tasks"))
+        .respond_with(ResponseTemplate::new(401).set_body_string("unauthorized"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let (_dir, store) = make_store();
+    let inst = Instance {
+        name: "revoked-json".to_owned(),
+        base_url: server.uri(),
+        email: "x@x.com".to_owned(),
+        token: "bad-token".to_owned(),
+        user_id: Some(42),
+    };
+    InstanceRepository::new(store.conn()).save(&inst).unwrap();
+
+    let repo = InstanceRepository::new(store.conn());
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    let outcome = mine_core(&repo, &make_http(), None, true, false, &mut out, &mut err).await;
+    let code = mine_outcome_code(outcome);
+
+    assert_eq!(code, 1, "401 in json mode must yield non-zero exit");
+    let e = output_str(&err);
+    assert!(
+        e.contains("Token invalid or revoked"),
+        "re-auth message must appear on 401 json mode: {e}"
+    );
+    assert!(
+        output_str(&out).is_empty(),
+        "stdout must be empty on 401: {}",
+        output_str(&out)
+    );
+}
+
+#[tokio::test]
+async fn collect_mine_rows_401_returns_empty_via_unwrap_or_default_seam() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/users/42/tasks"))
+        .respond_with(ResponseTemplate::new(401).set_body_string("unauthorized"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let inst = Instance {
+        name: "tui-401".to_owned(),
+        base_url: server.uri(),
+        email: "x@x.com".to_owned(),
+        token: "bad-token".to_owned(),
+        user_id: Some(42),
+    };
+    let rows = collect_mine_rows(&[inst], &make_http()).await;
+
+    assert!(
+        rows.is_empty(),
+        "collect_mine_rows on 401 must yield empty rows (TUI non-breaking seam)"
+    );
+}
+
+#[tokio::test]
 async fn comment_core_unresolvable_branch_returns_exit2_without_write() {
     let server = MockServer::start().await;
 
@@ -2358,5 +2522,289 @@ async fn comment_core_http_failure_with_json_flag_emits_error_object() {
     assert!(
         obj.get("error").is_some(),
         "error field must be present: {obj}"
+    );
+}
+
+// AC1: get/current 401 → re-auth message, non-zero exit, no "task not found"
+#[tokio::test]
+async fn do_get_task_401_prints_reauth_message_and_returns_nonzero() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/projects/5/tasks/10"))
+        .respond_with(ResponseTemplate::new(401).set_body_string("unauthorized"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let (_dir, store) = make_store();
+    let cache = TaskCache::new(store.conn());
+    let inst = make_inst(&server.uri());
+    let client = ActiveCollabClient::new(inst.clone(), make_http());
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    let code = do_get_task(
+        &inst,
+        &cache,
+        &client,
+        5,
+        10,
+        &default_flags(),
+        &mut out,
+        &mut err,
+    )
+    .await;
+
+    server.verify().await;
+    assert_ne!(code, 0, "HTTP 401 must return a non-zero exit code");
+    let e = output_str(&err);
+    assert!(
+        e.contains("ac setup add"),
+        "re-auth message must mention 'ac setup add': {e}"
+    );
+    assert!(
+        !e.contains("task not found"),
+        "must NOT print 'task not found' for 401: {e}"
+    );
+}
+
+// AC1: load_task 401 writes re-auth message to the err writer
+#[tokio::test]
+async fn load_task_401_writes_reauth_to_err_and_returns_none() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/projects/10/tasks/99"))
+        .respond_with(ResponseTemplate::new(401).set_body_string("unauthorized"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let (_dir, store) = make_store();
+    let cache = TaskCache::new(store.conn());
+    let inst = Instance {
+        name: "inst".to_owned(),
+        base_url: server.uri(),
+        email: "x@x.com".to_owned(),
+        token: "tok".to_owned(),
+        user_id: None,
+    };
+    let client = ActiveCollabClient::new(inst, make_http());
+    let mut err = Vec::new();
+
+    let result = load_task(&cache, &client, "inst", 10, 99, false, false, &mut err).await;
+
+    server.verify().await;
+    assert!(result.is_none(), "401 must return None");
+    let e = output_str(&err);
+    assert!(
+        e.contains("ac setup add"),
+        "re-auth message must mention 'ac setup add': {e}"
+    );
+    assert!(
+        !e.contains("task not found"),
+        "must NOT print 'task not found' for 401: {e}"
+    );
+}
+
+// AC2: comment 401 → re-auth message, non-zero exit
+#[tokio::test]
+async fn comment_core_401_prints_reauth_message_and_returns_nonzero() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/comments/task/75346"))
+        .respond_with(ResponseTemplate::new(401).set_body_string("unauthorized"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let inst = comment_inst(&server.uri());
+    let client = ActiveCollabClient::new(inst.clone(), make_http());
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    let code = comment_core(
+        Some("524/75346"),
+        None,
+        "some body",
+        &inst,
+        &client,
+        false,
+        &mut out,
+        &mut err,
+    )
+    .await;
+
+    server.verify().await;
+    assert_ne!(code, 0, "HTTP 401 must return non-zero exit");
+    let e = output_str(&err);
+    assert!(
+        e.contains("ac setup add"),
+        "re-auth message must mention 'ac setup add': {e}"
+    );
+    assert!(
+        !output_str(&out).contains("ok"),
+        "success marker must not appear on 401: {}",
+        output_str(&out)
+    );
+}
+
+// AC2: comment 401 with --json → failure shape (no "ok": true)
+#[tokio::test]
+async fn comment_core_401_json_emits_failure_shape_without_ok_true() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/comments/task/75346"))
+        .respond_with(ResponseTemplate::new(401).set_body_string("unauthorized"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let inst = comment_inst(&server.uri());
+    let client = ActiveCollabClient::new(inst.clone(), make_http());
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    let code = comment_core(
+        Some("524/75346"),
+        None,
+        "some body",
+        &inst,
+        &client,
+        true,
+        &mut out,
+        &mut err,
+    )
+    .await;
+
+    server.verify().await;
+    assert_ne!(code, 0, "HTTP 401 with --json must return non-zero");
+    let s = output_str(&out);
+    let trimmed = s.trim_end_matches('\n');
+    let obj: serde_json::Value =
+        serde_json::from_str(trimmed).expect("stdout must be valid JSON with --json");
+    assert_eq!(obj["ok"], false, "ok must be false on 401");
+    assert!(
+        obj.get("error").is_some(),
+        "error field must be present: {obj}"
+    );
+    let error_str = obj["error"].as_str().unwrap_or("");
+    assert!(
+        error_str.contains("ac setup add"),
+        "error message must contain re-auth hint: {error_str}"
+    );
+}
+
+// AC3: non-401 errors (404/500) keep existing output, no re-auth message
+#[tokio::test]
+async fn do_get_task_404_prints_not_found_without_reauth_message() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/projects/5/tasks/10"))
+        .respond_with(ResponseTemplate::new(404).set_body_string("not found"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let (_dir, store) = make_store();
+    let cache = TaskCache::new(store.conn());
+    let inst = make_inst(&server.uri());
+    let client = ActiveCollabClient::new(inst.clone(), make_http());
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    let code = do_get_task(
+        &inst,
+        &cache,
+        &client,
+        5,
+        10,
+        &default_flags(),
+        &mut out,
+        &mut err,
+    )
+    .await;
+
+    server.verify().await;
+    assert_ne!(code, 0, "HTTP 404 must return non-zero");
+    let e = output_str(&err);
+    assert!(
+        e.contains("404"),
+        "existing 404 message must still appear: {e}"
+    );
+    assert!(
+        !e.contains("ac setup add"),
+        "re-auth message must NOT appear for 404: {e}"
+    );
+}
+
+#[tokio::test]
+async fn comment_core_404_keeps_existing_output_without_reauth_message() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/comments/task/75346"))
+        .respond_with(ResponseTemplate::new(404).set_body_string("not found"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let inst = comment_inst(&server.uri());
+    let client = ActiveCollabClient::new(inst.clone(), make_http());
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    let code = comment_core(
+        Some("524/75346"),
+        None,
+        "some body",
+        &inst,
+        &client,
+        false,
+        &mut out,
+        &mut err,
+    )
+    .await;
+
+    server.verify().await;
+    assert_ne!(code, 0, "HTTP 404 must return non-zero");
+    let e = output_str(&err);
+    assert!(
+        e.contains("404"),
+        "existing HTTP status must still appear: {e}"
+    );
+    assert!(
+        !e.contains("ac setup add"),
+        "re-auth message must NOT appear for 404: {e}"
+    );
+}
+
+// AC4: i18n — message resolves through t(); pt-BR maps to translated string
+#[test]
+fn reauth_message_resolves_in_pt_br() {
+    let _guard = LANG_MUTEX.lock().unwrap();
+    set_language("pt_BR");
+    let msg = crate::i18n::t("Token invalid or revoked — run `ac setup add` to re-authenticate.");
+    set_language("en");
+    drop(_guard);
+
+    assert!(
+        msg.contains("reautenticar"),
+        "pt-BR translation must contain 'reautenticar': {msg}"
+    );
+    assert!(
+        msg.contains("inválido"),
+        "pt-BR translation must contain 'inválido': {msg}"
+    );
+}
+
+#[test]
+fn reauth_message_english_key_is_identity() {
+    let _guard = LANG_MUTEX.lock().unwrap();
+    set_language("en");
+    let msg = crate::i18n::t("Token invalid or revoked — run `ac setup add` to re-authenticate.");
+    drop(_guard);
+
+    assert_eq!(
+        msg, "Token invalid or revoked — run `ac setup add` to re-authenticate.",
+        "English key must be returned as-is (identity)"
     );
 }
