@@ -121,6 +121,28 @@ fn shape_comment(c: &Value) -> Value {
     })
 }
 
+/// Build the ADR 0040 write-result for a newly posted comment.
+///
+/// Returns a minified single-line JSON string on success:
+/// `{"ok":true,"comment_id":N,"task_id":N,"project_id":N}`
+pub fn comment_result(comment_id: i64, task_id: i64, project_id: i64) -> String {
+    format!(
+        r#"{{"ok":true,"comment_id":{comment_id},"task_id":{task_id},"project_id":{project_id}}}"#,
+        comment_id = comment_id,
+        task_id = task_id,
+        project_id = project_id,
+    )
+}
+
+/// Build the ADR 0040 error object for a failed comment write.
+///
+/// Returns a minified single-line JSON string:
+/// `{"ok":false,"error":"<reason>"}`
+pub fn comment_error(reason: &str) -> String {
+    let escaped = serde_json::to_string(reason).unwrap_or_else(|_| r#""error""#.to_owned());
+    format!(r#"{{"ok":false,"error":{escaped}}}"#, escaped = escaped)
+}
+
 /// Build the ADR 0011 browse schema for agent/LLM consumption.
 ///
 /// Pure: no network, no I/O. Accepts the same `ProjectGroup` slice the TUI

@@ -4,8 +4,11 @@ pub mod model;
 pub mod screens;
 pub mod theme;
 pub mod view;
+pub mod widgets;
 
-pub use model::{init_browse, init_mine, update, ClickTarget, Cmd, DetailLoad, Model, Msg};
+pub use model::{
+    init_browse, init_mine, update, ClickTarget, Cmd, DetailLoad, ModalButtonTarget, Model, Msg,
+};
 pub use view::view;
 
 use crate::controller;
@@ -19,7 +22,9 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use events::{map_browse_key_event, map_browse_mouse_event, map_compose_key_event};
+use events::{
+    map_browse_key_event, map_browse_mouse_event, map_compose_key_event, map_confirm_key_event,
+};
 use ratatui::{backend::CrosstermBackend, Terminal};
 use std::io;
 use std::path::{Path, PathBuf};
@@ -85,11 +90,23 @@ fn compose_active(model: &Model) -> bool {
     )
 }
 
+/// Return true when the delete-confirm modal is active on the top screen.
+fn confirm_active(model: &Model) -> bool {
+    matches!(
+        model.top(),
+        Some(model::Screen::Detail {
+            confirm_delete: Some(_),
+            ..
+        })
+    )
+}
+
 /// Handle a crossterm input event: map to a Msg, run update, and dispatch commands.
 ///
-/// When compose mode is active on the Detail screen, key events are routed through
-/// `map_compose_key_event` so typed characters append to the compose buffer rather
-/// than triggering browse navigation.
+/// Key routing priority (highest first):
+///   1. confirm sub-mode (delete-confirm modal open) — Enter/Esc only
+///   2. compose sub-mode (comment compose open) — typed chars + Ctrl+S/Esc
+///   3. browse mode — navigation, shortcuts
 fn handle_input_event(
     ev: Event,
     model: Model,
@@ -100,7 +117,9 @@ fn handle_input_event(
 ) -> Model {
     let msg_opt = match ev {
         Event::Key(key) => {
-            if compose_active(&model) {
+            if confirm_active(&model) {
+                map_confirm_key_event(key)
+            } else if compose_active(&model) {
                 map_compose_key_event(key)
             } else {
                 map_browse_key_event(key)
@@ -240,12 +259,16 @@ async fn run_app(
         }
 
         let mut frame_targets: Vec<ClickTarget> = Vec::new();
-        if let Err(e) = terminal.draw(|f| view(&model, f, &mut frame_targets)) {
+        let mut modal_btn_targets: Vec<ModalButtonTarget> = Vec::new();
+        if let Err(e) =
+            terminal.draw(|f| view(&model, f, &mut frame_targets, &mut modal_btn_targets))
+        {
             guard.restore();
             eprintln!("Error drawing frame: {e}");
             return 1;
         }
         model.set_click_targets(frame_targets);
+        model.set_modal_button_targets(modal_btn_targets);
 
         if model.should_quit {
             break;

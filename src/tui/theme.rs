@@ -50,6 +50,20 @@ pub fn link_style() -> Style {
         .add_modifier(Modifier::UNDERLINED)
 }
 
+/// Edit affordance on own-comment card headers — soft cyan + underlined.
+pub fn edit_affordance_style() -> Style {
+    Style::default()
+        .fg(SOFT_CYAN)
+        .add_modifier(Modifier::UNDERLINED)
+}
+
+/// Delete affordance on own-comment card headers — destructive red + underlined.
+pub fn delete_affordance_style() -> Style {
+    Style::default()
+        .fg(DUE_RED)
+        .add_modifier(Modifier::UNDERLINED)
+}
+
 /// Badge style (amber, bold) — retained for theme-consistency tests.
 #[allow(dead_code)]
 pub fn badge_style() -> Style {
@@ -75,6 +89,50 @@ pub fn copied_indicator_style() -> Style {
 /// Inline code spans in rich text — steel, dim.
 pub fn code_style() -> Style {
     Style::default().fg(STEEL).add_modifier(Modifier::DIM)
+}
+
+/// Detail footer status row — same band as footer but dim, for transient messages.
+pub fn footer_status_style() -> Style {
+    Style::default()
+        .fg(LIGHT_GREY)
+        .bg(STEEL_BG)
+        .add_modifier(Modifier::DIM)
+}
+
+/// Focused comment card border/line highlight — steel-blue background, bold.
+///
+/// Applied to every line of the currently-focused comment card in the Detail
+/// thread so the cursor is visible without obscuring the card text.
+pub fn focused_comment_style() -> Style {
+    Style::default().bg(STEEL_BG).add_modifier(Modifier::BOLD)
+}
+
+/// Modal overlay border — rounded-corner box, soft cyan, to match comment cards.
+pub fn modal_border_style() -> Style {
+    Style::default().fg(SOFT_CYAN)
+}
+
+/// Modal title text — bold, soft cyan.
+pub fn modal_title_style() -> Style {
+    Style::default().fg(SOFT_CYAN).add_modifier(Modifier::BOLD)
+}
+
+/// Modal body text — light grey, default background.
+pub fn modal_body_style() -> Style {
+    Style::default().fg(LIGHT_GREY)
+}
+
+/// In-box hint/status line — steel, dim.
+pub fn modal_hint_style() -> Style {
+    Style::default().fg(STEEL).add_modifier(Modifier::DIM)
+}
+
+/// Backdrop background for the strongly-dimmed modal overlay.
+///
+/// Applied to every backdrop cell in addition to `Modifier::DIM` so the thread
+/// reads as clearly behind the modal (not merely fg-dimmed / transparent).
+pub fn modal_backdrop_style() -> Style {
+    Style::default().bg(NEAR_BLACK)
 }
 
 /// Due-date color for a task card's line 2, keyed on the DueStyle variant.

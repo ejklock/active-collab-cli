@@ -26,13 +26,15 @@ flowchart TD
     view --> screens["tui/screens/\nprojects.rs · tasks.rs · detail.rs\neach owns its draw_* fn\n(responsive Table · detail wraps text + assets panel)"]
     view --> drawer["tui/drawer.rs\nshared widget builders (render_table)"]
     view --> theme["tui/theme.rs\ncentralized Style / Color constants"]
+    view --> widgets["tui/widgets/modal.rs\nreusable centered modal overlay\n(DIM backdrop + Clear + bordered box)\ncompose · delete-confirm"]
+    widgets --> theme
     screens --> asset_panel["tui/screens/asset_panel.rs\nAnexos/Artefatos composition source\nlayout → Vec&lt;PanelRow&gt; → inline content lines\n+ pure line→asset-index map"]
     render --> asset_panel
     model --> asset_panel
     screens --> drawer
     screens --> theme
     main --> cli["cli (clap)"]
-    cli --> commands["commands\nsetup · get · current · mine · browse"]
+    cli --> commands["commands\nsetup · get · current · mine · browse · comment"]
     commands --> controller["controller\n(async orchestration)"]
     model --> controller
     controller --> client["client\n(ActiveCollab API)"]
@@ -56,14 +58,40 @@ flowchart TD
   Enter/click on the mine Tasks screen opens Detail through the same `update` path.
 - **the view layer is responsive and theme-centralized**: `view()` splits the frame
   vertically into three regions — a one-line identity header (`app_header_style`:
-  white on cyan, bold), a variable-height content area, and a one-line footer.  The
-  too-small guard (width < 24 or height < 6) bypasses all three and renders only a
-  centered `"Terminal too small"` message.  List screens render a ratatui `Table`
-  driven by width `Constraint`s (no fixed-width truncation) with a
+  white on cyan, bold), a variable-height content area, and a footer.  The footer
+  itself is **two stacked regions** ([ADR 0038](/adr/0038-detail-footer-contextual-hint-and-status-line.md)):
+  a **contextual instruction line** whose Detail-screen text changes by mode
+  (browsing / composing / confirming-delete / own-comment-focused, via `detail_hint`
+  in `FooterPlan`), and a **thin status line** that surfaces one derived transient
+  string (`Enviando…`, a write error, `Copiado ✓`) and is blank — collapsing the row —
+  when idle.  The too-small guard (width < 24 or height < 6) bypasses all three and
+  renders only a centered `"Terminal too small"` message.  List screens render a
+  ratatui `Table` driven by width `Constraint`s (no fixed-width truncation) with a
   `TableState`-driven selection highlight; the detail screen wraps long lines and
   renders the assets inline at the end of the single globally-scrollable content
   (ADR 0029 — no fixed panel). All colors live in `theme.rs` — no inline
   `Color`/`Style` literals in the screen or drawer modules.
+- **the detail thread has a keyboard focus cursor over the comment cards**
+  ([ADR 0037](/adr/0037-comment-card-keyboard-focus.md)): `Screen::Detail` carries a
+  `focused_comment: Option<usize>` and a memoized `comment_spans` line-range cache
+  (built by `reflow_detail` alongside the line cache, mirroring the Tasks card-layout
+  cache of [ADR 0031](/adr/0031-tasks-card-layout-cache.md)).  `j`/`k` (and `Up`/`Down`)
+  move the focus, which highlights the focused card and derives a scroll `offset` that
+  brings it fully into view (reusing the `first_visible_card` discipline); `PageUp`/
+  `PageDown` and the wheel keep scrolling raw lines without moving focus.  Edit/delete
+  stay on the existing Ctrl/Cmd+click affordances ([ADR 0036](/adr/0036-permission-aware-comment-targeting.md)).
+- **transient comment interactions render as a centered modal overlay, not inline in the
+  scroll** ([ADR 0039](/adr/0039-reusable-modal-overlay-for-compose-and-confirm.md)):
+  `tui/widgets/modal.rs` owns a reusable primitive — a pure `modal_area(frame, w, h)`
+  (centered + clamped `Rect`) plus a `render_modal` helper that dims the backdrop
+  (`Modifier::DIM` over the content cells), `Clear`s the modal `Rect`, and draws a
+  bordered box with title + body + an in-box hint/status.  Both the **comment compose**
+  (`compose.is_some()`, title `Novo`/`Editar comentário`, the buffer + `Ctrl+S`/`Esc`
+  hint + `Enviando…`/error status) and the **delete-confirm** (`confirm_delete.is_some()`,
+  `[confirmar]`/`[cancelar]` buttons, also Enter/Esc) draw through it — so `reflow_detail`
+  no longer appends the compose lines and `build_detail_content` no longer renders the
+  inline confirm tokens.  While a modal is open it owns the hint/status; the footer does
+  not duplicate them (amends [ADR 0038](/adr/0038-detail-footer-contextual-hint-and-status-line.md)).
 - **the Anexos/Artefatos assets are part of the global scroll, from one composition
   source** ([ADR 0029](/adr/0029-assets-inline-in-scrollable-detail-content.md),
   amending [ADR 0028](/adr/0028-asset-panel-single-layout-source.md)):
@@ -192,6 +220,19 @@ sequenceDiagram
   reusing the scroll-aware asset click-map
   ([ADR 0036](/adr/0036-permission-aware-comment-targeting.md)). The local own-check is an
   affordance filter; the **server** (`canEdit`/`canDelete`) is the authorization boundary.
+- **A non-interactive `comment` command writes through the same seam, no TEA loop**
+  ([ADR 0040](/adr/0040-non-interactive-comment-write-command.md)): `dispatch_comment`
+  (`main.rs`) → `comment_core` (`commands.rs`) resolves the task (`parse_task_ref` or the
+  current git branch, as `current` does), reads the body from `-m/--message` or **stdin**,
+  and calls the **same** `client.create_comment` the TUI uses — attributed to the logged-in
+  user (the host-gated instance token owner; a configured instance is required). It is a
+  one-shot synchronous write (not `update()`/`Cmd`): success prints a human line or, with
+  `--json`, a curated minified `{"ok":true,"comment_id":N,"task_id":N,"project_id":N}`
+  (`agent_json::comment_result`, extending the read `--json` contract of
+  [ADR 0011](/adr/0011-agent-json-output-contract.md) to a write); an empty body exits `2`,
+  and no task / no instance / an HTTP error exits non-zero with no false success. Deleting
+  the command leaves the TUI write intact — it is a non-interactive adapter over the one
+  write seam, not a second implementation.
 
 ## Quality gates
 

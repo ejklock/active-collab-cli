@@ -38,3 +38,8 @@
 | [0034](/adr/0034-comment-compose-mode-multiline.md) | Multi-line comment compose is a mode on the Detail screen, driven by mode-aware key mapping in the shell | Accepted |
 | [0035](/adr/0035-server-truth-refresh-after-comment-mutation.md) | After a comment mutation, re-derive the thread from the server (LoadDetail refresh) — no optimistic UI | Accepted |
 | [0036](/adr/0036-permission-aware-comment-targeting.md) | Edit/delete target a comment via permission-aware inline affordances rendered only on the user's own comments | Accepted |
+| [0037](/adr/0037-comment-card-keyboard-focus.md) | Comment cards gain a keyboard focus cursor (highlight + scroll-into-view) over the global scroll, with actions left on the click affordances | Accepted |
+| [0038](/adr/0038-detail-footer-contextual-hint-and-status-line.md) | The detail footer becomes two regions — a context-aware instruction line plus a thin transient status line | Accepted |
+| [0039](/adr/0039-reusable-modal-overlay-for-compose-and-confirm.md) | A reusable centered modal overlay (dimmed backdrop) renders the comment compose and the delete-confirm, replacing their inline-spliced rendering | Accepted |
+| [0040](/adr/0040-non-interactive-comment-write-command.md) | A non-interactive `comment` CLI command posts a comment as the logged-in user, reusing the authenticated client seam and extending the agent --json contract to a write | Accepted |
+| [0041](/adr/0041-comment-affordance-colored-links-and-yes-no-confirm.md) | Comment edit/delete affordances render as structurally-emitted colored links (edit cyan, delete destructive red); the delete-confirm modal presents Sim/Não buttons | Accepted |
