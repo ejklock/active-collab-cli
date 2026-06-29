@@ -6049,7 +6049,7 @@ mod confirm_modal_buttons {
     }
 
     // AC1 (BDR 0026 Sc.7): confirm_delete=Some renders modal with title 'Excluir comentário?'
-    // and visible [confirmar]/[cancelar] button labels, over a strongly-dimmed backdrop.
+    // and visible [Sim]/[Não] button labels (ADR 0041), over a strongly-dimmed backdrop.
     #[test]
     fn confirm_modal_renders_title_and_buttons_pt_br() {
         use ratatui::style::Modifier;
@@ -6064,12 +6064,12 @@ mod confirm_modal_buttons {
             "confirm modal title must contain 'Excluir comentário?' in pt-BR: {content}"
         );
         assert!(
-            content.contains("confirmar"),
-            "confirm modal must show '[confirmar]' button: {content}"
+            content.contains("Sim"),
+            "confirm modal must show '[Sim]' button in pt-BR: {content}"
         );
         assert!(
-            content.contains("cancelar"),
-            "confirm modal must show '[cancelar]' button: {content}"
+            content.contains("N\u{00e3}o"),
+            "confirm modal must show '[Não]' button in pt-BR: {content}"
         );
         let area = buf.area();
         let any_dim = (0..area.height).any(|y| {
@@ -6085,7 +6085,7 @@ mod confirm_modal_buttons {
         );
     }
 
-    // AC3 (BDR 0026 Sc.8, geometry-consistency): the [confirmar] and [cancelar] labels are
+    // AC3 (BDR 0026 Sc.8, geometry-consistency): the [Sim] and [Não] labels are
     // located in the rendered buffer; a plain click at those exact cells emits the right result.
     // Button positions come from the registered ModalButtonTargets — never assumed.
     #[test]
@@ -6144,7 +6144,7 @@ mod confirm_modal_buttons {
         assert_eq!(
             cmds.len(),
             1,
-            "plain click on [confirmar] must emit one Cmd::DeleteComment; got {:?}",
+            "plain click on [Sim] must emit one Cmd::DeleteComment; got {:?}",
             cmds
         );
         match &cmds[0] {
@@ -6204,7 +6204,7 @@ mod confirm_modal_buttons {
         );
     }
 
-    // AC3 (plain click on cancel from buffer): plain click on [cancelar] clears confirm, no Cmd.
+    // AC3 (plain click on cancel from buffer): plain click on [Não] clears confirm, no Cmd.
     #[test]
     fn plain_click_on_buffer_located_cancel_button_clears_confirm() {
         use crate::tui::model::{update, Msg};
@@ -6230,7 +6230,7 @@ mod confirm_modal_buttons {
         );
         assert!(
             cmds.is_empty(),
-            "plain click on [cancelar] must emit no Cmd; got {:?}",
+            "plain click on [Não] must emit no Cmd; got {:?}",
             cmds
         );
         match m2.top() {
@@ -6242,6 +6242,314 @@ mod confirm_modal_buttons {
             }
             _ => panic!("expected Detail"),
         }
+    }
+}
+
+// ── Yes/No confirm modal label tests (ADR 0041) ──────────────────────────────
+
+mod yes_no_confirm_labels {
+    use crate::i18n::{set_language, t};
+    use crate::tui::model::{Header, ModalButtonTarget, Model, Screen};
+    use crate::tui::view::view;
+    use ratatui::{backend::TestBackend, Terminal};
+    use serde_json::Value;
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+
+    static LANG_MUTEX: Mutex<()> = Mutex::new(());
+
+    fn make_confirm_model(comment_id: i64) -> Model {
+        Model {
+            stack: vec![Screen::Detail {
+                instance: "inst".into(),
+                project_id: 1,
+                task_id: 42,
+                task: Value::Null,
+                comments: vec![],
+                user_map: HashMap::new(),
+                lines: vec![],
+                line_styles: vec![],
+                assets: vec![],
+                offset: 0,
+                loading: false,
+                rendered_width: usize::MAX,
+                compose: None,
+                current_user_id: Some(7),
+                affordances: vec![],
+                confirm_delete: Some(comment_id),
+                focused_comment: None,
+                comment_spans: vec![],
+            }],
+            should_quit: false,
+            header: Header::from_instances(&[], None),
+            viewport: (80, 24),
+            click_targets: vec![],
+            modal_button_targets: vec![],
+            last_loaded: None,
+            selection: None,
+            copied_feedback: false,
+        }
+    }
+
+    fn render_and_collect(
+        model: &Model,
+        width: u16,
+        height: u16,
+    ) -> (ratatui::buffer::Buffer, Vec<ModalButtonTarget>) {
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut btn_targets: Vec<ModalButtonTarget> = vec![];
+        terminal
+            .draw(|frame| view(model, frame, &mut vec![], &mut btn_targets))
+            .unwrap();
+        (terminal.backend().buffer().clone(), btn_targets)
+    }
+
+    fn buf_text(buf: &ratatui::buffer::Buffer) -> String {
+        let area = buf.area();
+        let mut out = String::new();
+        for y in 0..area.height {
+            for x in 0..area.width {
+                out.push_str(buf.cell((x, y)).unwrap().symbol());
+            }
+            out.push('\n');
+        }
+        out
+    }
+
+    // AC1: the hint row of the delete-confirm modal shows [Sim] and [Não] in pt-BR,
+    // asserted against the real rendered TestBackend buffer.
+    #[test]
+    fn confirm_modal_hint_row_shows_sim_and_nao_in_pt_br() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("pt_BR");
+        let model = make_confirm_model(42);
+        let (buf, _) = render_and_collect(&model, 80, 24);
+        set_language("en");
+        let content = buf_text(&buf);
+        assert!(
+            content.contains("Sim"),
+            "confirm modal hint must show '[Sim]' in pt-BR: {content}"
+        );
+        assert!(
+            content.contains("N\u{00e3}o"),
+            "confirm modal hint must show '[Não]' in pt-BR: {content}"
+        );
+        assert!(
+            !content.contains("confirmar"),
+            "old label 'confirmar' must not appear: {content}"
+        );
+        assert!(
+            !content.contains("cancelar"),
+            "old label 'cancelar' must not appear: {content}"
+        );
+    }
+
+    // AC1 (en): in English locale the hint row shows [Yes] and [No].
+    #[test]
+    fn confirm_modal_hint_row_shows_yes_and_no_in_english() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let model = make_confirm_model(42);
+        let (buf, _) = render_and_collect(&model, 80, 24);
+        let content = buf_text(&buf);
+        assert!(
+            content.contains("Yes"),
+            "confirm modal hint must show '[Yes]' in English: {content}"
+        );
+        assert!(
+            content.contains("No"),
+            "confirm modal hint must show '[No]' in English: {content}"
+        );
+    }
+
+    // AC2: the first registered button target (is_confirm: true) maps to the [Sim] columns;
+    // the second (is_confirm: false) maps to the [Não] columns in pt-BR.
+    // Swapping the targets would break this test (mutation floor).
+    #[test]
+    fn sim_target_is_confirm_and_nao_target_is_cancel() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("pt_BR");
+        let model = make_confirm_model(55);
+        let (buf, btn_targets) = render_and_collect(&model, 80, 24);
+        set_language("en");
+
+        assert_eq!(
+            btn_targets.len(),
+            2,
+            "must register exactly two button targets; got {}",
+            btn_targets.len()
+        );
+
+        let sim_btn = btn_targets
+            .iter()
+            .find(|t| t.is_confirm)
+            .expect("is_confirm=true target must be registered");
+        let nao_btn = btn_targets
+            .iter()
+            .find(|t| !t.is_confirm)
+            .expect("is_confirm=false target must be registered");
+
+        let sim_x = sim_btn.x_start;
+        let sim_row = sim_btn.row;
+        let nao_x = nao_btn.x_start;
+        let nao_row = nao_btn.row;
+
+        assert_eq!(
+            sim_row, nao_row,
+            "both buttons must be on the same hint row"
+        );
+        assert!(
+            sim_x < nao_x,
+            "Sim button must be to the left of Não button (sim_x={sim_x}, nao_x={nao_x})"
+        );
+
+        let sim_start_sym = buf
+            .cell((sim_x, sim_row))
+            .map(|c| c.symbol().to_string())
+            .unwrap_or_default();
+        assert!(
+            sim_start_sym.contains('['),
+            "Sim button x_start ({sim_x},{sim_row}) must be '[': got '{sim_start_sym}'"
+        );
+
+        let nao_start_sym = buf
+            .cell((nao_x, nao_row))
+            .map(|c| c.symbol().to_string())
+            .unwrap_or_default();
+        assert!(
+            nao_start_sym.contains('['),
+            "Não button x_start ({nao_x},{nao_row}) must be '[': got '{nao_start_sym}'"
+        );
+    }
+
+    // AC2: a click on the Sim target (is_confirm=true) dispatches ConfirmDeleteComment /
+    // DeleteComment; a click on the Não target (is_confirm=false) dispatches CancelDeleteComment.
+    #[test]
+    fn click_sim_dispatches_delete_click_nao_dispatches_cancel() {
+        use crate::tui::model::{update, Cmd, Msg};
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let mut model = make_confirm_model(99);
+        model.viewport = (80, 24);
+        let (_, btn_targets) = render_and_collect(&model, 80, 24);
+
+        let sim_btn = btn_targets
+            .iter()
+            .find(|t| t.is_confirm)
+            .expect("confirm target must be registered")
+            .clone();
+        let nao_btn = btn_targets
+            .iter()
+            .find(|t| !t.is_confirm)
+            .expect("cancel target must be registered")
+            .clone();
+
+        let mut model_for_sim = make_confirm_model(99);
+        model_for_sim.viewport = (80, 24);
+        model_for_sim.set_modal_button_targets(btn_targets.clone());
+        let (_, cmds_sim) = update(
+            model_for_sim,
+            Msg::Click {
+                column: sim_btn.x_start,
+                row: sim_btn.row,
+                modifiers: crossterm::event::KeyModifiers::NONE,
+            },
+        );
+        assert_eq!(
+            cmds_sim.len(),
+            1,
+            "click on Sim must emit exactly one Cmd; got {:?}",
+            cmds_sim
+        );
+        assert!(
+            matches!(cmds_sim[0], Cmd::DeleteComment { comment_id: 99, .. }),
+            "click on Sim must emit DeleteComment(99); got {:?}",
+            cmds_sim[0]
+        );
+
+        let mut model_for_nao = make_confirm_model(99);
+        model_for_nao.viewport = (80, 24);
+        model_for_nao.set_modal_button_targets(btn_targets);
+        let (m_nao, cmds_nao) = update(
+            model_for_nao,
+            Msg::Click {
+                column: nao_btn.x_start,
+                row: nao_btn.row,
+                modifiers: crossterm::event::KeyModifiers::NONE,
+            },
+        );
+        assert!(
+            cmds_nao.is_empty(),
+            "click on Não must emit no Cmd; got {:?}",
+            cmds_nao
+        );
+        match m_nao.top() {
+            Some(Screen::Detail { confirm_delete, .. }) => {
+                assert!(
+                    confirm_delete.is_none(),
+                    "confirm_delete must be cleared after Não click"
+                );
+            }
+            _ => panic!("expected Detail screen"),
+        }
+    }
+
+    // AC2: ConfirmDeleteComment (Enter) confirms and CancelDeleteComment (Esc) cancels
+    // — key handling is unchanged by the label relabeling (ADR 0041).
+    #[test]
+    fn confirm_msg_confirms_and_cancel_msg_cancels_in_confirm_modal() {
+        use crate::tui::model::{update, Cmd, Msg};
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+
+        let mut model_confirm = make_confirm_model(33);
+        model_confirm.viewport = (80, 24);
+        let (_, cmds_confirm) = update(model_confirm, Msg::ConfirmDeleteComment);
+        assert_eq!(
+            cmds_confirm.len(),
+            1,
+            "ConfirmDeleteComment must emit one Cmd; got {:?}",
+            cmds_confirm
+        );
+        assert!(
+            matches!(cmds_confirm[0], Cmd::DeleteComment { comment_id: 33, .. }),
+            "ConfirmDeleteComment must emit DeleteComment(33); got {:?}",
+            cmds_confirm[0]
+        );
+
+        let mut model_cancel = make_confirm_model(33);
+        model_cancel.viewport = (80, 24);
+        let (m_cancel, cmds_cancel) = update(model_cancel, Msg::CancelDeleteComment);
+        assert!(
+            cmds_cancel.is_empty(),
+            "CancelDeleteComment must emit no Cmd; got {:?}",
+            cmds_cancel
+        );
+        match m_cancel.top() {
+            Some(Screen::Detail { confirm_delete, .. }) => {
+                assert!(
+                    confirm_delete.is_none(),
+                    "CancelDeleteComment must clear confirm_delete"
+                );
+            }
+            _ => panic!("expected Detail screen"),
+        }
+    }
+
+    // AC3: i18n — t("Yes") resolves to "Sim" in pt-BR and "Yes" in English (identity).
+    //            t("No") resolves to "Não" in pt-BR and "No" in English (identity).
+    #[test]
+    fn i18n_yes_no_keys_resolve_correctly() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+
+        set_language("pt_BR");
+        assert_eq!(t("Yes"), "Sim", "pt-BR: t(\"Yes\") must be \"Sim\"");
+        assert_eq!(t("No"), "N\u{00e3}o", "pt-BR: t(\"No\") must be \"Não\"");
+
+        set_language("en");
+        assert_eq!(t("Yes"), "Yes", "en: t(\"Yes\") must be identity \"Yes\"");
+        assert_eq!(t("No"), "No", "en: t(\"No\") must be identity \"No\"");
     }
 }
 
@@ -6772,12 +7080,12 @@ mod contextual_footer {
         let content = buf_to_string(&buf);
         // The confirm buttons render INSIDE the modal box (one-home rule, ADR 0039 §5).
         assert!(
-            content.contains("confirm") || content.contains("confirmar"),
-            "confirm button must appear inside the modal box: {content}"
+            content.contains("Yes") || content.contains("Sim"),
+            "confirm button [Yes/Sim] must appear inside the modal box: {content}"
         );
         assert!(
-            content.contains("cancel") || content.contains("cancelar"),
-            "cancel button must appear inside the modal box: {content}"
+            content.contains("No") || content.contains("N\u{00e3}o"),
+            "cancel button [No/Não] must appear inside the modal box: {content}"
         );
         // Per ADR 0039 §5 the footer shows the browse hint while the modal is open.
         assert!(
@@ -7230,7 +7538,7 @@ mod confirm_modal_render {
         );
     }
 
-    // AC2: the confirm-modal buttons [confirmar]/[cancelar] appear in the MODAL overlay,
+    // AC2: the confirm-modal buttons [Sim]/[Não] appear in the MODAL overlay (ADR 0041),
     // not spliced inline into the comment card. The buttons are visible in the buffer (in the
     // modal), but the comment card body lines do NOT carry them as inline affordance tokens.
     #[test]
@@ -7241,12 +7549,12 @@ mod confirm_modal_render {
         set_language("en");
         let content = buf_to_string(&buf);
         assert!(
-            content.contains("confirmar"),
-            "buffer must contain 'confirmar' (visible in the modal buttons): {content}"
+            content.contains("Sim"),
+            "buffer must contain 'Sim' (visible in the modal buttons in pt-BR): {content}"
         );
         assert!(
-            content.contains("cancelar"),
-            "buffer must contain 'cancelar' (visible in the modal buttons): {content}"
+            content.contains("N\u{00e3}o"),
+            "buffer must contain 'Não' (visible in the modal buttons in pt-BR): {content}"
         );
         assert!(
             content.contains("Excluir"),
@@ -7272,7 +7580,7 @@ mod confirm_modal_render {
         );
     }
 
-    // AC1: confirm modal shows [confirmar]/[cancelar] button labels inside the modal.
+    // AC1: confirm modal shows [Yes]/[No] button labels (ADR 0041) inside the modal.
     #[test]
     fn confirm_modal_shows_button_labels() {
         let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -7280,12 +7588,286 @@ mod confirm_modal_render {
         let buf = render_with_confirm(Some(42));
         let content = buf_to_string(&buf);
         assert!(
-            content.contains("confirm") || content.contains("confirmar"),
-            "modal must show confirm button label: {content}"
+            content.contains("Yes"),
+            "modal must show '[Yes]' confirm button label in English: {content}"
         );
         assert!(
-            content.contains("cancel") || content.contains("cancelar"),
-            "modal must show cancel button label: {content}"
+            content.contains("No"),
+            "modal must show '[No]' cancel button label in English: {content}"
         );
     }
+}
+
+// ── AC1/AC2: Affordance color cells in TestBackend (ADR 0041) ────────────────
+
+/// Build `DetailContent` for a single own comment and render it through
+/// `draw_detail` into a `TestBackend` buffer of the given dimensions.
+///
+/// Returns `(buffer, content)` so callers can inspect both the rendered buffer
+/// and the `DetailContent` metadata (affordance coordinates).
+fn build_and_render_detail_with_own_comment(
+    width: u16,
+    height: u16,
+    current_user_id: Option<i64>,
+) -> (ratatui::buffer::Buffer, crate::render::DetailContent) {
+    use crate::render::build_detail_content;
+    use crate::tui::screens::DetailParams;
+    use ratatui::{backend::TestBackend, layout::Rect, Terminal};
+    use serde_json::json;
+    use std::collections::HashMap;
+
+    let inner_width = width.saturating_sub(2) as usize;
+    let own_comment = json!({
+        "id": 42i64,
+        "created_by_id": 7i64,
+        "created_by_name": "Me",
+        "created_on": 1700000000u64,
+        "body_plain_text": "Hello"
+    });
+    let task = json!({ "name": "T", "id": 1, "project_id": 1, "is_completed": false });
+    let user_map: HashMap<i64, String> = HashMap::new();
+    let content = build_detail_content(
+        &task,
+        &[own_comment],
+        &user_map,
+        inner_width,
+        current_user_id,
+    );
+
+    let backend = TestBackend::new(width, height);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|frame| {
+            draw_detail(
+                frame,
+                Rect::new(0, 0, width, height),
+                DetailParams {
+                    lines: &content.lines,
+                    line_styles: &content.line_styles,
+                    assets: &[],
+                    offset: 0,
+                    loading: false,
+                    task_id: 1,
+                    task_name: "T",
+                    focused_comment: None,
+                    comment_spans: &content.comment_spans,
+                },
+            );
+        })
+        .unwrap();
+    (terminal.backend().buffer().clone(), content)
+}
+
+// AC1: On an own comment rendered to TestBackend, [editar] cells carry SOFT_CYAN fg + UNDERLINED.
+//
+// The block rendered in the test frame has its left outer border at x=0, so the
+// block's inner area starts at x=1. Lines render starting at y=1 (inner top after
+// the block's top border). Buffer cell x = 1 + col where col is the string column.
+#[test]
+fn own_comment_editar_cells_carry_soft_cyan_and_underlined() {
+    use ratatui::style::{Color, Modifier};
+
+    let (buf, content) = build_and_render_detail_with_own_comment(80, 40, Some(7));
+
+    let edit_aff = content
+        .affordances
+        .iter()
+        .find(|a| matches!(a.kind, crate::render::AffordanceKind::Edit(_)))
+        .expect("own comment must have an Edit affordance");
+
+    let soft_cyan = Color::Rgb(102, 204, 204);
+    // In the test frame the outer block starts at y=0, so inner starts at y=1.
+    // lines[line_idx] renders at buffer y = 1 + line_idx.
+    let render_y = (1 + edit_aff.line_idx) as u16;
+
+    let mut found_styled_cell = false;
+    for col in edit_aff.col_start..edit_aff.col_end {
+        // The block inner starts at x=1; string column `col` renders at buffer x = 1 + col.
+        let buf_x = (1 + col) as u16;
+        if let Some(cell) = buf.cell((buf_x, render_y)) {
+            if cell.symbol() != " " {
+                assert_eq!(
+                    cell.style().fg,
+                    Some(soft_cyan),
+                    "[editar] cell at x={buf_x} y={render_y} must have SOFT_CYAN fg; got {:?}",
+                    cell.style().fg
+                );
+                assert!(
+                    cell.style().add_modifier.contains(Modifier::UNDERLINED),
+                    "[editar] cell at x={buf_x} y={render_y} must carry UNDERLINED modifier"
+                );
+                found_styled_cell = true;
+            }
+        }
+    }
+    assert!(
+        found_styled_cell,
+        "[editar] token span (col_start={}, col_end={}) must contain at least one non-space cell \
+         with SOFT_CYAN fg + UNDERLINED (AC1)",
+        edit_aff.col_start, edit_aff.col_end
+    );
+}
+
+// AC2: On an own comment rendered to TestBackend, [excluir] cells carry DUE_RED fg + UNDERLINED.
+#[test]
+fn own_comment_excluir_cells_carry_due_red_and_underlined() {
+    use ratatui::style::{Color, Modifier};
+
+    let (buf, content) = build_and_render_detail_with_own_comment(80, 40, Some(7));
+
+    let delete_aff = content
+        .affordances
+        .iter()
+        .find(|a| matches!(a.kind, crate::render::AffordanceKind::Delete(_)))
+        .expect("own comment must have a Delete affordance");
+
+    let due_red = Color::Rgb(220, 80, 80);
+    let render_y = (1 + delete_aff.line_idx) as u16;
+
+    let mut found_styled_cell = false;
+    for col in delete_aff.col_start..delete_aff.col_end {
+        let buf_x = (1 + col) as u16;
+        if let Some(cell) = buf.cell((buf_x, render_y)) {
+            if cell.symbol() != " " {
+                assert_eq!(
+                    cell.style().fg,
+                    Some(due_red),
+                    "[excluir] cell at x={buf_x} y={render_y} must have DUE_RED fg; got {:?}",
+                    cell.style().fg
+                );
+                assert!(
+                    cell.style().add_modifier.contains(Modifier::UNDERLINED),
+                    "[excluir] cell at x={buf_x} y={render_y} must carry UNDERLINED modifier"
+                );
+                found_styled_cell = true;
+            }
+        }
+    }
+    assert!(
+        found_styled_cell,
+        "[excluir] token span (col_start={}, col_end={}) must contain at least one non-space cell \
+         with DUE_RED fg + UNDERLINED (AC2)",
+        delete_aff.col_start, delete_aff.col_end
+    );
+}
+
+// AC4 (regression): Ctrl+click on the styled [editar] cell still opens compose-edit
+// via the real update() path; a plain click does not.
+#[test]
+fn ctrl_click_on_editar_cell_opens_compose_edit_regression() {
+    use crate::i18n::set_language;
+    use crate::tui::model::{update, Header};
+    use crate::tui::model::{ComposeKind, ComposeStatus, Model, Screen};
+    use crossterm::event::KeyModifiers;
+    use ratatui::style::Color;
+    use serde_json::json;
+    use std::collections::HashMap;
+
+    let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+    set_language("en");
+
+    let width: u16 = 82;
+    let height: u16 = 30;
+    let inner_width = width.saturating_sub(2) as usize;
+
+    let own_comment = json!({
+        "id": 42i64,
+        "created_by_id": 7i64,
+        "created_by_name": "Me",
+        "created_on": 1700000000u64,
+        "body_plain_text": "My comment body"
+    });
+    let task = json!({ "name": "T", "id": 1, "project_id": 1, "is_completed": false });
+    let user_map: HashMap<i64, String> = HashMap::new();
+    let content =
+        crate::render::build_detail_content(&task, &[own_comment], &user_map, inner_width, Some(7));
+
+    let edit_aff = content
+        .affordances
+        .iter()
+        .find(|a| matches!(a.kind, crate::render::AffordanceKind::Edit(_)))
+        .expect("edit affordance must exist for own comment");
+
+    let soft_cyan = Color::Rgb(102, 204, 204);
+    // In the test frame (block at y=0), the line renders at buffer y = 1 + line_idx.
+    let render_y = (1 + edit_aff.line_idx) as u16;
+    // affordance_at uses text_top=2 in the model (header bar + title bar above the block).
+    // The click row the model expects is 2 + line_idx.
+    let click_row = 2u16 + edit_aff.line_idx as u16;
+    let click_col = edit_aff.col_start as u16;
+
+    let (buf, _) = build_and_render_detail_with_own_comment(width, height, Some(7));
+    let cell_x = (1 + edit_aff.col_start) as u16;
+    if let Some(cell) = buf.cell((cell_x, render_y)) {
+        if cell.symbol() != " " {
+            assert_eq!(
+                cell.style().fg,
+                Some(soft_cyan),
+                "the [editar] cell must carry SOFT_CYAN (regression: color is present before click)"
+            );
+        }
+    }
+
+    let m = Model {
+        stack: vec![Screen::Detail {
+            instance: "inst".into(),
+            project_id: 1,
+            task_id: 1,
+            task: task.clone(),
+            comments: vec![json!({
+                "id": 42i64,
+                "created_by_id": 7i64,
+                "created_by_name": "Me",
+                "created_on": 1700000000u64,
+                "body_plain_text": "My comment body"
+            })],
+            user_map: HashMap::new(),
+            lines: content.lines.clone(),
+            line_styles: content.line_styles.clone(),
+            assets: vec![],
+            offset: 0,
+            loading: false,
+            rendered_width: inner_width,
+            compose: None,
+            current_user_id: Some(7),
+            affordances: content.affordances.clone(),
+            confirm_delete: None,
+            focused_comment: None,
+            comment_spans: content.comment_spans.clone(),
+        }],
+        should_quit: false,
+        header: Header::from_instances(&[], None),
+        viewport: (width, height),
+        click_targets: vec![],
+        modal_button_targets: vec![],
+        last_loaded: None,
+        selection: None,
+        copied_feedback: false,
+    };
+
+    let (m_ctrl, cmds) = update(
+        m,
+        crate::tui::model::Msg::Click {
+            column: click_col,
+            row: click_row,
+            modifiers: KeyModifiers::CONTROL,
+        },
+    );
+    assert!(cmds.is_empty(), "Ctrl+click on [editar] must emit no Cmd");
+    match m_ctrl.top() {
+        Some(Screen::Detail { compose, .. }) => {
+            let cp = compose
+                .as_ref()
+                .expect("compose must be Some after Ctrl+click on [editar]");
+            assert_eq!(
+                cp.kind,
+                ComposeKind::Edit { comment_id: 42 },
+                "compose kind must be Edit{{comment_id: 42}}"
+            );
+            assert_eq!(cp.status, ComposeStatus::Editing);
+        }
+        _ => panic!("expected Detail screen"),
+    }
+
+    set_language("en");
 }

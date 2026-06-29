@@ -408,7 +408,7 @@ fn render_compose_modal(frame: &mut Frame, frame_area: ratatui::layout::Rect, cp
 /// Render the delete-confirm modal overlay and register the two button click targets.
 ///
 /// Uses the shared `render_modal` primitive (ADR 0039) to dim the backdrop and draw a
-/// centered bordered box. The button row in the hint line shows `[confirmar]  [cancelar]`;
+/// centered bordered box. The button row in the hint line shows `[Sim]  [Não]`;
 /// their absolute cell Rects are derived from the Rect `render_modal` returns so the
 /// hit-test geometry is single-sourced (never recomputed independently).
 fn render_confirm_modal(
@@ -419,8 +419,8 @@ fn render_confirm_modal(
     use crate::tui::widgets::modal::render_modal;
     let title = t("Delete comment?");
     let body = vec![t("This action cannot be undone.")];
-    let confirm_label = format!("[{}]", t("confirmar"));
-    let cancel_label = format!("[{}]", t("cancelar"));
+    let confirm_label = format!("[{}]", t("Yes"));
+    let cancel_label = format!("[{}]", t("No"));
     let hint = format!("{}  {}", confirm_label, cancel_label);
     let modal_rect = render_modal(
         frame,
