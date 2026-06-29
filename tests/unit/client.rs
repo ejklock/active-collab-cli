@@ -367,6 +367,76 @@ async fn fetch_open_tasks_non_200_returns_empty() {
 }
 
 #[tokio::test]
+async fn fetch_open_tasks_401_returns_unauthorized_error() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/users/7/tasks"))
+        .respond_with(ResponseTemplate::new(401).set_body_string("unauthorized"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = make_client(&server.uri());
+    let result = client.fetch_open_tasks().await;
+    assert!(result.is_err(), "HTTP 401 must be Err, not Ok");
+    let err = result.unwrap_err();
+    assert!(
+        err.is::<Unauthorized>(),
+        "error must downcast to Unauthorized, got: {err}"
+    );
+}
+
+#[tokio::test]
+async fn fetch_open_tasks_404_returns_empty_not_unauthorized() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/users/7/tasks"))
+        .respond_with(ResponseTemplate::new(404).set_body_string("not found"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = make_client(&server.uri());
+    let result = client.fetch_open_tasks().await;
+    assert!(result.is_ok(), "HTTP 404 must be Ok, not Err");
+    assert!(result.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn fetch_open_tasks_500_returns_empty_not_unauthorized() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/users/7/tasks"))
+        .respond_with(ResponseTemplate::new(500).set_body_string("server error"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = make_client(&server.uri());
+    let result = client.fetch_open_tasks().await;
+    assert!(result.is_ok(), "HTTP 500 must be Ok, not Err");
+    assert!(result.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn fetch_open_tasks_401_unwrap_or_default_yields_empty() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/users/7/tasks"))
+        .respond_with(ResponseTemplate::new(401).set_body_string("unauthorized"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = make_client(&server.uri());
+    let tasks = client.fetch_open_tasks().await.unwrap_or_default();
+    assert!(
+        tasks.is_empty(),
+        "unwrap_or_default on 401 must yield empty vec (non-breaking TUI seam)"
+    );
+}
+
+#[tokio::test]
 async fn list_projects_returns_status_and_body() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
