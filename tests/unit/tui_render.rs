@@ -198,6 +198,8 @@ fn render_detail_to_buf_with_name(
                     loading: false,
                     task_id: 42,
                     task_name,
+                    focused_comment: None,
+                    comment_spans: &[],
                 },
             );
         })
@@ -236,7 +238,7 @@ fn build_and_render_detail_with_assets(
         "attachments": attachment_json
     });
     let user_map: HashMap<i64, String> = HashMap::new();
-    let content = build_detail_content(&task, &[], &user_map, inner_width, None, None);
+    let content = build_detail_content(&task, &[], &user_map, inner_width, None);
     let backend = TestBackend::new(width, height);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
@@ -252,6 +254,8 @@ fn build_and_render_detail_with_assets(
                     loading: false,
                     task_id: 1,
                     task_name: "Test Task",
+                    focused_comment: None,
+                    comment_spans: &content.comment_spans,
                 },
             );
         })
@@ -883,7 +887,7 @@ fn build_detail_lines_with_comment_produces_boxed_lines_fitting_width() {
         "body": "<p>This is a test comment body for the box rendering test.</p>"
     });
     let user_map: HashMap<i64, String> = HashMap::new();
-    let lines = build_detail_content(&task, &[comment], &user_map, inner_width, None, None).lines;
+    let lines = build_detail_content(&task, &[comment], &user_map, inner_width, None).lines;
 
     assert!(!lines.is_empty(), "must produce at least one line");
 
@@ -1054,6 +1058,7 @@ mod view_size_guard {
             header: Header::from_instances(&[], None),
             viewport: (0, 0),
             click_targets: vec![],
+            modal_button_targets: vec![],
             last_loaded: None,
             selection: None,
             copied_feedback: false,
@@ -1069,7 +1074,7 @@ mod view_size_guard {
         let mut terminal = Terminal::new(backend).unwrap();
         let model = projects_model();
         terminal
-            .draw(|frame| view(&model, frame, &mut vec![]))
+            .draw(|frame| view(&model, frame, &mut vec![], &mut vec![]))
             .unwrap();
         let content = buf_to_string(terminal.backend().buffer());
 
@@ -1096,7 +1101,7 @@ mod view_size_guard {
         let mut terminal = Terminal::new(backend).unwrap();
         let model = projects_model();
         terminal
-            .draw(|frame| view(&model, frame, &mut vec![]))
+            .draw(|frame| view(&model, frame, &mut vec![], &mut vec![]))
             .unwrap();
         let content = buf_to_string(terminal.backend().buffer());
 
@@ -1800,8 +1805,8 @@ fn build_detail_lines_reflow_at_different_widths_changes_output() {
     let user_map: HashMap<i64, String> = HashMap::new();
 
     let comments = [comment];
-    let lines_80 = build_detail_content(&task, &comments, &user_map, 80, None, None).lines;
-    let lines_40 = build_detail_content(&task, &comments, &user_map, 40, None, None).lines;
+    let lines_80 = build_detail_content(&task, &comments, &user_map, 80, None).lines;
+    let lines_40 = build_detail_content(&task, &comments, &user_map, 40, None).lines;
 
     // All lines at width 40 must be at most 40 chars
     for line in &lines_40 {
@@ -1849,7 +1854,7 @@ fn draw_detail_renders_single_global_content_block() {
         "body": "<p>A comment on this task.</p>"
     });
     let user_map: HashMap<i64, String> = HashMap::new();
-    let content_obj = build_detail_content(&task, &[comment], &user_map, 76, None, None);
+    let content_obj = build_detail_content(&task, &[comment], &user_map, 76, None);
     let lines = &content_obj.lines;
 
     let buf = render_detail_to_buf_with_name(lines, &[], 0, 80, 40, "Test Task");
@@ -1889,7 +1894,7 @@ fn draw_detail_title_row_present_after_task_row_in_details_panel() {
         "is_completed": false
     });
     let user_map: HashMap<i64, String> = HashMap::new();
-    let detail = build_detail_content(&task, &[], &user_map, 76, None, None);
+    let detail = build_detail_content(&task, &[], &user_map, 76, None);
     let buf = render_detail_to_buf_with_name(&detail.lines, &[], 0, 80, 30, "OSV-Scanner");
     let content = buf_to_string(&buf);
     set_language("en");
@@ -2055,11 +2060,14 @@ fn view_detail_footer_has_no_tab_switch_hint() {
             current_user_id: None,
             affordances: vec![],
             confirm_delete: None,
+            focused_comment: None,
+            comment_spans: vec![],
         }],
         should_quit: false,
         header: Header::from_instances(&[], None),
         viewport: (0, 0),
         click_targets: vec![],
+        modal_button_targets: vec![],
         last_loaded: None,
         selection: None,
         copied_feedback: false,
@@ -2068,7 +2076,7 @@ fn view_detail_footer_has_no_tab_switch_hint() {
     let backend = TestBackend::new(80, 24);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
-        .draw(|frame| view(&model, frame, &mut vec![]))
+        .draw(|frame| view(&model, frame, &mut vec![], &mut vec![]))
         .unwrap();
     let content = buf_to_string(terminal.backend().buffer());
 
@@ -2084,11 +2092,10 @@ fn view_detail_footer_has_no_tab_switch_hint() {
         !content.contains("1-9"),
         "Detail footer must NOT contain '1-9 open asset' hint (numeric scheme removed): {content}"
     );
-    // The Ctrl/Cmd hint is now in the inline asset section (part of build_detail_content lines),
-    // NOT in the footer. The footer renders only the scroll/nav hint.
+    // The contextual browsing hint now starts with j/k (ADR 0038 §1).
     assert!(
-        content.contains("↑/↓"),
-        "Detail footer must contain '↑/↓ scroll' hint: {content}"
+        content.contains("j/k"),
+        "Detail footer (browsing mode) must contain 'j/k' hint: {content}"
     );
 }
 
@@ -2117,11 +2124,14 @@ fn view_detail_footer_without_assets_has_no_tab_hint() {
             current_user_id: None,
             affordances: vec![],
             confirm_delete: None,
+            focused_comment: None,
+            comment_spans: vec![],
         }],
         should_quit: false,
         header: Header::from_instances(&[], None),
         viewport: (0, 0),
         click_targets: vec![],
+        modal_button_targets: vec![],
         last_loaded: None,
         selection: None,
         copied_feedback: false,
@@ -2130,7 +2140,7 @@ fn view_detail_footer_without_assets_has_no_tab_hint() {
     let backend = TestBackend::new(80, 24);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
-        .draw(|frame| view(&model, frame, &mut vec![]))
+        .draw(|frame| view(&model, frame, &mut vec![], &mut vec![]))
         .unwrap();
     let content = buf_to_string(terminal.backend().buffer());
 
@@ -2139,8 +2149,8 @@ fn view_detail_footer_without_assets_has_no_tab_hint() {
         "Detail footer without assets must NOT contain 'Tab': {content}"
     );
     assert!(
-        content.contains("↑/↓"),
-        "Detail footer must still contain scroll hint: {content}"
+        content.contains("j/k"),
+        "Detail footer (browsing mode) must contain 'j/k' hint: {content}"
     );
 }
 
@@ -2241,6 +2251,7 @@ fn view_renders_header_on_top_row_with_app_header_style_is_soft_cyan_on_steel() 
         header,
         viewport: (0, 0),
         click_targets: vec![],
+        modal_button_targets: vec![],
         last_loaded: None,
         selection: None,
         copied_feedback: false,
@@ -2249,7 +2260,7 @@ fn view_renders_header_on_top_row_with_app_header_style_is_soft_cyan_on_steel() 
     let backend = TestBackend::new(80, 10);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
-        .draw(|frame| view(&model, frame, &mut vec![]))
+        .draw(|frame| view(&model, frame, &mut vec![], &mut vec![]))
         .unwrap();
     let buf = terminal.backend().buffer();
 
@@ -2301,6 +2312,7 @@ fn view_content_and_footer_render_below_header() {
         header,
         viewport: (0, 0),
         click_targets: vec![],
+        modal_button_targets: vec![],
         last_loaded: None,
         selection: None,
         copied_feedback: false,
@@ -2310,7 +2322,7 @@ fn view_content_and_footer_render_below_header() {
     let backend = TestBackend::new(80, height);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
-        .draw(|frame| view(&model, frame, &mut vec![]))
+        .draw(|frame| view(&model, frame, &mut vec![], &mut vec![]))
         .unwrap();
     let buf = terminal.backend().buffer();
 
@@ -2352,6 +2364,7 @@ fn view_multi_instance_header_shows_extra_suffix() {
         header,
         viewport: (0, 0),
         click_targets: vec![],
+        modal_button_targets: vec![],
         last_loaded: None,
         selection: None,
         copied_feedback: false,
@@ -2360,7 +2373,7 @@ fn view_multi_instance_header_shows_extra_suffix() {
     let backend = TestBackend::new(80, 10);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
-        .draw(|frame| view(&model, frame, &mut vec![]))
+        .draw(|frame| view(&model, frame, &mut vec![], &mut vec![]))
         .unwrap();
     let buf = terminal.backend().buffer();
 
@@ -2395,6 +2408,7 @@ fn view_too_small_suppresses_header_and_footer() {
         header,
         viewport: (0, 0),
         click_targets: vec![],
+        modal_button_targets: vec![],
         last_loaded: None,
         selection: None,
         copied_feedback: false,
@@ -2403,7 +2417,7 @@ fn view_too_small_suppresses_header_and_footer() {
     let backend = TestBackend::new(20, 5);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
-        .draw(|frame| view(&model, frame, &mut vec![]))
+        .draw(|frame| view(&model, frame, &mut vec![], &mut vec![]))
         .unwrap();
     let content = buf_to_string(terminal.backend().buffer());
 
@@ -2508,7 +2522,7 @@ fn draw_detail_url_in_description_body_has_link_style() {
     });
     let user_map: HashMap<i64, String> = HashMap::new();
     let width: u16 = 80;
-    let content = build_detail_content(&task, &[], &user_map, (width - 2) as usize, None, None);
+    let content = build_detail_content(&task, &[], &user_map, (width - 2) as usize, None);
     let lines = content.lines;
 
     let joined = lines.join("\n");
@@ -2571,14 +2585,7 @@ fn draw_detail_url_in_comment_body_has_link_style() {
     });
     let user_map: HashMap<i64, String> = HashMap::new();
     let width: u16 = 80;
-    let content = build_detail_content(
-        &task,
-        &[comment],
-        &user_map,
-        (width - 2) as usize,
-        None,
-        None,
-    );
+    let content = build_detail_content(&task, &[comment], &user_map, (width - 2) as usize, None);
     let lines = content.lines;
 
     let joined = lines.join("\n");
@@ -2627,7 +2634,7 @@ fn draw_detail_border_and_no_url_lines_have_default_style() {
     });
     let user_map: HashMap<i64, String> = HashMap::new();
     let width: u16 = 80;
-    let lines = build_detail_content(&task, &[], &user_map, (width - 2) as usize, None, None).lines;
+    let lines = build_detail_content(&task, &[], &user_map, (width - 2) as usize, None).lines;
 
     let buf = render_detail_to_buf(&lines, &[], 0, width, 20);
 
@@ -2718,7 +2725,7 @@ mod v2b_click_targets {
         let mut terminal = Terminal::new(backend).unwrap();
         let mut targets = vec![];
         terminal
-            .draw(|frame| view(model, frame, &mut targets))
+            .draw(|frame| view(model, frame, &mut targets, &mut vec![]))
             .unwrap();
         model.set_click_targets(targets);
     }
@@ -2758,6 +2765,7 @@ mod v2b_click_targets {
             header: empty_header(),
             viewport: (30, 15),
             click_targets: vec![],
+            modal_button_targets: vec![],
             last_loaded: None,
             selection: None,
             copied_feedback: false,
@@ -2834,6 +2842,7 @@ mod v2b_click_targets {
             header: empty_header(),
             viewport: (80, 15),
             click_targets: vec![],
+            modal_button_targets: vec![],
             last_loaded: None,
             selection: None,
             copied_feedback: false,
@@ -2907,6 +2916,7 @@ mod v2b_click_targets {
             header: empty_header(),
             viewport: (80, 20),
             click_targets: vec![],
+            modal_button_targets: vec![],
             last_loaded: None,
             selection: None,
             copied_feedback: false,
@@ -2979,6 +2989,7 @@ mod v2b_click_targets {
             header: empty_header(),
             viewport: (80, 6),
             click_targets: vec![],
+            modal_button_targets: vec![],
             last_loaded: None,
             selection: None,
             copied_feedback: false,
@@ -3070,6 +3081,7 @@ mod footer_refresh_hint {
             header: Header::from_instances(&[], None),
             viewport: (0, 0),
             click_targets: vec![],
+            modal_button_targets: vec![],
             last_loaded,
             selection: None,
             copied_feedback: false,
@@ -3080,7 +3092,7 @@ mod footer_refresh_hint {
         let backend = TestBackend::new(80, 10);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal
-            .draw(|frame| view(model, frame, &mut vec![]))
+            .draw(|frame| view(model, frame, &mut vec![], &mut vec![]))
             .unwrap();
         buf_to_string(terminal.backend().buffer())
     }
@@ -3145,11 +3157,14 @@ mod footer_refresh_hint {
                 current_user_id: None,
                 affordances: vec![],
                 confirm_delete: None,
+                focused_comment: None,
+                comment_spans: vec![],
             }],
             should_quit: false,
             header: Header::from_instances(&[], None),
             viewport: (0, 0),
             click_targets: vec![],
+            modal_button_targets: vec![],
             last_loaded: None,
             selection: None,
             copied_feedback: false,
@@ -3189,11 +3204,14 @@ mod footer_refresh_hint {
                 current_user_id: None,
                 affordances: vec![],
                 confirm_delete: None,
+                focused_comment: None,
+                comment_spans: vec![],
             }],
             should_quit: false,
             header: Header::from_instances(&[], None),
             viewport: (0, 0),
             click_targets: vec![],
+            modal_button_targets: vec![],
             last_loaded: None,
             selection: None,
             copied_feedback: false,
@@ -3413,6 +3431,8 @@ mod footer_refresh_hint {
                             loading: false,
                             task_id: 1,
                             task_name: "",
+                            focused_comment: None,
+                            comment_spans: &[],
                         },
                     );
                 })
@@ -3476,11 +3496,14 @@ mod footer_refresh_hint {
                 current_user_id: None,
                 affordances: vec![],
                 confirm_delete: None,
+                focused_comment: None,
+                comment_spans: vec![],
             }],
             should_quit: false,
             header: Header::from_instances(&[], None),
             viewport: (0, 0),
             click_targets: vec![],
+            modal_button_targets: vec![],
             last_loaded: None,
             selection: None,
             copied_feedback: false,
@@ -3532,7 +3555,7 @@ fn draw_detail_comment_with_long_url_renders_inline_with_link_style() {
     let width: u16 = 80;
     let inner_width = (width - 2) as usize;
 
-    let content = build_detail_content(&task, &[comment], &user_map, inner_width, None, None);
+    let content = build_detail_content(&task, &[comment], &user_map, inner_width, None);
     let lines = content.lines;
 
     let joined = lines.join("\n");
@@ -3598,7 +3621,7 @@ mod v6_view {
         let backend = TestBackend::new(120, 24);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal
-            .draw(|frame| view(model, frame, &mut vec![]))
+            .draw(|frame| view(model, frame, &mut vec![], &mut vec![]))
             .unwrap();
         buf_to_string(terminal.backend().buffer())
     }
@@ -3615,6 +3638,7 @@ mod v6_view {
             header: Header::from_instances(&[], None),
             viewport: (0, 0),
             click_targets: vec![],
+            modal_button_targets: vec![],
             last_loaded: None,
             selection: None,
             copied_feedback,
@@ -3641,11 +3665,14 @@ mod v6_view {
                 current_user_id: None,
                 affordances: vec![],
                 confirm_delete: None,
+                focused_comment: None,
+                comment_spans: vec![],
             }],
             should_quit: false,
             header: Header::from_instances(&[], None),
             viewport: (0, 0),
             click_targets: vec![],
+            modal_button_targets: vec![],
             last_loaded: None,
             selection: sel,
             copied_feedback: false,
@@ -3724,7 +3751,7 @@ mod v6_view {
         let backend = TestBackend::new(80, 24);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal
-            .draw(|frame| view(&model, frame, &mut vec![]))
+            .draw(|frame| view(&model, frame, &mut vec![], &mut vec![]))
             .unwrap();
         let buf = terminal.backend().buffer();
 
@@ -3758,7 +3785,7 @@ mod v6_view {
         let backend = TestBackend::new(80, 24);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal
-            .draw(|frame| view(&model, frame, &mut vec![]))
+            .draw(|frame| view(&model, frame, &mut vec![], &mut vec![]))
             .unwrap();
         let buf = terminal.backend().buffer();
 
@@ -3937,7 +3964,7 @@ fn strong_tag_produces_bold_style_run() {
         "body": "<p>Before <strong>bold word</strong> after.</p>"
     });
     let user_map: HashMap<i64, String> = HashMap::new();
-    let content = build_detail_content(&task, &[], &user_map, 80, None, None);
+    let content = build_detail_content(&task, &[], &user_map, 80, None);
 
     assert_eq!(
         content.lines.len(),
@@ -3969,7 +3996,7 @@ fn b_tag_produces_bold_style_run() {
         "body": "<p>Before <b>bolded</b> after.</p>"
     });
     let user_map: HashMap<i64, String> = HashMap::new();
-    let content = build_detail_content(&task, &[], &user_map, 80, None, None);
+    let content = build_detail_content(&task, &[], &user_map, 80, None);
 
     let found = find_style_run_for_text(
         &content.lines,
@@ -3995,7 +4022,7 @@ fn em_tag_produces_italic_style_run() {
         "body": "<p>See <em>italic text</em> here.</p>"
     });
     let user_map: HashMap<i64, String> = HashMap::new();
-    let content = build_detail_content(&task, &[], &user_map, 80, None, None);
+    let content = build_detail_content(&task, &[], &user_map, 80, None);
 
     let found = find_style_run_for_text(
         &content.lines,
@@ -4021,7 +4048,7 @@ fn i_tag_produces_italic_style_run() {
         "body": "<p>Text <i>slanted</i> end.</p>"
     });
     let user_map: HashMap<i64, String> = HashMap::new();
-    let content = build_detail_content(&task, &[], &user_map, 80, None, None);
+    let content = build_detail_content(&task, &[], &user_map, 80, None);
 
     let found = find_style_run_for_text(
         &content.lines,
@@ -4047,7 +4074,7 @@ fn code_tag_produces_code_style_run() {
         "body": "<p>Run <code>cargo test</code> now.</p>"
     });
     let user_map: HashMap<i64, String> = HashMap::new();
-    let content = build_detail_content(&task, &[], &user_map, 80, None, None);
+    let content = build_detail_content(&task, &[], &user_map, 80, None);
 
     let found = find_style_run_for_text(
         &content.lines,
@@ -4075,7 +4102,7 @@ fn heading_tags_produce_bold_style_runs() {
             "body": html_body
         });
         let user_map: HashMap<i64, String> = HashMap::new();
-        let content = build_detail_content(&task, &[], &user_map, 80, None, None);
+        let content = build_detail_content(&task, &[], &user_map, 80, None);
 
         let found = find_style_run_for_text(
             &content.lines,
@@ -4105,7 +4132,7 @@ fn bold_span_across_wrap_boundary_keeps_style_on_all_fragments() {
         "body": html_body
     });
     let user_map: HashMap<i64, String> = HashMap::new();
-    let content = build_detail_content(&task, &[], &user_map, 40, None, None);
+    let content = build_detail_content(&task, &[], &user_map, 40, None);
 
     let bold_run_count = content
         .line_styles
@@ -4136,7 +4163,7 @@ fn line_styles_always_aligned_with_lines() {
         "body": "<p>Comment with <code>code</code> inline.</p>"
     });
     let user_map: HashMap<i64, String> = HashMap::new();
-    let content = build_detail_content(&task, &[comment], &user_map, 60, None, None);
+    let content = build_detail_content(&task, &[comment], &user_map, 60, None);
 
     assert_eq!(
         content.lines.len(),
@@ -4164,7 +4191,7 @@ fn build_detail_content_structured_path_preserves_plain_text() {
     });
     let user_map: HashMap<i64, String> = HashMap::new();
 
-    let content = build_detail_content(&task, &[comment], &user_map, 70, None, None);
+    let content = build_detail_content(&task, &[comment], &user_map, 70, None);
     let joined = content.lines.join("\n");
 
     assert!(
@@ -4217,7 +4244,7 @@ fn plain_body_produces_empty_style_runs_per_line() {
         "body": "<p>Just plain text here.</p>"
     });
     let user_map: HashMap<i64, String> = HashMap::new();
-    let content = build_detail_content(&task, &[], &user_map, 80, None, None);
+    let content = build_detail_content(&task, &[], &user_map, 80, None);
 
     let body_lines_with_style_runs: Vec<&str> = content
         .lines
@@ -4244,7 +4271,7 @@ fn style_run_start_is_offset_by_chrome() {
         "body": "<p><strong>starts bold</strong> rest of line.</p>"
     });
     let user_map: HashMap<i64, String> = HashMap::new();
-    let content = build_detail_content(&task, &[], &user_map, 80, None, None);
+    let content = build_detail_content(&task, &[], &user_map, 80, None);
 
     let bold_run = content
         .line_styles
@@ -4364,7 +4391,7 @@ mod w1_chrome_wrap {
         let backend = TestBackend::new(width, height);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal
-            .draw(|frame| view(model, frame, &mut vec![]))
+            .draw(|frame| view(model, frame, &mut vec![], &mut vec![]))
             .unwrap();
         terminal.backend().buffer().clone()
     }
@@ -4381,6 +4408,7 @@ mod w1_chrome_wrap {
             header,
             viewport: (0, 0),
             click_targets: vec![],
+            modal_button_targets: vec![],
             last_loaded,
             selection: None,
             copied_feedback: false,
@@ -4814,6 +4842,8 @@ fn hint_for_screen_detail_with_assets_has_no_ctrl_cmd_in_footer() {
         current_user_id: None,
         affordances: vec![],
         confirm_delete: None,
+        focused_comment: None,
+        comment_spans: vec![],
     };
     let hint = hint_for_screen(&screen);
     assert!(
@@ -4825,8 +4855,8 @@ fn hint_for_screen_detail_with_assets_has_no_ctrl_cmd_in_footer() {
         "footer hint for Detail-with-assets must NOT contain 'abrir anexo' (BDR 0021 Sc.1): {hint:?}"
     );
     assert!(
-        hint.contains("↑/↓"),
-        "footer hint for Detail must still contain scroll nav arrows (BDR 0021 Sc.1): {hint:?}"
+        hint.contains("j/k"),
+        "footer hint for Detail must contain 'j/k' navigation (ADR 0038 browsing hint): {hint:?}"
     );
 }
 
@@ -5625,14 +5655,16 @@ fn asset_row_cells_carry_link_style_structural_not_url_detection() {
     }
 }
 
-// AC5: Render (TestBackend) — compose block visible when compose is active; absent when None.
-// Tests drive the REAL model -> reflow_detail -> draw_detail path, not compose_lines directly.
+// AC2/AC3/AC5 (BDR 0026): compose renders in a centered modal overlay (ADR 0039).
+// The compose field is no longer appended to the scrollable `lines` by reflow_detail;
+// instead view() renders a modal box over the thread via render_compose_modal.
 
 mod compose_render {
     use crate::i18n::set_language;
+    use crate::render::compose_block_lines;
     use crate::tui::model::{Compose, ComposeKind, ComposeStatus, Header, Model, Screen};
-    use crate::tui::screens::{draw_detail, DetailParams};
-    use ratatui::{backend::TestBackend, layout::Rect, Terminal};
+    use crate::tui::view::view;
+    use ratatui::{backend::TestBackend, Terminal};
     use serde_json::Value;
     use std::collections::HashMap;
     use std::sync::Mutex;
@@ -5642,6 +5674,14 @@ mod compose_render {
     fn compose_editing(buffer: &str) -> Compose {
         Compose {
             kind: ComposeKind::New,
+            buffer: buffer.into(),
+            status: ComposeStatus::Editing,
+        }
+    }
+
+    fn compose_edit_existing(comment_id: i64, buffer: &str) -> Compose {
+        Compose {
+            kind: ComposeKind::Edit { comment_id },
             buffer: buffer.into(),
             status: ComposeStatus::Editing,
         }
@@ -5666,143 +5706,542 @@ mod compose_render {
                 current_user_id: None,
                 affordances: vec![],
                 confirm_delete: None,
+                focused_comment: None,
+                comment_spans: vec![],
             }],
             should_quit: false,
             header: Header::from_instances(&[], None),
             viewport: (80, 24),
             click_targets: vec![],
+            modal_button_targets: vec![],
             last_loaded: None,
             selection: None,
             copied_feedback: false,
         }
     }
 
-    fn render_model_after_reflow(model: &mut Model, width: u16, height: u16) -> String {
-        let inner_width = width.saturating_sub(2) as usize;
-        model.reflow_detail(inner_width);
-
-        let (lines, line_styles) = match model.top() {
-            Some(Screen::Detail {
-                lines, line_styles, ..
-            }) => (lines.clone(), line_styles.clone()),
-            _ => (vec![], vec![]),
-        };
-
+    fn render_via_view(model: &Model, width: u16, height: u16) -> ratatui::buffer::Buffer {
         let backend = TestBackend::new(width, height);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal
-            .draw(|frame| {
-                draw_detail(
-                    frame,
-                    Rect::new(0, 0, width, height),
-                    DetailParams {
-                        lines: &lines,
-                        line_styles: &line_styles,
-                        assets: &[],
-                        offset: 0,
-                        loading: false,
-                        task_id: 42,
-                        task_name: "Task",
-                    },
-                );
-            })
+            .draw(|frame| view(model, frame, &mut vec![], &mut vec![]))
             .unwrap();
-        let buf = terminal.backend().buffer().clone();
-        let area = buf.area();
-        let mut result = String::new();
-        for y in 0..area.height {
-            for x in 0..area.width {
-                result.push_str(buf.cell((x, y)).unwrap().symbol());
-            }
-            result.push('\n');
-        }
-        result
+        terminal.backend().buffer().clone()
     }
 
-    // AC5-part1: compose active with typed body — label, buffer lines, and hint are visible
-    // via the real model -> reflow_detail -> draw_detail path.
+    fn buf_text(buf: &ratatui::buffer::Buffer) -> String {
+        let area = buf.area();
+        let mut out = String::new();
+        for y in 0..area.height {
+            for x in 0..area.width {
+                out.push_str(buf.cell((x, y)).unwrap().symbol());
+            }
+            out.push('\n');
+        }
+        out
+    }
+
+    // AC2 (BDR 0026 Sc.1): with compose active, a centered titled modal renders
+    // over the thread via view(); the buffer text and in-box hint appear in the modal.
     #[test]
     fn compose_active_shows_label_buffer_and_hint() {
         let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         set_language("en");
-        let mut model = make_detail_model(Some(compose_editing("hello")));
-        let content = render_model_after_reflow(&mut model, 80, 24);
+        let model = make_detail_model(Some(compose_editing("hello")));
+        let buf = render_via_view(&model, 80, 24);
         set_language("en");
+        let content = buf_text(&buf);
         assert!(
-            content.contains("Comment"),
-            "compose area must show the 'Comment' label: {content}"
+            content.contains("New comment"),
+            "modal must show 'New comment' title: {content}"
         );
         assert!(
             content.contains("hello"),
-            "compose area must show the typed buffer: {content}"
+            "modal must show the typed buffer: {content}"
         );
         assert!(
             content.contains("Ctrl+S send"),
-            "compose area must show the hint 'Ctrl+S send': {content}"
-        );
-        assert!(
-            content.contains("Esc cancel"),
-            "compose area must show 'Esc cancel' in the hint: {content}"
+            "in-box hint must contain 'Ctrl+S send': {content}"
         );
     }
 
-    // AC5-part2: multiline compose buffer — both lines visible via the real reflow path.
+    // AC2 (BDR 0026 Sc.2): multiline compose buffer — both lines visible in the modal.
     #[test]
     fn compose_active_multiline_buffer_both_lines_visible() {
         let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         set_language("en");
-        let mut model = make_detail_model(Some(compose_editing("line one\nline two")));
-        let content = render_model_after_reflow(&mut model, 80, 24);
+        let model = make_detail_model(Some(compose_editing("line one\nline two")));
+        let buf = render_via_view(&model, 80, 24);
         set_language("en");
+        let content = buf_text(&buf);
         assert!(
             content.contains("line one"),
-            "first line of buffer must be visible: {content}"
+            "first line of buffer must be visible in modal: {content}"
         );
         assert!(
             content.contains("line two"),
-            "second line of buffer must be visible: {content}"
+            "second line of buffer must be visible in modal: {content}"
         );
     }
 
-    // AC5-part3: compose None — neither label, buffer, nor hint appear.
-    // This test FAILS if reflow_detail appends compose lines when compose is None.
+    // AC3 (BDR 0026 Sc.3): compose None — compose content absent from scrollable lines
+    // and the modal hint does not appear in raw draw_detail output.
     #[test]
     fn compose_inactive_shows_no_compose_content() {
         let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         set_language("en");
-        let mut model = make_detail_model(None);
-        let content = render_model_after_reflow(&mut model, 80, 24);
+        let model = make_detail_model(None);
+        let buf = render_via_view(&model, 80, 24);
         set_language("en");
+        let content = buf_text(&buf);
         assert!(
-            !content.contains("Ctrl+S send"),
-            "hint must NOT appear when compose is None: {content}"
+            !content.contains("New comment"),
+            "modal title must NOT appear when compose is None: {content}"
         );
         assert!(
             !content.contains("Esc cancel"),
-            "cancel hint must NOT appear when compose is None: {content}"
+            "modal hint must NOT appear when compose is None: {content}"
         );
     }
 
-    // AC5-part4 (pt_BR): compose active shows localized hint via the real reflow path.
+    // AC5 (BDR 0026 Sc.6): edit compose opens modal titled 'Edit comment' pre-filled.
+    #[test]
+    fn compose_edit_renders_edit_title_and_prefilled_buffer() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let model = make_detail_model(Some(compose_edit_existing(42, "existing body")));
+        let buf = render_via_view(&model, 80, 24);
+        set_language("en");
+        let content = buf_text(&buf);
+        assert!(
+            content.contains("Edit comment"),
+            "modal must show 'Edit comment' title for edit compose: {content}"
+        );
+        assert!(
+            content.contains("existing body"),
+            "modal must show the pre-filled buffer: {content}"
+        );
+    }
+
+    // AC2 (BDR 0026 Sc.1, pt_BR): compose active shows localized modal title.
     #[test]
     fn compose_active_shows_localized_hint_in_pt_br() {
         let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         set_language("pt_BR");
-        let mut model = make_detail_model(Some(compose_editing("texto")));
-        let content = render_model_after_reflow(&mut model, 80, 24);
+        let model = make_detail_model(Some(compose_editing("texto")));
+        let buf = render_via_view(&model, 80, 24);
         set_language("en");
+        let content = buf_text(&buf);
         assert!(
-            content.contains("enviar"),
-            "pt_BR compose hint must contain 'enviar': {content}"
+            content.contains("texto"),
+            "pt_BR: modal must show buffer text: {content}"
+        );
+        assert!(
+            content.contains("Novo coment"),
+            "pt_BR: modal title must be 'Novo comentário': {content}"
+        );
+    }
+
+    // AC3 (BDR 0026 Sc.3): compose body builder returns buffer lines (no label).
+    // compose_block_lines no longer prepends the '── Comment ──' label.
+    #[test]
+    fn compose_block_lines_returns_buffer_without_label() {
+        let cp = compose_editing("first\nsecond");
+        let (lines, _) = compose_block_lines(&cp);
+        assert_eq!(
+            lines,
+            vec!["first", "second"],
+            "compose_block_lines must return buffer lines only, no label: {lines:?}"
+        );
+    }
+
+    // AC2 (backdrop DIM): backdrop cells outside the modal Rect carry Modifier::DIM.
+    #[test]
+    fn compose_modal_backdrop_cells_carry_dim_modifier() {
+        use ratatui::style::Modifier;
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let model = make_detail_model(Some(compose_editing("hi")));
+        let buf = render_via_view(&model, 80, 24);
+        set_language("en");
+        let area = buf.area();
+        let any_dim = (0..area.height).any(|y| {
+            (0..area.width).any(|x| {
+                buf.cell((x, y))
+                    .map(|c| c.modifier.contains(Modifier::DIM))
+                    .unwrap_or(false)
+            })
+        });
+        assert!(
+            any_dim,
+            "with compose modal open, at least one backdrop cell must carry Modifier::DIM"
+        );
+    }
+
+    // AC1 (slice-1b, BDR 0026 Sc.9): the rendered modal box occupies ≈70% of the frame.
+    // On a 100×40 frame the modal width must be in 64..=76 and height in 24..=32
+    // (70%±~10%). Box extents are derived from the buffer: border cells with the modal's
+    // soft-cyan fg color (theme::modal_border_style) isolate the modal from the detail
+    // panel borders (which use a different color). Geometry is never assumed.
+    #[test]
+    fn compose_modal_renders_at_70_percent_of_frame() {
+        use ratatui::style::Color;
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let model = make_detail_model(Some(compose_editing("hello")));
+        let backend = ratatui::backend::TestBackend::new(100, 40);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| crate::tui::view::view(&model, frame, &mut vec![], &mut vec![]))
+            .unwrap();
+        let buf = terminal.backend().buffer();
+        let area = buf.area();
+
+        // The modal border uses theme::modal_border_style() = SOFT_CYAN fg.
+        // Filter by fg=SOFT_CYAN to distinguish modal borders from the detail panel borders.
+        let soft_cyan = Color::Rgb(102, 204, 204);
+        let border_chars = [
+            '\u{250C}', '\u{2510}', '\u{2514}', '\u{2518}', '\u{2502}', '\u{2500}', '\u{256D}',
+            '\u{256E}', '\u{2570}', '\u{256F}',
+        ];
+        let is_modal_border = |x: u16, y: u16| -> bool {
+            buf.cell((x, y))
+                .map(|c| {
+                    let sym = c.symbol();
+                    let is_bc = border_chars.iter().any(|bc| sym.contains(*bc));
+                    is_bc && c.style().fg == Some(soft_cyan)
+                })
+                .unwrap_or(false)
+        };
+
+        let modal_cols: Vec<u16> = (0..area.width)
+            .filter(|&x| (0..area.height).any(|y| is_modal_border(x, y)))
+            .collect();
+        let modal_rows: Vec<u16> = (0..area.height)
+            .filter(|&y| (0..area.width).any(|x| is_modal_border(x, y)))
+            .collect();
+
+        assert!(
+            !modal_cols.is_empty(),
+            "must find at least one soft-cyan modal border column"
+        );
+        assert!(
+            !modal_rows.is_empty(),
+            "must find at least one soft-cyan modal border row"
+        );
+
+        let min_col = *modal_cols.iter().min().unwrap();
+        let max_col = *modal_cols.iter().max().unwrap();
+        let min_row = *modal_rows.iter().min().unwrap();
+        let max_row = *modal_rows.iter().max().unwrap();
+
+        let modal_w = max_col.saturating_sub(min_col) + 1;
+        let modal_h = max_row.saturating_sub(min_row) + 1;
+
+        assert!(
+            (64..=76).contains(&modal_w),
+            "modal width must be ≈70% of 100 (64..=76): got {modal_w} (cols {min_col}..={max_col})"
+        );
+        assert!(
+            (24..=32).contains(&modal_h),
+            "modal height must be ≈70% of 40 (24..=32): got {modal_h} (rows {min_row}..={max_row})"
+        );
+    }
+
+    // AC2 (slice-1b, BDR 0026 Sc.1): a backdrop cell at (0,0) carries BOTH Modifier::DIM
+    // AND the dark backdrop background from theme::modal_backdrop_style().
+    #[test]
+    fn compose_modal_backdrop_cell_carries_dim_and_dark_bg() {
+        use ratatui::style::{Color, Modifier};
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let model = make_detail_model(Some(compose_editing("hi")));
+        let buf = render_via_view(&model, 80, 24);
+        set_language("en");
+
+        let dark_bg = Color::Rgb(13, 13, 13);
+
+        let cell = buf.cell((0, 0)).expect("cell (0,0) must exist");
+        assert!(
+            cell.modifier.contains(Modifier::DIM),
+            "backdrop cell (0,0) must carry Modifier::DIM; modifier={:?}",
+            cell.modifier
+        );
+        assert_eq!(
+            cell.style().bg,
+            Some(dark_bg),
+            "backdrop cell (0,0) must carry the dark backdrop bg (NEAR_BLACK Rgb(13,13,13)); got {:?}",
+            cell.style().bg
+        );
+    }
+}
+
+// ── Confirm-delete modal render tests (BDR 0026 Sc.7/8, ADR 0039 §4) ─────────
+
+mod confirm_modal_buttons {
+    use crate::i18n::set_language;
+    use crate::tui::model::{Header, ModalButtonTarget, Model, Screen};
+    use crate::tui::view::view;
+    use ratatui::{backend::TestBackend, Terminal};
+    use serde_json::Value;
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+
+    static LANG_MUTEX: Mutex<()> = Mutex::new(());
+
+    fn make_confirm_model(comment_id: i64) -> Model {
+        Model {
+            stack: vec![Screen::Detail {
+                instance: "inst".into(),
+                project_id: 1,
+                task_id: 42,
+                task: Value::Null,
+                comments: vec![],
+                user_map: HashMap::new(),
+                lines: vec![],
+                line_styles: vec![],
+                assets: vec![],
+                offset: 0,
+                loading: false,
+                rendered_width: usize::MAX,
+                compose: None,
+                current_user_id: Some(7),
+                affordances: vec![],
+                confirm_delete: Some(comment_id),
+                focused_comment: None,
+                comment_spans: vec![],
+            }],
+            should_quit: false,
+            header: Header::from_instances(&[], None),
+            viewport: (80, 24),
+            click_targets: vec![],
+            modal_button_targets: vec![],
+            last_loaded: None,
+            selection: None,
+            copied_feedback: false,
+        }
+    }
+
+    fn render_confirm_buf_and_targets(
+        model: &Model,
+        width: u16,
+        height: u16,
+    ) -> (ratatui::buffer::Buffer, Vec<ModalButtonTarget>) {
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut btn_targets: Vec<ModalButtonTarget> = vec![];
+        terminal
+            .draw(|frame| view(model, frame, &mut vec![], &mut btn_targets))
+            .unwrap();
+        (terminal.backend().buffer().clone(), btn_targets)
+    }
+
+    fn buf_text(buf: &ratatui::buffer::Buffer) -> String {
+        let area = buf.area();
+        let mut out = String::new();
+        for y in 0..area.height {
+            for x in 0..area.width {
+                out.push_str(buf.cell((x, y)).unwrap().symbol());
+            }
+            out.push('\n');
+        }
+        out
+    }
+
+    // AC1 (BDR 0026 Sc.7): confirm_delete=Some renders modal with title 'Excluir comentário?'
+    // and visible [confirmar]/[cancelar] button labels, over a strongly-dimmed backdrop.
+    #[test]
+    fn confirm_modal_renders_title_and_buttons_pt_br() {
+        use ratatui::style::Modifier;
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("pt_BR");
+        let model = make_confirm_model(42);
+        let (buf, _) = render_confirm_buf_and_targets(&model, 80, 24);
+        set_language("en");
+        let content = buf_text(&buf);
+        assert!(
+            content.contains("Excluir coment"),
+            "confirm modal title must contain 'Excluir comentário?' in pt-BR: {content}"
+        );
+        assert!(
+            content.contains("confirmar"),
+            "confirm modal must show '[confirmar]' button: {content}"
         );
         assert!(
             content.contains("cancelar"),
-            "pt_BR compose hint must contain 'cancelar': {content}"
+            "confirm modal must show '[cancelar]' button: {content}"
+        );
+        let area = buf.area();
+        let any_dim = (0..area.height).any(|y| {
+            (0..area.width).any(|x| {
+                buf.cell((x, y))
+                    .map(|c| c.modifier.contains(Modifier::DIM))
+                    .unwrap_or(false)
+            })
+        });
+        assert!(
+            any_dim,
+            "backdrop must carry Modifier::DIM with confirm modal open"
+        );
+    }
+
+    // AC3 (BDR 0026 Sc.8, geometry-consistency): the [confirmar] and [cancelar] labels are
+    // located in the rendered buffer; a plain click at those exact cells emits the right result.
+    // Button positions come from the registered ModalButtonTargets — never assumed.
+    #[test]
+    fn plain_click_on_buffer_located_confirm_button_emits_delete() {
+        use crate::tui::model::{update, Msg};
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let mut model = make_confirm_model(77);
+        model.viewport = (80, 24);
+        let (buf, btn_targets) = render_confirm_buf_and_targets(&model, 80, 24);
+
+        assert!(
+            !btn_targets.is_empty(),
+            "render must produce at least two modal button targets"
+        );
+        let confirm_btn = btn_targets
+            .iter()
+            .find(|t| t.is_confirm)
+            .expect("confirm button target must be registered");
+        let cancel_btn = btn_targets
+            .iter()
+            .find(|t| !t.is_confirm)
+            .expect("cancel button target must be registered");
+
+        let confirm_cell_x = confirm_btn.x_start;
+        let confirm_cell_y = confirm_btn.row;
+        let confirm_cell_sym = buf
+            .cell((confirm_cell_x, confirm_cell_y))
+            .map(|c| c.symbol().to_string())
+            .unwrap_or_default();
+        assert!(
+            confirm_cell_sym == "[" || confirm_cell_sym.contains('['),
+            "confirm button cell ({confirm_cell_x},{confirm_cell_y}) must contain '[': got '{confirm_cell_sym}'"
+        );
+
+        let cancel_cell_x = cancel_btn.x_start;
+        let cancel_cell_y = cancel_btn.row;
+        let cancel_cell_sym = buf
+            .cell((cancel_cell_x, cancel_cell_y))
+            .map(|c| c.symbol().to_string())
+            .unwrap_or_default();
+        assert!(
+            cancel_cell_sym == "[" || cancel_cell_sym.contains('['),
+            "cancel button cell ({cancel_cell_x},{cancel_cell_y}) must contain '[': got '{cancel_cell_sym}'"
+        );
+
+        model.set_modal_button_targets(btn_targets.clone());
+        let (m2, cmds) = update(
+            model,
+            Msg::Click {
+                column: confirm_btn.x_start,
+                row: confirm_btn.row,
+                modifiers: crossterm::event::KeyModifiers::NONE,
+            },
+        );
+        assert_eq!(
+            cmds.len(),
+            1,
+            "plain click on [confirmar] must emit one Cmd::DeleteComment; got {:?}",
+            cmds
+        );
+        match &cmds[0] {
+            crate::tui::model::Cmd::DeleteComment { comment_id, .. } => {
+                assert_eq!(*comment_id, 77);
+            }
+            other => panic!("expected DeleteComment, got {other:?}"),
+        }
+        match m2.top() {
+            Some(Screen::Detail { confirm_delete, .. }) => {
+                assert!(
+                    confirm_delete.is_none(),
+                    "confirm_delete cleared after confirm"
+                );
+            }
+            _ => panic!("expected Detail"),
+        }
+    }
+
+    // AC3b (geometry-consistency / capture): plain click OUTSIDE the button labels while
+    // the confirm modal is open does NOT delete and does NOT start a text selection.
+    #[test]
+    fn plain_click_outside_buttons_does_not_delete_or_select() {
+        use crate::tui::model::{update, Msg};
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let mut model = make_confirm_model(77);
+        model.viewport = (80, 24);
+        let (_, btn_targets) = render_confirm_buf_and_targets(&model, 80, 24);
+        model.set_modal_button_targets(btn_targets);
+
+        let (m2, cmds) = update(
+            model,
+            Msg::Click {
+                column: 0,
+                row: 0,
+                modifiers: crossterm::event::KeyModifiers::NONE,
+            },
         );
         assert!(
-            content.contains("Comentário"),
-            "pt_BR compose label must be 'Comentário': {content}"
+            cmds.is_empty(),
+            "click outside buttons must emit no Cmd; got {:?}",
+            cmds
         );
+        match m2.top() {
+            Some(Screen::Detail { confirm_delete, .. }) => {
+                assert!(
+                    confirm_delete.is_some(),
+                    "confirm_delete must stay Some when click misses the buttons"
+                );
+            }
+            _ => panic!("expected Detail"),
+        }
+        assert!(
+            m2.selection.is_none(),
+            "selection must NOT start behind the confirm modal"
+        );
+    }
+
+    // AC3 (plain click on cancel from buffer): plain click on [cancelar] clears confirm, no Cmd.
+    #[test]
+    fn plain_click_on_buffer_located_cancel_button_clears_confirm() {
+        use crate::tui::model::{update, Msg};
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let mut model = make_confirm_model(77);
+        model.viewport = (80, 24);
+        let (_, btn_targets) = render_confirm_buf_and_targets(&model, 80, 24);
+        let cancel_btn = btn_targets
+            .iter()
+            .find(|t| !t.is_confirm)
+            .expect("cancel button target must be registered")
+            .clone();
+        model.set_modal_button_targets(btn_targets);
+
+        let (m2, cmds) = update(
+            model,
+            Msg::Click {
+                column: cancel_btn.x_start,
+                row: cancel_btn.row,
+                modifiers: crossterm::event::KeyModifiers::NONE,
+            },
+        );
+        assert!(
+            cmds.is_empty(),
+            "plain click on [cancelar] must emit no Cmd; got {:?}",
+            cmds
+        );
+        match m2.top() {
+            Some(Screen::Detail { confirm_delete, .. }) => {
+                assert!(
+                    confirm_delete.is_none(),
+                    "confirm_delete cleared after cancel"
+                );
+            }
+            _ => panic!("expected Detail"),
+        }
     }
 }
 
@@ -5828,7 +6267,7 @@ fn edit_affordance_shown_for_own_comment() {
         "body_plain_text": "Hello"
     });
     let user_map: HashMap<i64, String> = HashMap::new();
-    let content = build_detail_content(&task, &[comment], &user_map, 80, Some(7), None);
+    let content = build_detail_content(&task, &[comment], &user_map, 80, Some(7));
     use crate::render::AffordanceKind;
     // The affordance vec is the authoritative signal; also verify the header line text.
     let edit_affs: Vec<_> = content
@@ -5873,7 +6312,7 @@ fn edit_affordance_hidden_for_other_user_comment() {
         "body_plain_text": "Other"
     });
     let user_map: HashMap<i64, String> = HashMap::new();
-    let content = build_detail_content(&task, &[comment], &user_map, 80, Some(7), None);
+    let content = build_detail_content(&task, &[comment], &user_map, 80, Some(7));
     let edit_affs: Vec<_> = content
         .affordances
         .iter()
@@ -5902,7 +6341,7 @@ fn edit_affordance_hidden_when_current_user_id_is_none() {
         "body_plain_text": "Hello"
     });
     let user_map: HashMap<i64, String> = HashMap::new();
-    let content = build_detail_content(&task, &[comment], &user_map, 80, None, None);
+    let content = build_detail_content(&task, &[comment], &user_map, 80, None);
     let edit_affs: Vec<_> = content
         .affordances
         .iter()
@@ -5937,7 +6376,7 @@ fn edit_affordances_populated_only_for_own_comment() {
         "body_plain_text": "their comment"
     });
     let user_map: HashMap<i64, String> = HashMap::new();
-    let content = build_detail_content(&task, &[own, other], &user_map, 80, Some(5), None);
+    let content = build_detail_content(&task, &[own, other], &user_map, 80, Some(5));
     let edit_affs: Vec<_> = content
         .affordances
         .iter()
@@ -5953,4 +6392,900 @@ fn edit_affordances_populated_only_for_own_comment() {
         panic!("expected Edit kind")
     };
     assert_eq!(cid, 10, "affordance must reference comment_id=10");
+}
+
+// --- AC4: focused comment card carries the focus highlight; others do not ---
+
+mod comment_focus_render {
+    use crate::render::build_detail_content;
+    use crate::tui::screens::{draw_detail, DetailParams};
+    use crate::tui::theme;
+    use ratatui::{backend::TestBackend, layout::Rect, Terminal};
+    use serde_json::json;
+    use std::collections::HashMap;
+
+    fn render_detail_with_focus(
+        focused_comment: Option<usize>,
+        comment_spans: &[(usize, usize)],
+        lines: &[String],
+        line_styles: &[Vec<crate::render::StyleRun>],
+        width: u16,
+        height: u16,
+    ) -> ratatui::buffer::Buffer {
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| {
+                draw_detail(
+                    frame,
+                    Rect::new(0, 0, width, height),
+                    DetailParams {
+                        lines,
+                        line_styles,
+                        assets: &[],
+                        offset: 0,
+                        loading: false,
+                        task_id: 1,
+                        task_name: "Task",
+                        focused_comment,
+                        comment_spans,
+                    },
+                );
+            })
+            .unwrap();
+        terminal.backend().buffer().clone()
+    }
+
+    fn build_two_comment_content(width: u16) -> crate::render::DetailContent {
+        let inner_width = width.saturating_sub(2) as usize;
+        let c0 = json!({
+            "id": 1i64,
+            "created_by_id": 2i64,
+            "created_on": 1700000000u64,
+            "body_plain_text": "First comment text here"
+        });
+        let c1 = json!({
+            "id": 2i64,
+            "created_by_id": 3i64,
+            "created_on": 1700000001u64,
+            "body_plain_text": "Second comment text here"
+        });
+        let task = json!({"name": "Task", "id": 1, "project_id": 1, "is_completed": false});
+        let user_map: HashMap<i64, String> = HashMap::new();
+        build_detail_content(&task, &[c0, c1], &user_map, inner_width, None)
+    }
+
+    fn has_focus_bg_on_row(buf: &ratatui::buffer::Buffer, y: u16, width: u16) -> bool {
+        let focus_style = theme::focused_comment_style();
+        let focus_bg = focus_style.bg;
+        (0..width).any(|x| {
+            buf.cell((x, y))
+                .map(|c| c.style().bg == focus_bg)
+                .unwrap_or(false)
+        })
+    }
+
+    // AC4: focused card's lines carry the focus background; unfocused card's lines do not.
+    #[test]
+    fn focused_card_has_highlight_style_unfocused_does_not() {
+        let width = 80u16;
+        let height = 40u16;
+        let content = build_two_comment_content(width);
+        assert_eq!(content.comment_spans.len(), 2, "must have 2 comment_spans");
+
+        let (span0_start, span0_count) = content.comment_spans[0];
+        let (span1_start, span1_count) = content.comment_spans[1];
+
+        let buf = render_detail_with_focus(
+            Some(0),
+            &content.comment_spans,
+            &content.lines,
+            &content.line_styles,
+            width,
+            height,
+        );
+
+        let content_top: u16 = 1;
+        let offset: u16 = 0;
+
+        let focused_row = content_top + (span0_start as u16).saturating_sub(offset);
+        let unfocused_row = content_top + (span1_start as u16).saturating_sub(offset);
+
+        assert!(
+            has_focus_bg_on_row(&buf, focused_row, width),
+            "first line of focused card (row {focused_row}) must carry focus background"
+        );
+        let span0_mid = content_top + (span0_start + span0_count / 2) as u16;
+        if span0_mid != focused_row {
+            assert!(
+                has_focus_bg_on_row(&buf, span0_mid, width),
+                "middle line of focused card (row {span0_mid}) must carry focus background"
+            );
+        }
+
+        assert!(
+            !has_focus_bg_on_row(&buf, unfocused_row, width),
+            "first line of unfocused card (row {unfocused_row}) must NOT carry focus background"
+        );
+        let _ = (span1_count, span1_start);
+    }
+
+    // AC4: moving focus from card 0 to card 1 moves the highlight.
+    #[test]
+    fn moving_focus_moves_highlight_to_new_card() {
+        let width = 80u16;
+        let height = 40u16;
+        let content = build_two_comment_content(width);
+        let content_top: u16 = 1;
+
+        let (span0_start, _) = content.comment_spans[0];
+        let (span1_start, _) = content.comment_spans[1];
+
+        let buf_focus0 = render_detail_with_focus(
+            Some(0),
+            &content.comment_spans,
+            &content.lines,
+            &content.line_styles,
+            width,
+            height,
+        );
+        let buf_focus1 = render_detail_with_focus(
+            Some(1),
+            &content.comment_spans,
+            &content.lines,
+            &content.line_styles,
+            width,
+            height,
+        );
+
+        let row0 = content_top + span0_start as u16;
+        let row1 = content_top + span1_start as u16;
+
+        assert!(
+            has_focus_bg_on_row(&buf_focus0, row0, width),
+            "with focus=0, card-0 first row must be highlighted"
+        );
+        assert!(
+            !has_focus_bg_on_row(&buf_focus0, row1, width),
+            "with focus=0, card-1 first row must NOT be highlighted"
+        );
+
+        assert!(
+            !has_focus_bg_on_row(&buf_focus1, row0, width),
+            "with focus=1, card-0 first row must NOT be highlighted"
+        );
+        assert!(
+            has_focus_bg_on_row(&buf_focus1, row1, width),
+            "with focus=1, card-1 first row must be highlighted"
+        );
+    }
+
+    // AC4: no focus (None) — no lines carry the focus background.
+    #[test]
+    fn no_focus_means_no_highlight_anywhere() {
+        let width = 80u16;
+        let height = 40u16;
+        let content = build_two_comment_content(width);
+
+        let buf = render_detail_with_focus(
+            None,
+            &content.comment_spans,
+            &content.lines,
+            &content.line_styles,
+            width,
+            height,
+        );
+
+        let focus_style = theme::focused_comment_style();
+        let focus_bg = focus_style.bg;
+        let any_focus = (0..height).any(|y| {
+            (0..width).any(|x| {
+                buf.cell((x, y))
+                    .map(|c| c.style().bg == focus_bg)
+                    .unwrap_or(false)
+            })
+        });
+        assert!(
+            !any_focus,
+            "with focused_comment=None, no cell must have the focus background"
+        );
+    }
+}
+
+// --- ADR 0038 / BDR 0025 Scenarios 7-9: contextual footer + status line ---
+
+mod contextual_footer {
+    use crate::i18n::set_language;
+    use crate::render::build_detail_content;
+    use crate::tui::model::{Compose, ComposeKind, ComposeStatus, Header, Model, Screen};
+    use crate::tui::view::view;
+    use ratatui::{backend::TestBackend, Terminal};
+    use serde_json::json;
+    use std::collections::HashMap;
+
+    fn buf_to_string(buf: &ratatui::buffer::Buffer) -> String {
+        let area = buf.area();
+        let mut out = String::new();
+        for y in 0..area.height {
+            for x in 0..area.width {
+                out.push_str(buf.cell((x, y)).unwrap().symbol());
+            }
+            out.push('\n');
+        }
+        out
+    }
+
+    fn footer_row_string(buf: &ratatui::buffer::Buffer, row: u16) -> String {
+        let area = buf.area();
+        (0..area.width)
+            .map(|x| buf.cell((x, row)).unwrap().symbol().to_string())
+            .collect()
+    }
+
+    fn render_detail_model(
+        compose: Option<Compose>,
+        confirm_delete: Option<i64>,
+        focused_comment: Option<usize>,
+        comments: Vec<serde_json::Value>,
+        current_user_id: Option<i64>,
+        copied_feedback: bool,
+    ) -> ratatui::buffer::Buffer {
+        let task = json!({"name": "T", "id": 1, "project_id": 1, "is_completed": false});
+        let inner_width = 78usize;
+        let content = build_detail_content(
+            &task,
+            &comments,
+            &HashMap::new(),
+            inner_width,
+            current_user_id,
+        );
+        let model = Model {
+            stack: vec![Screen::Detail {
+                instance: "inst".into(),
+                project_id: 1,
+                task_id: 1,
+                task,
+                comments,
+                user_map: HashMap::new(),
+                lines: content.lines,
+                line_styles: content.line_styles,
+                assets: vec![],
+                offset: 0,
+                loading: false,
+                rendered_width: 80,
+                compose,
+                current_user_id,
+                affordances: content.affordances,
+                confirm_delete,
+                focused_comment,
+                comment_spans: content.comment_spans,
+            }],
+            should_quit: false,
+            header: Header::from_instances(&[], None),
+            viewport: (0, 0),
+            click_targets: vec![],
+            modal_button_targets: vec![],
+            last_loaded: None,
+            selection: None,
+            copied_feedback,
+        };
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| view(&model, frame, &mut vec![], &mut vec![]))
+            .unwrap();
+        terminal.backend().buffer().clone()
+    }
+
+    fn editing_compose() -> Compose {
+        Compose {
+            kind: ComposeKind::New,
+            buffer: String::new(),
+            status: ComposeStatus::Editing,
+        }
+    }
+
+    fn submitting_compose() -> Compose {
+        Compose {
+            kind: ComposeKind::New,
+            buffer: String::new(),
+            status: ComposeStatus::Submitting,
+        }
+    }
+
+    fn error_compose(msg: &str) -> Compose {
+        Compose {
+            kind: ComposeKind::New,
+            buffer: String::new(),
+            status: ComposeStatus::Error(msg.to_string()),
+        }
+    }
+
+    fn own_comment(user_id: i64) -> serde_json::Value {
+        json!({
+            "id": 10i64,
+            "created_by_id": user_id,
+            "created_on": 1700000000u64,
+            "body_plain_text": "My comment"
+        })
+    }
+
+    fn other_comment() -> serde_json::Value {
+        json!({
+            "id": 20i64,
+            "created_by_id": 999i64,
+            "created_on": 1700000001u64,
+            "body_plain_text": "Other comment"
+        })
+    }
+
+    // AC1/Scenario 7: browsing mode shows the browse hint.
+    #[test]
+    fn detail_footer_browsing_mode_shows_browse_hint() {
+        let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let buf = render_detail_model(None, None, None, vec![], None, false);
+        set_language("en");
+        let content = buf_to_string(&buf);
+        assert!(
+            content.contains("j/k move"),
+            "browsing hint must contain 'j/k move': {content}"
+        );
+        assert!(
+            content.contains("c comment"),
+            "browsing hint must contain 'c comment': {content}"
+        );
+        assert!(
+            content.contains("r refresh"),
+            "browsing hint must contain 'r refresh': {content}"
+        );
+    }
+
+    // AC6 (ADR 0039 §5): while compose modal is open, the footer shows the browse
+    // hint — the modal owns the compose hint/status (one-home rule).
+    // Ctrl+S/Esc hint appears inside the modal box, NOT in the footer.
+    #[test]
+    fn detail_footer_composing_mode_shows_compose_hint() {
+        let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let buf = render_detail_model(Some(editing_compose()), None, None, vec![], None, false);
+        set_language("en");
+        let content = buf_to_string(&buf);
+        assert!(
+            content.contains("j/k move"),
+            "footer must show browse hint when modal is open (modal owns compose hint): {content}"
+        );
+        assert!(
+            content.contains("c comment"),
+            "footer must show browse hint 'c comment' when modal is open: {content}"
+        );
+    }
+
+    // AC1/Scenario 7: confirm-delete modal shows buttons inside the box (ADR 0039 §5).
+    // The modal owns its confirm buttons; the footer shows the browse hint behind the dim.
+    #[test]
+    fn detail_footer_confirm_delete_mode_shows_confirm_hint() {
+        let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let buf = render_detail_model(None, Some(10), None, vec![own_comment(42)], Some(42), false);
+        set_language("en");
+        let content = buf_to_string(&buf);
+        // The confirm buttons render INSIDE the modal box (one-home rule, ADR 0039 §5).
+        assert!(
+            content.contains("confirm") || content.contains("confirmar"),
+            "confirm button must appear inside the modal box: {content}"
+        );
+        assert!(
+            content.contains("cancel") || content.contains("cancelar"),
+            "cancel button must appear inside the modal box: {content}"
+        );
+        // Per ADR 0039 §5 the footer shows the browse hint while the modal is open.
+        assert!(
+            content.contains("j/k move"),
+            "footer must show browse hint 'j/k move' while confirm modal is open (ADR 0039 §5): {content}"
+        );
+    }
+
+    // AC1/Scenario 7: own-comment-focused mode shows the own-focused hint.
+    #[test]
+    fn detail_footer_own_comment_focused_shows_own_focused_hint() {
+        let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let comments = vec![own_comment(42)];
+        let buf = render_detail_model(None, None, Some(0), comments, Some(42), false);
+        set_language("en");
+        let content = buf_to_string(&buf);
+        assert!(
+            content.contains("Ctrl+click edit/delete"),
+            "own-focused hint must contain 'Ctrl+click edit/delete': {content}"
+        );
+        assert!(
+            content.contains("c new"),
+            "own-focused hint must contain 'c new': {content}"
+        );
+        assert!(
+            !content.contains("c comment"),
+            "own-focused mode must NOT show browse hint: {content}"
+        );
+    }
+
+    // AC1: focused on OTHER user's comment → browsing hint (not own-focused).
+    #[test]
+    fn detail_footer_other_comment_focused_shows_browse_hint() {
+        let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let comments = vec![other_comment()];
+        let buf = render_detail_model(None, None, Some(0), comments, Some(42), false);
+        set_language("en");
+        let content = buf_to_string(&buf);
+        assert!(
+            content.contains("c comment"),
+            "other-comment-focused must show browse hint: {content}"
+        );
+        assert!(
+            !content.contains("Ctrl+click edit/delete"),
+            "other-comment-focused must NOT show own-focused hint: {content}"
+        );
+    }
+
+    // AC6 (ADR 0039 §5): modal open vs browse produce different render output;
+    // browse shows j/k move, modal frame adds the compose overlay (Ctrl+S in modal).
+    #[test]
+    fn detail_footer_hint_switches_when_mode_changes() {
+        let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let buf_composing =
+            render_detail_model(Some(editing_compose()), None, None, vec![], None, false);
+        let buf_browsing = render_detail_model(None, None, None, vec![], None, false);
+        set_language("en");
+        let composing = buf_to_string(&buf_composing);
+        let browsing = buf_to_string(&buf_browsing);
+        assert!(
+            composing.contains("Ctrl+S send"),
+            "compose hint must appear inside the modal when compose is open: {composing}"
+        );
+        assert!(
+            browsing.contains("j/k move"),
+            "browsing mode must show browse hint in footer: {browsing}"
+        );
+        assert_ne!(
+            composing, browsing,
+            "composing and browsing renders must differ (modal overlay changes the buffer)"
+        );
+    }
+
+    // AC4 (ADR 0039 §5, Scenario 4): 'Enviando…' appears in the compose modal hint
+    // when Submitting (rendered by view() which includes the modal overlay).
+    #[test]
+    fn detail_footer_status_row_shows_enviando_when_submitting() {
+        let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("pt_BR");
+        let buf = render_detail_model(Some(submitting_compose()), None, None, vec![], None, false);
+        set_language("en");
+        let content = buf_to_string(&buf);
+        assert!(
+            content.contains("Enviando"),
+            "modal in-box hint must show 'Enviando…' when Submitting: {content}"
+        );
+    }
+
+    // AC4 (ADR 0039 §5): localized error appears in the compose modal when Error.
+    #[test]
+    fn detail_footer_status_row_shows_error_when_compose_error() {
+        let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("pt_BR");
+        let buf = render_detail_model(
+            Some(error_compose("network failure")),
+            None,
+            None,
+            vec![],
+            None,
+            false,
+        );
+        set_language("en");
+        let content = buf_to_string(&buf);
+        assert!(
+            content.contains("Falha ao"),
+            "modal in-box hint must show localized error when compose Error: {content}"
+        );
+    }
+
+    // AC2/Scenario 8: status row shows 'Copiado ✓' when copied_feedback is set.
+    #[test]
+    fn detail_footer_status_row_shows_copiado_when_copied_feedback() {
+        let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("pt_BR");
+        let buf = render_detail_model(None, None, None, vec![], None, true);
+        set_language("en");
+        let content = buf_to_string(&buf);
+        assert!(
+            content.contains("Copiado"),
+            "status row must show 'Copiado ✓' when copied_feedback=true: {content}"
+        );
+    }
+
+    // AC2/Scenario 8: status row is blank when idle (no compose, no copied_feedback).
+    #[test]
+    fn detail_footer_status_row_is_blank_when_idle() {
+        let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let buf = render_detail_model(None, None, None, vec![], None, false);
+        set_language("en");
+        let area = buf.area();
+        let last_row = footer_row_string(&buf, area.height - 1);
+        let second_to_last = footer_row_string(&buf, area.height - 2);
+        let hint_shown_on_last_row = last_row.contains("j/k move");
+        let hint_shown_on_second_last = second_to_last.contains("j/k move");
+        assert!(
+            hint_shown_on_last_row || hint_shown_on_second_last,
+            "idle Detail: hint must appear on one of the last two rows: last='{last_row}', second_last='{second_to_last}'"
+        );
+        assert!(
+            !last_row.contains("Enviando")
+                && !last_row.contains("Copiado")
+                && !last_row.contains("Falha"),
+            "idle Detail: last row must not contain any status text: {last_row}"
+        );
+    }
+
+    // AC3: compose_block_lines returns only the buffer body lines (no status, no label, no hint).
+    // Status and hint are rendered by the modal caller (view.rs), not by the body builder.
+    #[test]
+    fn compose_block_lines_does_not_contain_status_text() {
+        use crate::render::compose_block_lines;
+        let submitting = submitting_compose();
+        let (lines, _) = compose_block_lines(&submitting);
+        let joined = lines.join("\n");
+        assert!(
+            !joined.contains("Enviando"),
+            "compose_block_lines body must NOT contain 'Enviando' (status rendered by modal caller): {joined}"
+        );
+        assert!(
+            !joined.contains("Sending"),
+            "compose_block_lines body must NOT contain 'Sending…': {joined}"
+        );
+
+        let error = error_compose("oops");
+        let (lines_err, _) = compose_block_lines(&error);
+        let joined_err = lines_err.join("\n");
+        assert!(
+            !joined_err.contains("Failed"),
+            "compose_block_lines body must NOT contain error text: {joined_err}"
+        );
+
+        let editing = editing_compose();
+        let (lines_edit, _) = compose_block_lines(&editing);
+        let joined_edit = lines_edit.join("\n");
+        assert!(
+            !joined_edit.contains("Ctrl+S send"),
+            "compose_block_lines body must NOT contain hint text: {joined_edit}"
+        );
+    }
+
+    // AC4: FooterPlan height accounts for status row when status is present.
+    // AC4 (ADR 0039 §5): compose status lives in the modal, not the footer.
+    // When Submitting, 'Enviando…' appears inside the modal box; the footer
+    // shows the browse hint (footer height is unchanged by compose status).
+    #[test]
+    fn detail_footer_height_increases_by_one_when_status_present() {
+        let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("pt_BR");
+        let buf_submitting =
+            render_detail_model(Some(submitting_compose()), None, None, vec![], None, false);
+        set_language("en");
+        let content = buf_to_string(&buf_submitting);
+        assert!(
+            content.contains("Enviando"),
+            "Enviando… must appear in the modal (not the footer) when Submitting: {content}"
+        );
+        let area = buf_submitting.area();
+        let last_row = footer_row_string(&buf_submitting, area.height - 1);
+        assert!(
+            !last_row.contains("Enviando"),
+            "Enviando… must NOT appear in the footer row (modal owns status): {last_row}"
+        );
+    }
+
+    // AC4: render at MIN_HEIGHT (6) with a status string does not panic.
+    #[test]
+    fn detail_footer_at_min_height_with_status_does_not_panic() {
+        let task = json!({"name": "T", "id": 1, "project_id": 1, "is_completed": false});
+        let model = Model {
+            stack: vec![Screen::Detail {
+                instance: "inst".into(),
+                project_id: 1,
+                task_id: 1,
+                task,
+                comments: vec![],
+                user_map: HashMap::new(),
+                lines: vec![],
+                line_styles: vec![],
+                assets: vec![],
+                offset: 0,
+                loading: false,
+                rendered_width: 80,
+                compose: Some(submitting_compose()),
+                current_user_id: None,
+                affordances: vec![],
+                confirm_delete: None,
+                focused_comment: None,
+                comment_spans: vec![],
+            }],
+            should_quit: false,
+            header: Header::from_instances(&[], None),
+            viewport: (0, 0),
+            click_targets: vec![],
+            modal_button_targets: vec![],
+            last_loaded: None,
+            selection: None,
+            copied_feedback: false,
+        };
+        let backend = TestBackend::new(80, 6);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| view(&model, frame, &mut vec![], &mut vec![]))
+            .unwrap();
+        let content = buf_to_string(terminal.backend().buffer());
+        assert!(
+            !content.is_empty(),
+            "render at MIN_HEIGHT with status must not produce empty output"
+        );
+    }
+
+    // AC5: pt-BR translations are present in the catalog.
+    #[test]
+    fn pt_br_catalog_has_contextual_footer_keys() {
+        let raw = include_str!("../../locales/pt_BR.json");
+        let catalog: HashMap<String, String> =
+            serde_json::from_str(raw).expect("pt_BR.json must be valid JSON");
+
+        assert_eq!(
+            catalog
+                .get("j/k move · c comment · r refresh · Esc/b back · q quit")
+                .map(String::as_str),
+            Some("j/k mover · c comentar · r atualizar · Esc/b voltar · q sair"),
+            "pt_BR must have browsing hint"
+        );
+        assert_eq!(
+            catalog
+                .get("Enter/click confirm · Esc cancel")
+                .map(String::as_str),
+            Some("Enter/clique confirmar · Esc cancelar"),
+            "pt_BR must have confirm-delete hint"
+        );
+        assert_eq!(
+            catalog
+                .get("j/k move · Ctrl+click edit/delete · c new")
+                .map(String::as_str),
+            Some("j/k mover · Ctrl+clique editar/excluir · c novo"),
+            "pt_BR must have own-focused hint"
+        );
+        assert_eq!(
+            catalog.get("Copiado ✓").map(String::as_str),
+            Some("Copiado ✓"),
+            "pt_BR must have copied status"
+        );
+    }
+
+    // AC5: all new footer/status strings resolve through i18n::t() in pt-BR.
+    #[test]
+    fn detail_footer_pt_br_browsing_hint_shows_portuguese() {
+        let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("pt_BR");
+        let buf = render_detail_model(None, None, None, vec![], None, false);
+        set_language("en");
+        let content = buf_to_string(&buf);
+        assert!(
+            content.contains("j/k mover"),
+            "pt-BR browsing hint must show 'j/k mover': {content}"
+        );
+        assert!(
+            content.contains("c comentar"),
+            "pt-BR browsing hint must show 'c comentar': {content}"
+        );
+    }
+}
+
+// --- Confirm-delete modal overlay (ADR 0039 slice 2) ---
+
+mod confirm_modal_render {
+    use crate::i18n::set_language;
+    use crate::render::build_detail_content;
+    use crate::tui::model::{Header, Model, Screen};
+    use crate::tui::view::view;
+    use ratatui::{backend::TestBackend, style::Modifier, Terminal};
+    use serde_json::json;
+    use std::collections::HashMap;
+
+    fn buf_to_string(buf: &ratatui::buffer::Buffer) -> String {
+        let area = buf.area();
+        let mut out = String::new();
+        for y in 0..area.height {
+            for x in 0..area.width {
+                out.push_str(buf.cell((x, y)).unwrap().symbol());
+            }
+            out.push('\n');
+        }
+        out
+    }
+
+    fn render_with_confirm(confirm_delete: Option<i64>) -> ratatui::buffer::Buffer {
+        let task = json!({"name": "T", "id": 1, "project_id": 1, "is_completed": false});
+        let comment = json!({
+            "id": 42i64,
+            "created_by_id": 7i64,
+            "created_on": 1700000000u64,
+            "body_plain_text": "Hello"
+        });
+        let inner_width = 78usize;
+        let content = build_detail_content(
+            &task,
+            std::slice::from_ref(&comment),
+            &HashMap::new(),
+            inner_width,
+            Some(7),
+        );
+        let model = Model {
+            stack: vec![Screen::Detail {
+                instance: "inst".into(),
+                project_id: 1,
+                task_id: 1,
+                task,
+                comments: vec![comment],
+                user_map: HashMap::new(),
+                lines: content.lines,
+                line_styles: content.line_styles,
+                assets: vec![],
+                offset: 0,
+                loading: false,
+                rendered_width: 80,
+                compose: None,
+                current_user_id: Some(7),
+                affordances: content.affordances,
+                confirm_delete,
+                focused_comment: None,
+                comment_spans: content.comment_spans,
+            }],
+            should_quit: false,
+            header: Header::from_instances(&[], None),
+            viewport: (0, 0),
+            click_targets: vec![],
+            modal_button_targets: vec![],
+            last_loaded: None,
+            selection: None,
+            copied_feedback: false,
+        };
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| view(&model, frame, &mut vec![], &mut vec![]))
+            .unwrap();
+        terminal.backend().buffer().clone()
+    }
+
+    // AC1: when confirm_delete is Some, the modal renders with DIM backdrop and
+    // the title "Delete comment?" (or pt-BR equivalent).
+    #[test]
+    fn confirm_modal_renders_dim_backdrop_and_title() {
+        let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let buf = render_with_confirm(Some(42));
+        let content = buf_to_string(&buf);
+        assert!(
+            content.contains("Delete comment?"),
+            "modal must show title 'Delete comment?': {content}"
+        );
+        // At least one cell must carry the DIM modifier (the backdrop).
+        let area = buf.area();
+        let has_dim = (0..area.height)
+            .flat_map(|y| (0..area.width).map(move |x| (x, y)))
+            .any(|(x, y)| {
+                buf.cell((x, y))
+                    .map(|c| c.style().add_modifier.contains(Modifier::DIM))
+                    .unwrap_or(false)
+            });
+        assert!(
+            has_dim,
+            "at least one cell must carry Modifier::DIM (backdrop dimming)"
+        );
+    }
+
+    // AC1 (pt-BR): confirm modal title is translated.
+    #[test]
+    fn confirm_modal_title_translates_to_pt_br() {
+        let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("pt_BR");
+        let buf = render_with_confirm(Some(42));
+        set_language("en");
+        let content = buf_to_string(&buf);
+        assert!(
+            content.contains("Excluir"),
+            "modal title must contain 'Excluir' in pt-BR: {content}"
+        );
+    }
+
+    // AC1: when confirm_delete is None, the modal is absent (no DIM backdrop).
+    #[test]
+    fn no_confirm_modal_when_confirm_delete_none() {
+        let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let buf = render_with_confirm(None);
+        let content = buf_to_string(&buf);
+        assert!(
+            !content.contains("Delete comment?"),
+            "modal must be absent when confirm_delete is None: {content}"
+        );
+        // No DIM modifier should be present without the modal.
+        let area = buf.area();
+        let has_dim = (0..area.height)
+            .flat_map(|y| (0..area.width).map(move |x| (x, y)))
+            .any(|(x, y)| {
+                buf.cell((x, y))
+                    .map(|c| c.style().add_modifier.contains(Modifier::DIM))
+                    .unwrap_or(false)
+            });
+        assert!(
+            !has_dim,
+            "DIM modifier must be absent when no modal is shown"
+        );
+    }
+
+    // AC2: the confirm-modal buttons [confirmar]/[cancelar] appear in the MODAL overlay,
+    // not spliced inline into the comment card. The buttons are visible in the buffer (in the
+    // modal), but the comment card body lines do NOT carry them as inline affordance tokens.
+    #[test]
+    fn confirm_buttons_in_modal_not_inline_in_card() {
+        let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("pt_BR");
+        let buf = render_with_confirm(Some(42));
+        set_language("en");
+        let content = buf_to_string(&buf);
+        assert!(
+            content.contains("confirmar"),
+            "buffer must contain 'confirmar' (visible in the modal buttons): {content}"
+        );
+        assert!(
+            content.contains("cancelar"),
+            "buffer must contain 'cancelar' (visible in the modal buttons): {content}"
+        );
+        assert!(
+            content.contains("Excluir"),
+            "buffer must show the confirm modal title 'Excluir': {content}"
+        );
+    }
+
+    // AC2 (footer one-home): footer does NOT show the confirm hint when modal is open.
+    #[test]
+    fn footer_does_not_show_confirm_hint_when_modal_open() {
+        let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let buf = render_with_confirm(Some(42));
+        let area = buf.area();
+        // Footer is the last row.
+        let footer_row = area.height - 1;
+        let footer_text: String = (0..area.width)
+            .map(|x| buf.cell((x, footer_row)).unwrap().symbol().to_string())
+            .collect();
+        assert!(
+            !footer_text.contains("Enter/click confirm"),
+            "footer must NOT show confirm hint when modal is open (one-home): {footer_text}"
+        );
+    }
+
+    // AC1: confirm modal shows [confirmar]/[cancelar] button labels inside the modal.
+    #[test]
+    fn confirm_modal_shows_button_labels() {
+        let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let buf = render_with_confirm(Some(42));
+        let content = buf_to_string(&buf);
+        assert!(
+            content.contains("confirm") || content.contains("confirmar"),
+            "modal must show confirm button label: {content}"
+        );
+        assert!(
+            content.contains("cancel") || content.contains("cancelar"),
+            "modal must show cancel button label: {content}"
+        );
+    }
 }

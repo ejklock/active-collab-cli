@@ -125,6 +125,17 @@
   "edit": "editar",
   "excluir": "excluir",
   "Delete comment?": "Excluir comentário?",
+  "This action cannot be undone.": "Esta ação não pode ser desfeita.",
   "confirmar": "confirmar",
-  "cancelar": "cancelar"
+  "cancelar": "cancelar",
+  "j/k move · c comment · r refresh · Esc/b back · q quit": "j/k mover · c comentar · r atualizar · Esc/b voltar · q sair",
+  "Enter/click confirm · Esc cancel": "Enter/clique confirmar · Esc cancelar",
+  "j/k move · Ctrl+click edit/delete · c new": "j/k mover · Ctrl+clique editar/excluir · c novo",
+  "Copiado ✓": "Copiado ✓",
+  "New comment": "Novo comentário",
+  "Edit comment": "Editar comentário",
+  "no comment body": "corpo do comentário ausente",
+  "Comment posted (comment_id={comment_id}, task {project_id}/{task_id}).": "Comentário publicado (comment_id={comment_id}, tarefa {project_id}/{task_id}).",
+  "Error: no task ref given and not in a git repository or HEAD is detached.": "Erro: nenhuma referência de tarefa informada e não está em um repositório git ou HEAD está desanexado.",
+  "Error: no task ref given and branch '{branch}' does not match expected pattern (feature|hotfix|fix)/PROJECT_ID-TASK_ID.": "Erro: nenhuma referência de tarefa informada e a branch '{branch}' não corresponde ao padrão esperado (feature|hotfix|fix)/PROJECT_ID-TASK_ID."
 }

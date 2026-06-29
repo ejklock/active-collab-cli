@@ -38,11 +38,14 @@ fn detail_model_with_assets_and_viewport(
             current_user_id: None,
             affordances: vec![],
             confirm_delete: None,
+            focused_comment: None,
+            comment_spans: vec![],
         }],
         should_quit: false,
         header: empty_header(),
         viewport,
         click_targets: vec![],
+        modal_button_targets: vec![],
         last_loaded: None,
         selection: None,
         copied_feedback: false,
@@ -63,6 +66,7 @@ fn click_struct_form_accepted_by_update_on_projects_screen() {
         header: empty_header(),
         viewport: (80, 24),
         click_targets: vec![],
+        modal_button_targets: vec![],
         last_loaded: None,
         selection: None,
         copied_feedback: false,
@@ -116,11 +120,14 @@ fn detail_model_scrollable(lines: Vec<String>, assets: Vec<Asset>, viewport: (u1
             current_user_id: None,
             affordances: vec![],
             confirm_delete: None,
+            focused_comment: None,
+            comment_spans: vec![],
         }],
         should_quit: false,
         header: empty_header(),
         viewport,
         click_targets: vec![],
+        modal_button_targets: vec![],
         last_loaded: None,
         selection: None,
         copied_feedback: false,
@@ -162,8 +169,9 @@ fn detail_max_offset_zero_viewport_clamps_text_vh_to_one() {
     );
 }
 
-// V5-A1: handle_down clamps to detail_max_offset, not lines.len()-1.
+// V5-A1: scroll_down (mouse wheel) clamps to detail_max_offset, not lines.len()-1.
 // viewport=80x24, 50 lines, no assets → max=30. Scroll 60 times → offset stays at 30.
+// Note: Msg::Down in Detail moves comment focus; Msg::ScrollDown scrolls raw lines.
 #[test]
 fn handle_down_clamps_to_detail_max_offset_no_assets() {
     use crate::tui::model::detail_max_offset;
@@ -171,7 +179,7 @@ fn handle_down_clamps_to_detail_max_offset_no_assets() {
     let mut model = detail_model_scrollable(lines.clone(), vec![], (80, 24));
 
     for _ in 0..60 {
-        model = update(model, Msg::Down).0;
+        model = update(model, Msg::ScrollDown).0;
     }
 
     let expected_max = detail_max_offset(24, 80, 50, &[]);
@@ -186,7 +194,8 @@ fn handle_down_clamps_to_detail_max_offset_no_assets() {
     }
 }
 
-// V5-A1: handle_down is idempotent at max — pressing Down when already at max does nothing.
+// V5-A1: scroll_down (mouse wheel) is idempotent at max — scrolling when already at max does nothing.
+// Note: Msg::Down in Detail moves comment focus; Msg::ScrollDown scrolls raw lines.
 #[test]
 fn handle_down_idempotent_at_max() {
     use crate::tui::model::detail_max_offset;
@@ -195,7 +204,7 @@ fn handle_down_idempotent_at_max() {
 
     let max = detail_max_offset(24, 80, 50, &[]);
     for _ in 0..100 {
-        model = update(model, Msg::Down).0;
+        model = update(model, Msg::ScrollDown).0;
     }
 
     let offset_at_max = match model.top() {
@@ -204,10 +213,13 @@ fn handle_down_idempotent_at_max() {
     };
     assert_eq!(offset_at_max, max, "offset must be clamped to max={max}");
 
-    model = update(model, Msg::Down).0;
+    model = update(model, Msg::ScrollDown).0;
     match model.top() {
         Some(Screen::Detail { offset, .. }) => {
-            assert_eq!(*offset, max, "offset must stay at max after another Down");
+            assert_eq!(
+                *offset, max,
+                "offset must stay at max after another ScrollDown"
+            );
         }
         other => panic!("expected Detail, got {other:?}"),
     }
@@ -301,6 +313,7 @@ fn click_on_projects_screen_with_target_drills_into_tasks() {
         header: empty_header(),
         viewport: (80, 24),
         click_targets: vec![],
+        modal_button_targets: vec![],
         last_loaded: None,
         selection: None,
         copied_feedback: false,
@@ -371,11 +384,14 @@ fn detail_model_with_lines_and_assets(
             current_user_id: None,
             affordances: vec![],
             confirm_delete: None,
+            focused_comment: None,
+            comment_spans: vec![],
         }],
         should_quit: false,
         header: empty_header(),
         viewport,
         click_targets: vec![],
+        modal_button_targets: vec![],
         last_loaded: None,
         selection: None,
         copied_feedback: false,
@@ -708,6 +724,7 @@ fn projects_browse_model() -> Model {
         header: empty_header(),
         viewport: (80, 24),
         click_targets: vec![],
+        modal_button_targets: vec![],
         last_loaded: None,
         selection: None,
         copied_feedback: false,
@@ -747,11 +764,14 @@ fn detail_model_for_selection(lines: Vec<String>, viewport: (u16, u16), offset: 
             current_user_id: None,
             affordances: vec![],
             confirm_delete: None,
+            focused_comment: None,
+            comment_spans: vec![],
         }],
         should_quit: false,
         header: empty_header(),
         viewport,
         click_targets: vec![],
+        modal_button_targets: vec![],
         last_loaded: None,
         selection: None,
         copied_feedback: false,
@@ -1361,6 +1381,7 @@ fn navigation_msgs_behave_identically_regardless_of_selection_state() {
         header: empty_header(),
         viewport: (80, 24),
         click_targets: vec![],
+        modal_button_targets: vec![],
         last_loaded: None,
         selection: None,
         copied_feedback: false,
@@ -1376,6 +1397,7 @@ fn navigation_msgs_behave_identically_regardless_of_selection_state() {
         header: empty_header(),
         viewport: (80, 24),
         click_targets: vec![],
+        modal_button_targets: vec![],
         last_loaded: None,
         selection: Some(Selection {
             anchor: (2, 0),
@@ -1486,6 +1508,7 @@ fn loaded_tasks_clears_revalidating_and_stamps_last_loaded() {
         header: empty_header(),
         viewport: (0, 0),
         click_targets: vec![],
+        modal_button_targets: vec![],
         last_loaded: None,
         selection: None,
         copied_feedback: false,
@@ -1598,6 +1621,8 @@ fn detail_footer_hint_with_assets_has_no_ctrl_cmd_reference() {
         current_user_id: None,
         affordances: vec![],
         confirm_delete: None,
+        focused_comment: None,
+        comment_spans: vec![],
     };
     let hint = hint_for_screen(&screen);
     assert!(
@@ -1609,8 +1634,8 @@ fn detail_footer_hint_with_assets_has_no_ctrl_cmd_reference() {
         "footer hint with assets must NOT contain 'abrir anexo' (hint moved to card): {hint:?}"
     );
     assert!(
-        hint.contains("↑/↓") && hint.contains("scroll"),
-        "footer hint must still contain the scroll nav text: {hint:?}"
+        hint.contains("j/k"),
+        "footer hint must contain 'j/k' navigation (ADR 0038 browsing hint): {hint:?}"
     );
 }
 
@@ -1661,11 +1686,14 @@ fn detail_model_with_boxed_lines(lines: Vec<String>, viewport: (u16, u16), offse
             current_user_id: None,
             affordances: vec![],
             confirm_delete: None,
+            focused_comment: None,
+            comment_spans: vec![],
         }],
         should_quit: false,
         header: empty_header(),
         viewport,
         click_targets: vec![],
+        modal_button_targets: vec![],
         last_loaded: None,
         selection: None,
         copied_feedback: false,
@@ -2611,11 +2639,14 @@ fn detail_model_with_inline_assets(
             current_user_id: None,
             affordances: vec![],
             confirm_delete: None,
+            focused_comment: None,
+            comment_spans: vec![],
         }],
         should_quit: false,
         header: empty_header(),
         viewport,
         click_targets: vec![],
+        modal_button_targets: vec![],
         last_loaded: None,
         selection: None,
         copied_feedback: false,
@@ -3008,11 +3039,14 @@ fn detail_model_for_compose(instance: &str, project_id: i64, task_id: i64) -> Mo
             current_user_id: None,
             affordances: vec![],
             confirm_delete: None,
+            focused_comment: None,
+            comment_spans: vec![],
         }],
         should_quit: false,
         header: empty_header(),
         viewport: (80, 24),
         click_targets: vec![],
+        modal_button_targets: vec![],
         last_loaded: None,
         selection: None,
         copied_feedback: false,
@@ -3382,11 +3416,14 @@ fn detail_model_with_comments_for_edit(
             current_user_id,
             affordances: vec![],
             confirm_delete: None,
+            focused_comment: None,
+            comment_spans: vec![],
         }],
         should_quit: false,
         header: empty_header(),
         viewport: (width, 30),
         click_targets: vec![],
+        modal_button_targets: vec![],
         last_loaded: None,
         selection: None,
         copied_feedback: false,
@@ -3628,19 +3665,20 @@ fn confirm_affordances_absent_when_confirm_delete_is_none() {
                 confirm_delete.is_none(),
                 "confirm_delete must be None before any click"
             );
-            let has_confirm = affordances
-                .iter()
-                .any(|a| matches!(a.kind, crate::render::AffordanceKind::Confirm));
-            let has_cancel = affordances
-                .iter()
-                .any(|a| matches!(a.kind, crate::render::AffordanceKind::Cancel));
+            // The confirm/cancel modal buttons are hit-tested by dispatch_modal_click
+            // from frame geometry (ADR 0039). The scroll-aware affordance list must
+            // contain only Edit and Delete kinds — never modal-specific entries.
+            let only_edit_or_delete = affordances.iter().all(|a| {
+                matches!(
+                    a.kind,
+                    crate::render::AffordanceKind::Edit(_)
+                        | crate::render::AffordanceKind::Delete(_)
+                )
+            });
             assert!(
-                !has_confirm,
-                "Confirm affordances must be absent when confirm_delete=None"
-            );
-            assert!(
-                !has_cancel,
-                "Cancel affordances must be absent when confirm_delete=None"
+                only_edit_or_delete,
+                "affordances must only contain Edit/Delete kinds when confirm_delete=None; got: {:?}",
+                affordances
             );
         }
         _ => panic!("expected Detail screen"),
@@ -3729,10 +3767,11 @@ fn plain_click_on_delete_affordance_does_not_set_confirm_delete() {
     }
 }
 
-// ACd2-c: After clicking `[excluir]`, the model is reflowed and
-// Confirm/Cancel affordances are non-empty (confirm prompt rendered).
+// ACd2-c: After clicking `[excluir]`, confirm_delete is Some and the modal overlay
+// owns confirm/cancel UI. The scroll-aware affordance list must NOT contain inline
+// Confirm/Cancel entries (they moved to the modal, ADR 0039 slice 2).
 #[test]
-fn confirm_affordances_populated_after_delete_request() {
+fn confirm_affordances_absent_in_affordances_after_delete_request() {
     let m = detail_model_with_comments_for_delete("inst", 1, 1, Some(7), 82);
     let (click_row, click_col) = match m.top() {
         Some(Screen::Detail { affordances, .. }) => {
@@ -3763,30 +3802,36 @@ fn confirm_affordances_populated_after_delete_request() {
             confirm_delete,
             ..
         }) => {
-            assert_eq!(*confirm_delete, Some(42));
-            let has_confirm = affordances
-                .iter()
-                .any(|a| matches!(a.kind, crate::render::AffordanceKind::Confirm));
-            let has_cancel = affordances
-                .iter()
-                .any(|a| matches!(a.kind, crate::render::AffordanceKind::Cancel));
-            assert!(
-                has_confirm,
-                "Confirm affordance must be populated after [excluir] click + reflow"
+            assert_eq!(
+                *confirm_delete,
+                Some(42),
+                "confirm_delete must be Some(42) after excluir click"
             );
+            // The confirm/cancel modal buttons are hit-tested by dispatch_modal_click
+            // from frame geometry (ADR 0039). The scroll-aware affordance list must
+            // contain only Edit and Delete kinds — never modal-specific entries.
+            let only_edit_or_delete = affordances.iter().all(|a| {
+                matches!(
+                    a.kind,
+                    crate::render::AffordanceKind::Edit(_)
+                        | crate::render::AffordanceKind::Delete(_)
+                )
+            });
             assert!(
-                has_cancel,
-                "Cancel affordance must be populated after [excluir] click + reflow"
+                only_edit_or_delete,
+                "affordances must only contain Edit/Delete kinds after delete request; got: {:?}",
+                affordances
             );
         }
         _ => panic!("expected Detail screen"),
     }
 }
 
-// ACd2-d: After the confirm prompt appears, a Ctrl+click on `[confirmar]` emits
-// exactly one `Cmd::DeleteComment{comment_id: 42}` with the correct instance.
+// ACd2-d: When confirm_delete is Some, Msg::ConfirmDeleteComment emits exactly one
+// `Cmd::DeleteComment{comment_id: 42}` with the correct instance and clears confirm_delete.
+// (Modal confirm is now via Enter key / Msg::ConfirmDeleteComment — ADR 0039 slice 2.)
 #[test]
-fn ctrl_click_on_confirmar_emits_delete_comment_cmd() {
+fn confirm_delete_msg_emits_delete_comment_cmd() {
     let m = detail_model_with_comments_for_delete("myinst", 1, 1, Some(7), 82);
     let (excluir_row, excluir_col) = match m.top() {
         Some(Screen::Detail { affordances, .. }) => {
@@ -3799,7 +3844,7 @@ fn ctrl_click_on_confirmar_emits_delete_comment_cmd() {
         _ => panic!("expected Detail screen"),
     };
 
-    let (mut m2, _) = update(
+    let (m2, _) = update(
         m,
         Msg::Click {
             column: excluir_col,
@@ -3808,33 +3853,23 @@ fn ctrl_click_on_confirmar_emits_delete_comment_cmd() {
         },
     );
 
-    let inner_width = (82u16.saturating_sub(2)) as usize;
-    m2.reflow_detail(inner_width);
-
-    let (confirmar_row, confirmar_col) = match m2.top() {
-        Some(Screen::Detail { affordances, .. }) => {
-            let aff = affordances
-                .iter()
-                .find(|a| matches!(a.kind, crate::render::AffordanceKind::Confirm))
-                .expect("Confirm affordance must be non-empty after reflow");
-            (2u16 + aff.line_idx as u16, aff.col_start as u16)
-        }
-        _ => panic!("expected Detail screen"),
-    };
-
-    let (_m3, cmds) = update(
-        m2,
-        Msg::Click {
-            column: confirmar_col,
-            row: confirmar_row,
-            modifiers: KeyModifiers::CONTROL,
-        },
+    assert!(
+        matches!(
+            m2.top(),
+            Some(Screen::Detail {
+                confirm_delete: Some(42),
+                ..
+            })
+        ),
+        "confirm_delete must be Some(42) after clicking [excluir]"
     );
+
+    let (_m3, cmds) = update(m2, Msg::ConfirmDeleteComment);
 
     assert_eq!(
         cmds.len(),
         1,
-        "Ctrl+click on [confirmar] must emit exactly one Cmd; got {:?}",
+        "ConfirmDeleteComment must emit exactly one Cmd; got {:?}",
         cmds
     );
     match &cmds[0] {
@@ -3849,10 +3884,10 @@ fn ctrl_click_on_confirmar_emits_delete_comment_cmd() {
     }
 }
 
-// ACd2-e: After the confirm prompt appears, a Ctrl+click on `[cancelar]` clears
-// `confirm_delete` and emits NO Cmd.
+// ACd2-e: When confirm_delete is Some, Msg::CancelDeleteComment clears it and emits NO Cmd.
+// (Modal cancel is now via Esc key / Msg::CancelDeleteComment — ADR 0039 slice 2.)
 #[test]
-fn ctrl_click_on_cancelar_clears_confirm_delete_no_cmd() {
+fn cancel_delete_msg_clears_confirm_delete_no_cmd() {
     let m = detail_model_with_comments_for_delete("inst", 1, 1, Some(7), 82);
     let (excluir_row, excluir_col) = match m.top() {
         Some(Screen::Detail { affordances, .. }) => {
@@ -3865,7 +3900,7 @@ fn ctrl_click_on_cancelar_clears_confirm_delete_no_cmd() {
         _ => panic!("expected Detail screen"),
     };
 
-    let (mut m2, _) = update(
+    let (m2, _) = update(
         m,
         Msg::Click {
             column: excluir_col,
@@ -3874,39 +3909,29 @@ fn ctrl_click_on_cancelar_clears_confirm_delete_no_cmd() {
         },
     );
 
-    let inner_width = (82u16.saturating_sub(2)) as usize;
-    m2.reflow_detail(inner_width);
-
-    let (cancelar_row, cancelar_col) = match m2.top() {
-        Some(Screen::Detail { affordances, .. }) => {
-            let aff = affordances
-                .iter()
-                .find(|a| matches!(a.kind, crate::render::AffordanceKind::Cancel))
-                .expect("Cancel affordance must be non-empty after reflow");
-            (2u16 + aff.line_idx as u16, aff.col_start as u16)
-        }
-        _ => panic!("expected Detail screen"),
-    };
-
-    let (m3, cmds) = update(
-        m2,
-        Msg::Click {
-            column: cancelar_col,
-            row: cancelar_row,
-            modifiers: KeyModifiers::CONTROL,
-        },
+    assert!(
+        matches!(
+            m2.top(),
+            Some(Screen::Detail {
+                confirm_delete: Some(_),
+                ..
+            })
+        ),
+        "confirm_delete must be Some after clicking [excluir]"
     );
+
+    let (m3, cmds) = update(m2, Msg::CancelDeleteComment);
 
     assert!(
         cmds.is_empty(),
-        "Ctrl+click on [cancelar] must emit no Cmd; got {:?}",
+        "CancelDeleteComment must emit no Cmd; got {:?}",
         cmds
     );
     match m3.top() {
         Some(Screen::Detail { confirm_delete, .. }) => {
             assert!(
                 confirm_delete.is_none(),
-                "confirm_delete must be None after clicking [cancelar]"
+                "confirm_delete must be None after CancelDeleteComment"
             );
         }
         _ => panic!("expected Detail screen"),
@@ -3992,5 +4017,1204 @@ fn comment_mutation_err_does_not_emit_refresh() {
     assert!(
         !has_load_detail,
         "CommentMutationErr must not emit Cmd::LoadDetail{{refresh:true}}"
+    );
+}
+
+// --- AC1: FocusNextComment / FocusPrevComment move focused_comment, emit no Cmd ---
+
+fn detail_model_with_n_comments(n: usize) -> Model {
+    use serde_json::json;
+    let comments: Vec<serde_json::Value> = (0..n)
+        .map(|i| {
+            json!({
+                "id": i as i64,
+                "created_by_id": 1i64,
+                "created_on": 1700000000u64 + i as u64,
+                "body_plain_text": format!("Comment {i}")
+            })
+        })
+        .collect();
+    Model {
+        stack: vec![Screen::Detail {
+            instance: "inst".into(),
+            project_id: 1,
+            task_id: 1,
+            task: serde_json::Value::Null,
+            comments,
+            user_map: std::collections::HashMap::new(),
+            lines: vec![],
+            line_styles: vec![],
+            assets: vec![],
+            offset: 0,
+            loading: false,
+            rendered_width: usize::MAX,
+            compose: None,
+            current_user_id: None,
+            affordances: vec![],
+            confirm_delete: None,
+            focused_comment: None,
+            comment_spans: vec![],
+        }],
+        should_quit: false,
+        header: empty_header(),
+        viewport: (80, 30),
+        click_targets: vec![],
+        modal_button_targets: vec![],
+        last_loaded: None,
+        selection: None,
+        copied_feedback: false,
+    }
+}
+
+fn detail_model_with_n_comments_and_spans(n: usize) -> Model {
+    let mut m = detail_model_with_n_comments(n);
+    m.reflow_detail(78);
+    m
+}
+
+fn focused_comment(model: &Model) -> Option<usize> {
+    match model.top() {
+        Some(Screen::Detail {
+            focused_comment, ..
+        }) => *focused_comment,
+        _ => panic!("expected Detail screen"),
+    }
+}
+
+// AC1: FocusNextComment with None focus moves to first comment (index 0), emits no Cmd.
+#[test]
+fn focus_next_from_none_moves_to_first_comment() {
+    let m = detail_model_with_n_comments_and_spans(3);
+    let (m, cmds) = update(m, Msg::FocusNextComment);
+    assert!(cmds.is_empty(), "FocusNextComment must emit no Cmd");
+    assert_eq!(
+        focused_comment(&m),
+        Some(0),
+        "focus must move to first comment"
+    );
+}
+
+// AC1: FocusNextComment moves focus from 0 to 1.
+#[test]
+fn focus_next_increments_focused_comment() {
+    let mut m = detail_model_with_n_comments_and_spans(3);
+    if let Some(Screen::Detail {
+        focused_comment, ..
+    }) = m.top_mut()
+    {
+        *focused_comment = Some(0);
+    }
+    let (m, cmds) = update(m, Msg::FocusNextComment);
+    assert!(cmds.is_empty());
+    assert_eq!(
+        focused_comment(&m),
+        Some(1),
+        "FocusNext must move from 0 to 1"
+    );
+}
+
+// AC1: FocusPrevComment with None focus moves to first comment (index 0), emits no Cmd.
+#[test]
+fn focus_prev_from_none_moves_to_first_comment() {
+    let m = detail_model_with_n_comments_and_spans(3);
+    let (m, cmds) = update(m, Msg::FocusPrevComment);
+    assert!(cmds.is_empty());
+    assert_eq!(
+        focused_comment(&m),
+        Some(0),
+        "FocusPrev from None should start at first comment"
+    );
+}
+
+// AC1: FocusPrevComment moves focus from 1 to 0.
+#[test]
+fn focus_prev_decrements_focused_comment() {
+    let mut m = detail_model_with_n_comments_and_spans(3);
+    if let Some(Screen::Detail {
+        focused_comment, ..
+    }) = m.top_mut()
+    {
+        *focused_comment = Some(1);
+    }
+    let (m, cmds) = update(m, Msg::FocusPrevComment);
+    assert!(cmds.is_empty());
+    assert_eq!(
+        focused_comment(&m),
+        Some(0),
+        "FocusPrev must move from 1 to 0"
+    );
+}
+
+// AC1: FocusNextComment at last comment is a no-op (no wraparound).
+#[test]
+fn focus_next_at_last_comment_is_noop() {
+    let mut m = detail_model_with_n_comments_and_spans(3);
+    if let Some(Screen::Detail {
+        focused_comment, ..
+    }) = m.top_mut()
+    {
+        *focused_comment = Some(2);
+    }
+    let (m, cmds) = update(m, Msg::FocusNextComment);
+    assert!(cmds.is_empty());
+    assert_eq!(
+        focused_comment(&m),
+        Some(2),
+        "FocusNext at last must stay at last (no wraparound)"
+    );
+}
+
+// AC1: FocusPrevComment at first comment is a no-op (no wraparound).
+#[test]
+fn focus_prev_at_first_comment_is_noop() {
+    let mut m = detail_model_with_n_comments_and_spans(3);
+    if let Some(Screen::Detail {
+        focused_comment, ..
+    }) = m.top_mut()
+    {
+        *focused_comment = Some(0);
+    }
+    let (m, cmds) = update(m, Msg::FocusPrevComment);
+    assert!(cmds.is_empty());
+    assert_eq!(
+        focused_comment(&m),
+        Some(0),
+        "FocusPrev at first must stay at first (no wraparound)"
+    );
+}
+
+// AC1: Zero-comment thread keeps focused_comment = None on FocusNextComment.
+#[test]
+fn focus_next_on_empty_thread_is_noop() {
+    let m = detail_model_with_n_comments_and_spans(0);
+    let (m, cmds) = update(m, Msg::FocusNextComment);
+    assert!(cmds.is_empty());
+    assert_eq!(
+        focused_comment(&m),
+        None,
+        "empty thread: FocusNext must keep focused_comment = None"
+    );
+}
+
+// AC1: Zero-comment thread keeps focused_comment = None on FocusPrevComment.
+#[test]
+fn focus_prev_on_empty_thread_is_noop() {
+    let m = detail_model_with_n_comments_and_spans(0);
+    let (m, cmds) = update(m, Msg::FocusPrevComment);
+    assert!(cmds.is_empty());
+    assert_eq!(
+        focused_comment(&m),
+        None,
+        "empty thread: FocusPrev must keep focused_comment = None"
+    );
+}
+
+// --- AC2: focus move sets offset so focused card is fully visible ---
+
+fn detail_model_with_comment_spans(
+    comment_spans: Vec<(usize, usize)>,
+    total_lines: usize,
+    initial_offset: usize,
+    viewport_rows: u16,
+) -> Model {
+    use serde_json::json;
+    let n = comment_spans.len();
+    let comments: Vec<serde_json::Value> = (0..n)
+        .map(|i| {
+            json!({
+                "id": i as i64,
+                "created_by_id": 1i64,
+                "created_on": 1700000000u64 + i as u64,
+                "body_plain_text": format!("Comment {i}")
+            })
+        })
+        .collect();
+    let lines: Vec<String> = (0..total_lines).map(|i| format!("line {i}")).collect();
+    Model {
+        stack: vec![Screen::Detail {
+            instance: "inst".into(),
+            project_id: 1,
+            task_id: 1,
+            task: serde_json::Value::Null,
+            comments,
+            user_map: std::collections::HashMap::new(),
+            lines,
+            line_styles: vec![],
+            assets: vec![],
+            offset: initial_offset,
+            loading: false,
+            rendered_width: 80,
+            compose: None,
+            current_user_id: None,
+            affordances: vec![],
+            confirm_delete: None,
+            focused_comment: None,
+            comment_spans,
+        }],
+        should_quit: false,
+        header: empty_header(),
+        viewport: (80, viewport_rows),
+        click_targets: vec![],
+        modal_button_targets: vec![],
+        last_loaded: None,
+        selection: None,
+        copied_feedback: false,
+    }
+}
+
+fn detail_offset(model: &Model) -> usize {
+    match model.top() {
+        Some(Screen::Detail { offset, .. }) => *offset,
+        _ => panic!("expected Detail screen"),
+    }
+}
+
+// AC2: card below viewport — focus move scrolls down so card's last line is visible.
+// viewport_rows=14, DETAIL_CHROME_ROWS=4 → text_vh=10.
+// Card at lines 15..20 (start=15, count=5). Offset=0 → card_end(20) > viewport_end(10).
+// Expected offset = card_end - text_vh = 20 - 10 = 10.
+#[test]
+fn focus_move_scrolls_down_when_card_below_viewport() {
+    let total_lines = 30;
+    let card_start = 15;
+    let card_count = 5;
+    let viewport_rows = 14u16;
+    let spans = vec![(card_start, card_count)];
+    let m = detail_model_with_comment_spans(spans, total_lines, 0, viewport_rows);
+
+    let (m, _) = update(m, Msg::FocusNextComment);
+    let offset = detail_offset(&m);
+    let text_vh = (viewport_rows - 4) as usize;
+    let expected = card_start + card_count - text_vh;
+    assert_eq!(
+        offset, expected,
+        "card below viewport: offset must make card's last line visible"
+    );
+}
+
+// AC2: card above viewport — focus move scrolls up so card's first line is visible.
+// viewport_rows=14, text_vh=10. Card at lines 3..8 (start=3, count=5).
+// Offset=10 → card_start(3) < current_offset(10).
+// Expected offset = card_start = 3.
+#[test]
+fn focus_move_scrolls_up_when_card_above_viewport() {
+    let total_lines = 30;
+    let card_start = 3;
+    let card_count = 5;
+    let viewport_rows = 14u16;
+    let spans = vec![(card_start, card_count)];
+    let m = detail_model_with_comment_spans(spans, total_lines, 10, viewport_rows);
+
+    let (m, _) = update(m, Msg::FocusNextComment);
+    let offset = detail_offset(&m);
+    assert_eq!(
+        offset, card_start,
+        "card above viewport: offset must be at card's first line"
+    );
+}
+
+// AC2: card already fully visible — focus move leaves offset unchanged.
+// viewport_rows=14, text_vh=10. Card at lines 2..6 (start=2, count=4).
+// Offset=0 → viewport covers lines 0..10; card [2..6] fully inside.
+// Expected offset = 0 (unchanged).
+#[test]
+fn focus_move_does_not_change_offset_when_card_already_visible() {
+    let total_lines = 20;
+    let card_start = 2;
+    let card_count = 4;
+    let viewport_rows = 14u16;
+    let spans = vec![(card_start, card_count)];
+    let m = detail_model_with_comment_spans(spans, total_lines, 0, viewport_rows);
+
+    let (m, _) = update(m, Msg::FocusNextComment);
+    let offset = detail_offset(&m);
+    assert_eq!(
+        offset, 0,
+        "card already visible: offset must remain unchanged"
+    );
+}
+
+// --- AC3: PageUp/PageDown change offset and leave focused_comment unchanged ---
+
+#[test]
+fn page_down_changes_offset_leaves_focused_comment_unchanged() {
+    let mut m = detail_model_with_n_comments_and_spans(3);
+    if let Some(Screen::Detail {
+        focused_comment,
+        lines,
+        ..
+    }) = m.top_mut()
+    {
+        *focused_comment = Some(1);
+        *lines = (0..50).map(|i| format!("line {i}")).collect();
+    }
+    m.viewport = (80, 24);
+    let (m, _) = update(m, Msg::PageDown);
+    assert_eq!(
+        focused_comment(&m),
+        Some(1),
+        "PageDown must leave focused_comment unchanged"
+    );
+    let offset = detail_offset(&m);
+    assert!(offset > 0, "PageDown must advance offset");
+}
+
+#[test]
+fn page_up_changes_offset_leaves_focused_comment_unchanged() {
+    let mut m = detail_model_with_n_comments_and_spans(3);
+    if let Some(Screen::Detail {
+        focused_comment,
+        lines,
+        offset,
+        ..
+    }) = m.top_mut()
+    {
+        *focused_comment = Some(0);
+        *lines = (0..50).map(|i| format!("line {i}")).collect();
+        *offset = 20;
+    }
+    m.viewport = (80, 24);
+    let (m, _) = update(m, Msg::PageUp);
+    assert_eq!(
+        focused_comment(&m),
+        Some(0),
+        "PageUp must leave focused_comment unchanged"
+    );
+    let offset = detail_offset(&m);
+    assert!(offset < 20, "PageUp must reduce offset");
+}
+
+// ScrollUp/ScrollDown (mouse wheel) also leave focused_comment unchanged.
+#[test]
+fn mouse_wheel_scroll_leaves_focused_comment_unchanged() {
+    let mut m = detail_model_with_n_comments_and_spans(3);
+    if let Some(Screen::Detail {
+        focused_comment,
+        lines,
+        offset,
+        ..
+    }) = m.top_mut()
+    {
+        *focused_comment = Some(1);
+        *lines = (0..50).map(|i| format!("line {i}")).collect();
+        *offset = 10;
+    }
+    m.viewport = (80, 24);
+    let (m, _) = update(m, Msg::ScrollDown);
+    assert_eq!(
+        focused_comment(&m),
+        Some(1),
+        "ScrollDown must leave focused_comment unchanged"
+    );
+}
+
+// --- AC5: reflow_detail rebuilds comment_spans on width change, reuses on same width ---
+
+#[test]
+fn reflow_detail_builds_comment_spans_on_width_change() {
+    let mut m = detail_model_with_n_comments(2);
+    assert!(
+        matches!(m.top(), Some(Screen::Detail { comment_spans, .. }) if comment_spans.is_empty()),
+        "comment_spans must be empty before reflow"
+    );
+    m.reflow_detail(78);
+    match m.top() {
+        Some(Screen::Detail { comment_spans, .. }) => {
+            assert_eq!(
+                comment_spans.len(),
+                2,
+                "comment_spans must have one entry per comment after reflow"
+            );
+            for (start, count) in comment_spans {
+                assert!(*count > 0, "each span must have line_count > 0");
+                let _ = start;
+            }
+        }
+        _ => panic!("expected Detail screen"),
+    }
+}
+
+#[test]
+fn reflow_detail_reuses_comment_spans_at_same_width() {
+    let mut m = detail_model_with_n_comments(2);
+    m.reflow_detail(78);
+    let spans_after_first = match m.top() {
+        Some(Screen::Detail { comment_spans, .. }) => comment_spans.clone(),
+        _ => panic!("expected Detail"),
+    };
+    m.reflow_detail(78);
+    match m.top() {
+        Some(Screen::Detail { comment_spans, .. }) => {
+            assert_eq!(
+                *comment_spans, spans_after_first,
+                "second reflow at same width must return identical spans (cache hit)"
+            );
+        }
+        _ => panic!("expected Detail"),
+    }
+}
+
+#[test]
+fn reflow_detail_rebuilds_comment_spans_on_data_change() {
+    let mut m = detail_model_with_n_comments(1);
+    m.reflow_detail(78);
+    let spans_1 = match m.top() {
+        Some(Screen::Detail { comment_spans, .. }) => comment_spans.clone(),
+        _ => panic!("expected Detail"),
+    };
+    use crate::tui::model::DetailLoad;
+    use serde_json::json;
+    let new_comment = json!({
+        "id": 99i64, "created_by_id": 1i64, "created_on": 1700000099u64,
+        "body_plain_text": "Extra comment"
+    });
+    let (m, _) = update(
+        m,
+        Msg::LoadedDetail(DetailLoad {
+            task: serde_json::Value::Null,
+            comments: vec![new_comment.clone(), new_comment],
+            assets: vec![],
+            user_map: std::collections::HashMap::new(),
+            loaded_at: "2026-06-28T00:00:00Z".into(),
+            current_user_id: None,
+        }),
+    );
+    let mut m = m;
+    m.reflow_detail(78);
+    match m.top() {
+        Some(Screen::Detail { comment_spans, .. }) => {
+            assert_eq!(
+                comment_spans.len(),
+                2,
+                "after data change and reflow, spans must reflect new comment count"
+            );
+            assert_ne!(
+                *comment_spans, spans_1,
+                "spans must differ after data change"
+            );
+        }
+        _ => panic!("expected Detail"),
+    }
+}
+
+// --- AC6: Ctrl/Cmd+click on [editar]/[excluir] still emits the correct Cmd (regression) ---
+
+#[test]
+fn ctrl_click_editar_on_focused_own_card_still_emits_compose_open() {
+    let m = detail_model_with_comments_for_edit("inst", 1, 1, Some(7), 82);
+    let (click_row, click_col) = match m.top() {
+        Some(Screen::Detail { affordances, .. }) => {
+            let aff = affordances
+                .iter()
+                .find(|a| matches!(a.kind, crate::render::AffordanceKind::Edit(_)))
+                .expect("edit affordance must exist after reflow");
+            (2u16 + aff.line_idx as u16, aff.col_start as u16)
+        }
+        _ => panic!("expected Detail screen"),
+    };
+
+    let mut m = m;
+    if let Some(Screen::Detail {
+        focused_comment, ..
+    }) = m.top_mut()
+    {
+        *focused_comment = Some(0);
+    }
+
+    let (_m, cmds) = update(
+        m,
+        Msg::Click {
+            column: click_col,
+            row: click_row,
+            modifiers: crossterm::event::KeyModifiers::CONTROL,
+        },
+    );
+    assert!(
+        cmds.is_empty(),
+        "Ctrl+click [editar] must emit no Cmd directly; compose is opened via model state change"
+    );
+}
+
+#[test]
+fn no_key_acts_on_focused_comment_for_edit_or_delete() {
+    let mut m = detail_model_with_comments_for_edit("inst", 1, 1, Some(7), 82);
+    if let Some(Screen::Detail {
+        focused_comment, ..
+    }) = m.top_mut()
+    {
+        *focused_comment = Some(0);
+    }
+    let (m_after_e, cmds_e) = update(m, Msg::ComposeOpen);
+    assert!(
+        cmds_e.is_empty(),
+        "ComposeOpen key must emit no Cmd (only opens compose state)"
+    );
+    let _ = m_after_e;
+}
+
+// --- AC1 (BDR 0026 Sc.9): modal_area centering and clamping ---
+
+#[test]
+fn modal_area_centers_in_large_frame() {
+    use crate::tui::widgets::modal::modal_area;
+    use ratatui::layout::Rect;
+    let frame = Rect::new(0, 0, 100, 40);
+    let area = modal_area(frame, 60, 20);
+    let center_x = area.x + area.width / 2;
+    let center_y = area.y + area.height / 2;
+    let frame_cx = frame.width / 2;
+    let frame_cy = frame.height / 2;
+    assert!(
+        center_x.abs_diff(frame_cx) <= 1,
+        "modal must be horizontally centered (cx={center_x}, frame_cx={frame_cx})"
+    );
+    assert!(
+        center_y.abs_diff(frame_cy) <= 1,
+        "modal must be vertically centered (cy={center_y}, frame_cy={frame_cy})"
+    );
+    assert!(
+        area.right() <= frame.right(),
+        "modal must not overflow frame right: area.right()={}",
+        area.right()
+    );
+    assert!(
+        area.bottom() <= frame.bottom(),
+        "modal must not overflow frame bottom: area.bottom()={}",
+        area.bottom()
+    );
+}
+
+#[test]
+fn modal_area_clamps_when_frame_narrower_than_desired() {
+    use crate::tui::widgets::modal::modal_area;
+    use ratatui::layout::Rect;
+    let frame = Rect::new(0, 0, 30, 10);
+    let area = modal_area(frame, 80, 20);
+    assert!(
+        area.right() <= frame.right(),
+        "clamped modal must not overflow frame right: area={area:?}, frame={frame:?}"
+    );
+    assert!(
+        area.bottom() <= frame.bottom(),
+        "clamped modal must not overflow frame bottom: area={area:?}, frame={frame:?}"
+    );
+    assert!(
+        area.width >= 1,
+        "clamped modal must have at least 1 column wide"
+    );
+    assert!(
+        area.height >= 1,
+        "clamped modal must have at least 1 row tall"
+    );
+}
+
+#[test]
+fn modal_area_clamps_when_frame_shorter_than_desired() {
+    use crate::tui::widgets::modal::modal_area;
+    use ratatui::layout::Rect;
+    let frame = Rect::new(0, 0, 80, 6);
+    let area = modal_area(frame, 60, 30);
+    assert!(
+        area.bottom() <= frame.bottom(),
+        "clamped modal height must not overflow frame: area.bottom()={}, frame.bottom()={}",
+        area.bottom(),
+        frame.bottom()
+    );
+}
+
+// --- AC3 (slice-1b): modal_target_size pure unit tests ---
+
+#[test]
+fn modal_target_size_large_frame_returns_70_percent() {
+    use crate::tui::widgets::modal::{modal_target_size, ModalContent};
+    use ratatui::layout::Rect;
+    let frame = Rect::new(0, 0, 100, 40);
+    let content = ModalContent {
+        title: "Test",
+        lines: &[],
+        hint: None,
+    };
+    let (w, h) = modal_target_size(frame, &content);
+    assert!(
+        (64..=76).contains(&w),
+        "width must be ≈70% of 100 (70±10): got {w}"
+    );
+    assert!(
+        (24..=32).contains(&h),
+        "height must be ≈70% of 40 (28±6): got {h}"
+    );
+}
+
+#[test]
+fn modal_target_size_respects_content_minimum() {
+    use crate::tui::widgets::modal::{modal_target_size, ModalContent};
+    use ratatui::layout::Rect;
+    let body_lines: Vec<String> = (0..10).map(|i| format!("line {i}")).collect();
+    let frame = Rect::new(0, 0, 10, 8);
+    let content = ModalContent {
+        title: "Test",
+        lines: &body_lines,
+        hint: Some("hint"),
+    };
+    let (w, h) = modal_target_size(frame, &content);
+    let min_h = body_lines.len() as u16 + 1 + 2;
+    assert!(
+        h >= min_h,
+        "height must be at least the content minimum ({min_h}): got {h}"
+    );
+    assert!(w >= 1, "width must be at least 1: got {w}");
+}
+
+// --- AC3 (BDR 0026 Sc.3): compose absent from scrollable lines after reflow ---
+
+#[test]
+fn reflow_detail_with_compose_does_not_append_compose_lines() {
+    use crate::tui::model::{Compose, ComposeKind, ComposeStatus};
+    let compose = Compose {
+        kind: ComposeKind::New,
+        buffer: "compose body text".into(),
+        status: ComposeStatus::Editing,
+    };
+    let mut m = Model {
+        stack: vec![Screen::Detail {
+            instance: "inst".into(),
+            project_id: 1,
+            task_id: 1,
+            task: serde_json::Value::Null,
+            comments: vec![],
+            user_map: HashMap::new(),
+            lines: vec![],
+            line_styles: vec![],
+            assets: vec![],
+            offset: 0,
+            loading: false,
+            rendered_width: usize::MAX,
+            compose: Some(compose),
+            current_user_id: None,
+            affordances: vec![],
+            confirm_delete: None,
+            focused_comment: None,
+            comment_spans: vec![],
+        }],
+        should_quit: false,
+        header: Header::from_instances(&[], None),
+        viewport: (80, 24),
+        click_targets: vec![],
+        modal_button_targets: vec![],
+        last_loaded: None,
+        selection: None,
+        copied_feedback: false,
+    };
+    m.reflow_detail(78);
+    match m.top() {
+        Some(Screen::Detail { lines, .. }) => {
+            let joined = lines.join("\n");
+            assert!(
+                !joined.contains("compose body text"),
+                "compose buffer must NOT appear in scrollable lines (moved to modal): {joined}"
+            );
+            assert!(
+                !joined.contains("Comment"),
+                "compose label must NOT appear in scrollable lines (moved to modal): {joined}"
+            );
+        }
+        _ => panic!("expected Detail screen"),
+    }
+}
+
+// --- AC7: compose semantics regression — key map unchanged after modal migration ---
+// These exercise the pure update() transitions to confirm the compose mode behavior
+// is unaffected by moving the rendering to an overlay.
+
+#[test]
+fn ac7_regression_compose_newline_inserts_newline_not_submit_after_modal_migration() {
+    use crate::tui::model::{Compose, ComposeKind, ComposeStatus};
+    let m = Model {
+        stack: vec![Screen::Detail {
+            instance: "inst".into(),
+            project_id: 1,
+            task_id: 1,
+            task: serde_json::Value::Null,
+            comments: vec![],
+            user_map: HashMap::new(),
+            lines: vec![],
+            line_styles: vec![],
+            assets: vec![],
+            offset: 0,
+            loading: false,
+            rendered_width: usize::MAX,
+            compose: Some(Compose {
+                kind: ComposeKind::New,
+                buffer: "hello".into(),
+                status: ComposeStatus::Editing,
+            }),
+            current_user_id: None,
+            affordances: vec![],
+            confirm_delete: None,
+            focused_comment: None,
+            comment_spans: vec![],
+        }],
+        should_quit: false,
+        header: Header::from_instances(&[], None),
+        viewport: (80, 24),
+        click_targets: vec![],
+        modal_button_targets: vec![],
+        last_loaded: None,
+        selection: None,
+        copied_feedback: false,
+    };
+    let (m2, cmds) = update(m, Msg::ComposeNewline);
+    assert!(
+        cmds.is_empty(),
+        "ComposeNewline must emit no Cmd (no submit): {cmds:?}"
+    );
+    match m2.top() {
+        Some(Screen::Detail {
+            compose: Some(cp), ..
+        }) => {
+            assert!(
+                cp.buffer.contains('\n'),
+                "ComposeNewline must insert a newline into the buffer: {:?}",
+                cp.buffer
+            );
+        }
+        _ => panic!("expected Detail with active compose"),
+    }
+}
+
+#[test]
+fn ac7_regression_compose_cancel_clears_compose_emits_no_cmd_after_modal_migration() {
+    use crate::tui::model::{Compose, ComposeKind, ComposeStatus};
+    let m = Model {
+        stack: vec![Screen::Detail {
+            instance: "inst".into(),
+            project_id: 1,
+            task_id: 1,
+            task: serde_json::Value::Null,
+            comments: vec![],
+            user_map: HashMap::new(),
+            lines: vec![],
+            line_styles: vec![],
+            assets: vec![],
+            offset: 0,
+            loading: false,
+            rendered_width: usize::MAX,
+            compose: Some(Compose {
+                kind: ComposeKind::New,
+                buffer: "draft text".into(),
+                status: ComposeStatus::Editing,
+            }),
+            current_user_id: None,
+            affordances: vec![],
+            confirm_delete: None,
+            focused_comment: None,
+            comment_spans: vec![],
+        }],
+        should_quit: false,
+        header: Header::from_instances(&[], None),
+        viewport: (80, 24),
+        click_targets: vec![],
+        modal_button_targets: vec![],
+        last_loaded: None,
+        selection: None,
+        copied_feedback: false,
+    };
+    let (m2, cmds) = update(m, Msg::ComposeCancel);
+    assert!(cmds.is_empty(), "ComposeCancel must emit no Cmd: {cmds:?}");
+    match m2.top() {
+        Some(Screen::Detail { compose, .. }) => {
+            assert!(
+                compose.is_none(),
+                "ComposeCancel must clear compose: {compose:?}"
+            );
+        }
+        _ => panic!("expected Detail screen"),
+    }
+}
+
+#[test]
+fn ac7_regression_compose_submit_emits_write_cmd_after_modal_migration() {
+    use crate::tui::model::{Compose, ComposeKind, ComposeStatus};
+    let m = Model {
+        stack: vec![Screen::Detail {
+            instance: "inst".into(),
+            project_id: 1,
+            task_id: 42,
+            task: serde_json::Value::Null,
+            comments: vec![],
+            user_map: HashMap::new(),
+            lines: vec![],
+            line_styles: vec![],
+            assets: vec![],
+            offset: 0,
+            loading: false,
+            rendered_width: usize::MAX,
+            compose: Some(Compose {
+                kind: ComposeKind::New,
+                buffer: "non empty".into(),
+                status: ComposeStatus::Editing,
+            }),
+            current_user_id: None,
+            affordances: vec![],
+            confirm_delete: None,
+            focused_comment: None,
+            comment_spans: vec![],
+        }],
+        should_quit: false,
+        header: Header::from_instances(&[], None),
+        viewport: (80, 24),
+        click_targets: vec![],
+        modal_button_targets: vec![],
+        last_loaded: None,
+        selection: None,
+        copied_feedback: false,
+    };
+    let (_m2, cmds) = update(m, Msg::ComposeSubmit);
+    assert!(
+        cmds.iter().any(|c| matches!(c, Cmd::SubmitComment { .. })),
+        "ComposeSubmit on non-empty buffer must emit SubmitComment Cmd: {cmds:?}"
+    );
+}
+
+// scroll_offset_for_card unit tests (pure math, no model) ---
+
+#[test]
+fn scroll_offset_for_card_returns_current_when_visible() {
+    use crate::tui::model::scroll_offset_for_card;
+    let result = scroll_offset_for_card(0, 2, 4, 14, 20);
+    assert_eq!(result, 0, "visible card: offset must be unchanged");
+}
+
+#[test]
+fn scroll_offset_for_card_scrolls_down_when_below() {
+    use crate::tui::model::scroll_offset_for_card;
+    let result = scroll_offset_for_card(0, 15, 5, 14, 20);
+    let text_vh = (14u16 - 4) as usize;
+    assert_eq!(
+        result,
+        15 + 5 - text_vh,
+        "card below viewport: offset must show card end"
+    );
+}
+
+#[test]
+fn scroll_offset_for_card_scrolls_up_when_above() {
+    use crate::tui::model::scroll_offset_for_card;
+    let result = scroll_offset_for_card(10, 3, 5, 14, 20);
+    assert_eq!(result, 3, "card above viewport: offset must be card_start");
+}
+
+// --- Confirm-delete modal keyboard routing (ADR 0039 slice 2) ---
+
+fn detail_model_with_confirm_delete(comment_id: i64) -> Model {
+    Model {
+        stack: vec![Screen::Detail {
+            instance: "inst".into(),
+            project_id: 1,
+            task_id: 1,
+            task: serde_json::Value::Null,
+            comments: vec![],
+            user_map: HashMap::new(),
+            lines: vec![],
+            line_styles: vec![],
+            assets: vec![],
+            offset: 0,
+            loading: false,
+            rendered_width: usize::MAX,
+            compose: None,
+            current_user_id: Some(7),
+            affordances: vec![],
+            confirm_delete: Some(comment_id),
+            focused_comment: None,
+            comment_spans: vec![],
+        }],
+        should_quit: false,
+        header: empty_header(),
+        viewport: (80, 24),
+        click_targets: vec![],
+        modal_button_targets: vec![],
+        last_loaded: None,
+        selection: None,
+        copied_feedback: false,
+    }
+}
+
+// AC4: Enter key (Msg::Select) when confirm_delete is Some confirms the delete.
+#[test]
+fn enter_key_when_confirm_delete_some_emits_delete_comment() {
+    let m = detail_model_with_confirm_delete(99);
+    let (m2, cmds) = update(m, Msg::Select);
+    assert_eq!(
+        cmds.len(),
+        1,
+        "Enter in confirm sub-mode must emit one Cmd::DeleteComment; got {:?}",
+        cmds
+    );
+    match &cmds[0] {
+        Cmd::DeleteComment { comment_id, .. } => {
+            assert_eq!(*comment_id, 99, "must delete comment_id=99");
+        }
+        other => panic!("expected DeleteComment, got {other:?}"),
+    }
+    match m2.top() {
+        Some(Screen::Detail { confirm_delete, .. }) => {
+            assert!(
+                confirm_delete.is_none(),
+                "confirm_delete must be cleared after confirm"
+            );
+        }
+        _ => panic!("expected Detail screen"),
+    }
+}
+
+// AC4: Esc key (Msg::Back) when confirm_delete is Some cancels the delete (no cmd, no pop).
+#[test]
+fn esc_key_when_confirm_delete_some_cancels_without_popping() {
+    let m = detail_model_with_confirm_delete(99);
+    let (m2, cmds) = update(m, Msg::Back);
+    assert!(
+        cmds.is_empty(),
+        "Esc in confirm sub-mode must emit no Cmd; got {:?}",
+        cmds
+    );
+    match m2.top() {
+        Some(Screen::Detail { confirm_delete, .. }) => {
+            assert!(
+                confirm_delete.is_none(),
+                "confirm_delete must be None after cancel"
+            );
+        }
+        _ => panic!("expected Detail screen; Esc must not pop the stack"),
+    }
+    assert!(!m2.should_quit, "Esc in confirm sub-mode must not quit");
+}
+
+// AC4: Msg::ConfirmDeleteComment when confirm_delete is None is a no-op.
+#[test]
+fn confirm_delete_msg_when_none_is_noop() {
+    let m = detail_model_with_assets_and_viewport(vec![], "inst", (80, 24));
+    let (m2, cmds) = update(m, Msg::ConfirmDeleteComment);
+    assert!(
+        cmds.is_empty(),
+        "ConfirmDeleteComment with no pending delete must emit no Cmd"
+    );
+    match m2.top() {
+        Some(Screen::Detail { confirm_delete, .. }) => {
+            assert!(confirm_delete.is_none());
+        }
+        _ => panic!("expected Detail screen"),
+    }
+}
+
+// AC4: Msg::CancelDeleteComment when confirm_delete is None is a no-op.
+#[test]
+fn cancel_delete_msg_when_none_is_noop() {
+    let m = detail_model_with_assets_and_viewport(vec![], "inst", (80, 24));
+    let (m2, cmds) = update(m, Msg::CancelDeleteComment);
+    assert!(
+        cmds.is_empty(),
+        "CancelDeleteComment with no pending delete must emit no Cmd"
+    );
+    assert!(
+        !m2.should_quit,
+        "CancelDeleteComment must not quit when no modal is open"
+    );
+}
+
+// AC5 (regression): Msg::CommentMutationOk after a delete triggers LoadDetail{refresh:true}.
+// This test duplicates the existing comment_mutation_ok_after_delete_emits_load_detail_refresh
+// from the same file to guard against the delete refresh path regressing across slices.
+#[test]
+fn comment_mutation_ok_after_delete_triggers_load_detail_refresh_regression() {
+    let mut m = detail_model_with_confirm_delete(42);
+    if let Some(Screen::Detail {
+        ref mut instance,
+        ref mut project_id,
+        ref mut task_id,
+        ..
+    }) = m.top_mut()
+    {
+        *instance = "myinst".into();
+        *project_id = 5;
+        *task_id = 10;
+    }
+
+    let (m2, cmds) = update(m, Msg::CommentMutationOk);
+
+    assert_eq!(
+        cmds.len(),
+        1,
+        "CommentMutationOk must emit exactly one Cmd; got {:?}",
+        cmds
+    );
+    match &cmds[0] {
+        Cmd::LoadDetail {
+            instance,
+            project_id,
+            task_id,
+            refresh,
+        } => {
+            assert_eq!(instance, "myinst");
+            assert_eq!(*project_id, 5);
+            assert_eq!(*task_id, 10);
+            assert!(*refresh, "refresh must be true on mutation ok");
+        }
+        other => panic!("expected LoadDetail, got {other:?}"),
+    }
+    match m2.top() {
+        Some(Screen::Detail { confirm_delete, .. }) => {
+            assert!(
+                confirm_delete.is_none(),
+                "confirm_delete cleared by CommentMutationOk"
+            );
+        }
+        _ => panic!("expected Detail screen"),
+    }
+}
+
+// AC3: plain left click on the [confirmar] button target emits Cmd::DeleteComment.
+// Button targets are set on the model (mirroring the shell's render-then-set flow).
+// For an 80×24 frame: modal at x=12,y=4,w=56,h=16; inner_x=13; hint_row=18;
+// [confirmar] → x_start=13, x_end=24.
+#[test]
+fn plain_click_on_confirm_button_emits_delete_comment() {
+    use crate::tui::model::ModalButtonTarget;
+    let mut m = detail_model_with_confirm_delete(55);
+    m.viewport = (80, 24);
+    m.set_modal_button_targets(vec![
+        ModalButtonTarget {
+            x_start: 13,
+            x_end: 24,
+            row: 18,
+            is_confirm: true,
+        },
+        ModalButtonTarget {
+            x_start: 26,
+            x_end: 36,
+            row: 18,
+            is_confirm: false,
+        },
+    ]);
+    let (m2, cmds) = update(
+        m,
+        Msg::Click {
+            column: 15,
+            row: 18,
+            modifiers: crossterm::event::KeyModifiers::NONE,
+        },
+    );
+    assert_eq!(
+        cmds.len(),
+        1,
+        "plain click on [confirmar] must emit one Cmd::DeleteComment; got {:?}",
+        cmds
+    );
+    match &cmds[0] {
+        Cmd::DeleteComment { comment_id, .. } => {
+            assert_eq!(*comment_id, 55, "must delete comment_id=55");
+        }
+        other => panic!("expected DeleteComment, got {other:?}"),
+    }
+    match m2.top() {
+        Some(Screen::Detail { confirm_delete, .. }) => {
+            assert!(
+                confirm_delete.is_none(),
+                "confirm_delete cleared after confirm click"
+            );
+        }
+        _ => panic!("expected Detail screen"),
+    }
+}
+
+// AC3: plain left click on the [cancelar] button target clears confirm_delete, emits no Cmd.
+#[test]
+fn plain_click_on_cancel_button_clears_confirm_no_cmd() {
+    use crate::tui::model::ModalButtonTarget;
+    let mut m = detail_model_with_confirm_delete(55);
+    m.viewport = (80, 24);
+    m.set_modal_button_targets(vec![
+        ModalButtonTarget {
+            x_start: 13,
+            x_end: 24,
+            row: 18,
+            is_confirm: true,
+        },
+        ModalButtonTarget {
+            x_start: 26,
+            x_end: 36,
+            row: 18,
+            is_confirm: false,
+        },
+    ]);
+    let (m2, cmds) = update(
+        m,
+        Msg::Click {
+            column: 28,
+            row: 18,
+            modifiers: crossterm::event::KeyModifiers::NONE,
+        },
+    );
+    assert!(
+        cmds.is_empty(),
+        "plain click on [cancelar] must emit no Cmd; got {:?}",
+        cmds
+    );
+    match m2.top() {
+        Some(Screen::Detail { confirm_delete, .. }) => {
+            assert!(
+                confirm_delete.is_none(),
+                "confirm_delete cleared after cancel click"
+            );
+        }
+        _ => panic!("expected Detail screen"),
+    }
+}
+
+// AC3b: plain click OUTSIDE the button targets while confirm modal is open is a no-op
+// (modal captures all clicks — no selection starts behind it).
+#[test]
+fn plain_click_outside_buttons_while_modal_open_is_noop() {
+    use crate::tui::model::ModalButtonTarget;
+    let mut m = detail_model_with_confirm_delete(55);
+    m.viewport = (80, 24);
+    m.set_modal_button_targets(vec![
+        ModalButtonTarget {
+            x_start: 13,
+            x_end: 24,
+            row: 18,
+            is_confirm: true,
+        },
+        ModalButtonTarget {
+            x_start: 26,
+            x_end: 36,
+            row: 18,
+            is_confirm: false,
+        },
+    ]);
+    let (m2, cmds) = update(
+        m,
+        Msg::Click {
+            column: 40,
+            row: 5,
+            modifiers: crossterm::event::KeyModifiers::NONE,
+        },
+    );
+    assert!(
+        cmds.is_empty(),
+        "click outside buttons must emit no Cmd (modal captures); got {:?}",
+        cmds
+    );
+    match m2.top() {
+        Some(Screen::Detail { confirm_delete, .. }) => {
+            assert!(
+                confirm_delete.is_some(),
+                "confirm_delete must stay Some when click misses the buttons"
+            );
+        }
+        _ => panic!("expected Detail screen"),
+    }
+    assert!(
+        m2.selection.is_none(),
+        "selection must NOT start behind the confirm modal (modal captures clicks)"
     );
 }
