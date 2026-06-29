@@ -1,6 +1,8 @@
 use clap::{Args, Parser, Subcommand};
 
-pub const KNOWN_COMMANDS: [&str; 6] = ["setup", "get", "current", "mine", "list", "browse"];
+pub const KNOWN_COMMANDS: [&str; 7] = [
+    "setup", "get", "current", "mine", "list", "browse", "comment",
+];
 
 /// Fetch ActiveCollab tasks from one or more configured instances.
 #[derive(Parser, Debug)]
@@ -23,6 +25,8 @@ pub enum Command {
     Mine(MineArgs),
     /// Interactive TUI browser for your tasks.
     Browse(BrowseArgs),
+    /// Post a comment to a task as the logged-in user.
+    Comment(CommentArgs),
 }
 
 /// Wrapper that holds the setup subcommand.
@@ -124,6 +128,21 @@ pub struct BrowseArgs {
     /// Print curated minified JSON for agent/LLM consumption; never launches the TUI.
     #[arg(long)]
     pub json: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct CommentArgs {
+    /// Task URL or PROJECT_ID/TASK_ID. When omitted, resolved from the current git branch.
+    pub task_ref: Option<String>,
+    /// Comment body. When omitted, the body is read from stdin.
+    #[arg(short = 'm', long)]
+    pub message: Option<String>,
+    /// Print curated minified JSON write result for agent/LLM consumption.
+    #[arg(long)]
+    pub json: bool,
+    /// Force a named instance.
+    #[arg(long)]
+    pub instance: Option<String>,
 }
 
 /// Mirror of Python `_normalize_argv`.

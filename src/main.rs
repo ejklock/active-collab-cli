@@ -16,8 +16,8 @@ mod tui;
 use clap::{CommandFactory, Parser};
 use cli::{bare_no_command_action, BareNoCommandAction, Cli, Command};
 use commands::{
-    current_core, get_core, mine_core, pick_instance, setup_add, setup_language, setup_list,
-    setup_remove, setup_test, DisplayFlags, MineOutcome, SetupAddFields,
+    comment_core, current_core, get_core, mine_core, pick_instance, setup_add, setup_language,
+    setup_list, setup_remove, setup_test, DisplayFlags, MineOutcome, SetupAddFields,
 };
 use std::io::IsTerminal;
 use std::process;
@@ -94,6 +94,7 @@ async fn dispatch(command: Command) -> i32 {
         Command::Current(args) => dispatch_current(args).await,
         Command::Mine(args) => dispatch_mine(args).await,
         Command::Browse(args) => dispatch_browse(args).await,
+        Command::Comment(args) => dispatch_comment(args).await,
     }
 }
 
@@ -444,6 +445,59 @@ async fn dispatch_browse(args: cli::BrowseArgs) -> i32 {
         return 0;
     }
     tui::browse(targets, http, db_path).await
+}
+
+async fn dispatch_comment(args: cli::CommentArgs) -> i32 {
+    let store = match open_store() {
+        Some(s) => s,
+        None => return 1,
+    };
+    let http = match http::Http::new() {
+        Ok(h) => h,
+        Err(e) => {
+            render::print_error(&format!("Error building HTTP client: {e}"));
+            return 1;
+        }
+    };
+    let repo = store::instances::InstanceRepository::new(store.conn());
+    let instances = match repo.load_all() {
+        Ok(v) => v,
+        Err(e) => {
+            render::print_error(&format!("Error loading instances: {e}"));
+            return 1;
+        }
+    };
+    let mut err_buf = std::io::stderr();
+    let idx = match pick_instance(&instances, args.instance.as_deref(), &mut err_buf) {
+        Ok(i) => i,
+        Err(code) => return code,
+    };
+    let inst = instances[idx].clone();
+    let ac_client = client::ActiveCollabClient::new(inst.clone(), http);
+
+    let body = if let Some(msg) = args.message {
+        msg
+    } else if !stdin_is_tty() {
+        let mut buf = String::new();
+        use std::io::Read;
+        std::io::stdin().read_to_string(&mut buf).ok();
+        buf
+    } else {
+        String::new()
+    };
+
+    let branch = current_git_branch();
+    comment_core(
+        args.task_ref.as_deref(),
+        branch.as_deref(),
+        &body,
+        &inst,
+        &ac_client,
+        args.json,
+        &mut std::io::stdout(),
+        &mut std::io::stderr(),
+    )
+    .await
 }
 
 /// Invoke `git rev-parse --abbrev-ref HEAD` and return the branch name.
