@@ -226,10 +226,14 @@ pub struct DetailData {
 ///
 /// Caller renders this immediately, then resolves user_map in the background
 /// for a second paint that updates the Assignee line.
+///
+/// `unauthorized` is true when the fetch returned HTTP 401; other non-200
+/// responses leave it false (collapsed to empty content as before).
 pub struct TaskCore {
     pub task: Value,
     pub comments: Vec<Value>,
     pub assets: Vec<Asset>,
+    pub unauthorized: bool,
 }
 
 static IMG_SRC_RE: OnceLock<Regex> = OnceLock::new();
@@ -370,7 +374,7 @@ pub async fn load_task_core(
     refresh: bool,
 ) -> TaskCore {
     let client = ActiveCollabClient::new(inst.clone(), http);
-    let (mut task, comments) =
+    let (mut task, comments, unauthorized) =
         load_task_data_from_path(&db_path, &inst, &client, project_id, task_id, refresh).await;
     enrich_task_with_project_name(&mut task, &db_path, &inst.name, project_id);
     let assets = extract_assets(&task, &comments);
@@ -378,6 +382,7 @@ pub async fn load_task_core(
         task,
         comments,
         assets,
+        unauthorized,
     }
 }
 
@@ -444,6 +449,10 @@ pub async fn refresh_user_map(
 
 /// Open a DB connection and serve cache or network for the task.
 ///
+/// Returns `(task, comments, unauthorized)`. `unauthorized` is true only when
+/// the network returned HTTP 401; cache hits and other non-200 responses leave
+/// it false (non-401 errors still collapse to Value::Null / empty as before).
+///
 /// Structured to avoid holding any non-Send reference (TaskCache/Connection)
 /// across an await point, satisfying tokio::spawn's Send bound.
 async fn load_task_data_from_path(
@@ -453,7 +462,7 @@ async fn load_task_data_from_path(
     project_id: i64,
     task_id: i64,
     refresh: bool,
-) -> (Value, Vec<Value>) {
+) -> (Value, Vec<Value>, bool) {
     let config = Config {
         db_path: db_path.to_path_buf(),
         task_cache_ttl_hours: 24,
@@ -464,20 +473,21 @@ async fn load_task_data_from_path(
         let cache_hit = try_cache_read(&config, &inst.name, project_id, task_id);
         crate::timing::record("task_cache_read", t.elapsed());
         if let Some(hit) = cache_hit {
-            return hit;
+            return (hit.0, hit.1, false);
         }
     }
 
     let t = std::time::Instant::now();
     let result = fetch_from_network(client, project_id, task_id).await;
     crate::timing::record("fetch_task", t.elapsed());
-    let (task, comments) = match result {
-        None => return (Value::Null, vec![]),
-        Some(pair) => pair,
-    };
-
-    try_cache_write(&config, &inst.name, project_id, task_id, &task, &comments);
-    (task, comments)
+    match result {
+        FetchResult::Unauthorized => (Value::Null, vec![], true),
+        FetchResult::Err => (Value::Null, vec![], false),
+        FetchResult::Ok(task, comments) => {
+            try_cache_write(&config, &inst.name, project_id, task_id, &task, &comments);
+            (task, comments, false)
+        }
+    }
 }
 
 /// Remove the embedded `comments` array from cached task fields, returning both parts.
@@ -536,16 +546,28 @@ fn parse_task_payload(payload: Value) -> (Value, Vec<Value>) {
     (task, comments)
 }
 
+enum FetchResult {
+    Ok(Value, Vec<Value>),
+    Unauthorized,
+    Err,
+}
+
 async fn fetch_from_network(
     client: &ActiveCollabClient,
     project_id: i64,
     task_id: i64,
-) -> Option<(Value, Vec<Value>)> {
-    let (status, payload_opt) = client.fetch_task(project_id, task_id).await.ok()?;
-    if status != 200 {
-        return None;
+) -> FetchResult {
+    let Ok((status, payload_opt)) = client.fetch_task(project_id, task_id).await else {
+        return FetchResult::Err;
+    };
+    if status == crate::http::HTTP_UNAUTHORIZED {
+        return FetchResult::Unauthorized;
     }
-    Some(parse_task_payload(payload_opt.unwrap_or(Value::Null)))
+    if status != 200 {
+        return FetchResult::Err;
+    }
+    let (task, comments) = parse_task_payload(payload_opt.unwrap_or(Value::Null));
+    FetchResult::Ok(task, comments)
 }
 
 fn try_user_map_cache_read(config: &Config, instance_name: &str) -> Option<HashMap<i64, String>> {
@@ -608,8 +630,8 @@ pub async fn task_detail_with_conn(
         None => {
             let result = fetch_from_network(&client, project_id, task_id).await;
             match result {
-                None => (Value::Null, vec![]),
-                Some((task, comments)) => {
+                FetchResult::Unauthorized | FetchResult::Err => (Value::Null, vec![]),
+                FetchResult::Ok(task, comments) => {
                     let cache = TaskCache::new(conn);
                     let comments_value = Value::Array(comments.clone());
                     cache

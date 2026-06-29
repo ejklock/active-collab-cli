@@ -202,6 +202,8 @@ pub struct DetailLoad {
     /// The logged-in user's id for the instance that owns this task. Used to gate the
     /// `[editar]` affordance to comments authored by the current user.
     pub current_user_id: Option<i64>,
+    /// True when the fetch returned HTTP 401; the TUI sets auth_error on the Detail screen.
+    pub unauthorized: bool,
 }
 
 /// A screen on the navigation stack.
@@ -274,6 +276,9 @@ pub enum Screen {
         /// Per-card global line ranges `(start_line, line_count)`, parallel to `comments`.
         /// Rebuilt by reflow_detail on the same rendered_width invalidation as `lines`.
         comment_spans: Vec<(usize, usize)>,
+        /// Set when a 401 response is received from a detail load or comment mutation.
+        /// Cleared on a subsequent successful (200) detail load.
+        auth_error: bool,
     },
 }
 
@@ -526,6 +531,9 @@ pub enum Msg {
     CommentMutationOk,
     /// The comment POST failed; preserve the buffer and show an error.
     CommentMutationErr(String),
+    /// A 401 response from a comment mutation (create/update/delete).
+    /// Sets auth_error on the Detail screen without clearing the compose buffer.
+    AuthExpired,
     /// Move the comment-card focus cursor forward by one card (j / Down in Detail browse mode).
     FocusNextComment,
     /// Move the comment-card focus cursor backward by one card (k / Up in Detail browse mode).
@@ -716,7 +724,8 @@ pub fn update(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
         | Msg::ComposeSubmit
         | Msg::ComposeCancel
         | Msg::CommentMutationOk
-        | Msg::CommentMutationErr(_)) => update_compose(model, m),
+        | Msg::CommentMutationErr(_)
+        | Msg::AuthExpired) => update_compose(model, m),
         Msg::FocusNextComment => (handle_focus_next(model), vec![]),
         Msg::FocusPrevComment => (handle_focus_prev(model), vec![]),
         Msg::ConfirmDeleteComment => handle_confirm_delete(model),
@@ -793,6 +802,7 @@ fn update_compose(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
         Msg::ComposeCancel => (handle_compose_cancel(model), vec![]),
         Msg::CommentMutationOk => handle_comment_mutation_ok(model),
         Msg::CommentMutationErr(msg) => (handle_comment_mutation_err(model, msg), vec![]),
+        Msg::AuthExpired => (handle_auth_expired(model), vec![]),
         _ => (model, vec![]),
     }
 }
@@ -1491,6 +1501,7 @@ fn handle_select(model: Model) -> (Model, Vec<Cmd>) {
                     confirm_delete: None,
                     focused_comment: None,
                     comment_spans: vec![],
+                    auth_error: false,
                 });
             }
         }
@@ -1634,6 +1645,7 @@ fn handle_loaded_detail(mut model: Model, load: DetailLoad) -> Model {
         ref mut confirm_delete,
         ref mut focused_comment,
         ref mut comment_spans,
+        ref mut auth_error,
         ..
     }) = model.top_mut()
     {
@@ -1643,6 +1655,7 @@ fn handle_loaded_detail(mut model: Model, load: DetailLoad) -> Model {
         *um = load.user_map;
         *loading = false;
         *current_user_id = load.current_user_id;
+        *auth_error = load.unauthorized;
         // Invalidate line cache so reflow_detail rebuilds at current width.
         *ls = vec![];
         *lss = vec![];
@@ -1653,6 +1666,19 @@ fn handle_loaded_detail(mut model: Model, load: DetailLoad) -> Model {
         *comment_spans = vec![];
     }
     model.last_loaded = Some(load.loaded_at);
+    model
+}
+
+/// Set auth_error on the Detail screen without disturbing the compose buffer.
+///
+/// Called when a comment mutation returns HTTP 401. The user keeps their draft.
+fn handle_auth_expired(mut model: Model) -> Model {
+    if let Some(Screen::Detail {
+        ref mut auth_error, ..
+    }) = model.top_mut()
+    {
+        *auth_error = true;
+    }
     model
 }
 
