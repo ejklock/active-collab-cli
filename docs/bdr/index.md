@@ -30,3 +30,4 @@
 | [0026](/bdr/0026-comment-modal-overlay.md) | Comment compose and delete-confirm open as a centered modal overlay over a dimmed thread, sharing one reusable modal primitive | Accepted |
 | [0027](/bdr/0027-non-interactive-comment-creation.md) | A non-interactive `comment` command posts a comment to a task as the logged-in user, from a -m flag or stdin, with a --json write result | Accepted |
 | [0028](/bdr/0028-comment-affordance-links-and-yes-no-confirm.md) | Comment edit/delete affordances read as colored underlined links (own comments only); the delete-confirm modal presents Sim/Não | Accepted |
+| [0029](/bdr/0029-token-invalidation-reauthentication.md) | A revoked API token (HTTP 401) produces actionable re-auth guidance: the CLI prints a message and exits non-zero; the TUI shows a status-line pointing to `ac setup add` (other non-200 unchanged) | Accepted |

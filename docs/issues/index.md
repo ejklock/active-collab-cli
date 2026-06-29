@@ -47,3 +47,6 @@ TUI/UX work (V/R/ARCH slices), tracing to
 | [0039](/issues/0039-non-tty-comment-command.md) | A1 | non-TTY `comment` command — post a comment to a task as the logged-in user (-m or stdin, --json result) | closed | — |
 | [0040](/issues/0040-comment-affordance-colored-links.md) | L1 | comment edit/delete affordances as colored underlined links ([editar] cyan, [excluir] red), emitted structurally | closed | — |
 | [0041](/issues/0041-yes-no-confirm-modal.md) | L2 | delete-confirm modal presents Sim/Não buttons (relabel [confirmar]/[cancelar]) | closed | — |
+| [0042](/issues/0042-cli-401-detail-and-comment.md) | RA1 | CLI get/current/comment detect HTTP 401 → actionable re-auth message + non-zero exit | closed | — |
+| [0043](/issues/0043-cli-401-mine.md) | RA2 | CLI mine detects 401 via a typed Unauthorized error → re-auth message + non-zero exit | closed | 0042 |
+| [0044](/issues/0044-tui-401-status-line.md) | RA3 | TUI surfaces 401 in the thin status line → guide to `ac setup add` | closed | 0042, 0043 |
