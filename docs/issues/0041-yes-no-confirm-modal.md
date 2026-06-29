@@ -2,7 +2,7 @@
 type: Issue
 title: "Delete-confirm modal presents Sim/Não buttons — relabel [confirmar]/[cancelar] to a yes/no choice"
 description: Relabel the delete-confirm modal's two buttons from [confirmar]/[cancelar] to [Sim]/[Não] (English source keys Yes/No, pt-BR values Sim/Não). The button click-target geometry already derives from the label widths, so it reflows automatically; the is_confirm mapping and Enter/Esc keys are unchanged.
-status: open
+status: closed
 labels: [tui, comments, modal, confirm, i18n, slice]
 blocked_by:
 tracker:
