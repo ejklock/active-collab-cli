@@ -2,7 +2,7 @@
 type: Issue
 title: "Comment edit/delete affordances render as colored underlined links — [editar] cyan, [excluir] destructive red, emitted structurally"
 description: Style the [editar]/[excluir] affordance tokens on an own comment's card header as links — soft-cyan underlined for edit, destructive-red underlined for delete — with the StyleRun emitted by build_comment_card over the edit_span/delete_span it already computes (structural, ADR 0032), not by text-pattern detection. Own-comment-only and click-to-act are unchanged.
-status: open
+status: closed
 labels: [tui, comments, affordance, link, style, theme, slice]
 blocked_by:
 tracker:
