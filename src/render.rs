@@ -57,14 +57,16 @@ pub struct StyleRun {
 /// What kind of action a `LocalAffordance` triggers on Ctrl/Cmd+click.
 ///
 /// `Edit(comment_id)` and `Delete(comment_id)` carry the id of the targeted comment.
-/// `Confirm` and `Cancel` act on the pending `confirm_delete` state already held by
-/// the model and need no extra payload.
+/// `Edit` opens the compose area pre-filled with the comment body; `Delete` requests
+/// a confirmation via the modal overlay (ADR 0039). The modal's [confirmar]/[cancelar]
+/// buttons are a separate registry (`Model.modal_button_targets`), registered by
+/// `view::register_confirm_button_targets` from the `Rect` that `render_modal` returns,
+/// and resolved by `model::dispatch_confirm_modal_click` on a plain click — single-sourced
+/// geometry that does not go through this scroll-aware affordance list.
 #[derive(Debug, Clone, PartialEq)]
 pub enum AffordanceKind {
     Edit(i64),
     Delete(i64),
-    Confirm,
-    Cancel,
 }
 
 /// A clickable affordance span registered during `build_detail_content`.
@@ -89,10 +91,13 @@ pub struct LocalAffordance {
 /// `affordances` records all clickable spans (edit, delete, confirm, cancel) for
 /// hit-testing; each entry carries its `AffordanceKind` so the caller dispatches
 /// without maintaining parallel collections.
+/// `comment_spans` maps comment index → `(start_line, line_count)` in global `lines`.
+/// Empty when there are no comments.
 pub struct DetailContent {
     pub lines: Vec<String>,
     pub line_styles: Vec<Vec<StyleRun>>,
     pub affordances: Vec<LocalAffordance>,
+    pub comment_spans: Vec<(usize, usize)>,
 }
 
 /// Strip the panel-box left border and HPAD from a boxed content line.
@@ -1436,18 +1441,12 @@ fn unzip_boxed(boxed: Vec<(String, Vec<StyleRun>)>) -> (Vec<String>, Vec<Vec<Sty
 /// `edit_span` is the half-open display-column span of the `[editar]` token.
 /// `delete_span` is the half-open display-column span of the `[excluir]` token.
 /// Both are `None` when `is_own` is false.
-/// `confirm_lines` carries the inline confirm-prompt lines rendered when
-/// `confirm_delete` matches this comment's id (may be empty).
 #[derive(Debug)]
 struct CommentCard {
     lines: Vec<String>,
     line_styles: Vec<Vec<StyleRun>>,
     edit_span: Option<(usize, usize)>,
     delete_span: Option<(usize, usize)>,
-    confirm_lines: Vec<String>,
-    confirm_styles: Vec<Vec<StyleRun>>,
-    confirm_span: Option<(usize, usize)>,
-    cancel_span: Option<(usize, usize)>,
 }
 
 /// Affordance span relative to the `nested_lines` vec produced during comment rendering.
@@ -1461,108 +1460,61 @@ struct CardAffordance {
     kind: AffordanceKind,
 }
 
-fn build_comment_lines_with_collector(
-    comments: &[Value],
-    inner_width: usize,
-    collector: &mut LinkCollector,
-    current_user_id: Option<i64>,
-    confirm_delete: Option<i64>,
-) -> (Vec<String>, Vec<Vec<StyleRun>>, Vec<CardAffordance>) {
-    if comments.is_empty() {
-        return (vec![], vec![], vec![]);
+type CommentLinesOutput = (
+    Vec<String>,
+    Vec<Vec<StyleRun>>,
+    Vec<CardAffordance>,
+    Vec<(usize, usize)>,
+);
+
+/// Append a built comment card's lines, styles, and affordances into the nested
+/// accumulators. Returns `(card_start_idx, card_end_idx)` so the caller can
+/// record the span for scroll-into-view.
+fn append_card_to_nested(
+    card: CommentCard,
+    comment_id: i64,
+    nested_lines: &mut Vec<String>,
+    nested_styles: &mut Vec<Vec<StyleRun>>,
+    card_affordances: &mut Vec<CardAffordance>,
+) -> (usize, usize) {
+    let card_start_idx = nested_lines.len();
+    for (line, runs) in card.lines.into_iter().zip(card.line_styles) {
+        nested_lines.push(format!(" {}", line));
+        nested_styles.push(indent_style_runs(runs, 1));
     }
-    let outer_content = panel_content_width(inner_width);
-    let card_width = outer_content.saturating_sub(1);
-    let mut nested_lines: Vec<String> = Vec::new();
-    let mut nested_styles: Vec<Vec<StyleRun>> = Vec::new();
-    let mut card_affordances: Vec<CardAffordance> = Vec::new();
-    let mut first = true;
-
-    for comment in comments {
-        if !first {
-            nested_lines.push(String::new());
-            nested_styles.push(vec![]);
-        }
-        first = false;
-
-        let comment_id = comment.get("id").and_then(|v| v.as_i64()).unwrap_or(0);
-        let created_by_id = comment.get("created_by_id").and_then(|v| v.as_i64());
-        let is_own = current_user_id
-            .zip(created_by_id)
-            .map(|(uid, cid)| uid == cid)
-            .unwrap_or(false);
-
-        let author = extract_comment_author(comment);
-        let when = fmt_ts(comment.get("created_on").unwrap_or(&Value::Null));
-        let showing_confirm = confirm_delete == Some(comment_id);
-        let ctx = CommentCardCtx {
-            comment,
-            author: &author,
-            when: &when,
-            card_width,
-            collector,
-            is_own,
-            showing_confirm,
-        };
-        let card = build_comment_card(ctx);
-
-        let card_start_idx = nested_lines.len();
-        for (line, runs) in card.lines.into_iter().zip(card.line_styles) {
-            nested_lines.push(format!(" {}", line));
-            nested_styles.push(indent_style_runs(runs, 1));
-        }
-
-        if let Some((col_start, col_end)) = card.edit_span {
-            card_affordances.push(CardAffordance {
-                line_idx: card_start_idx,
-                col_start: col_start + 1,
-                col_end: col_end + 1,
-                kind: AffordanceKind::Edit(comment_id),
-            });
-        }
-        if let Some((col_start, col_end)) = card.delete_span {
-            card_affordances.push(CardAffordance {
-                line_idx: card_start_idx,
-                col_start: col_start + 1,
-                col_end: col_end + 1,
-                kind: AffordanceKind::Delete(comment_id),
-            });
-        }
-
-        let confirm_start_idx = nested_lines.len();
-        for (line, runs) in card.confirm_lines.into_iter().zip(card.confirm_styles) {
-            nested_lines.push(format!(" {}", line));
-            nested_styles.push(indent_style_runs(runs, 1));
-        }
-
-        if let Some((col_start, col_end)) = card.confirm_span {
-            card_affordances.push(CardAffordance {
-                line_idx: confirm_start_idx,
-                col_start: col_start + 1,
-                col_end: col_end + 1,
-                kind: AffordanceKind::Confirm,
-            });
-        }
-        if let Some((col_start, col_end)) = card.cancel_span {
-            card_affordances.push(CardAffordance {
-                line_idx: confirm_start_idx,
-                col_start: col_start + 1,
-                col_end: col_end + 1,
-                kind: AffordanceKind::Cancel,
-            });
-        }
+    if let Some((s, e)) = card.edit_span {
+        card_affordances.push(CardAffordance {
+            line_idx: card_start_idx,
+            col_start: s + 1,
+            col_end: e + 1,
+            kind: AffordanceKind::Edit(comment_id),
+        });
     }
+    if let Some((s, e)) = card.delete_span {
+        card_affordances.push(CardAffordance {
+            line_idx: card_start_idx,
+            col_start: s + 1,
+            col_end: e + 1,
+            kind: AffordanceKind::Delete(comment_id),
+        });
+    }
+    let card_end_idx = nested_lines.len();
+    (card_start_idx, card_end_idx)
+}
 
-    let label = format!("{} ({})", t("Comments"), comments.len());
-    let outer_rich = plain_lines_to_rich(nested_lines.clone());
-    let boxed = panel_box_rich(&label, &outer_rich, inner_width);
-    let (outer_lines, outer_box_styles) = unzip_boxed(boxed);
-
-    let chrome = 1 + PANEL_HPAD;
-    let content_start = 1 + PANEL_VPAD;
-    let content_end = outer_lines.len().saturating_sub(1 + PANEL_VPAD);
-
-    let merged_styles: Vec<Vec<StyleRun>> = outer_lines
+/// Merge per-card nested styles with the outer box styles.
+///
+/// Lines in the content region use the nested style runs (offset by `chrome`);
+/// border and padding lines use the outer box styles.
+fn merge_nested_styles_into_outer(
+    outer_lines: &[String],
+    outer_box_styles: &[Vec<StyleRun>],
+    nested_styles: &[Vec<StyleRun>],
+    content_start: usize,
+    content_end: usize,
+    chrome: usize,
+) -> Vec<Vec<StyleRun>> {
+    outer_lines
         .iter()
         .enumerate()
         .map(|(i, _)| {
@@ -1583,7 +1535,79 @@ fn build_comment_lines_with_collector(
                 outer_box_styles.get(i).cloned().unwrap_or_default()
             }
         })
-        .collect();
+        .collect()
+}
+
+fn build_comment_lines_with_collector(
+    comments: &[Value],
+    inner_width: usize,
+    collector: &mut LinkCollector,
+    current_user_id: Option<i64>,
+) -> CommentLinesOutput {
+    if comments.is_empty() {
+        return (vec![], vec![], vec![], vec![]);
+    }
+    let outer_content = panel_content_width(inner_width);
+    let card_width = outer_content.saturating_sub(1);
+    let mut nested_lines: Vec<String> = Vec::new();
+    let mut nested_styles: Vec<Vec<StyleRun>> = Vec::new();
+    let mut card_affordances: Vec<CardAffordance> = Vec::new();
+    let mut nested_card_ranges: Vec<(usize, usize)> = Vec::new();
+    let mut first = true;
+
+    for comment in comments {
+        if !first {
+            nested_lines.push(String::new());
+            nested_styles.push(vec![]);
+        }
+        first = false;
+
+        let comment_id = comment.get("id").and_then(|v| v.as_i64()).unwrap_or(0);
+        let created_by_id = comment.get("created_by_id").and_then(|v| v.as_i64());
+        let is_own = current_user_id
+            .zip(created_by_id)
+            .map(|(uid, cid)| uid == cid)
+            .unwrap_or(false);
+
+        let author = extract_comment_author(comment);
+        let when = fmt_ts(comment.get("created_on").unwrap_or(&Value::Null));
+        let ctx = CommentCardCtx {
+            comment,
+            author: &author,
+            when: &when,
+            card_width,
+            collector,
+            is_own,
+        };
+        let card = build_comment_card(ctx);
+
+        let (card_start_idx, card_end_idx) = append_card_to_nested(
+            card,
+            comment_id,
+            &mut nested_lines,
+            &mut nested_styles,
+            &mut card_affordances,
+        );
+        nested_card_ranges.push((card_start_idx, card_end_idx - card_start_idx));
+    }
+
+    let label = format!("{} ({})", t("Comments"), comments.len());
+    let outer_rich = plain_lines_to_rich(nested_lines.clone());
+    let boxed = panel_box_rich(&label, &outer_rich, inner_width);
+    let (outer_lines, outer_box_styles) = unzip_boxed(boxed);
+
+    let chrome = 1 + PANEL_HPAD;
+    let content_start = 1 + PANEL_VPAD;
+    let content_end = outer_lines.len().saturating_sub(1 + PANEL_VPAD);
+
+    let merged_styles = merge_nested_styles_into_outer(
+        &outer_lines,
+        &outer_box_styles,
+        &nested_styles,
+        content_start,
+        content_end,
+        chrome,
+    );
 
     let translated_affordances: Vec<CardAffordance> = card_affordances
         .into_iter()
@@ -1595,7 +1619,17 @@ fn build_comment_lines_with_collector(
         })
         .collect();
 
-    (outer_lines, merged_styles, translated_affordances)
+    let outer_card_ranges: Vec<(usize, usize)> = nested_card_ranges
+        .into_iter()
+        .map(|(start, count)| (content_start + start, count))
+        .collect();
+
+    (
+        outer_lines,
+        merged_styles,
+        translated_affordances,
+        outer_card_ranges,
+    )
 }
 
 /// Parameters for building a single comment card.
@@ -1610,7 +1644,6 @@ struct CommentCardCtx<'a> {
     card_width: usize,
     collector: &'a mut LinkCollector,
     is_own: bool,
-    showing_confirm: bool,
 }
 
 /// Build a single comment card.
@@ -1618,9 +1651,7 @@ struct CommentCardCtx<'a> {
 /// The body is parsed through the rich path so inline emphasis carries through
 /// into the card's content rows. When `ctx.is_own` is true, `[editar]` and `[excluir]`
 /// tokens are appended to the label and the returned spans hold their display-column
-/// ranges within the top-border line. When `ctx.showing_confirm` is true, an inline
-/// confirm-prompt line is appended after the card body with `[confirmar]`/`[cancelar]`
-/// tokens. All spans are `None` when `ctx.is_own` is false.
+/// ranges within the top-border line. All spans are `None` when `ctx.is_own` is false.
 fn build_comment_card(ctx: CommentCardCtx<'_>) -> CommentCard {
     let CommentCardCtx {
         comment,
@@ -1629,7 +1660,6 @@ fn build_comment_card(ctx: CommentCardCtx<'_>) -> CommentCard {
         card_width,
         collector,
         is_own,
-        showing_confirm,
     } = ctx;
 
     let rich_body = extract_comment_body_rich(comment, collector);
@@ -1663,45 +1693,12 @@ fn build_comment_card(ctx: CommentCardCtx<'_>) -> CommentCard {
         (None, None)
     };
 
-    let (confirm_lines, confirm_styles, confirm_span, cancel_span) = if is_own && showing_confirm {
-        build_confirm_prompt_lines(card_width)
-    } else {
-        (vec![], vec![], None, None)
-    };
-
     CommentCard {
         lines,
         line_styles,
         edit_span,
         delete_span,
-        confirm_lines,
-        confirm_styles,
-        confirm_span,
-        cancel_span,
     }
-}
-
-type ConfirmPromptLines = (
-    Vec<String>,
-    Vec<Vec<StyleRun>>,
-    Option<(usize, usize)>,
-    Option<(usize, usize)>,
-);
-
-/// Build the inline confirm-prompt line with `[confirmar]` and `[cancelar]` tokens.
-///
-/// Returns `(lines, styles, confirm_span, cancel_span)`.
-fn build_confirm_prompt_lines(card_width: usize) -> ConfirmPromptLines {
-    let confirm_token = format!("[{}]", t("confirmar"));
-    let cancel_token = format!("[{}]", t("cancelar"));
-    let prompt = t("Delete comment?");
-    let prompt_line = format!("{} {} {}", prompt, confirm_token, cancel_token);
-    let padded = fit_to_display_width(&prompt_line, card_width);
-
-    let confirm_span = find_token_span(&padded, &confirm_token);
-    let cancel_span = find_token_span(&padded, &cancel_token);
-
-    (vec![padded], vec![vec![]], confirm_span, cancel_span)
 }
 
 /// Locate a token in a line and return its half-open display-column span.
@@ -1765,44 +1762,20 @@ fn extract_comment_body_rich(
 
 /// Build the visible lines and style runs for the compose overlay area.
 ///
-/// Returns `(lines, line_styles)` where each entry in `line_styles` is the
-/// parallel `StyleRun` vec for the corresponding line. The hint/status line
-/// carries an Italic `StyleRun` over the full text, matching the asset
-/// footnote hint convention. Buffer lines and the label carry no style runs.
+/// Build the modal body lines for the compose overlay.
 ///
-/// Called by `reflow_detail` to append the compose block to `Screen::Detail.lines`
-/// when compose is active.
+/// Returns `(lines, line_styles)` — the buffer split on `\n`, with a parallel
+/// empty-style-run vec. No label, no status text: the modal box renders the
+/// title separately and the caller supplies the in-box hint/status line.
+/// Called by `view()` to populate the `ModalContent` body.
 pub fn compose_block_lines(cp: &crate::tui::model::Compose) -> (Vec<String>, Vec<Vec<StyleRun>>) {
-    use crate::richtext::RichStyle;
-    use crate::tui::model::ComposeStatus;
-
-    let label = format!("── {} ──", t("Comment"));
-    let status_text = match &cp.status {
-        ComposeStatus::Editing => t("Ctrl+S send · Esc cancel"),
-        ComposeStatus::Submitting => t("Sending…"),
-        ComposeStatus::Error(_) => t("Failed to post comment"),
-    };
-
-    let status_len = display_width(&status_text);
-    let status_run = StyleRun {
-        start: 0,
-        len: status_len,
-        style: RichStyle::Italic,
-    };
-
     let mut lines: Vec<String> = Vec::new();
     let mut styles: Vec<Vec<StyleRun>> = Vec::new();
-
-    lines.push(label);
-    styles.push(vec![]);
 
     for body_line in cp.buffer.split('\n') {
         lines.push(body_line.to_string());
         styles.push(vec![]);
     }
-
-    lines.push(status_text);
-    styles.push(vec![status_run]);
 
     (lines, styles)
 }
@@ -1816,9 +1789,8 @@ pub fn compose_block_lines(cp: &crate::tui::model::Compose) -> (Vec<String>, Vec
 /// always the same length.
 /// When `current_user_id` is `Some(id)`, comments authored by `id` receive
 /// `[editar]` and `[excluir]` affordance tokens in their header; spans are recorded
-/// in `affordances` (kind `Edit`/`Delete`) for hit-testing. When
-/// `confirm_delete` is `Some(comment_id)`, an inline confirm prompt with
-/// `[confirmar]`/`[cancelar]` is rendered for that comment (kinds `Confirm`/`Cancel`).
+/// in `affordances` (kind `Edit`/`Delete`) for hit-testing.
+/// The delete-confirm UI is rendered by the modal overlay (ADR 0039 §4), not here.
 /// Pure: no I/O, no async, no time access.
 pub fn build_detail_content(
     task: &Value,
@@ -1826,7 +1798,6 @@ pub fn build_detail_content(
     user_map: &HashMap<i64, String>,
     inner_width: usize,
     current_user_id: Option<i64>,
-    confirm_delete: Option<i64>,
 ) -> DetailContent {
     use crate::tui::screens::asset_panel;
 
@@ -1848,18 +1819,20 @@ pub fn build_detail_content(
     lines.extend(body_lines);
     line_styles.extend(body_styles);
 
+    let mut comment_spans: Vec<(usize, usize)> = Vec::new();
+
     if !comments.is_empty() {
         lines.push(String::new());
         line_styles.push(vec![]);
 
         let comment_start_idx = lines.len();
-        let (comment_lines, comment_styles, card_affs) = build_comment_lines_with_collector(
-            comments,
-            inner_width,
-            &mut collector,
-            current_user_id,
-            confirm_delete,
-        );
+        let (comment_lines, comment_styles, card_affs, card_ranges) =
+            build_comment_lines_with_collector(
+                comments,
+                inner_width,
+                &mut collector,
+                current_user_id,
+            );
         for a in card_affs {
             affordances.push(LocalAffordance {
                 line_idx: comment_start_idx + a.line_idx,
@@ -1867,6 +1840,9 @@ pub fn build_detail_content(
                 col_end: a.col_end,
                 kind: a.kind,
             });
+        }
+        for (start, count) in card_ranges {
+            comment_spans.push((comment_start_idx + start, count));
         }
         lines.extend(comment_lines);
         line_styles.extend(comment_styles);
@@ -1894,6 +1870,7 @@ pub fn build_detail_content(
         lines,
         line_styles,
         affordances,
+        comment_spans,
     }
 }
 

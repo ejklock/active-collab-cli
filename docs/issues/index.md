@@ -40,3 +40,8 @@ TUI/UX work (V/R/ARCH slices), tracing to
 | [0032](/issues/0032-create-comment.md) | C1 | create a comment on the open task — multi-line compose, authenticated POST, server-truth refresh (PRD 0002 slice 1) | closed | — |
 | [0033](/issues/0033-edit-comment.md) | C2 | edit your own comment — permission-aware [editar] affordance, pre-filled compose, authenticated PUT (slice 2) | closed | 0032 |
 | [0034](/issues/0034-delete-comment.md) | C3 | delete your own comment — permission-aware [excluir] affordance, inline confirm, authenticated DELETE (slice 3) | closed | 0032 |
+| [0035](/issues/0035-comment-card-keyboard-focus.md) | N1 | comment-card keyboard focus — j/k focuses a card, highlight + scroll-into-view, actions stay on click (slice 1) | closed | — |
+| [0036](/issues/0036-detail-contextual-footer-status-line.md) | N2 | Detail contextual footer + thin status line — mode-aware hint, transient status row, compose status moved out of the inline block (slice 2) | closed | 0035 |
+| [0037](/issues/0037-modal-primitive-and-compose.md) | M1 | reusable modal primitive (centered overlay + dimmed backdrop) + migrate the comment compose to it (slice 1) | closed | — |
+| [0038](/issues/0038-confirm-delete-modal.md) | M2 | migrate the delete-confirm to the reusable modal (buttons + Enter/Esc), out of the comment card (slice 2) | closed | 0037 |
+| [0039](/issues/0039-non-tty-comment-command.md) | A1 | non-TTY `comment` command — post a comment to a task as the logged-in user (-m or stdin, --json result) | closed | — |

@@ -26,3 +26,6 @@
 | [0022](/bdr/0022-assets-inline-scrollable-detail-content.md) | Assets are part of the scrollable detail content: every attachment reachable by scrolling, opens on Ctrl/Cmd+click at any scroll position | Accepted |
 | [0023](/bdr/0023-richtext-wrap-positional-style.md) | Rich-text wrap: each wrapped word keeps its own source emphasis, even when the word repeats or is a substring of a styled token | Accepted |
 | [0024](/bdr/0024-comment-authoring-create-edit-delete.md) | Comment authoring: create a multi-line comment, edit and delete your own, with a server-truth refresh after each mutation | Accepted |
+| [0025](/bdr/0025-comment-card-navigation-and-contextual-footer.md) | Comment-card keyboard navigation (j/k focus, highlight + scroll-into-view) and a contextual two-region footer (mode-aware hint + thin status line) | Accepted |
+| [0026](/bdr/0026-comment-modal-overlay.md) | Comment compose and delete-confirm open as a centered modal overlay over a dimmed thread, sharing one reusable modal primitive | Accepted |
+| [0027](/bdr/0027-non-interactive-comment-creation.md) | A non-interactive `comment` command posts a comment to a task as the logged-in user, from a -m flag or stdin, with a --json write result | Accepted |

@@ -1,8 +1,11 @@
 use crate::i18n::t;
 use crate::render::{display_width, wrap_text};
-use crate::tui::model::{ClickTarget, Model, Screen, Selection};
+use crate::tui::model::{
+    ClickTarget, Compose, ComposeKind, ComposeStatus, ModalButtonTarget, Model, Screen, Selection,
+};
 use crate::tui::screens::{draw_detail, draw_projects, draw_tasks, DetailParams};
 use crate::tui::theme;
+use crate::tui::widgets::modal::ModalContent;
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout},
     widgets::Paragraph,
@@ -27,10 +30,115 @@ pub(crate) fn format_br_datetime(iso: &str) -> Option<String> {
     Some(format!("{}/{}/{} {}:{}", day, month, year, hour, minute))
 }
 
+/// Footer hint for the given screen.
+///
+/// When a compose modal is open the modal owns the compose hint (ADR 0039 §5).
+/// When the confirm-delete modal is open the modal owns its hint; the footer
+/// shows no confirm hint (one-home rule). Falls through to own-focused or browse.
 pub(crate) fn hint_for_screen(screen: &Screen) -> String {
     match screen {
-        Screen::Detail { .. } => t("↑/↓ scroll  r refresh  Esc/b back  q quit"),
+        Screen::Detail {
+            compose,
+            confirm_delete,
+            focused_comment,
+            comments,
+            current_user_id,
+            ..
+        } => {
+            let compose_for_footer = if compose.is_some() {
+                None
+            } else {
+                compose.as_ref()
+            };
+            // The confirm modal owns its hint; pass None so the footer does not
+            // duplicate it (ADR 0039 §5 one-home suppression).
+            let confirm_for_footer = if confirm_delete.is_some() {
+                None
+            } else {
+                *confirm_delete
+            };
+            detail_hint(
+                compose_for_footer,
+                confirm_for_footer,
+                *focused_comment,
+                comments,
+                *current_user_id,
+            )
+        }
         _ => t("↑/↓ navigate  Enter select  r refresh  Esc/b back  q quit"),
+    }
+}
+
+/// Derive the context-aware instruction hint for the Detail screen.
+///
+/// Priority order matches ADR 0038 §1: composing beats confirming-delete beats
+/// own-comment-focused beats the browsing default.
+pub(crate) fn detail_hint(
+    compose: Option<&Compose>,
+    confirm_delete: Option<i64>,
+    focused_comment: Option<usize>,
+    comments: &[serde_json::Value],
+    current_user_id: Option<i64>,
+) -> String {
+    if compose.is_some() {
+        return t("Ctrl+S send · Esc cancel");
+    }
+    if confirm_delete.is_some() {
+        return t("Enter/click confirm · Esc cancel");
+    }
+    if is_own_comment_focused(focused_comment, comments, current_user_id) {
+        return t("j/k move · Ctrl+click edit/delete · c new");
+    }
+    t("j/k move · c comment · r refresh · Esc/b back · q quit")
+}
+
+fn is_own_comment_focused(
+    focused_comment: Option<usize>,
+    comments: &[serde_json::Value],
+    current_user_id: Option<i64>,
+) -> bool {
+    let (Some(idx), Some(uid)) = (focused_comment, current_user_id) else {
+        return false;
+    };
+    comments
+        .get(idx)
+        .and_then(|c| c.get("created_by_id"))
+        .and_then(|v| v.as_i64())
+        .map(|cid| cid == uid)
+        .unwrap_or(false)
+}
+
+/// Derive the transient status string for the Detail footer status row.
+///
+/// When `compose` is `Some`, compose hint/status are owned by the modal overlay
+/// (ADR 0039 §5) — the footer only shows `Copiado ✓` in that case.
+/// When `compose` is `None`, the priority is: Submitting > Error > copied_feedback.
+pub(crate) fn detail_status_line(
+    compose: Option<&Compose>,
+    copied_feedback: bool,
+) -> Option<String> {
+    if compose.is_some() {
+        return if copied_feedback {
+            Some(t("Copiado ✓"))
+        } else {
+            None
+        };
+    }
+    if copied_feedback {
+        return Some(t("Copiado ✓"));
+    }
+    None
+}
+
+/// Status text rendered inside the compose modal's in-box hint line.
+///
+/// Returns `Some(status)` when the compose has a transient state to display,
+/// `None` when editing normally (the hint text suffices).
+pub(crate) fn compose_modal_status(compose: &Compose) -> Option<String> {
+    match &compose.status {
+        ComposeStatus::Submitting => Some(t("Sending…")),
+        ComposeStatus::Error(_) => Some(t("Failed to post comment")),
+        ComposeStatus::Editing => None,
     }
 }
 
@@ -53,10 +161,18 @@ struct FooterPlan {
     /// When true, hint and right cannot share a row; render right below hint.
     stacked: bool,
     right_is_copied: bool,
+    /// Thin transient status row rendered below the hint region; collapses when None.
+    status_line: Option<String>,
 }
 
 impl FooterPlan {
-    fn compute(hint: &str, last_loaded: Option<&str>, copied_feedback: bool, width: usize) -> Self {
+    fn compute(
+        hint: &str,
+        last_loaded: Option<&str>,
+        copied_feedback: bool,
+        status_line: Option<String>,
+        width: usize,
+    ) -> Self {
         let timestamp_text = last_loaded
             .and_then(format_br_datetime)
             .map(|formatted| format!("{} {}", t("Updated at"), formatted));
@@ -72,13 +188,16 @@ impl FooterPlan {
             .flatten()
             .collect();
 
+        let status_height: u16 = if status_line.is_some() { 1 } else { 0 };
+
         if right_segments.is_empty() {
             return Self {
-                height: wrapped_height(hint, width),
+                height: wrapped_height(hint, width) + status_height,
                 hint: hint.to_string(),
                 right_text: None,
                 stacked: false,
                 right_is_copied: false,
+                status_line,
             };
         }
 
@@ -88,21 +207,23 @@ impl FooterPlan {
 
         if hint_dw + 1 + right_dw <= width {
             Self {
-                height: 1,
+                height: 1 + status_height,
                 hint: hint.to_string(),
                 right_text: Some(right_text),
                 stacked: false,
                 right_is_copied: copied_feedback,
+                status_line,
             }
         } else {
             let hint_height = wrapped_height(hint, width);
             let right_height = wrapped_height(&right_text, width);
             Self {
-                height: hint_height + right_height,
+                height: hint_height + right_height + status_height,
                 hint: hint.to_string(),
                 right_text: Some(right_text),
                 stacked: true,
                 right_is_copied: copied_feedback,
+                status_line,
             }
         }
     }
@@ -114,7 +235,14 @@ impl FooterPlan {
 /// dispatches to the correct screen renderer. `targets` is populated by the
 /// Projects/Tasks renderers with the visible rows' y-ranges; the shell stores
 /// it on the model after draw so `handle_click_list` can resolve clicks.
-pub fn view(model: &Model, frame: &mut Frame, targets: &mut Vec<ClickTarget>) {
+/// `modal_btn_targets` is populated when the confirm modal renders; the shell
+/// stores it on the model so `handle_click_detail` can resolve plain clicks.
+pub fn view(
+    model: &Model,
+    frame: &mut Frame,
+    targets: &mut Vec<ClickTarget>,
+    modal_btn_targets: &mut Vec<ModalButtonTarget>,
+) {
     let Some(screen) = model.top() else { return };
 
     let area = frame.area();
@@ -131,10 +259,16 @@ pub fn view(model: &Model, frame: &mut Frame, targets: &mut Vec<ClickTarget>) {
     let header_height = header_wrapped.len().max(1) as u16;
 
     let hint_text = hint_for_screen(screen);
+    let status_line = if let Screen::Detail { compose, .. } = screen {
+        detail_status_line(compose.as_ref(), model.copied_feedback)
+    } else {
+        None
+    };
     let footer_plan = FooterPlan::compute(
         &hint_text,
         model.last_loaded.as_deref(),
         model.copied_feedback,
+        status_line,
         area_width,
     );
 
@@ -204,6 +338,10 @@ pub fn view(model: &Model, frame: &mut Frame, targets: &mut Vec<ClickTarget>) {
             offset,
             loading,
             task_id,
+            focused_comment,
+            comment_spans,
+            compose,
+            confirm_delete,
             ..
         } => {
             let task_name = task.get("name").and_then(|v| v.as_str()).unwrap_or("");
@@ -218,15 +356,112 @@ pub fn view(model: &Model, frame: &mut Frame, targets: &mut Vec<ClickTarget>) {
                     loading: *loading,
                     task_id: *task_id,
                     task_name,
+                    focused_comment: *focused_comment,
+                    comment_spans,
                 },
             );
             if let Some(ref sel) = model.selection {
                 draw_selection_highlight(frame, sel);
             }
+            if let Some(ref cp) = compose {
+                render_compose_modal(frame, area, cp);
+            }
+            if confirm_delete.is_some() {
+                render_confirm_modal(frame, area, modal_btn_targets);
+            }
         }
     }
 
     render_footer(frame, chunks[2], footer_plan, theme::footer_style());
+}
+
+fn compose_modal_title(cp: &Compose) -> String {
+    match &cp.kind {
+        ComposeKind::New => t("New comment"),
+        ComposeKind::Edit { .. } => t("Edit comment"),
+    }
+}
+
+fn compose_modal_hint(cp: &Compose) -> String {
+    match compose_modal_status(cp) {
+        Some(status) => status,
+        None => t("Ctrl+S send · Esc cancel"),
+    }
+}
+
+fn render_compose_modal(frame: &mut Frame, frame_area: ratatui::layout::Rect, cp: &Compose) {
+    use crate::tui::widgets::modal::render_modal;
+    let (body_lines, _body_styles) = crate::render::compose_block_lines(cp);
+    let hint = compose_modal_hint(cp);
+    let title = compose_modal_title(cp);
+    render_modal(
+        frame,
+        frame_area,
+        ModalContent {
+            title: &title,
+            lines: &body_lines,
+            hint: Some(&hint),
+        },
+    );
+}
+
+/// Render the delete-confirm modal overlay and register the two button click targets.
+///
+/// Uses the shared `render_modal` primitive (ADR 0039) to dim the backdrop and draw a
+/// centered bordered box. The button row in the hint line shows `[confirmar]  [cancelar]`;
+/// their absolute cell Rects are derived from the Rect `render_modal` returns so the
+/// hit-test geometry is single-sourced (never recomputed independently).
+fn render_confirm_modal(
+    frame: &mut Frame,
+    frame_area: ratatui::layout::Rect,
+    btn_targets: &mut Vec<ModalButtonTarget>,
+) {
+    use crate::tui::widgets::modal::render_modal;
+    let title = t("Delete comment?");
+    let body = vec![t("This action cannot be undone.")];
+    let confirm_label = format!("[{}]", t("confirmar"));
+    let cancel_label = format!("[{}]", t("cancelar"));
+    let hint = format!("{}  {}", confirm_label, cancel_label);
+    let modal_rect = render_modal(
+        frame,
+        frame_area,
+        ModalContent {
+            title: &title,
+            lines: &body,
+            hint: Some(&hint),
+        },
+    );
+    register_confirm_button_targets(modal_rect, &confirm_label, &cancel_label, btn_targets);
+}
+
+/// Derive the absolute button cell Rects from the modal Rect and push them as targets.
+///
+/// The hint row occupies the last inner row: `modal_rect.y + modal_rect.height - 2`
+/// (penultimate row before the bottom border). Buttons are left-aligned with a two-space
+/// gap between them. Column positions are computed from the label display widths.
+fn register_confirm_button_targets(
+    modal_rect: ratatui::layout::Rect,
+    confirm_label: &str,
+    cancel_label: &str,
+    btn_targets: &mut Vec<ModalButtonTarget>,
+) {
+    let inner_x = modal_rect.x + 1;
+    let hint_row = modal_rect.y + modal_rect.height.saturating_sub(2);
+    let confirm_w = display_width(confirm_label) as u16;
+    let cancel_start = inner_x + confirm_w + 2;
+    let cancel_w = display_width(cancel_label) as u16;
+    btn_targets.push(ModalButtonTarget {
+        x_start: inner_x,
+        x_end: inner_x + confirm_w,
+        row: hint_row,
+        is_confirm: true,
+    });
+    btn_targets.push(ModalButtonTarget {
+        x_start: cancel_start,
+        x_end: cancel_start + cancel_w,
+        row: hint_row,
+        is_confirm: false,
+    });
 }
 
 fn render_footer(
@@ -235,13 +470,45 @@ fn render_footer(
     plan: FooterPlan,
     style: ratatui::style::Style,
 ) {
-    let right_text = match plan.right_text {
+    let (hint_area, status_area) = split_footer_status_row(area, &plan.status_line);
+    render_footer_hint_region(frame, hint_area, &plan, style);
+    if let Some(ref status_text) = plan.status_line {
+        if let Some(sa) = status_area {
+            let status_widget =
+                Paragraph::new(status_text.clone()).style(theme::footer_status_style());
+            frame.render_widget(status_widget, sa);
+        }
+    }
+}
+
+fn split_footer_status_row(
+    area: ratatui::layout::Rect,
+    status_line: &Option<String>,
+) -> (ratatui::layout::Rect, Option<ratatui::layout::Rect>) {
+    if status_line.is_none() || area.height < 2 {
+        return (area, None);
+    }
+    let hint_height = area.height.saturating_sub(1);
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(hint_height), Constraint::Length(1)])
+        .split(area);
+    (chunks[0], Some(chunks[1]))
+}
+
+fn render_footer_hint_region(
+    frame: &mut Frame,
+    area: ratatui::layout::Rect,
+    plan: &FooterPlan,
+    style: ratatui::style::Style,
+) {
+    let right_text = match &plan.right_text {
         None => {
-            let footer = Paragraph::new(plan.hint).style(style);
+            let footer = Paragraph::new(plan.hint.clone()).style(style);
             frame.render_widget(footer, area);
             return;
         }
-        Some(rt) => rt,
+        Some(rt) => rt.clone(),
     };
 
     if !plan.stacked {
