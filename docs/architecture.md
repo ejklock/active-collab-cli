@@ -111,12 +111,17 @@ flowchart TD
   from style to hit-target): `build_detail_content` emits `DetailContent.affordances`
   — typed `LocalAffordance { line_idx, col_start, col_end, kind }` spans for comment
   `Edit`/`Delete`, body-link `OpenUrl(url)`, and asset `OpenAsset(url)` (one span per
-  wrapped fragment, the openable target resolved once at emit time). The three click
-  hit-tests in `model.rs` are **positional lookups** over that one list (plain click →
-  Edit/Delete; Ctrl/Cmd+click → OpenUrl/OpenAsset, [BDR 0014](/bdr/0014-body-link-inline-url-activation.md)
-  Sc.8). The old click-time re-derivation — `resolve_wrapped_url` + the inverse-wrap
-  helpers, and the asset `section_lines` re-call — is **deleted** (retiring the obs-35
-  latent over-join bug). Style and hit-target now share one single-source discipline.
+  wrapped fragment, the openable target resolved once at emit time). Click resolution is
+  one deep, pure `src/tui/hit_test.rs` module ([ADR 0044](/adr/0044-detail-click-resolution-as-hit-test-module.md)):
+  `resolve_detail_click` maps a click to a typed `DetailClickTarget` via a single
+  viewport→`line_idx` translation and one positional lookup over that list; the model maps
+  the target to the TEA effect. Every affordance activates on **Ctrl/Cmd+click** (comment
+  Edit/Delete, body `OpenUrl`, asset `OpenAsset`); a **plain** click is reserved for text
+  selection ([BDR 0014](/bdr/0014-body-link-inline-url-activation.md) Sc.8). The old
+  click-time re-derivation — `resolve_wrapped_url` + the inverse-wrap helpers, and the asset
+  `section_lines` re-call — is **deleted** (retiring the obs-35 latent over-join bug), and
+  the five scattered click functions collapse into the one `hit_test` module. Style and
+  hit-target now share one single-source discipline.
 
 ## Read / browse data flow
 
