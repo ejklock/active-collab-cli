@@ -81,6 +81,17 @@ pub enum AffordanceKind {
     OpenUrl(String),
 }
 
+impl AffordanceKind {
+    /// Returns true when the whole row is the click target, not just the link span.
+    ///
+    /// `OpenAsset` spans cover only the link text column range, but ADR 0029 specifies
+    /// that any Ctrl/Cmd+click anywhere on the asset row should open the asset.
+    /// All other kinds require the click to fall within `[col_start, col_end)`.
+    pub fn is_row_target(&self) -> bool {
+        matches!(self, AffordanceKind::OpenAsset(_))
+    }
+}
+
 /// A clickable affordance span registered during `build_detail_content`.
 ///
 /// Carries the line index (within `DetailContent.lines`), the half-open
