@@ -893,3 +893,223 @@ fn style_after_wrap_break_is_preserved() {
         "Bold span must contain 'bold': {last_row:?}"
     );
 }
+
+// --- wrap_rich geometry specs (mutation floor) ———————————————————————————
+
+/// Geometry 1 — zero-width and empty input each return an empty Vec.
+///
+/// render.rs:1162: `if line.is_empty() || width == 0 { return vec![]; }`
+/// A mutant that drops either guard would pass a non-empty Vec, killing it here.
+#[test]
+fn wrap_rich_zero_width_returns_empty_vec() {
+    use crate::render::wrap_rich;
+    use crate::richtext::{RichSpan, RichStyle};
+
+    let line = vec![RichSpan {
+        text: "hello".to_string(),
+        style: RichStyle::Plain,
+    }];
+    let result = wrap_rich(&line, 0);
+    assert!(
+        result.is_empty(),
+        "width == 0 must yield empty vec: {result:?}"
+    );
+}
+
+#[test]
+fn wrap_rich_empty_line_returns_empty_vec() {
+    use crate::render::wrap_rich;
+
+    let result = wrap_rich(&vec![], 40);
+    assert!(
+        result.is_empty(),
+        "empty RichLine must yield empty vec: {result:?}"
+    );
+}
+
+/// Geometry 2 — an all-whitespace line is returned as a single unwrapped result line.
+///
+/// render.rs:1166: `if plain.chars().all(|c| c.is_ascii_whitespace()) { return vec![line.clone()]; }`
+/// A mutant that drops this guard would re-process the whitespace-only text and
+/// produce an empty Vec (no words), failing the count and span assertions here.
+#[test]
+fn wrap_rich_all_whitespace_returns_single_line_unchanged() {
+    use crate::render::wrap_rich;
+    use crate::richtext::{RichSpan, RichStyle};
+
+    let line = vec![RichSpan {
+        text: "   ".to_string(),
+        style: RichStyle::Plain,
+    }];
+    let result = wrap_rich(&line, 10);
+    assert_eq!(
+        result.len(),
+        1,
+        "all-whitespace line must produce exactly one result line: {result:?}"
+    );
+    let row_text: String = result[0].iter().map(|s| s.text.as_str()).collect();
+    assert_eq!(
+        row_text, "   ",
+        "all-whitespace line content must be unchanged: {result:?}"
+    );
+}
+
+/// Geometry 3 — a styled word wider than `width` hard-splits into multiple lines,
+/// and every chunk retains the word's original style.
+///
+/// render.rs:1284: `if word_dw <= width { … } else { hard_split_rich_word(…) }`
+/// Dropping the hard-split branch (always `emit_styled_chars`) produces a single
+/// oversized line, failing the len > 1 assertion. Dropping the per-char style
+/// threading produces Plain spans, failing the Bold assertion.
+#[test]
+fn wrap_rich_word_wider_than_width_hard_splits_with_style_preserved() {
+    use crate::render::wrap_rich;
+    use crate::richtext::{RichSpan, RichStyle};
+
+    // "abcdefgh" is 8 chars wide, width is 3 — forces 3 hard-split chunks.
+    let line = vec![RichSpan {
+        text: "abcdefgh".to_string(),
+        style: RichStyle::Bold,
+    }];
+    let result = wrap_rich(&line, 3);
+    assert!(
+        result.len() > 1,
+        "word wider than width must hard-split into multiple lines: {result:?}"
+    );
+    for row in &result {
+        for span in row {
+            assert_eq!(
+                span.style,
+                RichStyle::Bold,
+                "every hard-split chunk must keep the word's Bold style: {result:?}"
+            );
+        }
+    }
+    let full_text: String = result
+        .iter()
+        .flat_map(|row| row.iter().map(|s| s.text.as_str()))
+        .collect();
+    assert_eq!(
+        full_text, "abcdefgh",
+        "all hard-split chars concatenated must equal the original word: {result:?}"
+    );
+}
+
+/// Geometry 4 — exact-width boundary: two words fitting in `width` exactly stay on
+/// one line; one extra column forces the second word to a new line.
+///
+/// render.rs:1242: `if *current_dw + 1 + word_dw <= width { … append … } else { … break … }`
+/// Flipping `<=` to `<` makes the `current_dw + 1 + word_dw == width` case break
+/// erroneously, producing 2 lines where 1 is expected and failing the first assertion.
+/// The second assertion (over by one column → 2 lines) is already correct in both
+/// forms, so both sub-cases are needed to distinguish the mutant.
+#[test]
+fn wrap_rich_exact_width_boundary_fits_on_one_line() {
+    use crate::render::wrap_rich;
+    use crate::richtext::{RichSpan, RichStyle};
+
+    // "abc def" = 3 + 1 + 3 = 7 display columns; width 7 → must fit on one line.
+    let line = vec![RichSpan {
+        text: "abc def".to_string(),
+        style: RichStyle::Plain,
+    }];
+    let result = wrap_rich(&line, 7);
+    assert_eq!(
+        result.len(),
+        1,
+        "two words totalling exactly width must stay on one line: {result:?}"
+    );
+    let row_text: String = result[0].iter().map(|s| s.text.as_str()).collect();
+    assert!(
+        row_text.contains("abc") && row_text.contains("def"),
+        "both words must appear on the single line: {result:?}"
+    );
+}
+
+#[test]
+fn wrap_rich_one_over_exact_width_breaks_to_second_line() {
+    use crate::render::wrap_rich;
+    use crate::richtext::{RichSpan, RichStyle};
+
+    // "abc defg" = 3 + 1 + 4 = 8 display columns; width 7 → "defg" must wrap.
+    let line = vec![RichSpan {
+        text: "abc defg".to_string(),
+        style: RichStyle::Plain,
+    }];
+    let result = wrap_rich(&line, 7);
+    assert_eq!(
+        result.len(),
+        2,
+        "combined width one over limit must break to two lines: {result:?}"
+    );
+    let first_text: String = result[0].iter().map(|s| s.text.as_str()).collect();
+    let second_text: String = result[1].iter().map(|s| s.text.as_str()).collect();
+    assert!(
+        first_text.contains("abc"),
+        "first line must contain 'abc': {result:?}"
+    );
+    assert!(
+        second_text.contains("defg"),
+        "second line must contain 'defg': {result:?}"
+    );
+}
+
+/// Geometry 5 — an embedded `\n` splits the input into two independent wrapped segments.
+///
+/// render.rs:1176: `for segment in styled_chars.split(|(ch, _)| *ch == '\n') { … }`
+/// Dropping the split produces a single result line containing both words,
+/// failing the len == 2 assertion and the per-line content checks.
+#[test]
+fn wrap_rich_embedded_newline_produces_two_segments() {
+    use crate::render::wrap_rich;
+    use crate::richtext::{RichSpan, RichStyle};
+
+    let line = vec![RichSpan {
+        text: "foo\nbar".to_string(),
+        style: RichStyle::Plain,
+    }];
+    let result = wrap_rich(&line, 20);
+    assert_eq!(
+        result.len(),
+        2,
+        "embedded \\n must produce exactly two result lines: {result:?}"
+    );
+    let first_text: String = result[0].iter().map(|s| s.text.as_str()).collect();
+    let second_text: String = result[1].iter().map(|s| s.text.as_str()).collect();
+    assert_eq!(first_text, "foo", "first segment must be 'foo': {result:?}");
+    assert_eq!(
+        second_text, "bar",
+        "second segment must be 'bar': {result:?}"
+    );
+}
+
+/// Geometry 6 — a word whose display width exactly equals `width` occupies its own
+/// line with no spurious extra break.
+///
+/// render.rs:1284: `if word_dw <= width` — equality must pass into `emit_styled_chars`,
+/// not into `hard_split_rich_word`.  A mutant that changes `<=` to `<` here would
+/// route an exact-width word through hard_split, yielding an extra empty line.
+#[test]
+fn wrap_rich_word_exactly_equal_to_width_fits_without_spurious_break() {
+    use crate::render::wrap_rich;
+    use crate::richtext::{RichSpan, RichStyle};
+
+    // "abcd" is 4 chars wide; width == 4 → must produce exactly one line.
+    let line = vec![RichSpan {
+        text: "abcd".to_string(),
+        style: RichStyle::Code,
+    }];
+    let result = wrap_rich(&line, 4);
+    assert_eq!(
+        result.len(),
+        1,
+        "word of exactly width columns must produce one line, not two: {result:?}"
+    );
+    let row_text: String = result[0].iter().map(|s| s.text.as_str()).collect();
+    assert_eq!(row_text, "abcd", "the word must appear intact: {result:?}");
+    assert_eq!(
+        result[0][0].style,
+        RichStyle::Code,
+        "the word must keep its Code style: {result:?}"
+    );
+}
