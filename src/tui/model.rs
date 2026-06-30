@@ -1120,16 +1120,14 @@ fn apply_detail_click_target(
 
 /// Return true when `row` falls within the scrollable body text area of the Detail screen.
 ///
-/// Assets are now inline in the scrollable body, so the body spans the full
-/// content area (viewport_rows - DETAIL_CHROME_ROWS rows starting at text_top=2).
+/// Assets are now inline in the scrollable body, so the body spans the full content area;
+/// bounds are delegated to `detail_geometry::is_in_content`.
 fn is_in_body_area(model: &Model, row: u16) -> bool {
     let Some(Screen::Detail { .. }) = model.top() else {
         return false;
     };
     let (_viewport_cols, viewport_rows) = model.viewport;
-    let text_top: u16 = 2;
-    let content_text_height = viewport_rows.saturating_sub(DETAIL_CHROME_ROWS);
-    row >= text_top && row < text_top + content_text_height
+    crate::tui::detail_geometry::is_in_content(viewport_rows, row)
 }
 
 fn handle_drag(
@@ -1189,7 +1187,7 @@ fn handle_mouse_up(
 ///
 /// Strips the box chrome (│ border + HPAD) from each logical line before slicing,
 /// so the copied text is chrome-free and char-correct (Sc.8, Sc.9).
-/// Coordinates are viewport (row, col); the body area starts at text_top=2.
+/// Row→line mapping delegates to `detail_geometry::row_to_line_idx`.
 /// Returns text in reading order (anchor normalized to be before cursor).
 fn extract_selected_text(model: &Model, sel: &Selection) -> String {
     let Screen::Detail { lines, offset, .. } = model.top().expect("detail screen") else {
@@ -1197,18 +1195,16 @@ fn extract_selected_text(model: &Model, sel: &Selection) -> String {
     };
 
     let (_viewport_cols, viewport_rows) = model.viewport;
-    let text_top: u16 = 2;
-    let content_text_height = viewport_rows.saturating_sub(DETAIL_CHROME_ROWS);
-
     let ((top_row, top_col), (bot_row, bot_col)) = sel.normalized();
 
     let mut parts: Vec<String> = Vec::new();
 
     for vp_row in top_row..=bot_row {
-        if vp_row < text_top || vp_row >= text_top + content_text_height {
+        let Some(line_idx) =
+            crate::tui::detail_geometry::row_to_line_idx(*offset, viewport_rows, vp_row)
+        else {
             continue;
-        }
-        let line_idx = *offset + (vp_row - text_top) as usize;
+        };
         let Some(line) = lines.get(line_idx) else {
             continue;
         };

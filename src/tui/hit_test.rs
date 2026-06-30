@@ -1,5 +1,5 @@
 use crate::render::AffordanceKind;
-use crate::tui::model::{Model, Screen, DETAIL_CHROME_ROWS};
+use crate::tui::model::{Model, Screen};
 
 /// The result of resolving a Ctrl/Cmd+click in the Detail screen.
 ///
@@ -17,7 +17,7 @@ pub enum DetailClickTarget {
 ///
 /// Returns `None` when:
 /// - the top screen is not a Detail screen,
-/// - `row` falls outside the text viewport `[text_top, text_top + content_text_height)`,
+/// - `row` falls outside the scrollable body area (delegated to `detail_geometry::row_to_line_idx`),
 /// - the resolved `line_idx` is past the end of `lines` (the guard that
 ///   `affordance_at` previously lacked, closing AC5).
 fn viewport_to_line_col(model: &Model, column: u16, row: u16) -> Option<(usize, usize)> {
@@ -26,14 +26,7 @@ fn viewport_to_line_col(model: &Model, column: u16, row: u16) -> Option<(usize, 
     };
 
     let (_, viewport_rows) = model.viewport;
-    let text_top: u16 = 2;
-    let content_text_height = viewport_rows.saturating_sub(DETAIL_CHROME_ROWS);
-
-    if row < text_top || row >= text_top + content_text_height {
-        return None;
-    }
-
-    let line_idx = offset + (row - text_top) as usize;
+    let line_idx = crate::tui::detail_geometry::row_to_line_idx(*offset, viewport_rows, row)?;
     if line_idx >= lines.len() {
         return None;
     }
