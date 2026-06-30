@@ -51,3 +51,12 @@ the doc language (English).
   requested while one is running does not enqueue a second.
 - **Token host isolation** — an instance's API token is attached only to requests
   to that instance's own host (a non-negotiable).
+- **Affordance registry** — `DetailContent.affordances`, the single list of typed,
+  layout-emitted clickable spans (`{ line_idx, col_start, col_end, kind }`) the
+  detail click hit-test resolves by a positional lookup. The home of every detail
+  **hit-target** (comment edit/delete, body-link URL, asset row); emitted by
+  `build_detail_content`, never re-derived from rendered text (ADR 0043).
+- **Hit-target** — what a click at a given cell resolves to (an `AffordanceKind`:
+  edit/delete a comment, open a URL, open an asset). Emitted structurally by the
+  layout alongside the lines and style runs, paralleling structural link **style**
+  (ADR 0032) — style and hit-target share the same single-source discipline.

@@ -50,3 +50,5 @@ TUI/UX work (V/R/ARCH slices), tracing to
 | [0042](/issues/0042-cli-401-detail-and-comment.md) | RA1 | CLI get/current/comment detect HTTP 401 → actionable re-auth message + non-zero exit | closed | — |
 | [0043](/issues/0043-cli-401-mine.md) | RA2 | CLI mine detects 401 via a typed Unauthorized error → re-auth message + non-zero exit | closed | 0042 |
 | [0044](/issues/0044-tui-401-status-line.md) | RA3 | TUI surfaces 401 in the thin status line → guide to `ac setup add` | closed | 0042, 0043 |
+| [0045](/issues/0045-asset-hit-target-structural.md) | HT1 | asset hit-target emitted structurally (OpenAsset span); asset_panel_cmd_at becomes a lookup | closed | — |
+| [0046](/issues/0046-body-link-hit-target-structural.md) | HT2 | body-link hit-target emitted structurally (OpenUrl span); delete resolve_wrapped_url + inverse-wrap helpers (obs 35) | closed | 0045 |
