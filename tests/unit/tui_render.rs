@@ -4658,122 +4658,6 @@ mod w1_chrome_wrap {
     }
 }
 
-// --- D1c: logical_position_in_wrap_group unit tests ---
-
-mod d1c_wrap_group_position {
-    use crate::render::{logical_position_in_wrap_group, panel_content_width_pub};
-
-    fn make_box_line(content: &str, content_width: usize) -> String {
-        let pad = " ".repeat(content_width.saturating_sub(content.len()));
-        format!("\u{2502} {content}{pad} \u{2502}")
-    }
-
-    // D1c-A4: logical_position_in_wrap_group resolves the first character of line 0
-    // (char_col=2, which is content_col=0) to group_start=0 and logical_col=0.
-    //
-    // Uses a content of exactly content_width chars to simulate a hard-split line, so
-    // group_start remains 0 (the click is on the first/only line of the group).
-    #[test]
-    fn single_line_group_start_col_maps_to_logical_zero() {
-        // frag0: exactly 36 ASCII chars — the first hard-split fragment of a [url] token.
-        // "[https://example.com/long-path/to/pa" = 1 + 8 + 11 + 16 = 36 chars.
-        let content_width = 36usize;
-        let frag0 = "[https://example.com/long-path/to/pa";
-        assert_eq!(
-            frag0.len(),
-            content_width,
-            "sanity: frag0 must fill content_width exactly"
-        );
-        let line = make_box_line(frag0, content_width);
-        let lines = vec![line];
-
-        let result = logical_position_in_wrap_group(&lines, 0, 2, content_width);
-        let (group_start, logical_col) = result.expect("must resolve for a valid box line");
-        assert_eq!(group_start, 0);
-        assert_eq!(logical_col, 0, "char_col=2 → content_col=0 → logical_col=0");
-    }
-
-    // D1c-A4: clicking at char_col=5 on line 0 (a hard-split line) returns logical_col=3.
-    //
-    // frag0 fills content_width exactly (hard-split); frag1 is the continuation.
-    // char_col=5 → content_col = 5-2 = 3 → logical_col = 3 (no prior fragments).
-    #[test]
-    fn hard_split_line_zero_char_col_maps_correctly() {
-        let content_width = 36usize;
-        let frag0 = "[https://example.com/long-path/to/pa"; // exactly 36 chars
-        let frag1 = "ge]";
-        assert_eq!(
-            frag0.len(),
-            content_width,
-            "frag0 must fill content_width exactly"
-        );
-        let line0 = make_box_line(frag0, content_width);
-        let line1 = make_box_line(frag1, content_width);
-        let lines = vec![line0, line1];
-
-        let (group_start, logical_col) =
-            logical_position_in_wrap_group(&lines, 0, 5, content_width)
-                .expect("must resolve on first line");
-        assert_eq!(group_start, 0);
-        assert_eq!(
-            logical_col, 3,
-            "char_col=5 → content_col=3 on line 0 → logical_col=3"
-        );
-    }
-
-    // D1c-A4: clicking at char_col=4 on line 1 (the continuation) maps to
-    // logical_col = content_width (36) + content_col (2) = 38.
-    #[test]
-    fn continuation_line_click_maps_to_logical_col_across_split() {
-        let content_width = 36usize;
-        let frag0 = "[https://example.com/long-path/to/pa"; // 36 chars — exactly fills content_width
-        let frag1 = "ge]";
-        assert_eq!(
-            frag0.len(),
-            content_width,
-            "frag0 must fill content_width exactly"
-        );
-        let line0 = make_box_line(frag0, content_width);
-        let line1 = make_box_line(frag1, content_width);
-        let lines = vec![line0, line1];
-
-        // char_col=4 on line 1: content_col = 4-2 = 2; previous line contributes 36 cols.
-        let (group_start, logical_col) =
-            logical_position_in_wrap_group(&lines, 1, 4, content_width)
-                .expect("must resolve on continuation line");
-        assert_eq!(group_start, 0, "group must walk back to line 0");
-        assert_eq!(
-            logical_col,
-            content_width + 2,
-            "logical_col = frag0.display_width ({content_width}) + content_col (2) = {}",
-            content_width + 2
-        );
-    }
-
-    // D1c-A4: a non-box line (no │ border) returns None.
-    #[test]
-    fn non_box_line_returns_none() {
-        let lines = vec!["plain text without box border".to_string()];
-        let result = logical_position_in_wrap_group(&lines, 0, 2, 36);
-        assert!(result.is_none(), "non-box line must return None");
-    }
-
-    // D1c-A4: panel_content_width_pub is called with inner_width (viewport_cols - 2),
-    // and returns inner_width - 4 (removes 2 border cols + 2×HPAD).
-    // For viewport_cols=42 → inner_width=40 → content_width=36.
-    #[test]
-    fn panel_content_width_pub_matches_expected() {
-        let inner_width = 40usize; // = viewport_cols(42) - 2
-        let expected_content_width = inner_width.saturating_sub(4);
-        assert_eq!(
-            panel_content_width_pub(inner_width),
-            expected_content_width,
-            "panel_content_width_pub(inner_width=40) must equal inner_width - 4 = 36"
-        );
-        assert_eq!(expected_content_width, 36, "sanity: 40 - 4 = 36");
-    }
-}
-
 // --- D1f (BDR 0021) render tests ---
 
 // AC2 (BDR 0021 Sc.2): the inline Artifacts section renders the hint text
@@ -8166,6 +8050,366 @@ mod auth_error_render {
         assert!(
             !content.contains("Token invalid or revoked"),
             "without auth_error the re-auth message must NOT appear: {content}"
+        );
+    }
+}
+
+// --- AC1 (issue 0045): build_detail_content emits OpenAsset affordances structurally ---
+//
+// These tests assert the emitted `DetailContent.affordances` payload from
+// `build_detail_content`, not a re-implementation of the geometry.
+mod open_asset_affordance_emission {
+    use crate::render::{build_detail_content, AffordanceKind};
+    use serde_json::json;
+    use std::collections::HashMap;
+
+    fn task_with_attachments(urls: &[(&str, &str)]) -> serde_json::Value {
+        let attachments: Vec<serde_json::Value> = urls
+            .iter()
+            .map(|(name, url)| {
+                json!({
+                    "name": name,
+                    "url": url,
+                    "class": "Attachment",
+                    "permalink": url
+                })
+            })
+            .collect();
+        json!({
+            "name": "Test Task",
+            "id": 1,
+            "project_id": 1,
+            "is_completed": false,
+            "attachments": attachments
+        })
+    }
+
+    // AC1-a: every asset content row carries an OpenAsset affordance with the asset's exact url.
+    #[test]
+    fn build_detail_content_emits_open_asset_affordance_for_each_asset() {
+        let url_a = "https://example.com/report.pdf";
+        let url_b = "https://example.com/photo.png";
+        let task = task_with_attachments(&[("report.pdf", url_a), ("photo.png", url_b)]);
+        let user_map: HashMap<i64, String> = HashMap::new();
+        let inner_width = 80usize;
+        let content = build_detail_content(&task, &[], &user_map, inner_width, None);
+
+        let open_asset_urls: Vec<&str> = content
+            .affordances
+            .iter()
+            .filter_map(|a| {
+                if let AffordanceKind::OpenAsset(ref url) = a.kind {
+                    Some(url.as_str())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        assert!(
+            open_asset_urls.contains(&url_a),
+            "affordances must include OpenAsset({url_a}): {open_asset_urls:?}"
+        );
+        assert!(
+            open_asset_urls.contains(&url_b),
+            "affordances must include OpenAsset({url_b}): {open_asset_urls:?}"
+        );
+    }
+
+    // AC1-b: non-asset rows (header, separator, pad, hint) carry NO OpenAsset span.
+    // With one short-label asset the section is: [header, pad, Asset, sep, hint, pad].
+    // Only the Asset row must have an OpenAsset affordance.
+    #[test]
+    fn non_asset_section_rows_carry_no_open_asset_affordance() {
+        let url = "https://example.com/doc.pdf";
+        let task = task_with_attachments(&[("doc.pdf", url)]);
+        let user_map: HashMap<i64, String> = HashMap::new();
+        let inner_width = 80usize;
+        let content = build_detail_content(&task, &[], &user_map, inner_width, None);
+
+        let open_asset_lines: Vec<usize> = content
+            .affordances
+            .iter()
+            .filter(|a| matches!(a.kind, AffordanceKind::OpenAsset(_)))
+            .map(|a| a.line_idx)
+            .collect();
+
+        // Must have exactly one OpenAsset affordance for a single short-label asset.
+        assert_eq!(
+            open_asset_lines.len(),
+            1,
+            "one short-label asset must produce exactly one OpenAsset affordance: {open_asset_lines:?}"
+        );
+
+        // Every line WITHOUT an OpenAsset affordance must not correspond to an asset
+        // content row. Assert the inverse: the one line WITH an OpenAsset affordance
+        // is an asset row by checking the lines text contains the asset number marker.
+        let asset_line_idx = open_asset_lines[0];
+        assert!(
+            content.lines[asset_line_idx].contains("[1]"),
+            "the line carrying an OpenAsset affordance must be the '[1]' asset content row"
+        );
+
+        // All other OpenAsset-free lines in the section must be non-asset rows.
+        // Find section start: the first line_idx in open_asset_lines gives us the asset row;
+        // the section header is one row before the first pad (which is one before the asset).
+        let section_end = content.lines.len();
+        let section_start = asset_line_idx.saturating_sub(2); // header + pad before asset
+        for line_idx in section_start..section_end {
+            let has_open_asset = content
+                .affordances
+                .iter()
+                .any(|a| a.line_idx == line_idx && matches!(a.kind, AffordanceKind::OpenAsset(_)));
+            let line = &content.lines[line_idx];
+            if line.contains("[1]") {
+                assert!(
+                    has_open_asset,
+                    "asset content row at line {line_idx} must carry OpenAsset"
+                );
+            } else {
+                assert!(
+                    !has_open_asset,
+                    "non-asset row at line {line_idx} must NOT carry OpenAsset: {line:?}"
+                );
+            }
+        }
+    }
+
+    // AC1-c: a wrapped asset (label longer than content_width) produces multiple Asset rows
+    // in the layout, each carrying an OpenAsset affordance with the SAME url.
+    // Width 40 → inner_width 38. The prefix "[1] ↗ " is ~8 display cols; a 35+ char label wraps.
+    #[test]
+    fn wrapped_asset_continuation_lines_each_carry_same_open_asset_url() {
+        let url = "https://example.com/file.pdf";
+        let long_label = "very-long-filename-that-does-not-fit.pdf";
+        let task = task_with_attachments(&[(long_label, url)]);
+        let user_map: HashMap<i64, String> = HashMap::new();
+        let inner_width = 38usize;
+        let content = build_detail_content(&task, &[], &user_map, inner_width, None);
+
+        let open_asset_affs: Vec<&crate::render::LocalAffordance> = content
+            .affordances
+            .iter()
+            .filter(|a| matches!(a.kind, AffordanceKind::OpenAsset(_)))
+            .collect();
+
+        assert!(
+            open_asset_affs.len() >= 2,
+            "a wrapped asset must produce at least 2 OpenAsset affordances (one per fragment): \
+             got {}: {open_asset_affs:?}",
+            open_asset_affs.len()
+        );
+
+        for aff in &open_asset_affs {
+            match &aff.kind {
+                AffordanceKind::OpenAsset(emitted_url) => {
+                    assert_eq!(
+                        emitted_url, url,
+                        "every wrapped fragment must carry the same url; got {emitted_url:?}"
+                    );
+                }
+                _ => unreachable!(),
+            }
+        }
+    }
+
+    // AC1-d: task with no attachments must produce zero OpenAsset affordances.
+    #[test]
+    fn task_without_assets_produces_no_open_asset_affordances() {
+        let task = json!({
+            "name": "T", "id": 1, "project_id": 1, "is_completed": false
+        });
+        let user_map: HashMap<i64, String> = HashMap::new();
+        let content = build_detail_content(&task, &[], &user_map, 80, None);
+
+        let has_open_asset = content
+            .affordances
+            .iter()
+            .any(|a| matches!(a.kind, AffordanceKind::OpenAsset(_)));
+        assert!(
+            !has_open_asset,
+            "task without attachments must produce no OpenAsset affordances"
+        );
+    }
+}
+
+// --- AC1 (ek-0046 / ADR 0043): build_detail_content emits OpenUrl affordances structurally ---
+//
+// Buffer-derived tests: the DetailContent payload from build_detail_content is the
+// source of truth for hit-targets. Each test is derived from an AC/BDR scenario.
+mod open_url_affordance_emission {
+    use crate::render::{build_detail_content, AffordanceKind, BODY_LEFT_CHROME_COLS};
+    use serde_json::json;
+    use std::collections::HashMap;
+
+    // AC1 (buffer-derived): an HTTP URL in the body emits one OpenUrl affordance
+    // with the complete, unmodified URL. col_start is >= BODY_LEFT_CHROME_COLS
+    // (inside the content area, not on the border or padding).
+    #[test]
+    fn http_url_in_body_emits_one_open_url_affordance() {
+        let url = "https://docs.example.com/guide";
+        let task = json!({
+            "name": "T", "id": 1, "project_id": 1, "is_completed": false,
+            "body": format!("<p><a href=\"{url}\">{url}</a></p>")
+        });
+        let user_map: HashMap<i64, String> = HashMap::new();
+        let content = build_detail_content(&task, &[], &user_map, 80, None);
+
+        let url_affs: Vec<_> = content
+            .affordances
+            .iter()
+            .filter(|a| matches!(&a.kind, AffordanceKind::OpenUrl(u) if u == url))
+            .collect();
+
+        assert_eq!(
+            url_affs.len(),
+            1,
+            "single-line HTTP URL must emit exactly one OpenUrl affordance: {:?}",
+            content.affordances
+        );
+        assert!(
+            url_affs[0].col_start >= BODY_LEFT_CHROME_COLS,
+            "col_start ({}) must be inside the content area (>= BODY_LEFT_CHROME_COLS={})",
+            url_affs[0].col_start,
+            BODY_LEFT_CHROME_COLS
+        );
+    }
+
+    // AC1 (buffer-derived, multi-fragment): a URL that hard-wraps across two lines
+    // emits two OpenUrl affordances, BOTH carrying the COMPLETE URL.
+    // Uses inner_width=40 → content_width=36; "[URL]" of 39 chars wraps at 36.
+    #[test]
+    fn wrapped_url_in_body_emits_two_affordances_with_complete_url() {
+        // URL = 37 chars; "[url]" = 39 chars > content_width=36 → wraps at 36.
+        // Fragment 0 = "[https://example.com/long-path/to/pa" (36 chars), frag 1 = "ge]" (3 chars).
+        let url = "https://example.com/long-path/to/page";
+        assert_eq!(url.len(), 37, "precondition: URL is 37 chars");
+
+        let task = json!({
+            "name": "T", "id": 1, "project_id": 1, "is_completed": false,
+            "body": format!("<p><a href=\"{url}\">{url}</a></p>")
+        });
+        let user_map: HashMap<i64, String> = HashMap::new();
+        // inner_width=40 → panel_content_width = 40 - 2 - 2 = 36
+        let content = build_detail_content(&task, &[], &user_map, 40, None);
+
+        let url_affs: Vec<_> = content
+            .affordances
+            .iter()
+            .filter(|a| matches!(&a.kind, AffordanceKind::OpenUrl(u) if u == url))
+            .collect();
+
+        assert_eq!(
+            url_affs.len(),
+            2,
+            "hard-wrapped URL must emit two OpenUrl affordances (one per fragment): {:?}",
+            content.affordances
+        );
+
+        assert!(
+            url_affs[0].line_idx < url_affs[1].line_idx,
+            "fragment affordances must be on consecutive lines: line0={}, line1={}",
+            url_affs[0].line_idx,
+            url_affs[1].line_idx
+        );
+        assert_eq!(
+            url_affs[1].line_idx,
+            url_affs[0].line_idx + 1,
+            "the two fragment affordances must be on adjacent lines"
+        );
+    }
+
+    // AC4 / OBS-35 (buffer-derived): clicking on the LAST fragment of a hard-wrapped URL
+    // (where frag0 fills exactly content_width columns) carries the COMPLETE URL.
+    // Regression guard for the old inverse-wrap over-join bug.
+    #[test]
+    fn obs35_last_fragment_affordance_carries_complete_url() {
+        // URL = 37 chars; content_width=36 → frag0 fills 36 (= content_width) exactly.
+        // Old code: saw frag0 width == content_width AND raw URL reaches edge →
+        //           joined frag1 before checking frag0's bracket state (over-join).
+        // New code: bracket_depth("[https://…/pa") > 0 → join. bracket_depth of joined = 0 → stop.
+        let url = "https://example.com/long-path/to/page";
+        assert_eq!(url.len(), 37, "precondition: URL is 37 chars");
+
+        let task = json!({
+            "name": "T", "id": 1, "project_id": 1, "is_completed": false,
+            "body": format!("<p><a href=\"{url}\">{url}</a></p>")
+        });
+        let user_map: HashMap<i64, String> = HashMap::new();
+        // inner_width=40 → content_width=36; frag0 = first 36 chars = "[https://…/pa" (36 cols)
+        let content = build_detail_content(&task, &[], &user_map, 40, None);
+
+        let url_affs: Vec<_> = content
+            .affordances
+            .iter()
+            .filter(|a| matches!(a.kind, AffordanceKind::OpenUrl(_)))
+            .collect();
+
+        assert_eq!(
+            url_affs.len(),
+            2,
+            "OBS-35 URL must emit two affordances (not one over-joined or three): {:?}",
+            content.affordances
+        );
+
+        for aff in &url_affs {
+            let AffordanceKind::OpenUrl(ref stored_url) = aff.kind else {
+                unreachable!()
+            };
+            assert_eq!(
+                stored_url, url,
+                "OBS-35: both fragment affordances must carry the complete URL; \
+                 got {stored_url:?} at line {}, cols [{}, {})",
+                aff.line_idx, aff.col_start, aff.col_end
+            );
+        }
+    }
+
+    // AC5 (buffer-derived): an email anchor emits OpenUrl("mailto:...") — not
+    // a plain HTTP URL and not empty.
+    #[test]
+    fn email_anchor_in_body_emits_mailto_open_url_affordance() {
+        let email = "contact@example.com";
+        let task = json!({
+            "name": "T", "id": 1, "project_id": 1, "is_completed": false,
+            "body": format!("<p><a href=\"mailto:{email}\">{email}</a></p>")
+        });
+        let user_map: HashMap<i64, String> = HashMap::new();
+        let content = build_detail_content(&task, &[], &user_map, 80, None);
+
+        let mailto_expected = format!("mailto:{email}");
+        let mailto_aff = content
+            .affordances
+            .iter()
+            .find(|a| matches!(&a.kind, AffordanceKind::OpenUrl(u) if u == &mailto_expected));
+
+        assert!(
+            mailto_aff.is_some(),
+            "email anchor must emit OpenUrl(\"mailto:{email}\") affordance; got: {:?}",
+            content.affordances
+        );
+    }
+
+    // AC5 / CC (buffer-derived): a non-URL bracketed token produces NO OpenUrl affordance.
+    // Negative test — asserts the filter works and non-openable tokens are excluded.
+    #[test]
+    fn non_url_bracket_text_in_body_emits_no_open_url_affordance() {
+        let task = json!({
+            "name": "T", "id": 1, "project_id": 1, "is_completed": false,
+            "body": "<p>see [note] for details</p>"
+        });
+        let user_map: HashMap<i64, String> = HashMap::new();
+        let content = build_detail_content(&task, &[], &user_map, 80, None);
+
+        let url_affs: Vec<_> = content
+            .affordances
+            .iter()
+            .filter(|a| matches!(a.kind, AffordanceKind::OpenUrl(_)))
+            .collect();
+
+        assert!(
+            url_affs.is_empty(),
+            "a plain [note] token must produce no OpenUrl affordances; got: {url_affs:?}"
         );
     }
 }

@@ -1638,7 +1638,7 @@ fn build_header_lines_long_title_wraps_within_panel() {
 fn build_body_lines_is_panel_with_description_label() {
     let task = json!({ "id": 1, "body": "<p>Hello world</p>" });
     let mut collector = LinkCollector::new();
-    let (lines, _) = build_body_lines_with_collector(&task, 80, &mut collector);
+    let (lines, _, _) = build_body_lines_with_collector(&task, 80, &mut collector);
     assert!(
         lines[0].starts_with('\u{256D}'),
         "first line must be panel top border: {:?}",
@@ -1659,7 +1659,7 @@ fn build_body_lines_is_panel_with_description_label() {
 fn build_body_lines_includes_wrapped_body_text() {
     let task = json!({ "id": 1, "body": "<p>Some details here</p>" });
     let mut collector = LinkCollector::new();
-    let (lines, _) = build_body_lines_with_collector(&task, 80, &mut collector);
+    let (lines, _, _) = build_body_lines_with_collector(&task, 80, &mut collector);
     let joined = lines.join("\n");
     assert!(
         joined.contains("Some details here"),
@@ -1671,7 +1671,7 @@ fn build_body_lines_includes_wrapped_body_text() {
 fn build_body_lines_fallback_when_body_empty() {
     let task = json!({ "id": 1, "body": null });
     let mut collector = LinkCollector::new();
-    let (lines, _) = build_body_lines_with_collector(&task, 80, &mut collector);
+    let (lines, _, _) = build_body_lines_with_collector(&task, 80, &mut collector);
     let joined = lines.join("\n");
     assert!(
         joined.contains("(no description)"),
@@ -1688,7 +1688,7 @@ fn build_body_lines_contains_no_meta_or_comment_lines() {
         "body": "<p>Body content</p>"
     });
     let mut collector = LinkCollector::new();
-    let (lines, _) = build_body_lines_with_collector(&task, 80, &mut collector);
+    let (lines, _, _) = build_body_lines_with_collector(&task, 80, &mut collector);
     let joined = lines.join("\n");
     assert!(
         !joined.contains("Task:"),
@@ -1708,7 +1708,7 @@ fn build_body_lines_no_line_exceeds_inner_width() {
     });
     let inner_width = 30;
     let mut collector = LinkCollector::new();
-    let (lines, _) = build_body_lines_with_collector(&task, inner_width, &mut collector);
+    let (lines, _, _) = build_body_lines_with_collector(&task, inner_width, &mut collector);
     for line in &lines {
         let len = line.chars().count();
         assert!(
@@ -2501,7 +2501,7 @@ fn url_at_col_past_end_returns_none() {
 fn build_body_lines_ul_produces_bullet_lines() {
     let task = json!({ "id": 1, "body": "<ul><li>alpha</li><li>beta</li></ul>" });
     let mut collector = LinkCollector::new();
-    let (lines, _) = build_body_lines_with_collector(&task, 80, &mut collector);
+    let (lines, _, _) = build_body_lines_with_collector(&task, 80, &mut collector);
     let joined = lines.join("\n");
     assert!(
         joined.contains("\u{2022} alpha"),
@@ -2517,7 +2517,7 @@ fn build_body_lines_ul_produces_bullet_lines() {
 fn build_body_lines_ol_produces_numbered_lines() {
     let task = json!({ "id": 1, "body": "<ol><li>first</li><li>second</li></ol>" });
     let mut collector = LinkCollector::new();
-    let (lines, _) = build_body_lines_with_collector(&task, 80, &mut collector);
+    let (lines, _, _) = build_body_lines_with_collector(&task, 80, &mut collector);
     let joined = lines.join("\n");
     assert!(
         joined.contains("1. first"),
@@ -2533,7 +2533,7 @@ fn build_body_lines_ol_produces_numbered_lines() {
 fn build_body_lines_blockquote_produces_gt_prefix() {
     let task = json!({ "id": 1, "body": "<blockquote>quoted text</blockquote>" });
     let mut collector = LinkCollector::new();
-    let (lines, _) = build_body_lines_with_collector(&task, 80, &mut collector);
+    let (lines, _, _) = build_body_lines_with_collector(&task, 80, &mut collector);
     let joined = lines.join("\n");
     assert!(
         joined.contains("> quoted text"),
@@ -2545,7 +2545,7 @@ fn build_body_lines_blockquote_produces_gt_prefix() {
 fn build_body_lines_h2_produces_heading_on_own_line() {
     let task = json!({ "id": 1, "body": "<h2>Section Title</h2>" });
     let mut collector = LinkCollector::new();
-    let (lines, _) = build_body_lines_with_collector(&task, 80, &mut collector);
+    let (lines, _, _) = build_body_lines_with_collector(&task, 80, &mut collector);
     let joined = lines.join("\n");
     assert!(
         joined.contains("Section Title"),
@@ -2891,6 +2891,179 @@ fn own_comment_delete_style_run_coords_equal_affordance_coords() {
         delete_run.len,
         delete_aff.col_end - delete_aff.col_start,
         "DeleteAffordance run len must equal affordance col_end - col_start"
+    );
+}
+
+// --- AC1: structural OpenUrl affordance emission (ADR 0043 / task ek-0046) ---
+
+// AC1-A1: single-line URL in body emits exactly one OpenUrl affordance with
+// the complete URL; its col_start is inside the content area (>= BODY_LEFT_CHROME_COLS).
+#[test]
+fn build_detail_content_single_line_url_emits_one_open_url_affordance() {
+    let url = "https://example.com/page";
+    let task = json!({
+        "id": 1, "name": "T",
+        "body": format!("<p><a href=\"{url}\">{url}</a></p>")
+    });
+    let content = build_detail_content(&task, &[], &HashMap::new(), 60, None);
+
+    let open_url_affs: Vec<_> = content
+        .affordances
+        .iter()
+        .filter(|a| matches!(&a.kind, AffordanceKind::OpenUrl(u) if u == url))
+        .collect();
+
+    assert_eq!(
+        open_url_affs.len(),
+        1,
+        "single-line URL must produce exactly one OpenUrl affordance; got {:?}",
+        content.affordances
+    );
+
+    let aff = open_url_affs[0];
+    assert!(
+        aff.col_start >= BODY_LEFT_CHROME_COLS,
+        "col_start ({}) must be >= BODY_LEFT_CHROME_COLS ({})",
+        aff.col_start,
+        BODY_LEFT_CHROME_COLS
+    );
+    assert!(
+        aff.col_end > aff.col_start,
+        "col_end ({}) must be > col_start ({})",
+        aff.col_end,
+        aff.col_start
+    );
+}
+
+// AC1-A2: a URL that wraps across two fragments emits two OpenUrl affordances,
+// both carrying the COMPLETE URL (not just the fragment text).
+#[test]
+fn build_detail_content_wrapped_url_emits_two_affordances_with_complete_url() {
+    // Use inner_width=40 → content_width=36.
+    // URL length 37 → "[url]" is 39 chars, hard-split across 2 fragments.
+    let url = "https://example.com/long-path/to/page";
+    assert_eq!(url.len(), 37, "precondition: URL is 37 chars");
+
+    let task = json!({
+        "id": 1, "name": "T",
+        "body": format!("<p><a href=\"{url}\">{url}</a></p>")
+    });
+    let content = build_detail_content(&task, &[], &HashMap::new(), 40, None);
+
+    let open_url_affs: Vec<_> = content
+        .affordances
+        .iter()
+        .filter(|a| matches!(&a.kind, AffordanceKind::OpenUrl(u) if u == url))
+        .collect();
+
+    assert_eq!(
+        open_url_affs.len(),
+        2,
+        "wrapped URL must produce 2 OpenUrl affordances (one per fragment); got {:?}",
+        content.affordances
+    );
+
+    let frag0 = open_url_affs[0];
+    let frag1 = open_url_affs[1];
+
+    assert!(
+        frag0.line_idx < frag1.line_idx,
+        "frag0.line_idx ({}) must be < frag1.line_idx ({})",
+        frag0.line_idx,
+        frag1.line_idx
+    );
+    assert_eq!(
+        frag1.line_idx,
+        frag0.line_idx + 1,
+        "the two fragment affordances must be on consecutive lines"
+    );
+
+    assert!(
+        frag0.col_start >= BODY_LEFT_CHROME_COLS,
+        "frag0 col_start ({}) must be >= BODY_LEFT_CHROME_COLS",
+        frag0.col_start
+    );
+    assert!(
+        frag1.col_start >= BODY_LEFT_CHROME_COLS,
+        "frag1 col_start ({}) must be >= BODY_LEFT_CHROME_COLS",
+        frag1.col_start
+    );
+}
+
+// AC1-A3: OBS-35 case — the second fragment line is exactly content_width wide
+// but the affordance still carries the COMPLETE URL (not truncated by the old
+// over-join bug that treated a word-boundary line as a hard-split continuation).
+// For inner_width=40, content_width=36; frag1 "ge]" is 3 chars < 36, so the
+// joining stops correctly after that fragment.
+#[test]
+fn build_detail_content_obs35_last_fragment_carries_complete_url() {
+    let url = "https://example.com/long-path/to/page";
+    let task = json!({
+        "id": 1, "name": "T",
+        "body": format!("<p><a href=\"{url}\">{url}</a></p>")
+    });
+    let content = build_detail_content(&task, &[], &HashMap::new(), 40, None);
+
+    for aff in content
+        .affordances
+        .iter()
+        .filter(|a| matches!(&a.kind, AffordanceKind::OpenUrl(_)))
+    {
+        let AffordanceKind::OpenUrl(ref stored_url) = aff.kind else {
+            unreachable!()
+        };
+        assert_eq!(
+            stored_url, url,
+            "every OpenUrl affordance must carry the complete URL (OBS-35 guard); \
+             got {stored_url:?} at line {}, cols [{}, {})",
+            aff.line_idx, aff.col_start, aff.col_end
+        );
+    }
+}
+
+// AC1-A4: a bare email anchor in the body emits an OpenUrl affordance with
+// the mailto: prefix.
+#[test]
+fn build_detail_content_bare_email_emits_mailto_affordance() {
+    let email = "user@example.com";
+    let task = json!({
+        "id": 1, "name": "T",
+        "body": format!("<p><a href=\"mailto:{email}\">{email}</a></p>")
+    });
+    let content = build_detail_content(&task, &[], &HashMap::new(), 60, None);
+
+    let expected_url = format!("mailto:{email}");
+    let mailto_aff = content
+        .affordances
+        .iter()
+        .find(|a| matches!(&a.kind, AffordanceKind::OpenUrl(u) if u == &expected_url));
+
+    assert!(
+        mailto_aff.is_some(),
+        "bare email anchor must emit OpenUrl(\"mailto:...\") affordance; affordances: {:?}",
+        content.affordances
+    );
+}
+
+// AC1-A5: a non-URL bracketed token in the body (e.g. [note]) does NOT produce
+// any OpenUrl affordance — only URL/email tokens are openable.
+#[test]
+fn build_detail_content_non_url_bracket_token_emits_no_open_url_affordance() {
+    let task = json!({
+        "id": 1, "name": "T",
+        "body": "<p>[note] see instructions</p>"
+    });
+    let content = build_detail_content(&task, &[], &HashMap::new(), 60, None);
+
+    let open_url_affs: Vec<_> = content
+        .affordances
+        .iter()
+        .filter(|a| matches!(a.kind, AffordanceKind::OpenUrl(_)))
+        .collect();
+
+    assert!(
+        open_url_affs.is_empty(),
+        "a plain [note] token must produce no OpenUrl affordances; got: {open_url_affs:?}"
     );
 }
 

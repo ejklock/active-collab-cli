@@ -63,10 +63,22 @@ pub struct StyleRun {
 /// `view::register_confirm_button_targets` from the `Rect` that `render_modal` returns,
 /// and resolved by `model::dispatch_confirm_modal_click` on a plain click — single-sourced
 /// geometry that does not go through this scroll-aware affordance list.
+///
+/// `OpenAsset(url)` carries the asset's url; emitted once per asset content row (including
+/// every wrapped continuation line) by `build_detail_content` at layout time (ADR 0043 §1).
+/// Resolved by `asset_panel_cmd_at` on Ctrl/Cmd+click.
+///
+/// `OpenUrl(url)` carries an inline body-link url; populated by slice 0046. Defined here
+/// to keep the enum stable across the two slices.
 #[derive(Debug, Clone, PartialEq)]
 pub enum AffordanceKind {
     Edit(i64),
     Delete(i64),
+    OpenAsset(String),
+    /// Populated at layout time by `build_body_lines_with_collector` (slice 0046,
+    /// ADR 0043 §2): one span per wrapped fragment of an openable inline URL/email token.
+    /// Resolved by `body_link_cmd_at` on Ctrl/Cmd+click.
+    OpenUrl(String),
 }
 
 /// A clickable affordance span registered during `build_detail_content`.
@@ -138,116 +150,6 @@ pub fn box_inner_content_pub(s: &str) -> Option<&str> {
 /// inner-content column.
 pub const BODY_LEFT_CHROME_COLS: usize = 1 + PANEL_HPAD;
 
-/// Map a clicked (line_idx, char_col) to the start of its logical wrap group and the
-/// column within the joined group content.
-///
-/// When `wrap_rich` hard-splits a URL token across multiple content lines, every line
-/// except the last fills the entire `content_width` with non-space characters (no
-/// trailing-space padding). This function walks backward from `line_idx` to find the
-/// first line of such a group, then computes the display-column offset within the
-/// concatenated inner content.
-///
-/// `char_col` is the display-column index into the full boxed string (0 = the `│`
-/// border character). Content starts at display-column 2 (border + HPAD).
-///
-/// Returns `(group_start_idx, logical_col)` where `group_start_idx` is the index into
-/// `lines` of the first line of the group and `logical_col` is the column within the
-/// concatenated inner content (trailing-space padding stripped from each fragment).
-/// Returns `None` when `line_idx` is out of range or not a box content line.
-pub fn logical_position_in_wrap_group(
-    lines: &[String],
-    line_idx: usize,
-    char_col: usize,
-    content_width: usize,
-) -> Option<(usize, usize)> {
-    box_inner_content(lines.get(line_idx)?)?;
-
-    let mut group_start = line_idx;
-    while group_start > 0 {
-        let prev_inner = match box_inner_content(&lines[group_start - 1]) {
-            Some(c) => c,
-            None => break,
-        };
-        let trimmed_dw = display_width(prev_inner.trim_end_matches(' '));
-        if trimmed_dw < content_width {
-            break;
-        }
-        group_start -= 1;
-    }
-
-    let content_col = char_col.saturating_sub(2);
-    let mut logical_col = 0usize;
-    for line in lines.iter().take(line_idx).skip(group_start) {
-        let inner = box_inner_content(line)?;
-        logical_col += display_width(inner.trim_end_matches(' '));
-    }
-    logical_col += content_col;
-
-    Some((group_start, logical_col))
-}
-
-/// Join the inner content of consecutive hard-split lines starting at `group_start`
-/// and run `url_at` on the joined string at `logical_col`.
-///
-/// A line is considered hard-split (has a continuation on the next line) when its
-/// inner content, after trimming trailing spaces, fills the entire `content_width`.
-/// Joining stops at the first naturally-ended line or after 20 continuations.
-fn url_at_in_wrap_group(
-    lines: &[String],
-    group_start: usize,
-    logical_col: usize,
-    content_width: usize,
-) -> Option<String> {
-    let mut joined = String::new();
-    let mut i = group_start;
-    loop {
-        let inner = box_inner_content(lines.get(i)?)?;
-        let trimmed = inner.trim_end_matches(' ');
-        let is_hard_split = display_width(trimmed) >= content_width;
-        joined.push_str(trimmed);
-        if !is_hard_split || i >= lines.len().saturating_sub(1) || i >= group_start + 20 {
-            break;
-        }
-        i += 1;
-    }
-    url_at(&joined, logical_col)
-}
-
-/// Resolve the URL at a click that may land on a wrapped fragment of a `[url]` token.
-///
-/// When `wrap_rich` hard-splits a long `[url]` token across multiple rendered lines,
-/// `url_at` on a single fragment returns an incomplete URL or `None`. This function
-/// detects the wrap group (consecutive full-width lines), joins their inner content,
-/// and runs `url_at` on the reconstructed logical line so any fragment of a split URL
-/// resolves to the complete URL.
-///
-/// For single-line (unwrapped) tokens the function falls through to a direct `url_at`
-/// call on the clicked boxed string, preserving the V5 behavior.
-///
-/// `char_col` is the display-column index into the full boxed string (0 = the `│`
-/// border character). `content_width` must equal `panel_content_width(inner_width)`
-/// — the same value used when wrapping the body text.
-pub fn resolve_wrapped_url(
-    lines: &[String],
-    line_idx: usize,
-    char_col: usize,
-    content_width: usize,
-) -> Option<String> {
-    let (group_start, logical_col) =
-        logical_position_in_wrap_group(lines, line_idx, char_col, content_width)?;
-
-    let clicked_inner = box_inner_content(&lines[line_idx])?;
-    let clicked_trimmed_dw = display_width(clicked_inner.trim_end_matches(' '));
-    let is_continuation = group_start < line_idx;
-    let is_hard_split_source = clicked_trimmed_dw >= content_width;
-
-    if is_continuation || is_hard_split_source {
-        return url_at_in_wrap_group(lines, group_start, logical_col, content_width);
-    }
-
-    url_at(&lines[line_idx], char_col)
-}
-
 /// Resolve the URL at `target_col` (display-column) within a rendered body line.
 ///
 /// Algorithm (in priority order):
@@ -260,6 +162,9 @@ pub fn resolve_wrapped_url(
 ///
 /// The returned string never contains the surrounding `[` and `]` brackets.
 /// The function is char-boundary-safe and pure (no I/O, no async, no time access).
+///
+/// Used by unit tests in `tests/unit/render.rs` to validate inline URL detection.
+#[allow(dead_code)]
 pub fn url_at(line: &str, target_col: usize) -> Option<String> {
     if let Some(url) = bracketed_url_at(line, target_col) {
         return Some(url);
@@ -269,6 +174,7 @@ pub fn url_at(line: &str, target_col: usize) -> Option<String> {
 
 /// Scan `[INNER]` tokens in `line`; return INNER when `target_col` is within the
 /// inner span and INNER is a URL or bare e-mail.
+#[allow(dead_code)]
 fn bracketed_url_at(line: &str, target_col: usize) -> Option<String> {
     static RE: OnceLock<Regex> = OnceLock::new();
     let re = RE.get_or_init(|| {
@@ -302,6 +208,7 @@ fn is_bare_email(s: &str) -> bool {
 }
 
 /// Scan raw URL matches in `line`; return the URL when `target_col` is within a match.
+#[allow(dead_code)]
 fn raw_url_at(line: &str, target_col: usize) -> Option<String> {
     for m in body_url_re().find_iter(line) {
         let col_start = display_col_of_byte(line, m.start());
@@ -496,6 +403,230 @@ pub fn is_openable_url(url: &str) -> bool {
     match url::Url::parse(url) {
         Ok(parsed) => matches!(parsed.scheme(), "http" | "https"),
         Err(_) => false,
+    }
+}
+
+/// Prepend `mailto:` when `token` is a bare email (contains `@`, no scheme).
+///
+/// Single home for link normalization at the body-link emit site; replaces the
+/// version that was in `model.rs`.
+fn normalize_link_url(token: &str) -> String {
+    if token.contains('@') && !token.contains("://") && !token.starts_with("mailto:") {
+        format!("mailto:{token}")
+    } else {
+        token.to_string()
+    }
+}
+
+/// Flatten a `RichLine` to its plain text.
+fn rich_line_plain(line: &crate::richtext::RichLine) -> String {
+    line.iter().map(|s| s.text.as_str()).collect()
+}
+
+/// Return the net bracket depth of `s`: `+1` per `[`, `-1` per `]`.
+///
+/// A positive result means `s` contains an unmatched `[` (hard-split token start).
+fn bracket_depth(s: &str) -> i32 {
+    let mut depth = 0i32;
+    for c in s.chars() {
+        match c {
+            '[' => depth += 1,
+            ']' => depth -= 1,
+            _ => {}
+        }
+    }
+    depth
+}
+
+/// Return `(body_rich_line_idx, panel_col_start, panel_col_end, normalized_url)` tuples
+/// for every openable URL/email token in the wrapped body-rich lines.
+///
+/// Bracketed `[url]` tokens are handled by bracket-counting: lines with an unmatched
+/// `[` are joined with their continuations until the group closes. Raw `https?://…`
+/// tokens that reach the right edge of a full-width line are joined with the next line
+/// so their complete URL is recovered. Both strategies fix the OBS-35 over-join bug by
+/// stopping at a structural boundary (closing `]` or URL terminator) instead of at
+/// display-width.
+///
+/// `panel_col_start`/`panel_col_end` are in the same coordinate space as
+/// `LocalAffordance.col_start`/`col_end` (where `│` = col 0; content starts at
+/// `BODY_LEFT_CHROME_COLS` = 2). Only tokens that pass `is_openable_url` or are
+/// `mailto:` emails are emitted; non-openable `[note]` tokens produce no entry.
+fn collect_body_url_affordances(
+    body_rich: &[crate::richtext::RichLine],
+    content_width: usize,
+) -> Vec<(usize, usize, usize, String)> {
+    let mut out: Vec<(usize, usize, usize, String)> = Vec::new();
+    let mut i = 0;
+
+    while i < body_rich.len() {
+        let plain = rich_line_plain(&body_rich[i]);
+        let plain_dw = display_width(&plain);
+        let is_full_width = plain_dw == content_width && content_width > 0;
+
+        let (joined, frag_widths, consumed) = if bracket_depth(&plain) > 0 && is_full_width {
+            join_bracketed_group(plain, plain_dw, i, body_rich, content_width)
+        } else if is_full_width && raw_url_reaches_edge(&plain, plain_dw) {
+            join_raw_url_group(plain, plain_dw, i, body_rich, content_width)
+        } else {
+            (plain, vec![plain_dw], 0)
+        };
+
+        emit_group_url_affordances(&joined, &frag_widths, i, &mut out);
+        i += 1 + consumed;
+    }
+
+    out
+}
+
+/// Join lines starting at `start_i` into one string while any `[` remains unmatched.
+///
+/// Returns `(joined_text, frag_widths, extra_lines_consumed)`. The caller advances
+/// the outer index by `1 + extra_lines_consumed`.
+fn join_bracketed_group(
+    first_plain: String,
+    first_dw: usize,
+    start_i: usize,
+    body_rich: &[crate::richtext::RichLine],
+    content_width: usize,
+) -> (String, Vec<usize>, usize) {
+    let mut joined = first_plain;
+    let mut frag_widths: Vec<usize> = vec![first_dw];
+    let mut consumed = 0usize;
+
+    while bracket_depth(&joined) > 0 && start_i + 1 + consumed < body_rich.len() && consumed < 20 {
+        consumed += 1;
+        let np = rich_line_plain(&body_rich[start_i + consumed]);
+        let ndw = display_width(&np);
+        let is_last_frag = ndw < content_width;
+        joined.push_str(&np);
+        frag_widths.push(ndw);
+        if is_last_frag {
+            break;
+        }
+    }
+
+    (joined, frag_widths, consumed)
+}
+
+/// Join lines starting at `start_i` while a raw URL ends exactly at the right edge.
+///
+/// Returns `(joined_text, frag_widths, extra_lines_consumed)`. The caller advances
+/// the outer index by `1 + extra_lines_consumed`.
+fn join_raw_url_group(
+    first_plain: String,
+    first_dw: usize,
+    start_i: usize,
+    body_rich: &[crate::richtext::RichLine],
+    content_width: usize,
+) -> (String, Vec<usize>, usize) {
+    let mut joined = first_plain;
+    let mut frag_widths: Vec<usize> = vec![first_dw];
+    let mut consumed = 0usize;
+
+    while raw_url_reaches_edge_of(&joined, total_frag_width(&frag_widths))
+        && start_i + 1 + consumed < body_rich.len()
+        && consumed < 20
+    {
+        consumed += 1;
+        let np = rich_line_plain(&body_rich[start_i + consumed]);
+        let ndw = display_width(&np);
+        joined.push_str(&np);
+        frag_widths.push(ndw);
+        if ndw < content_width {
+            break;
+        }
+    }
+
+    (joined, frag_widths, consumed)
+}
+
+/// Sum fragment widths to get the total joined-string display width so far.
+fn total_frag_width(frag_widths: &[usize]) -> usize {
+    frag_widths.iter().sum()
+}
+
+/// Return true when a raw URL in `plain` ends exactly at `edge_col` display columns
+/// (the right edge of the fragment), suggesting the URL may continue on the next line.
+fn raw_url_reaches_edge(plain: &str, edge_col: usize) -> bool {
+    raw_url_reaches_edge_of(plain, edge_col)
+}
+
+/// Return true when any raw URL match in `joined` ends exactly at `edge_col`.
+fn raw_url_reaches_edge_of(joined: &str, edge_col: usize) -> bool {
+    for m in body_url_re().find_iter(joined) {
+        let col_end = display_col_of_byte(joined, m.end());
+        if col_end == edge_col {
+            return true;
+        }
+    }
+    false
+}
+
+/// For each URL/email span found in `joined_text`, emit one affordance per fragment
+/// line into `out`.
+///
+/// `frag_widths[k]` is the display width of body_rich line `start_idx + k`.
+/// `col_start`/`col_end` are emitted in panel display-column space (content at col
+/// `BODY_LEFT_CHROME_COLS` = 2).
+fn emit_group_url_affordances(
+    joined_text: &str,
+    frag_widths: &[usize],
+    start_idx: usize,
+    out: &mut Vec<(usize, usize, usize, String)>,
+) {
+    let spans = collect_link_spans(joined_text);
+    for span in &spans {
+        let url_inner = &joined_text[span.start..span.end];
+        let normalized = normalize_link_url(url_inner);
+        if !is_openable_url(&normalized) && !normalized.starts_with("mailto:") {
+            continue;
+        }
+        let url_col_start = display_col_of_byte(joined_text, span.start);
+        let url_col_end = url_col_start + display_width(url_inner);
+        emit_url_per_fragment(
+            url_col_start,
+            url_col_end,
+            &normalized,
+            frag_widths,
+            start_idx,
+            out,
+        );
+    }
+}
+
+/// Compute the per-fragment affordance spans for a URL token that spans `[url_col_start,
+/// url_col_end)` in the joined-group display columns.
+///
+/// For each fragment k (at body_rich line `start_idx + k`), the fragment covers joined
+/// display columns `[frag_offset, frag_offset + frag_widths[k])`. The intersection of
+/// `[url_col_start, url_col_end)` with that range gives the URL sub-span on that
+/// fragment, which is then offset by `BODY_LEFT_CHROME_COLS` (= 2) to produce panel
+/// column coordinates.
+fn emit_url_per_fragment(
+    url_col_start: usize,
+    url_col_end: usize,
+    url: &str,
+    frag_widths: &[usize],
+    start_idx: usize,
+    out: &mut Vec<(usize, usize, usize, String)>,
+) {
+    let mut frag_offset = 0usize;
+    for (k, &fw) in frag_widths.iter().enumerate() {
+        let frag_end = frag_offset + fw;
+        let overlap_start = url_col_start.max(frag_offset);
+        let overlap_end = url_col_end.min(frag_end);
+        if overlap_start < overlap_end {
+            let rel_start = overlap_start - frag_offset;
+            let rel_end = overlap_end - frag_offset;
+            out.push((
+                start_idx + k,
+                BODY_LEFT_CHROME_COLS + rel_start,
+                BODY_LEFT_CHROME_COLS + rel_end,
+                url.to_string(),
+            ));
+        }
+        frag_offset = frag_end;
     }
 }
 
@@ -941,14 +1072,6 @@ fn panel_content_width(width: usize) -> usize {
     width.saturating_sub(2 + 2 * PANEL_HPAD)
 }
 
-/// Public accessor for `panel_content_width` used by callers outside this module.
-///
-/// Returns the number of display columns available for content inside a panel box
-/// of `outer_width` columns (removes 2 border columns and 2×PANEL_HPAD padding).
-pub fn panel_content_width_pub(outer_width: usize) -> usize {
-    panel_content_width(outer_width)
-}
-
 /// Parity: Python tui.py wrap_text.
 ///
 /// Greedy word-wrap on whitespace to at most `width` DISPLAY columns per line.
@@ -1376,7 +1499,7 @@ fn build_body_lines_with_collector(
     task: &Value,
     inner_width: usize,
     collector: &mut LinkCollector,
-) -> (Vec<String>, Vec<Vec<StyleRun>>) {
+) -> (Vec<String>, Vec<Vec<StyleRun>>, Vec<LocalAffordance>) {
     let body_html = task.get("body").and_then(|v| v.as_str()).unwrap_or("");
     let rich_lines = crate::richtext::structured_rich_with_links(body_html, collector);
     let content_width = panel_content_width(inner_width);
@@ -1390,8 +1513,24 @@ fn build_body_lines_with_collector(
     } else {
         build_rich_body_rows(rich_lines, content_width)
     };
+
+    let raw_affs = collect_body_url_affordances(&body_rich, content_width);
     let boxed = panel_box_rich(&t("Description"), &body_rich, inner_width);
-    unzip_boxed(boxed)
+    let (lines, styles) = unzip_boxed(boxed);
+
+    // Content rows start after the top border + PANEL_VPAD blank rows.
+    let content_row_offset = 1 + PANEL_VPAD;
+    let affordances = raw_affs
+        .into_iter()
+        .map(|(k, col_start, col_end, url)| LocalAffordance {
+            line_idx: content_row_offset + k,
+            col_start,
+            col_end,
+            kind: AffordanceKind::OpenUrl(url),
+        })
+        .collect();
+
+    (lines, styles, affordances)
 }
 
 /// Wrap a set of rich lines to `content_width` and return the wrapped rich lines.
@@ -1835,8 +1974,6 @@ pub fn build_detail_content(
     inner_width: usize,
     current_user_id: Option<i64>,
 ) -> DetailContent {
-    use crate::tui::screens::asset_panel;
-
     let mut collector = LinkCollector::new();
     let mut lines: Vec<String> = vec![];
     let mut line_styles: Vec<Vec<StyleRun>> = vec![];
@@ -1850,8 +1987,17 @@ pub fn build_detail_content(
     lines.push(String::new());
     line_styles.push(vec![]);
 
-    let (body_lines, body_styles) =
+    let body_panel_start = lines.len();
+    let (body_lines, body_styles, body_url_affs) =
         build_body_lines_with_collector(task, inner_width, &mut collector);
+    for aff in body_url_affs {
+        affordances.push(LocalAffordance {
+            line_idx: body_panel_start + aff.line_idx,
+            col_start: aff.col_start,
+            col_end: aff.col_end,
+            kind: aff.kind,
+        });
+    }
     lines.extend(body_lines);
     line_styles.extend(body_styles);
 
@@ -1885,16 +2031,13 @@ pub fn build_detail_content(
     }
 
     let assets = crate::controller::extract_assets(task, comments);
-    if !assets.is_empty() {
-        lines.push(String::new());
-        line_styles.push(vec![]);
-
-        let content_width = asset_panel::inline_content_width(inner_width);
-        for (text, runs) in asset_panel::section_lines(&assets, content_width) {
-            lines.push(text);
-            line_styles.push(runs);
-        }
-    }
+    splice_asset_section(
+        &assets,
+        inner_width,
+        &mut lines,
+        &mut line_styles,
+        &mut affordances,
+    );
 
     debug_assert_eq!(
         lines.len(),
@@ -1907,6 +2050,54 @@ pub fn build_detail_content(
         line_styles,
         affordances,
         comment_spans,
+    }
+}
+
+/// Appends the asset panel section (blank separator, rendered rows, and
+/// `OpenAsset` affordances) to the running `lines`/`line_styles`/`affordances`
+/// vecs kept by `build_detail_content`.
+///
+/// Called only when the asset list is non-empty; the blank separator line is
+/// included here so the caller's index alignment invariant is preserved.
+fn splice_asset_section(
+    assets: &[Asset],
+    inner_width: usize,
+    lines: &mut Vec<String>,
+    line_styles: &mut Vec<Vec<StyleRun>>,
+    affordances: &mut Vec<LocalAffordance>,
+) {
+    use crate::tui::screens::asset_panel;
+
+    if assets.is_empty() {
+        return;
+    }
+
+    lines.push(String::new());
+    line_styles.push(vec![]);
+
+    let content_width = asset_panel::inline_content_width(inner_width);
+    let section_base_idx = lines.len();
+    for (section_idx, (text, runs)) in asset_panel::section_lines(assets, content_width)
+        .into_iter()
+        .enumerate()
+    {
+        if let Some(asset_idx) =
+            asset_panel::asset_index_for_section_row(assets, content_width, section_idx)
+        {
+            let link_span = runs
+                .iter()
+                .find(|r| r.style == crate::richtext::RichStyle::Link);
+            if let Some(span) = link_span {
+                affordances.push(LocalAffordance {
+                    line_idx: section_base_idx + section_idx,
+                    col_start: span.start,
+                    col_end: span.start + span.len,
+                    kind: AffordanceKind::OpenAsset(assets[asset_idx].url.clone()),
+                });
+            }
+        }
+        lines.push(text);
+        line_styles.push(runs);
     }
 }
 
