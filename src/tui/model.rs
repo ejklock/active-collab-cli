@@ -1113,6 +1113,9 @@ fn dispatch_affordance_click(
         AffordanceKind::Delete(comment_id) => {
             (handle_delete_comment_request(model, comment_id), vec![])
         }
+        // OpenAsset is resolved by asset_panel_cmd_at, which runs after affordance_at in the
+        // Ctrl/Cmd click chain and filters the affordance list independently.
+        AffordanceKind::OpenAsset(_) | AffordanceKind::OpenUrl(_) => (model, vec![]),
     }
 }
 
@@ -1262,13 +1265,16 @@ fn extract_line_slice(
     crate::render::slice_by_display_cols(trimmed, start_inner_col, end_inner_col)
 }
 
-/// Resolve a Ctrl/Cmd+click against the unified affordance list in the Detail body.
+/// Resolve a Ctrl/Cmd+click against the Edit/Delete affordances in the Detail body.
 ///
 /// Translates the click to a scroll-aware (line_idx, col) coordinate, then does a
-/// single linear scan over `affordances` and returns the first span that contains
-/// the click. Returns `None` when the click is outside the text viewport or misses
-/// all spans.
+/// linear scan over `affordances` restricted to `Edit`/`Delete` kinds. Returns `None`
+/// when the click is outside the text viewport or misses all spans.
+/// `OpenAsset` and `OpenUrl` spans are resolved by their own dedicated hit-test
+/// functions (`asset_panel_cmd_at`; slice 0046 for body links).
 fn affordance_at(model: &Model, column: u16, row: u16) -> Option<crate::render::AffordanceKind> {
+    use crate::render::AffordanceKind;
+
     let Screen::Detail {
         affordances,
         offset,
@@ -1291,128 +1297,28 @@ fn affordance_at(model: &Model, column: u16, row: u16) -> Option<crate::render::
 
     affordances
         .iter()
-        .find(|a| a.line_idx == line_idx && char_col >= a.col_start && char_col < a.col_end)
+        .find(|a| {
+            a.line_idx == line_idx
+                && char_col >= a.col_start
+                && char_col < a.col_end
+                && matches!(a.kind, AffordanceKind::Edit(_) | AffordanceKind::Delete(_))
+        })
         .map(|a| a.kind.clone())
 }
 
-/// Try to resolve a body-link click in the Detail content text area.
+/// Translate a viewport click to a scroll-aware `(line_idx, char_col)` within the
+/// Detail content area.
 ///
-/// Returns `None` when:
-/// - the modifier set does not include Ctrl or Cmd/Super (BDR 0014 Sc.8 — plain
-///   click is reserved for text selection and must not navigate),
-/// - the click lands outside the text viewport, on a border, on padding, on plain
-///   text, or on a `[note]` that is not a URL/email.
-///
-/// When the modifier gate passes, resolves the URL via `resolve_wrapped_url` so a
-/// click on any wrapped fragment of a long `[url]` token returns the complete URL
-/// (BDR 0014 Sc.7). Assets are now inline in the scrollable body, so the body hit
-/// region spans the full content area (no panel height subtracted).
-fn body_link_cmd_at(
-    model: &Model,
-    column: u16,
-    row: u16,
-    modifiers: crossterm::event::KeyModifiers,
-) -> Option<Cmd> {
-    use crossterm::event::KeyModifiers;
-
-    let has_modifier =
-        modifiers.contains(KeyModifiers::CONTROL) || modifiers.contains(KeyModifiers::SUPER);
-    if !has_modifier {
-        return None;
-    }
-
-    let Screen::Detail {
-        instance,
-        lines,
-        offset,
-        ..
-    } = model.top()?
-    else {
+/// Returns `None` when the row falls outside the text viewport or the resolved
+/// `line_idx` is past the end of `lines`. `char_col` equals `column as usize`,
+/// matching the coordinate space used by `affordance_at` and `body_link_cmd_at`.
+fn click_to_line_col(model: &Model, column: u16, row: u16) -> Option<(usize, usize)> {
+    let Screen::Detail { lines, offset, .. } = model.top()? else {
         return None;
     };
 
-    let (viewport_cols, viewport_rows) = model.viewport;
+    let (_, viewport_rows) = model.viewport;
     let text_top: u16 = 2;
-    let inner_width = viewport_cols.saturating_sub(2) as usize;
-    let content_text_height = viewport_rows.saturating_sub(DETAIL_CHROME_ROWS);
-
-    if row < text_top || row >= text_top + content_text_height {
-        return None;
-    }
-
-    let line_idx = offset + (row - text_top) as usize;
-    let char_col = (column as usize).saturating_sub(1);
-    let content_width = crate::render::panel_content_width_pub(inner_width);
-    let token = crate::render::resolve_wrapped_url(lines, line_idx, char_col, content_width)?;
-    let url = normalize_link_url(&token);
-    if !crate::render::is_openable_url(&url) && !is_mailto_url(&url) {
-        return None;
-    }
-    Some(Cmd::OpenAsset {
-        instance: instance.clone(),
-        url,
-    })
-}
-
-/// Prepend `mailto:` when `token` is a bare email (contains `@`, no scheme).
-fn normalize_link_url(token: &str) -> String {
-    if token.contains('@') && !token.contains("://") && !token.starts_with("mailto:") {
-        format!("mailto:{token}")
-    } else {
-        token.to_string()
-    }
-}
-
-/// Return true for `mailto:` URLs (not caught by `is_openable_url` which accepts only http/https).
-fn is_mailto_url(url: &str) -> bool {
-    url.starts_with("mailto:")
-}
-
-/// Try to resolve a Ctrl/Cmd+click on an inline asset row in the Detail screen.
-///
-/// Gates on `has_modifier` (Ctrl or Super/Cmd): a plain unmodified click returns
-/// `None` so the caller can keep it reserved for V6 text selection.
-///
-/// Assets are now part of the global scrollable body. The click is resolved
-/// scroll-aware: `line_idx = offset + (row - text_top)`, then checked against
-/// the asset section at the tail of `lines`. Uses the same `inline_content_width`
-/// formula as `build_detail_content` so render and hit-test cannot drift.
-///
-/// Returns `Some(Cmd::OpenAsset)` when the click lands on an asset data row.
-/// Returns `None` for the section header, blank separator, italic hint row,
-/// any row outside the text viewport, or a plain unmodified click.
-fn asset_panel_cmd_at(
-    model: &Model,
-    row: u16,
-    modifiers: crossterm::event::KeyModifiers,
-) -> Option<Cmd> {
-    use crate::tui::screens::asset_panel;
-    use crossterm::event::KeyModifiers;
-
-    let has_modifier =
-        modifiers.contains(KeyModifiers::CONTROL) || modifiers.contains(KeyModifiers::SUPER);
-    if !has_modifier {
-        return None;
-    }
-
-    let Screen::Detail {
-        instance,
-        assets,
-        lines,
-        offset,
-        ..
-    } = model.top()?
-    else {
-        return None;
-    };
-
-    if assets.is_empty() {
-        return None;
-    }
-
-    let (viewport_cols, viewport_rows) = model.viewport;
-    let text_top: u16 = 2;
-    let inner_width = viewport_cols.saturating_sub(2) as usize;
     let content_text_height = viewport_rows.saturating_sub(DETAIL_CHROME_ROWS);
 
     if row < text_top || row >= text_top + content_text_height {
@@ -1424,23 +1330,124 @@ fn asset_panel_cmd_at(
         return None;
     }
 
-    let width = asset_panel::inline_content_width(inner_width);
-    let section_len = asset_panel::section_lines(assets, width).len();
-    if section_len == 0 {
+    Some((line_idx, column as usize))
+}
+
+/// Try to resolve a Ctrl/Cmd+click on an inline body link in the Detail screen.
+///
+/// Returns `None` when:
+/// - the modifier set does not include Ctrl or Cmd/Super (BDR 0014 Sc.8 — plain
+///   click is reserved for text selection and must not navigate),
+/// - the click lands outside the text viewport,
+/// - no `OpenUrl` affordance covers `(line_idx, column)`.
+///
+/// Resolves via the `OpenUrl` spans emitted into `DetailContent.affordances` at
+/// layout time (ADR 0043 §2), so any fragment of a hard-split URL carries the
+/// complete URL (BDR 0014 Sc.7). The click→(line_idx, char_col) translation uses
+/// `char_col = column as usize`, matching the coordinate space of `affordance_at`.
+fn body_link_cmd_at(
+    model: &Model,
+    column: u16,
+    row: u16,
+    modifiers: crossterm::event::KeyModifiers,
+) -> Option<Cmd> {
+    use crate::render::AffordanceKind;
+    use crossterm::event::KeyModifiers;
+
+    let has_modifier =
+        modifiers.contains(KeyModifiers::CONTROL) || modifiers.contains(KeyModifiers::SUPER);
+    if !has_modifier {
         return None;
     }
 
-    let asset_section_start = lines.len().saturating_sub(section_len);
-    if line_idx < asset_section_start {
+    let Screen::Detail {
+        instance,
+        affordances,
+        ..
+    } = model.top()?
+    else {
+        return None;
+    };
+
+    let (line_idx, char_col) = click_to_line_col(model, column, row)?;
+
+    let aff = affordances.iter().find(|a| {
+        a.line_idx == line_idx
+            && char_col >= a.col_start
+            && char_col < a.col_end
+            && matches!(a.kind, AffordanceKind::OpenUrl(_))
+    })?;
+
+    match &aff.kind {
+        AffordanceKind::OpenUrl(url) => Some(Cmd::OpenAsset {
+            instance: instance.clone(),
+            url: url.clone(),
+        }),
+        _ => None,
+    }
+}
+
+/// Try to resolve a Ctrl/Cmd+click on an inline asset row in the Detail screen.
+///
+/// Gates on `has_modifier` (Ctrl or Super/Cmd): a plain unmodified click returns
+/// `None` so the caller can keep it reserved for V6 text selection.
+///
+/// Resolves the click via the `OpenAsset` spans already emitted into
+/// `Screen::Detail.affordances` by `build_detail_content` at layout time (ADR 0043 §1).
+/// The scroll-aware `line_idx = offset + (row - text_top)` translation is preserved.
+///
+/// Returns `Some(Cmd::OpenAsset)` when the click lands on an asset content row.
+/// Returns `None` for header, separator, hint, pad rows, any row outside the text
+/// viewport, or a plain unmodified click (those rows carry no `OpenAsset` affordance).
+fn asset_panel_cmd_at(
+    model: &Model,
+    row: u16,
+    modifiers: crossterm::event::KeyModifiers,
+) -> Option<Cmd> {
+    use crate::render::AffordanceKind;
+    use crossterm::event::KeyModifiers;
+
+    let has_modifier =
+        modifiers.contains(KeyModifiers::CONTROL) || modifiers.contains(KeyModifiers::SUPER);
+    if !has_modifier {
         return None;
     }
 
-    let interior_row = line_idx - asset_section_start;
-    let idx = asset_panel::asset_index_for_section_row(assets, width, interior_row)?;
-    Some(Cmd::OpenAsset {
-        instance: instance.clone(),
-        url: assets[idx].url.clone(),
-    })
+    let Screen::Detail {
+        instance,
+        affordances,
+        lines,
+        offset,
+        ..
+    } = model.top()?
+    else {
+        return None;
+    };
+
+    let (_, viewport_rows) = model.viewport;
+    let text_top: u16 = 2;
+    let content_text_height = viewport_rows.saturating_sub(DETAIL_CHROME_ROWS);
+
+    if row < text_top || row >= text_top + content_text_height {
+        return None;
+    }
+
+    let line_idx = offset + (row - text_top) as usize;
+    if line_idx >= lines.len() {
+        return None;
+    }
+
+    let aff = affordances
+        .iter()
+        .find(|a| a.line_idx == line_idx && matches!(a.kind, AffordanceKind::OpenAsset(_)))?;
+
+    match &aff.kind {
+        AffordanceKind::OpenAsset(url) => Some(Cmd::OpenAsset {
+            instance: instance.clone(),
+            url: url.clone(),
+        }),
+        _ => None,
+    }
 }
 
 fn handle_select(model: Model) -> (Model, Vec<Cmd>) {

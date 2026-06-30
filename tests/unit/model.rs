@@ -368,6 +368,16 @@ fn detail_model_with_lines_and_assets(
     offset: usize,
     viewport: (u16, u16),
 ) -> Model {
+    detail_model_with_lines_assets_affs(lines, assets, vec![], offset, viewport)
+}
+
+fn detail_model_with_lines_assets_affs(
+    lines: Vec<String>,
+    assets: Vec<Asset>,
+    affordances: Vec<crate::render::LocalAffordance>,
+    offset: usize,
+    viewport: (u16, u16),
+) -> Model {
     Model {
         stack: vec![Screen::Detail {
             instance: "inst".into(),
@@ -384,7 +394,7 @@ fn detail_model_with_lines_and_assets(
             rendered_width: usize::MAX,
             compose: None,
             current_user_id: None,
-            affordances: vec![],
+            affordances,
             confirm_delete: None,
             focused_comment: None,
             auth_error: false,
@@ -401,6 +411,19 @@ fn detail_model_with_lines_and_assets(
     }
 }
 
+/// Build an `OpenUrl` affordance for a URL that starts at panel column `col_start`
+/// on `line_idx`, where `col_start` is in the panel display-column space
+/// (│=col 0, content starts at col 2).
+fn open_url_aff(line_idx: usize, col_start: usize, url: &str) -> crate::render::LocalAffordance {
+    use crate::render::{AffordanceKind, LocalAffordance};
+    LocalAffordance {
+        line_idx,
+        col_start,
+        col_end: col_start + url.len(),
+        kind: AffordanceKind::OpenUrl(url.to_string()),
+    }
+}
+
 // V5-A2: A click on the visible '[url]' token emits OpenAsset with the exact URL (no brackets).
 // Viewport 80x24, no assets. text_top=2, content_text_height=24-4=20.
 // Line: "│ click here [https://example.com/doc.pdf]            │"
@@ -411,9 +434,10 @@ fn click_bracketed_url_token_emits_open_asset_with_exact_url() {
     let url = "https://example.com/doc.pdf";
     // Build a line with the inline format: "│ click here [https://example.com/doc.pdf] │"
     // Border │ (col 0), space (col 1), "click here " (cols 2-12), "[" (col 13),
-    // URL inner starts at col 14.
+    // URL inner starts at col 14. OpenUrl affordance: col_start=14, col_end=14+url_len.
     let line = format!("\u{2502} click here [{url}] \u{2502}");
-    let m = detail_model_with_lines_and_assets(vec![line], vec![], 0, (80, 24));
+    let aff = open_url_aff(0, 14, url);
+    let m = detail_model_with_lines_assets_affs(vec![line], vec![], vec![aff], 0, (80, 24));
 
     // Click at col 15 — inside the URL inner span (starts at col 14 after "│ click here [")
     let (_m, cmds) = update(
@@ -445,10 +469,18 @@ fn click_body_link_accounts_for_scroll_offset() {
     let url = "https://example.com/offset-test";
     let plain_line = "\u{2502} plain text \u{2502}".to_string();
     let link_line = format!("\u{2502} [{url}] \u{2502}");
-    let m = detail_model_with_lines_and_assets(vec![plain_line, link_line], vec![], 1, (80, 24));
+    // OpenUrl affordance on line 1: `│ [` = 3 display cols before the inner URL.
+    // col_start=3, col_end=3+url.len().
+    let aff = open_url_aff(1, 3, url);
+    let m = detail_model_with_lines_assets_affs(
+        vec![plain_line, link_line],
+        vec![],
+        vec![aff],
+        1,
+        (80, 24),
+    );
 
-    // char_col = column - 1; URL inner starts at display col 3.
-    // So column must be 4 → char_col = 3 → inside the URL.
+    // char_col = column as usize = 4; affordance col_start=3, so col 4 ≥ 3 ✓
     let (_m, cmds) = update(
         m,
         Msg::Click {
@@ -507,15 +539,19 @@ fn click_non_url_bracket_token_is_noop() {
     );
 }
 
-// V5-A3: Mailto bracket token yields Cmd::OpenAsset with 'mailto:' scheme re-added.
+// V5-A3: Mailto bracket token yields Cmd::OpenAsset with 'mailto:' scheme pre-added
+// at emit time (ADR 0043 §2) and stored in the OpenUrl affordance.
 #[test]
 fn click_mailto_bracket_token_yields_mailto_cmd() {
     let email = "user@example.com";
     let line = format!("\u{2502} mail [{email}] \u{2502}");
-    let m = detail_model_with_lines_and_assets(vec![line], vec![], 0, (80, 24));
+    // OpenUrl affordance: normalized to "mailto:email" at emit time.
+    // Panel col: │(1) + space(1) + "mail "(5) + [(1) = inner at col 8.
+    let normalized_url = format!("mailto:{email}");
+    let aff = open_url_aff(0, 8, &normalized_url);
+    let m = detail_model_with_lines_assets_affs(vec![line], vec![], vec![aff], 0, (80, 24));
 
-    // char_col = column - 1; email inner starts at display col 8 (after "│ mail [").
-    // So column must be 9 → char_col = 8 → inside the email.
+    // char_col = column as usize = 9 ≥ col_start=8 ✓
     let (_m, cmds) = update(
         m,
         Msg::Click {
@@ -530,7 +566,7 @@ fn click_mailto_bracket_token_yields_mailto_cmd() {
             assert_eq!(
                 cmd_url,
                 &format!("mailto:{email}"),
-                "mailto scheme must be re-added in click path"
+                "OpenUrl affordance must carry mailto:-prefixed URL"
             );
         }
         other => panic!("expected OpenAsset with mailto, got {other:?}"),
@@ -560,41 +596,76 @@ fn click_outside_content_text_area_is_noop() {
 
 // --- D1c: modifier-gated wrapped-URL click tests ---
 
-/// Build a Detail model with a URL token that hard-splits across exactly two box-content
-/// lines at `content_width = inner_width - 4 = viewport_cols - 6`.
+/// Build a Detail model with a URL that hard-splits across at least two body content
+/// lines. Uses `build_detail_content` so that `affordances` is properly populated
+/// with `OpenUrl` spans for every wrapped fragment (ADR 0043 §2).
 ///
-/// The URL is placed inside a `[url]` bracket token. The combined `[url]` token is
-/// longer than `content_width`, so `wrap_text` splits it mid-token. The two boxed
-/// lines simulate the output of `build_detail_content` + `panel_box`.
+/// Returns `(model, line0_idx, line1_idx, text_top, col_in_frag0, col_in_frag1)`
+/// where `col_in_frag0` and `col_in_frag1` are click columns guaranteed to be inside
+/// their respective `OpenUrl` affordance spans.
 fn detail_model_with_wrapped_url_lines(
     url: &str,
     viewport: (u16, u16),
 ) -> (Model, usize, usize, u16) {
+    use crate::render::{build_detail_content, AffordanceKind};
     let inner_width = viewport.0.saturating_sub(2) as usize;
-    let content_width = inner_width.saturating_sub(4);
-    let token = format!("[{url}]");
-
-    assert!(
-        token.len() > content_width,
-        "url token must be longer than content_width={content_width} to force wrapping; \
-         got token.len()={} for url.len()={}",
-        token.len(),
-        url.len()
+    let html = format!("<p><a href=\"{url}\">{url}</a></p>");
+    let task = serde_json::json!({ "id": 1, "name": "T", "body": html });
+    let content = build_detail_content(
+        &task,
+        &[],
+        &std::collections::HashMap::new(),
+        inner_width,
+        None,
     );
 
-    let frag0 = &token[..content_width];
-    let frag1 = &token[content_width..];
-    let pad1 = " ".repeat(content_width.saturating_sub(frag1.len()));
-    let border = '\u{2502}';
-    let line0 = format!("{border} {frag0} {border}");
-    let line1 = format!("{border} {frag1}{pad1} {border}");
+    let url_affs: Vec<_> = content
+        .affordances
+        .iter()
+        .filter(|a| matches!(&a.kind, AffordanceKind::OpenUrl(_)))
+        .collect();
+    assert!(
+        url_affs.len() >= 2,
+        "URL must produce at least 2 OpenUrl affordances (one per wrapped fragment); \
+         got {}: url={url:?}, inner_width={inner_width}",
+        url_affs.len()
+    );
 
-    let lines = vec![line0, line1];
-    let line0_idx = 0usize;
-    let line1_idx = 1usize;
+    let line0_idx = url_affs[0].line_idx;
+    let line1_idx = url_affs[1].line_idx;
     let text_top: u16 = 2;
 
-    let m = detail_model_with_lines_and_assets(lines, vec![], 0, viewport);
+    let m = Model {
+        stack: vec![Screen::Detail {
+            instance: "inst".into(),
+            project_id: 1,
+            task_id: 1,
+            task: task.clone(),
+            comments: vec![],
+            user_map: HashMap::new(),
+            lines: content.lines,
+            line_styles: content.line_styles,
+            assets: vec![],
+            offset: 0,
+            loading: false,
+            rendered_width: usize::MAX,
+            compose: None,
+            current_user_id: None,
+            affordances: content.affordances,
+            confirm_delete: None,
+            focused_comment: None,
+            auth_error: false,
+            comment_spans: vec![],
+        }],
+        should_quit: false,
+        header: empty_header(),
+        viewport,
+        click_targets: vec![],
+        modal_button_targets: vec![],
+        last_loaded: None,
+        selection: None,
+        copied_feedback: false,
+    };
     (m, line0_idx, line1_idx, text_top)
 }
 
@@ -634,6 +705,8 @@ fn ctrl_click_on_first_wrapped_fragment_returns_complete_url() {
 }
 
 // D1c-A1: Ctrl+click on the LAST wrapped fragment of a long URL returns the COMPLETE URL.
+// URL = 37 chars, token = 39 chars, cw = 36. Fragment 1 = "ge]" (3 chars).
+// URL inner on fragment 1 spans panel cols [2, 4) — click at col 3 is inside.
 #[test]
 fn ctrl_click_on_last_wrapped_fragment_returns_complete_url() {
     let url = "https://example.com/long-path/to/page";
@@ -644,7 +717,7 @@ fn ctrl_click_on_last_wrapped_fragment_returns_complete_url() {
     let (_m, cmds) = update(
         m,
         Msg::Click {
-            column: 4,
+            column: 3,
             row: row1,
             modifiers: KeyModifiers::CONTROL,
         },
@@ -685,12 +758,15 @@ fn plain_click_on_url_token_is_noop() {
 }
 
 // D1c-A3: A single-line (unwrapped) body link still resolves to OpenAsset with the modifier.
-// Regression test: the new wrapped-URL path must not break the existing single-line case.
+// Regression test: the new affordance-lookup path must not break the single-line case.
+// URL "https://example.com/short" (25 chars). Panel col of inner: │(1)+space(1)+[(1) = 3.
+// col_end = 3 + 25 = 28. Click at col 4 ≥ 3 ✓.
 #[test]
 fn ctrl_click_on_single_line_url_still_resolves() {
     let url = "https://example.com/short";
     let line = format!("\u{2502} [{url}] \u{2502}");
-    let m = detail_model_with_lines_and_assets(vec![line], vec![], 0, (80, 24));
+    let aff = open_url_aff(0, 3, url);
+    let m = detail_model_with_lines_assets_affs(vec![line], vec![], vec![aff], 0, (80, 24));
 
     let (_m, cmds) = update(
         m,
@@ -1089,13 +1165,16 @@ fn release_after_drag_emits_copy_cmd_regardless_of_clipboard_availability() {
     );
 }
 
-// V6-A3 regression: Ctrl/Cmd+click still opens a link (D1c not broken).
-// Uses a body line with a URL token so body_link_cmd_at fires.
+// V6-A3 regression: Ctrl/Cmd+click still opens a link (D1c not broken by V6).
+// Uses an OpenUrl affordance so body_link_cmd_at resolves via the structural registry.
+// URL "https://example.com/doc" (23 chars). Inner panel col: │+sp+[ = col 3.
+// col_end = 3+23 = 26. Click at col 4 ≥ 3 ✓.
 #[test]
 fn ctrl_click_on_url_still_opens_link_after_v6() {
     let url = "https://example.com/doc";
     let line = format!("\u{2502} [{url}] \u{2502}");
-    let m = detail_model_with_lines_and_assets(vec![line], vec![], 0, (80, 24));
+    let aff = open_url_aff(0, 3, url);
+    let m = detail_model_with_lines_assets_affs(vec![line], vec![], vec![aff], 0, (80, 24));
 
     let (_m, cmds) = update(
         m,
@@ -2604,8 +2683,10 @@ fn relative_due_overdue_many_days_returns_plural_label() {
 
 /// Build a Detail model with inline asset section pre-spliced into `lines`.
 ///
-/// Uses `asset_panel::section_lines` to append the asset section so the
-/// geometry (lines.len(), section_start) matches what build_detail_content produces.
+/// Mirrors what `build_detail_content` produces: appends the asset section via
+/// `section_lines` and emits `OpenAsset` affordances for every asset content row
+/// (including wrapped continuation lines), so the click path works end-to-end
+/// without a real task JSON.
 fn detail_model_with_inline_assets(
     body_lines: Vec<String>,
     assets: Vec<Asset>,
@@ -2617,11 +2698,34 @@ fn detail_model_with_inline_assets(
 
     let mut lines = body_lines;
     let mut line_styles: Vec<Vec<crate::render::StyleRun>> = vec![vec![]; lines.len()];
+    let mut affordances: Vec<crate::render::LocalAffordance> = vec![];
 
     if !assets.is_empty() {
         lines.push(String::new());
         line_styles.push(vec![]);
-        for (text, runs) in asset_panel::section_lines(&assets, content_width) {
+
+        let section_base_idx = lines.len();
+        for (section_idx, (text, runs)) in asset_panel::section_lines(&assets, content_width)
+            .into_iter()
+            .enumerate()
+        {
+            if let Some(asset_idx) =
+                asset_panel::asset_index_for_section_row(&assets, content_width, section_idx)
+            {
+                let link_span = runs
+                    .iter()
+                    .find(|r| matches!(r.style, crate::richtext::RichStyle::Link));
+                if let Some(span) = link_span {
+                    affordances.push(crate::render::LocalAffordance {
+                        line_idx: section_base_idx + section_idx,
+                        col_start: span.start,
+                        col_end: span.start + span.len,
+                        kind: crate::render::AffordanceKind::OpenAsset(
+                            assets[asset_idx].url.clone(),
+                        ),
+                    });
+                }
+            }
             lines.push(text);
             line_styles.push(runs);
         }
@@ -2643,7 +2747,7 @@ fn detail_model_with_inline_assets(
             rendered_width: usize::MAX,
             compose: None,
             current_user_id: None,
-            affordances: vec![],
+            affordances,
             confirm_delete: None,
             focused_comment: None,
             auth_error: false,
@@ -2792,7 +2896,7 @@ fn ctrl_click_on_asset_section_header_row_emits_no_cmd() {
     );
     assert!(
         cmds.is_empty(),
-        "Ctrl+click on asset header row must emit no cmd (None from asset_index_for_section_row)"
+        "Ctrl+click on asset header row must emit no cmd (no OpenAsset affordance on header line)"
     );
 }
 
@@ -3020,6 +3124,148 @@ fn ctrl_click_with_empty_assets_emits_no_cmd() {
     assert!(
         !has_open,
         "empty assets: no OpenAsset must be emitted on any row"
+    );
+}
+
+// AC2 (issue 0045): Ctrl+click on a wrapped continuation line of an asset emits
+// OpenAsset with the asset's url.
+// Width 42 → inner_width=40 → content_width=39 (PANEL_HPAD=1). A 35+ char label
+// at that width wraps to at least 2 Asset rows in the layout, each carrying an
+// OpenAsset affordance with the same url.
+#[test]
+fn ctrl_click_on_wrapped_asset_continuation_emits_open_asset() {
+    let asset_url = "https://example.com/file.pdf";
+    let long_label = "very-long-filename-that-does-not-fit.pdf";
+    let viewport = (42u16, 24u16);
+    let inner_width = viewport.0.saturating_sub(2) as usize;
+    let content_width = asset_panel::inline_content_width(inner_width);
+
+    let asset_rows =
+        crate::render::asset_row_lines(1, &make_asset(long_label, asset_url), content_width);
+    assert!(
+        asset_rows.len() >= 2,
+        "label must wrap to at least 2 rows at content_width={content_width}; \
+         got {} rows for label.len()={}",
+        asset_rows.len(),
+        long_label.len()
+    );
+
+    let open_asset_affs: Vec<crate::render::LocalAffordance> = {
+        let m = detail_model_with_inline_assets(
+            vec![],
+            vec![make_asset(long_label, asset_url)],
+            0,
+            viewport,
+        );
+        let Screen::Detail { affordances, .. } = m.top().unwrap() else {
+            panic!("expected Detail screen")
+        };
+        affordances
+            .iter()
+            .filter(|a| matches!(a.kind, crate::render::AffordanceKind::OpenAsset(_)))
+            .cloned()
+            .collect()
+    };
+
+    assert!(
+        open_asset_affs.len() >= 2,
+        "wrapped asset must produce at least 2 OpenAsset affordances; got {}: {open_asset_affs:?}",
+        open_asset_affs.len()
+    );
+
+    let text_top: u16 = 2;
+
+    for aff in &open_asset_affs {
+        let m = detail_model_with_inline_assets(
+            vec![],
+            vec![make_asset(long_label, asset_url)],
+            0,
+            viewport,
+        );
+        let row = text_top + (aff.line_idx as u16);
+        let (_m, cmds) = update(
+            m,
+            Msg::Click {
+                column: (aff.col_start + 1) as u16,
+                row,
+                modifiers: crossterm::event::KeyModifiers::CONTROL,
+            },
+        );
+        assert_eq!(
+            cmds.len(),
+            1,
+            "Ctrl+click on wrapped asset fragment at line {} (row {}) must emit one cmd; got {:?}",
+            aff.line_idx,
+            row,
+            cmds
+        );
+        match &cmds[0] {
+            Cmd::OpenAsset { url, instance } => {
+                assert_eq!(
+                    url, asset_url,
+                    "wrapped fragment click must return the asset url"
+                );
+                assert_eq!(instance, "inst");
+            }
+            other => panic!(
+                "expected OpenAsset for wrapped fragment at line {}, got {other:?}",
+                aff.line_idx
+            ),
+        }
+    }
+}
+
+// AC4 (issue 0045): plain (no Ctrl/Cmd) click on a wrapped asset continuation row
+// does NOT emit Cmd::OpenAsset. (The modifier gate is enforced per BDR 0014 Sc.8.)
+#[test]
+fn plain_click_on_wrapped_asset_continuation_emits_no_open_asset() {
+    let asset_url = "https://example.com/file.pdf";
+    let long_label = "very-long-filename-that-does-not-fit.pdf";
+    let viewport = (42u16, 24u16);
+
+    let (continuation_line_idx, continuation_col_start) = {
+        let m = detail_model_with_inline_assets(
+            vec![],
+            vec![make_asset(long_label, asset_url)],
+            0,
+            viewport,
+        );
+        let Screen::Detail { affordances, .. } = m.top().unwrap() else {
+            panic!("expected Detail screen")
+        };
+        let open_asset_affs: Vec<_> = affordances
+            .iter()
+            .filter(|a| matches!(a.kind, crate::render::AffordanceKind::OpenAsset(_)))
+            .collect();
+        assert!(
+            !open_asset_affs.is_empty(),
+            "wrapped asset must produce OpenAsset affordances for this test to be meaningful"
+        );
+        let last = open_asset_affs[open_asset_affs.len() - 1];
+        (last.line_idx, last.col_start)
+    };
+
+    let text_top: u16 = 2;
+    let row = text_top + (continuation_line_idx as u16);
+
+    let m = detail_model_with_inline_assets(
+        vec![],
+        vec![make_asset(long_label, asset_url)],
+        0,
+        viewport,
+    );
+    let (_m, cmds) = update(
+        m,
+        Msg::Click {
+            column: (continuation_col_start + 1) as u16,
+            row,
+            modifiers: crossterm::event::KeyModifiers::NONE,
+        },
+    );
+    let has_open = cmds.iter().any(|c| matches!(c, Cmd::OpenAsset { .. }));
+    assert!(
+        !has_open,
+        "plain click on wrapped continuation must NOT emit OpenAsset (BDR 0014 Sc.8): {cmds:?}"
     );
 }
 
