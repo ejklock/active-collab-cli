@@ -186,6 +186,49 @@ pub struct Compose {
     pub status: ComposeStatus,
 }
 
+/// The active modal overlay on the Detail read view.
+///
+/// Compose and the delete prompt are mutually exclusive by construction — only one overlay
+/// at a time. The combined state (both active) cannot be constructed with this enum,
+/// replacing the previous two independent `Option` fields (ADR 0047).
+#[derive(Debug, Clone, PartialEq)]
+pub enum DetailOverlay {
+    None,
+    Compose(Compose),
+    ConfirmDelete { comment_id: i64 },
+}
+
+impl DetailOverlay {
+    pub fn compose(&self) -> Option<&Compose> {
+        match self {
+            DetailOverlay::Compose(c) => Some(c),
+            _ => Option::None,
+        }
+    }
+
+    pub fn compose_mut(&mut self) -> Option<&mut Compose> {
+        match self {
+            DetailOverlay::Compose(c) => Some(c),
+            _ => Option::None,
+        }
+    }
+
+    pub fn confirm_delete_id(&self) -> Option<i64> {
+        match self {
+            DetailOverlay::ConfirmDelete { comment_id } => Some(*comment_id),
+            _ => Option::None,
+        }
+    }
+
+    pub fn is_compose(&self) -> bool {
+        matches!(self, DetailOverlay::Compose(_))
+    }
+
+    pub fn is_confirm(&self) -> bool {
+        matches!(self, DetailOverlay::ConfirmDelete { .. })
+    }
+}
+
 /// Structured payload sent by spawn_load_detail phase 1.
 ///
 /// Carries the raw task/comments/assets + whatever user_map was available
@@ -259,8 +302,9 @@ pub enum Screen {
         loading: bool,
         /// Width at which the cache was last built; usize::MAX means "not yet built".
         rendered_width: usize,
-        /// In-progress comment compose area; None when compose mode is inactive.
-        compose: Option<Compose>,
+        /// The active modal overlay: compose area or delete-confirm prompt.
+        /// Mutually exclusive by construction — only one overlay at a time (ADR 0047).
+        overlay: DetailOverlay,
         /// Logged-in user's id for this instance; used to gate [editar]/[excluir] affordances.
         current_user_id: Option<i64>,
         /// All clickable affordance spans rebuilt by reflow_detail.
@@ -269,8 +313,6 @@ pub enum Screen {
         /// single linear scan over this vec replaces the four parallel affordance vecs
         /// that were here before. Hit-tested by `affordance_at` in model.rs.
         affordances: Vec<crate::render::LocalAffordance>,
-        /// When Some(id), the [confirmar]/[cancelar] inline prompt is shown for comment `id`.
-        confirm_delete: Option<i64>,
         /// Index of the currently-focused comment card; None when the thread has no comments.
         focused_comment: Option<usize>,
         /// Per-card global line ranges `(start_line, line_count)`, parallel to `comments`.
@@ -1036,10 +1078,7 @@ fn handle_click_list(model: Model, row: u16) -> (Model, Vec<Cmd>) {
 fn confirm_modal_is_open(model: &Model) -> bool {
     matches!(
         model.top(),
-        Some(Screen::Detail {
-            confirm_delete: Some(_),
-            ..
-        })
+        Some(Screen::Detail { overlay, .. }) if overlay.is_confirm()
     )
 }
 
@@ -1262,12 +1301,10 @@ fn extract_line_slice(
 
 fn handle_select(model: Model) -> (Model, Vec<Cmd>) {
     // When the delete-confirm modal is open, Enter confirms the delete.
-    if let Some(Screen::Detail {
-        confirm_delete: Some(_),
-        ..
-    }) = model.top()
-    {
-        return handle_confirm_delete(model);
+    if let Some(Screen::Detail { overlay, .. }) = model.top() {
+        if overlay.is_confirm() {
+            return handle_confirm_delete(model);
+        }
     }
     let mut model = model;
     let mut cmds = vec![];
@@ -1312,10 +1349,9 @@ fn handle_select(model: Model) -> (Model, Vec<Cmd>) {
                     offset: 0,
                     loading: true,
                     rendered_width: usize::MAX,
-                    compose: None,
+                    overlay: DetailOverlay::None,
                     current_user_id: None,
                     affordances: vec![],
-                    confirm_delete: None,
                     focused_comment: None,
                     comment_spans: vec![],
                     auth_error: false,
@@ -1328,12 +1364,10 @@ fn handle_select(model: Model) -> (Model, Vec<Cmd>) {
 
 fn handle_back(model: Model) -> Model {
     // When the delete-confirm modal is open, Esc cancels the delete (not Back).
-    if let Some(Screen::Detail {
-        confirm_delete: Some(_),
-        ..
-    }) = model.top()
-    {
-        return handle_cancel_delete(model);
+    if let Some(Screen::Detail { overlay, .. }) = model.top() {
+        if overlay.is_confirm() {
+            return handle_cancel_delete(model);
+        }
     }
     let mut model = model;
     if model.stack.len() <= 1 {
@@ -1459,7 +1493,7 @@ fn handle_loaded_detail(mut model: Model, load: DetailLoad) -> Model {
         ref mut loading,
         ref mut current_user_id,
         ref mut affordances,
-        ref mut confirm_delete,
+        ref mut overlay,
         ref mut focused_comment,
         ref mut comment_spans,
         ref mut auth_error,
@@ -1478,7 +1512,7 @@ fn handle_loaded_detail(mut model: Model, load: DetailLoad) -> Model {
         *lss = vec![];
         *rw = usize::MAX;
         *affordances = vec![];
-        *confirm_delete = None;
+        *overlay = DetailOverlay::None;
         *focused_comment = None;
         *comment_spans = vec![];
     }
@@ -1524,13 +1558,13 @@ fn handle_header_name_resolved(mut model: Model, name: String) -> Model {
 
 fn handle_compose_open(mut model: Model) -> Model {
     if let Some(Screen::Detail {
-        ref mut compose,
+        ref mut overlay,
         ref mut rendered_width,
         ..
     }) = model.top_mut()
     {
-        if compose.is_none() {
-            *compose = Some(Compose {
+        if !overlay.is_compose() {
+            *overlay = DetailOverlay::Compose(Compose {
                 kind: ComposeKind::New,
                 buffer: String::new(),
                 status: ComposeStatus::Editing,
@@ -1543,14 +1577,16 @@ fn handle_compose_open(mut model: Model) -> Model {
 
 fn handle_compose_input(mut model: Model, c: char) -> Model {
     if let Some(Screen::Detail {
-        compose: Some(ref mut cp),
+        ref mut overlay,
         ref mut rendered_width,
         ..
     }) = model.top_mut()
     {
-        if cp.status == ComposeStatus::Editing {
-            cp.buffer.push(c);
-            *rendered_width = usize::MAX;
+        if let Some(cp) = overlay.compose_mut() {
+            if cp.status == ComposeStatus::Editing {
+                cp.buffer.push(c);
+                *rendered_width = usize::MAX;
+            }
         }
     }
     model
@@ -1558,14 +1594,16 @@ fn handle_compose_input(mut model: Model, c: char) -> Model {
 
 fn handle_compose_newline(mut model: Model) -> Model {
     if let Some(Screen::Detail {
-        compose: Some(ref mut cp),
+        ref mut overlay,
         ref mut rendered_width,
         ..
     }) = model.top_mut()
     {
-        if cp.status == ComposeStatus::Editing {
-            cp.buffer.push('\n');
-            *rendered_width = usize::MAX;
+        if let Some(cp) = overlay.compose_mut() {
+            if cp.status == ComposeStatus::Editing {
+                cp.buffer.push('\n');
+                *rendered_width = usize::MAX;
+            }
         }
     }
     model
@@ -1573,14 +1611,16 @@ fn handle_compose_newline(mut model: Model) -> Model {
 
 fn handle_compose_backspace(mut model: Model) -> Model {
     if let Some(Screen::Detail {
-        compose: Some(ref mut cp),
+        ref mut overlay,
         ref mut rendered_width,
         ..
     }) = model.top_mut()
     {
-        if cp.status == ComposeStatus::Editing {
-            cp.buffer.pop();
-            *rendered_width = usize::MAX;
+        if let Some(cp) = overlay.compose_mut() {
+            if cp.status == ComposeStatus::Editing {
+                cp.buffer.pop();
+                *rendered_width = usize::MAX;
+            }
         }
     }
     model
@@ -1594,13 +1634,15 @@ fn handle_compose_submit(mut model: Model) -> (Model, Vec<Cmd>) {
     };
 
     if let Some(Screen::Detail {
-        compose: Some(ref mut cp),
+        ref mut overlay,
         ref mut rendered_width,
         ..
     }) = model.top_mut()
     {
-        cp.status = ComposeStatus::Submitting;
-        *rendered_width = usize::MAX;
+        if let Some(cp) = overlay.compose_mut() {
+            cp.status = ComposeStatus::Submitting;
+            *rendered_width = usize::MAX;
+        }
     }
 
     let cmd = match kind {
@@ -1621,34 +1663,41 @@ fn handle_compose_submit(mut model: Model) -> (Model, Vec<Cmd>) {
 
 /// Extract the fields needed to submit a compose buffer, or None when the guard fails.
 ///
-/// Guard: compose must be `Some`, status must be `Editing`, and buffer must be non-empty.
+/// Guard: overlay must be Compose, status must be `Editing`, and buffer must be non-empty.
 fn extract_compose_submit_info(model: &Model) -> Option<(String, i64, i64, ComposeKind, String)> {
     match model.top() {
         Some(Screen::Detail {
             instance,
             project_id,
             task_id,
-            compose: Some(cp),
+            overlay,
             ..
-        }) if cp.status == ComposeStatus::Editing && !cp.buffer.is_empty() => Some((
-            instance.clone(),
-            *project_id,
-            *task_id,
-            cp.kind.clone(),
-            cp.buffer.clone(),
-        )),
+        }) => {
+            let cp = overlay.compose()?;
+            if cp.status == ComposeStatus::Editing && !cp.buffer.is_empty() {
+                Some((
+                    instance.clone(),
+                    *project_id,
+                    *task_id,
+                    cp.kind.clone(),
+                    cp.buffer.clone(),
+                ))
+            } else {
+                None
+            }
+        }
         _ => None,
     }
 }
 
 fn handle_compose_cancel(mut model: Model) -> Model {
     if let Some(Screen::Detail {
-        ref mut compose,
+        ref mut overlay,
         ref mut rendered_width,
         ..
     }) = model.top_mut()
     {
-        *compose = None;
+        *overlay = DetailOverlay::None;
         *rendered_width = usize::MAX;
     }
     model
@@ -1682,12 +1731,12 @@ fn handle_edit_comment_request(mut model: Model, comment_id: i64) -> Model {
     };
 
     if let Some(Screen::Detail {
-        ref mut compose,
+        ref mut overlay,
         ref mut rendered_width,
         ..
     }) = model.top_mut()
     {
-        *compose = Some(Compose {
+        *overlay = DetailOverlay::Compose(Compose {
             kind: ComposeKind::Edit { comment_id },
             buffer: body,
             status: ComposeStatus::Editing,
@@ -1697,29 +1746,27 @@ fn handle_edit_comment_request(mut model: Model, comment_id: i64) -> Model {
     model
 }
 
-/// Set `confirm_delete = Some(comment_id)` and invalidate the render cache so the
-/// inline confirm prompt appears on the next reflow. Emits no Cmd.
+/// Set `overlay = DetailOverlay::ConfirmDelete { comment_id }` and invalidate the render
+/// cache so the confirm prompt appears on the next reflow. Emits no Cmd.
 fn handle_delete_comment_request(mut model: Model, comment_id: i64) -> Model {
     if let Some(Screen::Detail {
-        ref mut confirm_delete,
+        ref mut overlay,
         ref mut rendered_width,
         ..
     }) = model.top_mut()
     {
-        *confirm_delete = Some(comment_id);
+        *overlay = DetailOverlay::ConfirmDelete { comment_id };
         *rendered_width = usize::MAX;
     }
     model
 }
 
-/// Emit `Cmd::DeleteComment` for the pending comment and clear `confirm_delete`.
+/// Emit `Cmd::DeleteComment` for the pending comment and clear the overlay.
 fn handle_confirm_delete(mut model: Model) -> (Model, Vec<Cmd>) {
     let fields = match model.top() {
         Some(Screen::Detail {
-            instance,
-            confirm_delete: Some(comment_id),
-            ..
-        }) => Some((instance.clone(), *comment_id)),
+            instance, overlay, ..
+        }) => overlay.confirm_delete_id().map(|id| (instance.clone(), id)),
         _ => None,
     };
 
@@ -1728,12 +1775,12 @@ fn handle_confirm_delete(mut model: Model) -> (Model, Vec<Cmd>) {
     };
 
     if let Some(Screen::Detail {
-        ref mut confirm_delete,
+        ref mut overlay,
         ref mut rendered_width,
         ..
     }) = model.top_mut()
     {
-        *confirm_delete = None;
+        *overlay = DetailOverlay::None;
         *rendered_width = usize::MAX;
     }
 
@@ -1746,15 +1793,15 @@ fn handle_confirm_delete(mut model: Model) -> (Model, Vec<Cmd>) {
     )
 }
 
-/// Dismiss the inline confirm prompt without deleting.
+/// Dismiss the confirm prompt without deleting.
 fn handle_cancel_delete(mut model: Model) -> Model {
     if let Some(Screen::Detail {
-        ref mut confirm_delete,
+        ref mut overlay,
         ref mut rendered_width,
         ..
     }) = model.top_mut()
     {
-        *confirm_delete = None;
+        *overlay = DetailOverlay::None;
         *rendered_width = usize::MAX;
     }
     model
@@ -1772,13 +1819,10 @@ fn handle_comment_mutation_ok(mut model: Model) -> (Model, Vec<Cmd>) {
     };
 
     if let Some(Screen::Detail {
-        ref mut compose,
-        ref mut confirm_delete,
-        ..
+        ref mut overlay, ..
     }) = model.top_mut()
     {
-        *compose = None;
-        *confirm_delete = None;
+        *overlay = DetailOverlay::None;
     }
 
     let Some((instance, project_id, task_id)) = detail_fields else {
@@ -1796,7 +1840,7 @@ fn handle_comment_mutation_ok(mut model: Model) -> (Model, Vec<Cmd>) {
 
 fn handle_comment_mutation_err(mut model: Model, msg: String) -> Model {
     if let Some(Screen::Detail {
-        compose: Some(ref mut cp),
+        overlay: DetailOverlay::Compose(cp),
         ref mut rendered_width,
         ..
     }) = model.top_mut()
