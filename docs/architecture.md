@@ -98,14 +98,25 @@ flowchart TD
   `screens/asset_panel.rs` owns a pure `layout(assets, width) -> Vec<PanelRow>`;
   `build_detail_content` (`render.rs`) splices that vector into the scrollable
   `lines`/`line_styles` (so every attachment is reachable by scrolling — no fixed
-  panel, no height cap), and the same vector yields a pure line→asset-index map the
-  click hit-test (`model.rs`) reads. The asset click is **scroll-aware**, sharing
+  panel, no height cap). The asset click is **scroll-aware**, sharing
   the body-link `offset + (row − text_top)` translation
   ([ADR 0020](/adr/0020-body-links-inline-url-native-click.md)). Fitness: the
-  rendered asset lines and the click map both derive from the one `layout` vector
-  (they cannot drift), gate-checked by a unit test on the `Vec<PanelRow>` + the map
-  and a TestBackend render derived from the real buffer
+  rendered asset lines and the click hit-target both derive from the one `layout`
+  vector (they cannot drift), gate-checked by a unit test on the `Vec<PanelRow>` and
+  a TestBackend render derived from the real buffer
   ([BDR 0022](/bdr/0022-assets-inline-scrollable-detail-content.md)).
+- **every detail click hit-target is emitted structurally into one affordance
+  registry** ([ADR 0043](/adr/0043-detail-hit-targets-emitted-structurally.md),
+  extending [ADR 0028](/adr/0028-asset-panel-single-layout-source.md)/[0032](/adr/0032-asset-row-link-style-structural.md)
+  from style to hit-target): `build_detail_content` emits `DetailContent.affordances`
+  — typed `LocalAffordance { line_idx, col_start, col_end, kind }` spans for comment
+  `Edit`/`Delete`, body-link `OpenUrl(url)`, and asset `OpenAsset(url)` (one span per
+  wrapped fragment, the openable target resolved once at emit time). The three click
+  hit-tests in `model.rs` are **positional lookups** over that one list (plain click →
+  Edit/Delete; Ctrl/Cmd+click → OpenUrl/OpenAsset, [BDR 0014](/bdr/0014-body-link-inline-url-activation.md)
+  Sc.8). The old click-time re-derivation — `resolve_wrapped_url` + the inverse-wrap
+  helpers, and the asset `section_lines` re-call — is **deleted** (retiring the obs-35
+  latent over-join bug). Style and hit-target now share one single-source discipline.
 
 ## Read / browse data flow
 
