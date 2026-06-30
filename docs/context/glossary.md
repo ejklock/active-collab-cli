@@ -60,6 +60,11 @@ the doc language (English).
   edit/delete a comment, open a URL, open an asset). Emitted structurally by the
   layout alongside the lines and style runs, paralleling structural link **style**
   (ADR 0032) — style and hit-target share the same single-source discipline.
+- **Detail content viewport** — the scrollable text region of the Detail screen: the rows
+  `[DETAIL_TEXT_TOP, DETAIL_TEXT_TOP + content_height)` (top row `2`, height
+  `viewport_rows - DETAIL_CHROME_ROWS`) mapping a terminal row to a content `line_idx` via
+  `offset + (row - DETAIL_TEXT_TOP)`. Single-homed in the pure `src/tui/detail_geometry.rs`
+  (`is_in_content`, `row_to_line_idx`), shared by hit-test, selection, and copy (ADR 0045).
 - **DetailClickTarget** — the typed result of resolving a detail click
   (`CommentEdit`/`CommentDelete`/`OpenUrl`/`OpenAsset`), returned by the pure
   `hit_test::resolve_detail_click`. It decouples the layout artifact (`AffordanceKind`)
