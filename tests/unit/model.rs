@@ -34,10 +34,9 @@ fn detail_model_with_assets_and_viewport(
             offset: 0,
             loading: false,
             rendered_width: usize::MAX,
-            compose: None,
+            overlay: DetailOverlay::None,
             current_user_id: None,
             affordances: vec![],
-            confirm_delete: None,
             focused_comment: None,
             auth_error: false,
             comment_spans: vec![],
@@ -117,10 +116,9 @@ fn detail_model_scrollable(lines: Vec<String>, assets: Vec<Asset>, viewport: (u1
             offset: 0,
             loading: false,
             rendered_width: usize::MAX,
-            compose: None,
+            overlay: DetailOverlay::None,
             current_user_id: None,
             affordances: vec![],
-            confirm_delete: None,
             focused_comment: None,
             auth_error: false,
             comment_spans: vec![],
@@ -392,10 +390,9 @@ fn detail_model_with_lines_assets_affs(
             offset,
             loading: false,
             rendered_width: usize::MAX,
-            compose: None,
+            overlay: DetailOverlay::None,
             current_user_id: None,
             affordances,
-            confirm_delete: None,
             focused_comment: None,
             auth_error: false,
             comment_spans: vec![],
@@ -649,10 +646,9 @@ fn detail_model_with_wrapped_url_lines(
             offset: 0,
             loading: false,
             rendered_width: usize::MAX,
-            compose: None,
+            overlay: DetailOverlay::None,
             current_user_id: None,
             affordances: content.affordances,
-            confirm_delete: None,
             focused_comment: None,
             auth_error: false,
             comment_spans: vec![],
@@ -839,10 +835,9 @@ fn detail_model_for_selection(lines: Vec<String>, viewport: (u16, u16), offset: 
             offset,
             loading: false,
             rendered_width: usize::MAX,
-            compose: None,
+            overlay: DetailOverlay::None,
             current_user_id: None,
             affordances: vec![],
-            confirm_delete: None,
             focused_comment: None,
             auth_error: false,
             comment_spans: vec![],
@@ -1700,10 +1695,9 @@ fn detail_footer_hint_with_assets_has_no_ctrl_cmd_reference() {
         offset: 0,
         loading: false,
         rendered_width: usize::MAX,
-        compose: None,
+        overlay: DetailOverlay::None,
         current_user_id: None,
         affordances: vec![],
-        confirm_delete: None,
         focused_comment: None,
         auth_error: false,
         comment_spans: vec![],
@@ -1766,10 +1760,9 @@ fn detail_model_with_boxed_lines(lines: Vec<String>, viewport: (u16, u16), offse
             offset,
             loading: false,
             rendered_width: usize::MAX,
-            compose: None,
+            overlay: DetailOverlay::None,
             current_user_id: None,
             affordances: vec![],
-            confirm_delete: None,
             focused_comment: None,
             auth_error: false,
             comment_spans: vec![],
@@ -2745,10 +2738,9 @@ fn detail_model_with_inline_assets(
             offset,
             loading: false,
             rendered_width: usize::MAX,
-            compose: None,
+            overlay: DetailOverlay::None,
             current_user_id: None,
             affordances,
-            confirm_delete: None,
             focused_comment: None,
             auth_error: false,
             comment_spans: vec![],
@@ -3271,7 +3263,7 @@ fn plain_click_on_wrapped_asset_continuation_emits_no_open_asset() {
 
 // ── Compose mode tests (BDR 0024 / ADR 0034 / ADR 0035) ──────────────────────
 
-use crate::tui::model::{Compose, ComposeKind, ComposeStatus};
+use crate::tui::model::{Compose, ComposeKind, ComposeStatus, DetailOverlay};
 
 fn detail_model_for_compose(instance: &str, project_id: i64, task_id: i64) -> Model {
     Model {
@@ -3288,10 +3280,9 @@ fn detail_model_for_compose(instance: &str, project_id: i64, task_id: i64) -> Mo
             offset: 0,
             loading: false,
             rendered_width: usize::MAX,
-            compose: None,
+            overlay: DetailOverlay::None,
             current_user_id: None,
             affordances: vec![],
-            confirm_delete: None,
             focused_comment: None,
             auth_error: false,
             comment_spans: vec![],
@@ -3309,7 +3300,7 @@ fn detail_model_for_compose(instance: &str, project_id: i64, task_id: i64) -> Mo
 
 fn extract_compose(model: &Model) -> Option<&Compose> {
     match model.top() {
-        Some(Screen::Detail { compose, .. }) => compose.as_ref(),
+        Some(Screen::Detail { overlay, .. }) => overlay.compose(),
         _ => None,
     }
 }
@@ -3331,10 +3322,10 @@ fn compose_open_on_detail_sets_editing_state_with_empty_buffer() {
 fn compose_open_when_already_active_is_noop() {
     let mut m = detail_model_for_compose("inst", 10, 42);
     if let Some(Screen::Detail {
-        ref mut compose, ..
+        ref mut overlay, ..
     }) = m.stack.last_mut()
     {
-        *compose = Some(Compose {
+        *overlay = DetailOverlay::Compose(Compose {
             kind: ComposeKind::New,
             buffer: "existing".into(),
             status: ComposeStatus::Editing,
@@ -3666,10 +3657,9 @@ fn detail_model_with_comments_for_edit(
             offset: 0,
             loading: false,
             rendered_width: usize::MAX,
-            compose: None,
+            overlay: DetailOverlay::None,
             current_user_id,
             affordances: vec![],
-            confirm_delete: None,
             focused_comment: None,
             auth_error: false,
             comment_spans: vec![],
@@ -3913,11 +3903,11 @@ fn confirm_affordances_absent_when_confirm_delete_is_none() {
     match m.top() {
         Some(Screen::Detail {
             affordances,
-            confirm_delete,
+            overlay,
             ..
         }) => {
             assert!(
-                confirm_delete.is_none(),
+                overlay.confirm_delete_id().is_none(),
                 "confirm_delete must be None before any click"
             );
             // The confirm/cancel modal buttons are hit-tested by dispatch_modal_click
@@ -3975,9 +3965,9 @@ fn ctrl_click_on_delete_affordance_sets_confirm_delete_no_cmd() {
         cmds
     );
     match m2.top() {
-        Some(Screen::Detail { confirm_delete, .. }) => {
+        Some(Screen::Detail { overlay, .. }) => {
             assert_eq!(
-                *confirm_delete,
+                overlay.confirm_delete_id(),
                 Some(42),
                 "confirm_delete must be Some(42) after clicking [excluir]"
             );
@@ -4012,9 +4002,9 @@ fn plain_click_on_delete_affordance_does_not_set_confirm_delete() {
     );
 
     match m2.top() {
-        Some(Screen::Detail { confirm_delete, .. }) => {
+        Some(Screen::Detail { overlay, .. }) => {
             assert!(
-                confirm_delete.is_none(),
+                overlay.confirm_delete_id().is_none(),
                 "plain click on [excluir] coords must NOT set confirm_delete"
             );
         }
@@ -4054,11 +4044,11 @@ fn confirm_affordances_absent_in_affordances_after_delete_request() {
     match m2.top() {
         Some(Screen::Detail {
             affordances,
-            confirm_delete,
+            overlay,
             ..
         }) => {
             assert_eq!(
-                *confirm_delete,
+                overlay.confirm_delete_id(),
                 Some(42),
                 "confirm_delete must be Some(42) after excluir click"
             );
@@ -4111,10 +4101,7 @@ fn confirm_delete_msg_emits_delete_comment_cmd() {
     assert!(
         matches!(
             m2.top(),
-            Some(Screen::Detail {
-                confirm_delete: Some(42),
-                ..
-            })
+            Some(Screen::Detail { overlay, .. }) if overlay.confirm_delete_id() == Some(42)
         ),
         "confirm_delete must be Some(42) after clicking [excluir]"
     );
@@ -4167,10 +4154,7 @@ fn cancel_delete_msg_clears_confirm_delete_no_cmd() {
     assert!(
         matches!(
             m2.top(),
-            Some(Screen::Detail {
-                confirm_delete: Some(_),
-                ..
-            })
+            Some(Screen::Detail { overlay, .. }) if overlay.is_confirm()
         ),
         "confirm_delete must be Some after clicking [excluir]"
     );
@@ -4183,9 +4167,9 @@ fn cancel_delete_msg_clears_confirm_delete_no_cmd() {
         cmds
     );
     match m3.top() {
-        Some(Screen::Detail { confirm_delete, .. }) => {
+        Some(Screen::Detail { overlay, .. }) => {
             assert!(
-                confirm_delete.is_none(),
+                overlay.confirm_delete_id().is_none(),
                 "confirm_delete must be None after CancelDeleteComment"
             );
         }
@@ -4199,11 +4183,10 @@ fn cancel_delete_msg_clears_confirm_delete_no_cmd() {
 fn comment_mutation_ok_after_delete_emits_load_detail_refresh() {
     let mut m = detail_model_with_comments_for_delete("inst", 5, 10, Some(7), 82);
     if let Some(Screen::Detail {
-        ref mut confirm_delete,
-        ..
+        ref mut overlay, ..
     }) = m.top_mut()
     {
-        *confirm_delete = Some(42);
+        *overlay = DetailOverlay::ConfirmDelete { comment_id: 42 };
     }
 
     let (m2, cmds) = update(m, Msg::CommentMutationOk);
@@ -4229,9 +4212,9 @@ fn comment_mutation_ok_after_delete_emits_load_detail_refresh() {
         other => panic!("expected Cmd::LoadDetail, got {other:?}"),
     }
     match m2.top() {
-        Some(Screen::Detail { confirm_delete, .. }) => {
+        Some(Screen::Detail { overlay, .. }) => {
             assert!(
-                confirm_delete.is_none(),
+                overlay.confirm_delete_id().is_none(),
                 "confirm_delete must be cleared by CommentMutationOk"
             );
         }
@@ -4246,13 +4229,10 @@ fn comment_mutation_err_does_not_emit_refresh() {
     let mut m = detail_model_with_comments_for_delete("inst", 5, 10, Some(7), 82);
 
     if let Some(Screen::Detail {
-        ref mut compose,
-        ref mut confirm_delete,
-        ..
+        ref mut overlay, ..
     }) = m.top_mut()
     {
-        *confirm_delete = Some(42);
-        *compose = Some(crate::tui::model::Compose {
+        *overlay = DetailOverlay::Compose(crate::tui::model::Compose {
             buffer: String::new(),
             status: crate::tui::model::ComposeStatus::Submitting,
             kind: crate::tui::model::ComposeKind::New,
@@ -4303,10 +4283,9 @@ fn detail_model_with_n_comments(n: usize) -> Model {
             offset: 0,
             loading: false,
             rendered_width: usize::MAX,
-            compose: None,
+            overlay: DetailOverlay::None,
             current_user_id: None,
             affordances: vec![],
-            confirm_delete: None,
             focused_comment: None,
             auth_error: false,
             comment_spans: vec![],
@@ -4500,10 +4479,9 @@ fn detail_model_with_comment_spans(
             offset: initial_offset,
             loading: false,
             rendered_width: 80,
-            compose: None,
+            overlay: DetailOverlay::None,
             current_user_id: None,
             affordances: vec![],
-            confirm_delete: None,
             focused_comment: None,
             auth_error: false,
             comment_spans,
@@ -4947,10 +4925,9 @@ fn reflow_detail_with_compose_does_not_append_compose_lines() {
             offset: 0,
             loading: false,
             rendered_width: usize::MAX,
-            compose: Some(compose),
+            overlay: DetailOverlay::Compose(compose),
             current_user_id: None,
             affordances: vec![],
-            confirm_delete: None,
             focused_comment: None,
             auth_error: false,
             comment_spans: vec![],
@@ -5002,14 +4979,13 @@ fn ac7_regression_compose_newline_inserts_newline_not_submit_after_modal_migrati
             offset: 0,
             loading: false,
             rendered_width: usize::MAX,
-            compose: Some(Compose {
+            overlay: DetailOverlay::Compose(Compose {
                 kind: ComposeKind::New,
                 buffer: "hello".into(),
                 status: ComposeStatus::Editing,
             }),
             current_user_id: None,
             affordances: vec![],
-            confirm_delete: None,
             focused_comment: None,
             auth_error: false,
             comment_spans: vec![],
@@ -5029,9 +5005,8 @@ fn ac7_regression_compose_newline_inserts_newline_not_submit_after_modal_migrati
         "ComposeNewline must emit no Cmd (no submit): {cmds:?}"
     );
     match m2.top() {
-        Some(Screen::Detail {
-            compose: Some(cp), ..
-        }) => {
+        Some(Screen::Detail { overlay, .. }) => {
+            let cp = overlay.compose().expect("compose must be active");
             assert!(
                 cp.buffer.contains('\n'),
                 "ComposeNewline must insert a newline into the buffer: {:?}",
@@ -5059,14 +5034,13 @@ fn ac7_regression_compose_cancel_clears_compose_emits_no_cmd_after_modal_migrati
             offset: 0,
             loading: false,
             rendered_width: usize::MAX,
-            compose: Some(Compose {
+            overlay: DetailOverlay::Compose(Compose {
                 kind: ComposeKind::New,
                 buffer: "draft text".into(),
                 status: ComposeStatus::Editing,
             }),
             current_user_id: None,
             affordances: vec![],
-            confirm_delete: None,
             focused_comment: None,
             auth_error: false,
             comment_spans: vec![],
@@ -5083,10 +5057,10 @@ fn ac7_regression_compose_cancel_clears_compose_emits_no_cmd_after_modal_migrati
     let (m2, cmds) = update(m, Msg::ComposeCancel);
     assert!(cmds.is_empty(), "ComposeCancel must emit no Cmd: {cmds:?}");
     match m2.top() {
-        Some(Screen::Detail { compose, .. }) => {
+        Some(Screen::Detail { overlay, .. }) => {
             assert!(
-                compose.is_none(),
-                "ComposeCancel must clear compose: {compose:?}"
+                overlay.compose().is_none(),
+                "ComposeCancel must clear compose: {overlay:?}"
             );
         }
         _ => panic!("expected Detail screen"),
@@ -5110,14 +5084,13 @@ fn ac7_regression_compose_submit_emits_write_cmd_after_modal_migration() {
             offset: 0,
             loading: false,
             rendered_width: usize::MAX,
-            compose: Some(Compose {
+            overlay: DetailOverlay::Compose(Compose {
                 kind: ComposeKind::New,
                 buffer: "non empty".into(),
                 status: ComposeStatus::Editing,
             }),
             current_user_id: None,
             affordances: vec![],
-            confirm_delete: None,
             focused_comment: None,
             auth_error: false,
             comment_spans: vec![],
@@ -5183,10 +5156,9 @@ fn detail_model_with_confirm_delete(comment_id: i64) -> Model {
             offset: 0,
             loading: false,
             rendered_width: usize::MAX,
-            compose: None,
+            overlay: DetailOverlay::ConfirmDelete { comment_id },
             current_user_id: Some(7),
             affordances: vec![],
-            confirm_delete: Some(comment_id),
             focused_comment: None,
             auth_error: false,
             comment_spans: vec![],
@@ -5220,10 +5192,10 @@ fn enter_key_when_confirm_delete_some_emits_delete_comment() {
         other => panic!("expected DeleteComment, got {other:?}"),
     }
     match m2.top() {
-        Some(Screen::Detail { confirm_delete, .. }) => {
+        Some(Screen::Detail { overlay, .. }) => {
             assert!(
-                confirm_delete.is_none(),
-                "confirm_delete must be cleared after confirm"
+                overlay.confirm_delete_id().is_none(),
+                "overlay must be cleared after confirm"
             );
         }
         _ => panic!("expected Detail screen"),
@@ -5241,10 +5213,10 @@ fn esc_key_when_confirm_delete_some_cancels_without_popping() {
         cmds
     );
     match m2.top() {
-        Some(Screen::Detail { confirm_delete, .. }) => {
+        Some(Screen::Detail { overlay, .. }) => {
             assert!(
-                confirm_delete.is_none(),
-                "confirm_delete must be None after cancel"
+                overlay.confirm_delete_id().is_none(),
+                "overlay must be None after cancel"
             );
         }
         _ => panic!("expected Detail screen; Esc must not pop the stack"),
@@ -5262,8 +5234,8 @@ fn confirm_delete_msg_when_none_is_noop() {
         "ConfirmDeleteComment with no pending delete must emit no Cmd"
     );
     match m2.top() {
-        Some(Screen::Detail { confirm_delete, .. }) => {
-            assert!(confirm_delete.is_none());
+        Some(Screen::Detail { overlay, .. }) => {
+            assert!(overlay.confirm_delete_id().is_none());
         }
         _ => panic!("expected Detail screen"),
     }
@@ -5325,10 +5297,10 @@ fn comment_mutation_ok_after_delete_triggers_load_detail_refresh_regression() {
         other => panic!("expected LoadDetail, got {other:?}"),
     }
     match m2.top() {
-        Some(Screen::Detail { confirm_delete, .. }) => {
+        Some(Screen::Detail { overlay, .. }) => {
             assert!(
-                confirm_delete.is_none(),
-                "confirm_delete cleared by CommentMutationOk"
+                overlay.confirm_delete_id().is_none(),
+                "overlay cleared by CommentMutationOk"
             );
         }
         _ => panic!("expected Detail screen"),
@@ -5379,10 +5351,10 @@ fn plain_click_on_confirm_button_emits_delete_comment() {
         other => panic!("expected DeleteComment, got {other:?}"),
     }
     match m2.top() {
-        Some(Screen::Detail { confirm_delete, .. }) => {
+        Some(Screen::Detail { overlay, .. }) => {
             assert!(
-                confirm_delete.is_none(),
-                "confirm_delete cleared after confirm click"
+                overlay.confirm_delete_id().is_none(),
+                "overlay cleared after confirm click"
             );
         }
         _ => panic!("expected Detail screen"),
@@ -5423,10 +5395,10 @@ fn plain_click_on_cancel_button_clears_confirm_no_cmd() {
         cmds
     );
     match m2.top() {
-        Some(Screen::Detail { confirm_delete, .. }) => {
+        Some(Screen::Detail { overlay, .. }) => {
             assert!(
-                confirm_delete.is_none(),
-                "confirm_delete cleared after cancel click"
+                overlay.confirm_delete_id().is_none(),
+                "overlay cleared after cancel click"
             );
         }
         _ => panic!("expected Detail screen"),
@@ -5468,10 +5440,10 @@ fn plain_click_outside_buttons_while_modal_open_is_noop() {
         cmds
     );
     match m2.top() {
-        Some(Screen::Detail { confirm_delete, .. }) => {
+        Some(Screen::Detail { overlay, .. }) => {
             assert!(
-                confirm_delete.is_some(),
-                "confirm_delete must stay Some when click misses the buttons"
+                overlay.is_confirm(),
+                "overlay must stay ConfirmDelete when click misses the buttons"
             );
         }
         _ => panic!("expected Detail screen"),
@@ -5504,10 +5476,9 @@ fn hit_test_model(lines: Vec<String>, affordances: Vec<LocalAffordance>) -> Mode
             offset: 0,
             loading: false,
             rendered_width: usize::MAX,
-            compose: None,
+            overlay: DetailOverlay::None,
             current_user_id: None,
             affordances,
-            confirm_delete: None,
             focused_comment: None,
             auth_error: false,
             comment_spans: vec![],

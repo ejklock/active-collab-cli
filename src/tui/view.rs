@@ -38,24 +38,24 @@ pub(crate) fn format_br_datetime(iso: &str) -> Option<String> {
 pub(crate) fn hint_for_screen(screen: &Screen) -> String {
     match screen {
         Screen::Detail {
-            compose,
-            confirm_delete,
+            overlay,
             focused_comment,
             comments,
             current_user_id,
             ..
         } => {
-            let compose_for_footer = if compose.is_some() {
+            // The compose modal owns its hint when active; pass None to footer.
+            let compose_for_footer = if overlay.is_compose() {
                 None
             } else {
-                compose.as_ref()
+                overlay.compose()
             };
             // The confirm modal owns its hint; pass None so the footer does not
             // duplicate it (ADR 0039 §5 one-home suppression).
-            let confirm_for_footer = if confirm_delete.is_some() {
+            let confirm_for_footer = if overlay.is_confirm() {
                 None
             } else {
-                *confirm_delete
+                overlay.confirm_delete_id()
             };
             detail_hint(
                 compose_for_footer,
@@ -266,12 +266,12 @@ pub fn view(
 
     let hint_text = hint_for_screen(screen);
     let status_line = if let Screen::Detail {
-        compose,
+        overlay,
         auth_error,
         ..
     } = screen
     {
-        detail_status_line(compose.as_ref(), model.copied_feedback, *auth_error)
+        detail_status_line(overlay.compose(), model.copied_feedback, *auth_error)
     } else {
         None
     };
@@ -351,8 +351,7 @@ pub fn view(
             task_id,
             focused_comment,
             comment_spans,
-            compose,
-            confirm_delete,
+            overlay,
             ..
         } => {
             let task_name = task.get("name").and_then(|v| v.as_str()).unwrap_or("");
@@ -374,10 +373,10 @@ pub fn view(
             if let Some(ref sel) = model.selection {
                 draw_selection_highlight(frame, sel);
             }
-            if let Some(ref cp) = compose {
+            if let Some(cp) = overlay.compose() {
                 render_compose_modal(frame, area, cp);
             }
-            if confirm_delete.is_some() {
+            if overlay.is_confirm() {
                 render_confirm_modal(frame, area, modal_btn_targets);
             }
         }

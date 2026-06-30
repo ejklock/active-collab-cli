@@ -2,7 +2,7 @@ use crate::i18n::set_language;
 use crate::render::{build_detail_content, build_header_lines, Asset, StyleRun};
 use crate::richtext::RichStyle;
 use crate::store::instances::Instance;
-use crate::tui::model::{Header, ProjectGroup, TaskRow};
+use crate::tui::model::{DetailOverlay, Header, ProjectGroup, TaskRow};
 use crate::tui::screens::{draw_detail, draw_projects, draw_tasks, DetailParams};
 use crate::tui::theme;
 use ratatui::{backend::TestBackend, layout::Rect, Terminal};
@@ -2056,10 +2056,9 @@ fn view_detail_footer_has_no_tab_switch_hint() {
             offset: 0,
             loading: false,
             rendered_width: 80,
-            compose: None,
+            overlay: DetailOverlay::None,
             current_user_id: None,
             affordances: vec![],
-            confirm_delete: None,
             focused_comment: None,
             auth_error: false,
             comment_spans: vec![],
@@ -2121,10 +2120,9 @@ fn view_detail_footer_without_assets_has_no_tab_hint() {
             offset: 0,
             loading: false,
             rendered_width: 80,
-            compose: None,
+            overlay: DetailOverlay::None,
             current_user_id: None,
             affordances: vec![],
-            confirm_delete: None,
             focused_comment: None,
             auth_error: false,
             comment_spans: vec![],
@@ -3041,7 +3039,9 @@ mod v2b_click_targets {
 
 mod footer_refresh_hint {
     use crate::i18n::set_language;
-    use crate::tui::model::{DetailLoad, Header, Model, Msg, ProjectGroup, Screen, TaskRow};
+    use crate::tui::model::{
+        DetailLoad, DetailOverlay, Header, Model, Msg, ProjectGroup, Screen, TaskRow,
+    };
     use crate::tui::view::view;
     use ratatui::{backend::TestBackend, Terminal};
     use std::collections::HashMap;
@@ -3155,10 +3155,9 @@ mod footer_refresh_hint {
                 offset: 0,
                 loading: false,
                 rendered_width: 80,
-                compose: None,
+                overlay: DetailOverlay::None,
                 current_user_id: None,
                 affordances: vec![],
-                confirm_delete: None,
                 focused_comment: None,
                 auth_error: false,
                 comment_spans: vec![],
@@ -3203,10 +3202,9 @@ mod footer_refresh_hint {
                 offset: 0,
                 loading: false,
                 rendered_width: 80,
-                compose: None,
+                overlay: DetailOverlay::None,
                 current_user_id: None,
                 affordances: vec![],
-                confirm_delete: None,
                 focused_comment: None,
                 auth_error: false,
                 comment_spans: vec![],
@@ -3496,10 +3494,9 @@ mod footer_refresh_hint {
                 offset: 0,
                 loading: true,
                 rendered_width: usize::MAX,
-                compose: None,
+                overlay: DetailOverlay::None,
                 current_user_id: None,
                 affordances: vec![],
-                confirm_delete: None,
                 focused_comment: None,
                 auth_error: false,
                 comment_spans: vec![],
@@ -3607,7 +3604,7 @@ fn draw_detail_comment_with_long_url_renders_inline_with_link_style() {
 
 mod v6_view {
     use crate::i18n::set_language;
-    use crate::tui::model::{Header, Model, Screen, Selection};
+    use crate::tui::model::{DetailOverlay, Header, Model, Screen, Selection};
     use crate::tui::view::view;
     use ratatui::{backend::TestBackend, Terminal};
 
@@ -3667,10 +3664,9 @@ mod v6_view {
                 offset: 0,
                 loading: false,
                 rendered_width: 120,
-                compose: None,
+                overlay: DetailOverlay::None,
                 current_user_id: None,
                 affordances: vec![],
-                confirm_delete: None,
                 focused_comment: None,
                 auth_error: false,
                 comment_spans: vec![],
@@ -4729,10 +4725,9 @@ fn hint_for_screen_detail_with_assets_has_no_ctrl_cmd_in_footer() {
         offset: 0,
         loading: false,
         rendered_width: usize::MAX,
-        compose: None,
+        overlay: DetailOverlay::None,
         current_user_id: None,
         affordances: vec![],
-        confirm_delete: None,
         focused_comment: None,
         auth_error: false,
         comment_spans: vec![],
@@ -5554,7 +5549,9 @@ fn asset_row_cells_carry_link_style_structural_not_url_detection() {
 mod compose_render {
     use crate::i18n::set_language;
     use crate::render::compose_block_lines;
-    use crate::tui::model::{Compose, ComposeKind, ComposeStatus, Header, Model, Screen};
+    use crate::tui::model::{
+        Compose, ComposeKind, ComposeStatus, DetailOverlay, Header, Model, Screen,
+    };
     use crate::tui::view::view;
     use ratatui::{backend::TestBackend, Terminal};
     use serde_json::Value;
@@ -5579,7 +5576,7 @@ mod compose_render {
         }
     }
 
-    fn make_detail_model(compose: Option<Compose>) -> Model {
+    fn make_detail_model(overlay: DetailOverlay) -> Model {
         Model {
             stack: vec![Screen::Detail {
                 instance: "inst".into(),
@@ -5594,10 +5591,9 @@ mod compose_render {
                 offset: 0,
                 loading: false,
                 rendered_width: usize::MAX,
-                compose,
+                overlay,
                 current_user_id: None,
                 affordances: vec![],
-                confirm_delete: None,
                 focused_comment: None,
                 auth_error: false,
                 comment_spans: vec![],
@@ -5640,7 +5636,7 @@ mod compose_render {
     fn compose_active_shows_label_buffer_and_hint() {
         let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         set_language("en");
-        let model = make_detail_model(Some(compose_editing("hello")));
+        let model = make_detail_model(DetailOverlay::Compose(compose_editing("hello")));
         let buf = render_via_view(&model, 80, 24);
         set_language("en");
         let content = buf_text(&buf);
@@ -5663,7 +5659,9 @@ mod compose_render {
     fn compose_active_multiline_buffer_both_lines_visible() {
         let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         set_language("en");
-        let model = make_detail_model(Some(compose_editing("line one\nline two")));
+        let model = make_detail_model(DetailOverlay::Compose(compose_editing(
+            "line one\nline two",
+        )));
         let buf = render_via_view(&model, 80, 24);
         set_language("en");
         let content = buf_text(&buf);
@@ -5683,7 +5681,7 @@ mod compose_render {
     fn compose_inactive_shows_no_compose_content() {
         let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         set_language("en");
-        let model = make_detail_model(None);
+        let model = make_detail_model(DetailOverlay::None);
         let buf = render_via_view(&model, 80, 24);
         set_language("en");
         let content = buf_text(&buf);
@@ -5702,7 +5700,10 @@ mod compose_render {
     fn compose_edit_renders_edit_title_and_prefilled_buffer() {
         let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         set_language("en");
-        let model = make_detail_model(Some(compose_edit_existing(42, "existing body")));
+        let model = make_detail_model(DetailOverlay::Compose(compose_edit_existing(
+            42,
+            "existing body",
+        )));
         let buf = render_via_view(&model, 80, 24);
         set_language("en");
         let content = buf_text(&buf);
@@ -5721,7 +5722,7 @@ mod compose_render {
     fn compose_active_shows_localized_hint_in_pt_br() {
         let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         set_language("pt_BR");
-        let model = make_detail_model(Some(compose_editing("texto")));
+        let model = make_detail_model(DetailOverlay::Compose(compose_editing("texto")));
         let buf = render_via_view(&model, 80, 24);
         set_language("en");
         let content = buf_text(&buf);
@@ -5754,7 +5755,7 @@ mod compose_render {
         use ratatui::style::Modifier;
         let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         set_language("en");
-        let model = make_detail_model(Some(compose_editing("hi")));
+        let model = make_detail_model(DetailOverlay::Compose(compose_editing("hi")));
         let buf = render_via_view(&model, 80, 24);
         set_language("en");
         let area = buf.area();
@@ -5781,7 +5782,7 @@ mod compose_render {
         use ratatui::style::Color;
         let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         set_language("en");
-        let model = make_detail_model(Some(compose_editing("hello")));
+        let model = make_detail_model(DetailOverlay::Compose(compose_editing("hello")));
         let backend = ratatui::backend::TestBackend::new(100, 40);
         let mut terminal = ratatui::Terminal::new(backend).unwrap();
         terminal
@@ -5848,7 +5849,7 @@ mod compose_render {
         use ratatui::style::{Color, Modifier};
         let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         set_language("en");
-        let model = make_detail_model(Some(compose_editing("hi")));
+        let model = make_detail_model(DetailOverlay::Compose(compose_editing("hi")));
         let buf = render_via_view(&model, 80, 24);
         set_language("en");
 
@@ -5873,7 +5874,7 @@ mod compose_render {
 
 mod confirm_modal_buttons {
     use crate::i18n::set_language;
-    use crate::tui::model::{Header, ModalButtonTarget, Model, Screen};
+    use crate::tui::model::{DetailOverlay, Header, ModalButtonTarget, Model, Screen};
     use crate::tui::view::view;
     use ratatui::{backend::TestBackend, Terminal};
     use serde_json::Value;
@@ -5897,10 +5898,9 @@ mod confirm_modal_buttons {
                 offset: 0,
                 loading: false,
                 rendered_width: usize::MAX,
-                compose: None,
+                overlay: DetailOverlay::ConfirmDelete { comment_id },
                 current_user_id: Some(7),
                 affordances: vec![],
-                confirm_delete: Some(comment_id),
                 focused_comment: None,
                 auth_error: false,
                 comment_spans: vec![],
@@ -6048,10 +6048,10 @@ mod confirm_modal_buttons {
             other => panic!("expected DeleteComment, got {other:?}"),
         }
         match m2.top() {
-            Some(Screen::Detail { confirm_delete, .. }) => {
+            Some(Screen::Detail { overlay, .. }) => {
                 assert!(
-                    confirm_delete.is_none(),
-                    "confirm_delete cleared after confirm"
+                    overlay.confirm_delete_id().is_none(),
+                    "overlay cleared after confirm"
                 );
             }
             _ => panic!("expected Detail"),
@@ -6084,10 +6084,10 @@ mod confirm_modal_buttons {
             cmds
         );
         match m2.top() {
-            Some(Screen::Detail { confirm_delete, .. }) => {
+            Some(Screen::Detail { overlay, .. }) => {
                 assert!(
-                    confirm_delete.is_some(),
-                    "confirm_delete must stay Some when click misses the buttons"
+                    overlay.is_confirm(),
+                    "overlay must stay ConfirmDelete when click misses the buttons"
                 );
             }
             _ => panic!("expected Detail"),
@@ -6128,10 +6128,10 @@ mod confirm_modal_buttons {
             cmds
         );
         match m2.top() {
-            Some(Screen::Detail { confirm_delete, .. }) => {
+            Some(Screen::Detail { overlay, .. }) => {
                 assert!(
-                    confirm_delete.is_none(),
-                    "confirm_delete cleared after cancel"
+                    overlay.confirm_delete_id().is_none(),
+                    "overlay cleared after cancel"
                 );
             }
             _ => panic!("expected Detail"),
@@ -6143,7 +6143,7 @@ mod confirm_modal_buttons {
 
 mod yes_no_confirm_labels {
     use crate::i18n::{set_language, t};
-    use crate::tui::model::{Header, ModalButtonTarget, Model, Screen};
+    use crate::tui::model::{DetailOverlay, Header, ModalButtonTarget, Model, Screen};
     use crate::tui::view::view;
     use ratatui::{backend::TestBackend, Terminal};
     use serde_json::Value;
@@ -6167,10 +6167,9 @@ mod yes_no_confirm_labels {
                 offset: 0,
                 loading: false,
                 rendered_width: usize::MAX,
-                compose: None,
+                overlay: DetailOverlay::ConfirmDelete { comment_id },
                 current_user_id: Some(7),
                 affordances: vec![],
-                confirm_delete: Some(comment_id),
                 focused_comment: None,
                 auth_error: false,
                 comment_spans: vec![],
@@ -6380,10 +6379,10 @@ mod yes_no_confirm_labels {
             cmds_nao
         );
         match m_nao.top() {
-            Some(Screen::Detail { confirm_delete, .. }) => {
+            Some(Screen::Detail { overlay, .. }) => {
                 assert!(
-                    confirm_delete.is_none(),
-                    "confirm_delete must be cleared after Não click"
+                    overlay.confirm_delete_id().is_none(),
+                    "overlay must be cleared after Não click"
                 );
             }
             _ => panic!("expected Detail screen"),
@@ -6422,10 +6421,10 @@ mod yes_no_confirm_labels {
             cmds_cancel
         );
         match m_cancel.top() {
-            Some(Screen::Detail { confirm_delete, .. }) => {
+            Some(Screen::Detail { overlay, .. }) => {
                 assert!(
-                    confirm_delete.is_none(),
-                    "CancelDeleteComment must clear confirm_delete"
+                    overlay.confirm_delete_id().is_none(),
+                    "CancelDeleteComment must clear overlay"
                 );
             }
             _ => panic!("expected Detail screen"),
@@ -6800,7 +6799,9 @@ mod comment_focus_render {
 mod contextual_footer {
     use crate::i18n::set_language;
     use crate::render::build_detail_content;
-    use crate::tui::model::{Compose, ComposeKind, ComposeStatus, Header, Model, Screen};
+    use crate::tui::model::{
+        Compose, ComposeKind, ComposeStatus, DetailOverlay, Header, Model, Screen,
+    };
     use crate::tui::view::view;
     use ratatui::{backend::TestBackend, Terminal};
     use serde_json::json;
@@ -6826,8 +6827,7 @@ mod contextual_footer {
     }
 
     fn render_detail_model(
-        compose: Option<Compose>,
-        confirm_delete: Option<i64>,
+        overlay: DetailOverlay,
         focused_comment: Option<usize>,
         comments: Vec<serde_json::Value>,
         current_user_id: Option<i64>,
@@ -6856,10 +6856,9 @@ mod contextual_footer {
                 offset: 0,
                 loading: false,
                 rendered_width: 80,
-                compose,
+                overlay,
                 current_user_id,
                 affordances: content.affordances,
-                confirm_delete,
                 focused_comment,
                 auth_error: false,
                 comment_spans: content.comment_spans,
@@ -6928,7 +6927,7 @@ mod contextual_footer {
     fn detail_footer_browsing_mode_shows_browse_hint() {
         let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         set_language("en");
-        let buf = render_detail_model(None, None, None, vec![], None, false);
+        let buf = render_detail_model(DetailOverlay::None, None, vec![], None, false);
         set_language("en");
         let content = buf_to_string(&buf);
         assert!(
@@ -6952,7 +6951,13 @@ mod contextual_footer {
     fn detail_footer_composing_mode_shows_compose_hint() {
         let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         set_language("en");
-        let buf = render_detail_model(Some(editing_compose()), None, None, vec![], None, false);
+        let buf = render_detail_model(
+            DetailOverlay::Compose(editing_compose()),
+            None,
+            vec![],
+            None,
+            false,
+        );
         set_language("en");
         let content = buf_to_string(&buf);
         assert!(
@@ -6971,7 +6976,13 @@ mod contextual_footer {
     fn detail_footer_confirm_delete_mode_shows_confirm_hint() {
         let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         set_language("en");
-        let buf = render_detail_model(None, Some(10), None, vec![own_comment(42)], Some(42), false);
+        let buf = render_detail_model(
+            DetailOverlay::ConfirmDelete { comment_id: 10 },
+            None,
+            vec![own_comment(42)],
+            Some(42),
+            false,
+        );
         set_language("en");
         let content = buf_to_string(&buf);
         // The confirm buttons render INSIDE the modal box (one-home rule, ADR 0039 §5).
@@ -6996,7 +7007,7 @@ mod contextual_footer {
         let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         set_language("en");
         let comments = vec![own_comment(42)];
-        let buf = render_detail_model(None, None, Some(0), comments, Some(42), false);
+        let buf = render_detail_model(DetailOverlay::None, Some(0), comments, Some(42), false);
         set_language("en");
         let content = buf_to_string(&buf);
         assert!(
@@ -7019,7 +7030,7 @@ mod contextual_footer {
         let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         set_language("en");
         let comments = vec![other_comment()];
-        let buf = render_detail_model(None, None, Some(0), comments, Some(42), false);
+        let buf = render_detail_model(DetailOverlay::None, Some(0), comments, Some(42), false);
         set_language("en");
         let content = buf_to_string(&buf);
         assert!(
@@ -7038,9 +7049,14 @@ mod contextual_footer {
     fn detail_footer_hint_switches_when_mode_changes() {
         let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         set_language("en");
-        let buf_composing =
-            render_detail_model(Some(editing_compose()), None, None, vec![], None, false);
-        let buf_browsing = render_detail_model(None, None, None, vec![], None, false);
+        let buf_composing = render_detail_model(
+            DetailOverlay::Compose(editing_compose()),
+            None,
+            vec![],
+            None,
+            false,
+        );
+        let buf_browsing = render_detail_model(DetailOverlay::None, None, vec![], None, false);
         set_language("en");
         let composing = buf_to_string(&buf_composing);
         let browsing = buf_to_string(&buf_browsing);
@@ -7064,7 +7080,13 @@ mod contextual_footer {
     fn detail_footer_status_row_shows_enviando_when_submitting() {
         let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         set_language("pt_BR");
-        let buf = render_detail_model(Some(submitting_compose()), None, None, vec![], None, false);
+        let buf = render_detail_model(
+            DetailOverlay::Compose(submitting_compose()),
+            None,
+            vec![],
+            None,
+            false,
+        );
         set_language("en");
         let content = buf_to_string(&buf);
         assert!(
@@ -7079,8 +7101,7 @@ mod contextual_footer {
         let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         set_language("pt_BR");
         let buf = render_detail_model(
-            Some(error_compose("network failure")),
-            None,
+            DetailOverlay::Compose(error_compose("network failure")),
             None,
             vec![],
             None,
@@ -7099,7 +7120,7 @@ mod contextual_footer {
     fn detail_footer_status_row_shows_copiado_when_copied_feedback() {
         let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         set_language("pt_BR");
-        let buf = render_detail_model(None, None, None, vec![], None, true);
+        let buf = render_detail_model(DetailOverlay::None, None, vec![], None, true);
         set_language("en");
         let content = buf_to_string(&buf);
         assert!(
@@ -7113,7 +7134,7 @@ mod contextual_footer {
     fn detail_footer_status_row_is_blank_when_idle() {
         let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         set_language("en");
-        let buf = render_detail_model(None, None, None, vec![], None, false);
+        let buf = render_detail_model(DetailOverlay::None, None, vec![], None, false);
         set_language("en");
         let area = buf.area();
         let last_row = footer_row_string(&buf, area.height - 1);
@@ -7174,8 +7195,13 @@ mod contextual_footer {
     fn detail_footer_height_increases_by_one_when_status_present() {
         let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         set_language("pt_BR");
-        let buf_submitting =
-            render_detail_model(Some(submitting_compose()), None, None, vec![], None, false);
+        let buf_submitting = render_detail_model(
+            DetailOverlay::Compose(submitting_compose()),
+            None,
+            vec![],
+            None,
+            false,
+        );
         set_language("en");
         let content = buf_to_string(&buf_submitting);
         assert!(
@@ -7208,10 +7234,9 @@ mod contextual_footer {
                 offset: 0,
                 loading: false,
                 rendered_width: 80,
-                compose: Some(submitting_compose()),
+                overlay: DetailOverlay::Compose(submitting_compose()),
                 current_user_id: None,
                 affordances: vec![],
-                confirm_delete: None,
                 focused_comment: None,
                 auth_error: false,
                 comment_spans: vec![],
@@ -7277,7 +7302,7 @@ mod contextual_footer {
     fn detail_footer_pt_br_browsing_hint_shows_portuguese() {
         let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         set_language("pt_BR");
-        let buf = render_detail_model(None, None, None, vec![], None, false);
+        let buf = render_detail_model(DetailOverlay::None, None, vec![], None, false);
         set_language("en");
         let content = buf_to_string(&buf);
         assert!(
@@ -7296,7 +7321,7 @@ mod contextual_footer {
 mod confirm_modal_render {
     use crate::i18n::set_language;
     use crate::render::build_detail_content;
-    use crate::tui::model::{Header, Model, Screen};
+    use crate::tui::model::{DetailOverlay, Header, Model, Screen};
     use crate::tui::view::view;
     use ratatui::{backend::TestBackend, style::Modifier, Terminal};
     use serde_json::json;
@@ -7314,7 +7339,7 @@ mod confirm_modal_render {
         out
     }
 
-    fn render_with_confirm(confirm_delete: Option<i64>) -> ratatui::buffer::Buffer {
+    fn render_with_confirm(confirm_id: Option<i64>) -> ratatui::buffer::Buffer {
         let task = json!({"name": "T", "id": 1, "project_id": 1, "is_completed": false});
         let comment = json!({
             "id": 42i64,
@@ -7330,6 +7355,10 @@ mod confirm_modal_render {
             inner_width,
             Some(7),
         );
+        let overlay = match confirm_id {
+            Some(comment_id) => DetailOverlay::ConfirmDelete { comment_id },
+            None => DetailOverlay::None,
+        };
         let model = Model {
             stack: vec![Screen::Detail {
                 instance: "inst".into(),
@@ -7344,10 +7373,9 @@ mod confirm_modal_render {
                 offset: 0,
                 loading: false,
                 rendered_width: 80,
-                compose: None,
+                overlay,
                 current_user_id: Some(7),
                 affordances: content.affordances,
-                confirm_delete,
                 focused_comment: None,
                 auth_error: false,
                 comment_spans: content.comment_spans,
@@ -7726,10 +7754,9 @@ fn ctrl_click_on_editar_cell_opens_compose_edit_regression() {
             offset: 0,
             loading: false,
             rendered_width: inner_width,
-            compose: None,
+            overlay: DetailOverlay::None,
             current_user_id: Some(7),
             affordances: content.affordances.clone(),
-            confirm_delete: None,
             focused_comment: None,
             auth_error: false,
             comment_spans: content.comment_spans.clone(),
@@ -7754,9 +7781,9 @@ fn ctrl_click_on_editar_cell_opens_compose_edit_regression() {
     );
     assert!(cmds.is_empty(), "Ctrl+click on [editar] must emit no Cmd");
     match m_ctrl.top() {
-        Some(Screen::Detail { compose, .. }) => {
-            let cp = compose
-                .as_ref()
+        Some(Screen::Detail { overlay, .. }) => {
+            let cp = overlay
+                .compose()
                 .expect("compose must be Some after Ctrl+click on [editar]");
             assert_eq!(
                 cp.kind,
@@ -7775,7 +7802,7 @@ mod auth_error_render {
     use crate::i18n::set_language;
     use crate::render::build_detail_content;
     use crate::tui::model::{
-        Compose, ComposeKind, ComposeStatus, DetailLoad, Header, Model, Msg, Screen,
+        Compose, ComposeKind, ComposeStatus, DetailLoad, DetailOverlay, Header, Model, Msg, Screen,
     };
     use crate::tui::update;
     use crate::tui::view::view;
@@ -7804,7 +7831,7 @@ mod auth_error_render {
         out
     }
 
-    fn make_detail_model(auth_error: bool, compose: Option<Compose>) -> Model {
+    fn make_detail_model(auth_error: bool, overlay: DetailOverlay) -> Model {
         let task = json!({"name": "T", "id": 1, "project_id": 1, "is_completed": false});
         let inner_width = 78usize;
         let content = build_detail_content(&task, &[], &HashMap::new(), inner_width, None);
@@ -7822,10 +7849,9 @@ mod auth_error_render {
                 offset: 0,
                 loading: false,
                 rendered_width: 80,
-                compose,
+                overlay,
                 current_user_id: None,
                 affordances: content.affordances,
-                confirm_delete: None,
                 focused_comment: None,
                 auth_error,
                 comment_spans: content.comment_spans,
@@ -7863,7 +7889,7 @@ mod auth_error_render {
     }
 
     fn initial_detail_model() -> Model {
-        make_detail_model(false, None)
+        make_detail_model(false, DetailOverlay::None)
     }
 
     // AC1: A 401 detail-load sets auth_error on the model and the rendered status
@@ -7917,16 +7943,19 @@ mod auth_error_render {
             buffer: "my draft".into(),
             status: ComposeStatus::Editing,
         };
-        let model = make_detail_model(false, Some(compose));
+        let model = make_detail_model(false, DetailOverlay::Compose(compose));
         let (model, _) = update(model, Msg::AuthExpired);
 
         match model.stack.last() {
             Some(Screen::Detail {
                 auth_error,
-                compose: Some(cp),
+                overlay,
                 ..
             }) => {
                 assert!(*auth_error, "auth_error must be true after AuthExpired");
+                let cp = overlay
+                    .compose()
+                    .expect("compose must be Some after AuthExpired");
                 assert_eq!(
                     cp.buffer, "my draft",
                     "compose buffer must be retained after AuthExpired"
@@ -7942,7 +7971,7 @@ mod auth_error_render {
     fn auth_expired_renders_reauth_message_not_generic_error() {
         let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         set_language("en");
-        let model = make_detail_model(true, None);
+        let model = make_detail_model(true, DetailOverlay::None);
         let buf = render_model(&model);
         let content = buf_to_string(&buf);
         assert!(
@@ -7992,7 +8021,7 @@ mod auth_error_render {
     fn auth_error_renders_pt_br_translation() {
         let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         set_language("pt_BR");
-        let model = make_detail_model(true, None);
+        let model = make_detail_model(true, DetailOverlay::None);
         let buf = render_model(&model);
         set_language("en");
         let content = buf_to_string(&buf);
@@ -8025,7 +8054,7 @@ mod auth_error_render {
     fn auth_error_takes_priority_over_compose_absence_in_status_line() {
         let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         set_language("en");
-        let model = make_detail_model(true, None);
+        let model = make_detail_model(true, DetailOverlay::None);
         let buf = render_model(&model);
         let area = buf.area();
         let last_row = buf_row_string(&buf, area.height - 1);
@@ -8044,7 +8073,7 @@ mod auth_error_render {
     fn no_auth_error_means_no_reauth_message_in_status_line() {
         let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         set_language("en");
-        let model = make_detail_model(false, None);
+        let model = make_detail_model(false, DetailOverlay::None);
         let buf = render_model(&model);
         let content = buf_to_string(&buf);
         assert!(
