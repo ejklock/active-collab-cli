@@ -21,26 +21,6 @@ fn body_url_re() -> &'static Regex {
     })
 }
 
-/// Retained for callers that thread it through the richtext parser.
-///
-/// The `urls` vec is no longer populated (inline rendering makes the collector
-/// unnecessary for body links). It exists so call sites do not require a
-/// signature change in this slice.
-#[allow(dead_code)]
-pub struct LinkCollector {
-    pub next_index: usize,
-    pub urls: Vec<String>,
-}
-
-impl LinkCollector {
-    pub fn new() -> Self {
-        LinkCollector {
-            next_index: 1,
-            urls: Vec::new(),
-        }
-    }
-}
-
 /// An emphasis-style run on a single display-column slice of a rendered line.
 ///
 /// `start` and `len` are DISPLAY COLUMNS (not byte offsets) in the final boxed
@@ -75,8 +55,8 @@ pub enum AffordanceKind {
     Edit(i64),
     Delete(i64),
     OpenAsset(String),
-    /// Populated at layout time by `build_body_lines_with_collector` (slice 0046,
-    /// ADR 0043 §2): one span per wrapped fragment of an openable inline URL/email token.
+    /// Populated at layout time by `build_body_lines` (ADR 0043 §2): one span per
+    /// wrapped fragment of an openable inline URL/email token.
     /// Resolved by `body_link_cmd_at` on Ctrl/Cmd+click.
     OpenUrl(String),
 }
@@ -1506,13 +1486,12 @@ pub fn build_header_lines(
     panel_box(&t("Details"), &meta_rows, inner_width)
 }
 
-fn build_body_lines_with_collector(
+fn build_body_lines(
     task: &Value,
     inner_width: usize,
-    collector: &mut LinkCollector,
 ) -> (Vec<String>, Vec<Vec<StyleRun>>, Vec<LocalAffordance>) {
     let body_html = task.get("body").and_then(|v| v.as_str()).unwrap_or("");
-    let rich_lines = crate::richtext::structured_rich_with_links(body_html, collector);
+    let rich_lines = crate::richtext::structured_rich_with_links(body_html);
     let content_width = panel_content_width(inner_width);
     let body_rich = if rich_lines.is_empty() {
         let fallback_wrapped = wrap_text(&t("(no description)"), content_width);
@@ -1601,8 +1580,8 @@ struct CommentCard {
 
 /// Affordance span relative to the `nested_lines` vec produced during comment rendering.
 ///
-/// These local offsets are translated to global `DetailContent.lines` indices by the
-/// caller of `build_comment_lines_with_collector`.
+/// These local offsets are translated to global `DetailContent.lines` indices by
+/// `build_comment_lines`.
 struct CardAffordance {
     line_idx: usize,
     col_start: usize,
@@ -1688,10 +1667,9 @@ fn merge_nested_styles_into_outer(
         .collect()
 }
 
-fn build_comment_lines_with_collector(
+fn build_comment_lines(
     comments: &[Value],
     inner_width: usize,
-    collector: &mut LinkCollector,
     current_user_id: Option<i64>,
 ) -> CommentLinesOutput {
     if comments.is_empty() {
@@ -1726,7 +1704,6 @@ fn build_comment_lines_with_collector(
             author: &author,
             when: &when,
             card_width,
-            collector,
             is_own,
         };
         let card = build_comment_card(ctx);
@@ -1792,7 +1769,6 @@ struct CommentCardCtx<'a> {
     author: &'a str,
     when: &'a str,
     card_width: usize,
-    collector: &'a mut LinkCollector,
     is_own: bool,
 }
 
@@ -1808,11 +1784,10 @@ fn build_comment_card(ctx: CommentCardCtx<'_>) -> CommentCard {
         author,
         when,
         card_width,
-        collector,
         is_own,
     } = ctx;
 
-    let rich_body = extract_comment_body_rich(comment, collector);
+    let rich_body = extract_comment_body_rich(comment);
     let content_width = panel_content_width(card_width);
     let body_rich = if rich_body.is_empty() {
         plain_lines_to_rich(vec![String::new()])
@@ -1925,10 +1900,7 @@ fn indent_style_runs(runs: Vec<StyleRun>, cols: usize) -> Vec<StyleRun> {
 }
 
 /// Extract comment body as rich lines for the TUI path.
-fn extract_comment_body_rich(
-    comment: &Value,
-    collector: &mut LinkCollector,
-) -> Vec<crate::richtext::RichLine> {
+fn extract_comment_body_rich(comment: &Value) -> Vec<crate::richtext::RichLine> {
     use crate::richtext::{RichSpan, RichStyle};
     let plain = comment
         .get("body_plain_text")
@@ -1941,7 +1913,7 @@ fn extract_comment_body_rich(
         }]],
         None => {
             let html = comment.get("body").and_then(|v| v.as_str()).unwrap_or("");
-            crate::richtext::structured_rich_with_links(html, collector)
+            crate::richtext::structured_rich_with_links(html)
         }
     }
 }
@@ -1985,7 +1957,6 @@ pub fn build_detail_content(
     inner_width: usize,
     current_user_id: Option<i64>,
 ) -> DetailContent {
-    let mut collector = LinkCollector::new();
     let mut lines: Vec<String> = vec![];
     let mut line_styles: Vec<Vec<StyleRun>> = vec![];
     let mut affordances: Vec<LocalAffordance> = vec![];
@@ -1999,8 +1970,7 @@ pub fn build_detail_content(
     line_styles.push(vec![]);
 
     let body_panel_start = lines.len();
-    let (body_lines, body_styles, body_url_affs) =
-        build_body_lines_with_collector(task, inner_width, &mut collector);
+    let (body_lines, body_styles, body_url_affs) = build_body_lines(task, inner_width);
     for aff in body_url_affs {
         affordances.push(LocalAffordance {
             line_idx: body_panel_start + aff.line_idx,
@@ -2020,12 +1990,7 @@ pub fn build_detail_content(
 
         let comment_start_idx = lines.len();
         let (comment_lines, comment_styles, card_affs, card_ranges) =
-            build_comment_lines_with_collector(
-                comments,
-                inner_width,
-                &mut collector,
-                current_user_id,
-            );
+            build_comment_lines(comments, inner_width, current_user_id);
         for a in card_affs {
             affordances.push(LocalAffordance {
                 line_idx: comment_start_idx + a.line_idx,

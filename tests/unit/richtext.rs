@@ -1,13 +1,24 @@
 use super::*;
-use crate::render::LinkCollector;
+
+/// Flatten `structured_rich_with_links` output to a plain `String` for text-equality tests.
+fn rich_to_text(html: &str) -> String {
+    let rich = structured_rich_with_links(html);
+    let joined = rich
+        .iter()
+        .map(|line| line.iter().map(|s| s.text.as_str()).collect::<String>())
+        .collect::<Vec<_>>()
+        .join("\n");
+    joined
+        .trim_matches(|c: char| c.is_ascii_whitespace())
+        .to_owned()
+}
 
 // --- R3a-A1: Unordered list —————————————————————————————————————————————
 
 #[test]
 fn unordered_list_items_prefixed_with_bullet() {
     let html = "<ul><li>one</li><li>two</li></ul>";
-    let mut col = LinkCollector::new();
-    let out = structured_text_with_links(html, &mut col);
+    let out = rich_to_text(html);
     let lines: Vec<&str> = out.lines().collect();
     assert!(
         lines
@@ -26,8 +37,7 @@ fn unordered_list_items_prefixed_with_bullet() {
 #[test]
 fn unordered_list_produces_exactly_n_bullet_lines() {
     let html = "<ul><li>a</li><li>b</li><li>c</li></ul>";
-    let mut col = LinkCollector::new();
-    let out = structured_text_with_links(html, &mut col);
+    let out = rich_to_text(html);
     let bullet_lines: Vec<&str> = out.lines().filter(|l| l.starts_with("\u{2022} ")).collect();
     assert_eq!(
         bullet_lines.len(),
@@ -41,8 +51,7 @@ fn unordered_list_produces_exactly_n_bullet_lines() {
 #[test]
 fn ordered_list_items_numbered_from_one() {
     let html = "<ol><li>alpha</li><li>beta</li></ol>";
-    let mut col = LinkCollector::new();
-    let out = structured_text_with_links(html, &mut col);
+    let out = rich_to_text(html);
     let lines: Vec<&str> = out.lines().collect();
     assert!(
         lines
@@ -61,8 +70,7 @@ fn ordered_list_items_numbered_from_one() {
 #[test]
 fn each_ordered_list_resets_counter_independently() {
     let html = "<ol><li>x</li></ol><ol><li>y</li></ol>";
-    let mut col = LinkCollector::new();
-    let out = structured_text_with_links(html, &mut col);
+    let out = rich_to_text(html);
     let lines: Vec<&str> = out.lines().collect();
     let ones: Vec<&&str> = lines.iter().filter(|l| l.starts_with("1. ")).collect();
     assert_eq!(
@@ -77,8 +85,7 @@ fn each_ordered_list_resets_counter_independently() {
 #[test]
 fn h2_heading_text_on_its_own_line() {
     let html = "<h2>Title</h2>";
-    let mut col = LinkCollector::new();
-    let out = structured_text_with_links(html, &mut col);
+    let out = rich_to_text(html);
     let lines: Vec<&str> = out.lines().collect();
     assert!(
         lines.iter().any(|l| l.trim() == "Title"),
@@ -89,8 +96,7 @@ fn h2_heading_text_on_its_own_line() {
 #[test]
 fn heading_surrounded_by_blank_line_separation() {
     let html = "before<h2>Section</h2>after";
-    let mut col = LinkCollector::new();
-    let out = structured_text_with_links(html, &mut col);
+    let out = rich_to_text(html);
     // "before" and "after" must be separated from "Section" by at least one blank line.
     let pos_before = out.find("before").expect("before must be present");
     let pos_heading = out.find("Section").expect("Section must be present");
@@ -111,8 +117,7 @@ fn heading_surrounded_by_blank_line_separation() {
 fn all_heading_levels_h1_to_h6_render_on_own_line() {
     for level in 1..=6 {
         let html = format!("<h{level}>Level {level}</h{level}>");
-        let mut col = LinkCollector::new();
-        let out = structured_text_with_links(&html, &mut col);
+        let out = rich_to_text(&html);
         let needle = format!("Level {level}");
         let lines: Vec<&str> = out.lines().collect();
         assert!(
@@ -127,8 +132,7 @@ fn all_heading_levels_h1_to_h6_render_on_own_line() {
 #[test]
 fn blockquote_content_prefixed_with_gt() {
     let html = "<blockquote>quoted text</blockquote>";
-    let mut col = LinkCollector::new();
-    let out = structured_text_with_links(html, &mut col);
+    let out = rich_to_text(html);
     assert!(
         out.contains("> quoted text"),
         "blockquote must be prefixed with '> ': {out:?}"
@@ -138,8 +142,7 @@ fn blockquote_content_prefixed_with_gt() {
 #[test]
 fn blockquote_multiline_all_lines_prefixed() {
     let html = "<blockquote>line one<br>line two</blockquote>";
-    let mut col = LinkCollector::new();
-    let out = structured_text_with_links(html, &mut col);
+    let out = rich_to_text(html);
     let prefixed_lines: Vec<&str> = out.lines().filter(|l| l.starts_with("> ")).collect();
     assert_eq!(
         prefixed_lines.len(),
@@ -153,8 +156,7 @@ fn blockquote_multiline_all_lines_prefixed() {
 #[test]
 fn anchor_with_text_renders_text_bracket_url() {
     let html = r#"<a href="https://x.example.com/y">click here</a>"#;
-    let mut col = LinkCollector::new();
-    let out = structured_text_with_links(html, &mut col);
+    let out = rich_to_text(html);
     assert!(
         out.contains("click here [https://x.example.com/y]"),
         "anchor with text must render 'text [url]': {out:?}"
@@ -168,8 +170,7 @@ fn anchor_with_text_renders_text_bracket_url() {
 #[test]
 fn anchor_with_empty_inner_text_renders_bracket_url_only() {
     let html = r#"<a href="https://empty.example.com/"></a>"#;
-    let mut col = LinkCollector::new();
-    let out = structured_text_with_links(html, &mut col);
+    let out = rich_to_text(html);
     assert!(
         out.contains("[https://empty.example.com/]"),
         "empty-inner anchor must render '[url]' only: {out:?}"
@@ -184,8 +185,7 @@ fn anchor_with_empty_inner_text_renders_bracket_url_only() {
 fn anchor_with_text_equal_to_url_renders_bracket_url_only() {
     let url = "https://example.com/page";
     let html = format!(r#"<a href="{url}">{url}</a>"#);
-    let mut col = LinkCollector::new();
-    let out = structured_text_with_links(&html, &mut col);
+    let out = rich_to_text(&html);
     assert!(
         out.contains(&format!("[{url}]")),
         "anchor where text==url must render '[url]' only (no duplication): {out:?}"
@@ -200,8 +200,7 @@ fn anchor_with_text_equal_to_url_renders_bracket_url_only() {
 #[test]
 fn anchor_without_href_strips_tag_preserves_inner_text() {
     let html = "<a>bare link text</a>";
-    let mut col = LinkCollector::new();
-    let out = structured_text_with_links(html, &mut col);
+    let out = rich_to_text(html);
     assert!(
         out.contains("bare link text"),
         "anchor without href must still show inner text: {out:?}"
@@ -211,8 +210,7 @@ fn anchor_without_href_strips_tag_preserves_inner_text() {
 #[test]
 fn two_anchors_both_render_inline() {
     let html = r#"<a href="https://one.com">first</a> and <a href="https://two.com">second</a>"#;
-    let mut col = LinkCollector::new();
-    let out = structured_text_with_links(html, &mut col);
+    let out = rich_to_text(html);
     assert!(
         out.contains("first [https://one.com]"),
         "first anchor must render inline: {out:?}"
@@ -227,8 +225,7 @@ fn two_anchors_both_render_inline() {
 #[test]
 fn anchor_mailto_renders_bare_address_in_brackets() {
     let html = r#"<a href="mailto:user@example.com">mail us</a>"#;
-    let mut col = LinkCollector::new();
-    let out = structured_text_with_links(html, &mut col);
+    let out = rich_to_text(html);
     assert!(
         out.contains("mail us [user@example.com]"),
         "mailto anchor must show bare address in brackets (no 'mailto:' prefix): {out:?}"
@@ -242,8 +239,7 @@ fn anchor_mailto_renders_bare_address_in_brackets() {
 #[test]
 fn anchor_mailto_empty_text_renders_bracket_address_only() {
     let html = r#"<a href="mailto:a@b.com"></a>"#;
-    let mut col = LinkCollector::new();
-    let out = structured_text_with_links(html, &mut col);
+    let out = rich_to_text(html);
     assert!(
         out.contains("[a@b.com]"),
         "empty-text mailto must render '[a@b.com]' only: {out:?}"
@@ -255,8 +251,7 @@ fn anchor_mailto_empty_text_renders_bracket_address_only() {
 #[test]
 fn unbalanced_ul_li_does_not_panic_and_shows_text() {
     let html = "<ul><li>item a";
-    let mut col = LinkCollector::new();
-    let out = structured_text_with_links(html, &mut col);
+    let out = rich_to_text(html);
     assert!(
         out.contains("item a"),
         "unbalanced list must still show text: {out:?}"
@@ -266,8 +261,7 @@ fn unbalanced_ul_li_does_not_panic_and_shows_text() {
 #[test]
 fn unknown_tag_is_stripped_text_preserved() {
     let html = "<foo>kept text</foo>";
-    let mut col = LinkCollector::new();
-    let out = structured_text_with_links(html, &mut col);
+    let out = rich_to_text(html);
     assert!(
         out.contains("kept text"),
         "text inside unknown tag must be preserved: {out:?}"
@@ -277,8 +271,7 @@ fn unknown_tag_is_stripped_text_preserved() {
 #[test]
 fn deeply_nested_unknown_tags_stripped_safely() {
     let html = "<outer><inner><deep>text</deep></inner></outer>";
-    let mut col = LinkCollector::new();
-    let out = structured_text_with_links(html, &mut col);
+    let out = rich_to_text(html);
     assert!(
         out.contains("text"),
         "text must survive deep unknown nesting: {out:?}"
@@ -287,8 +280,7 @@ fn deeply_nested_unknown_tags_stripped_safely() {
 
 #[test]
 fn empty_html_returns_empty_string() {
-    let mut col = LinkCollector::new();
-    let out = structured_text_with_links("", &mut col);
+    let out = rich_to_text("");
     assert_eq!(out, "");
 }
 
@@ -299,8 +291,7 @@ fn empty_html_returns_empty_string() {
 #[test]
 fn mixed_document_preserves_structure() {
     let html = "<h2>Tasks</h2><ul><li>First</li><li>Second</li></ul><blockquote>Note</blockquote>";
-    let mut col = LinkCollector::new();
-    let out = structured_text_with_links(html, &mut col);
+    let out = rich_to_text(html);
     let lines: Vec<&str> = out.lines().collect();
     // Heading text appears on its own line
     assert!(
@@ -323,8 +314,7 @@ fn mixed_document_preserves_structure() {
 #[test]
 fn entity_decoding_works_inside_list_items() {
     let html = "<ul><li>a &amp; b</li><li>&lt;escaped&gt;</li></ul>";
-    let mut col = LinkCollector::new();
-    let out = structured_text_with_links(html, &mut col);
+    let out = rich_to_text(html);
     assert!(
         out.contains("a & b"),
         "entity &amp; must decode to &: {out:?}"
@@ -338,8 +328,7 @@ fn entity_decoding_works_inside_list_items() {
 #[test]
 fn three_or_more_consecutive_newlines_collapsed_to_two() {
     let html = "<p>a</p><p>b</p><p>c</p>";
-    let mut col = LinkCollector::new();
-    let out = structured_text_with_links(html, &mut col);
+    let out = rich_to_text(html);
     assert!(
         !out.contains("\n\n\n"),
         "three+ consecutive newlines must collapse to 2: {out:?}"
@@ -352,8 +341,7 @@ fn three_or_more_consecutive_newlines_collapsed_to_two() {
 fn del_tag_produces_strike_style_span() {
     use crate::richtext::{structured_rich_with_links, RichStyle};
     let html = "<del>gone</del>";
-    let mut col = LinkCollector::new();
-    let lines = structured_rich_with_links(html, &mut col);
+    let lines = structured_rich_with_links(html);
     let has_strike = lines.iter().any(|line| {
         line.iter()
             .any(|span| span.style == RichStyle::Strike && span.text.contains("gone"))
@@ -365,8 +353,7 @@ fn del_tag_produces_strike_style_span() {
 fn strike_tag_produces_strike_style_span() {
     use crate::richtext::{structured_rich_with_links, RichStyle};
     let html = "<strike>struck</strike>";
-    let mut col = LinkCollector::new();
-    let lines = structured_rich_with_links(html, &mut col);
+    let lines = structured_rich_with_links(html);
     let has_strike = lines.iter().any(|line| {
         line.iter()
             .any(|span| span.style == RichStyle::Strike && span.text.contains("struck"))
@@ -378,8 +365,7 @@ fn strike_tag_produces_strike_style_span() {
 fn u_tag_produces_underline_style_span() {
     use crate::richtext::{structured_rich_with_links, RichStyle};
     let html = "<u>under</u>";
-    let mut col = LinkCollector::new();
-    let lines = structured_rich_with_links(html, &mut col);
+    let lines = structured_rich_with_links(html);
     let has_underline = lines.iter().any(|line| {
         line.iter()
             .any(|span| span.style == RichStyle::Underline && span.text.contains("under"))
@@ -391,8 +377,7 @@ fn u_tag_produces_underline_style_span() {
 fn strike_and_plain_text_in_same_line() {
     use crate::richtext::{structured_rich_with_links, RichStyle};
     let html = "before <del>removed</del> after";
-    let mut col = LinkCollector::new();
-    let lines = structured_rich_with_links(html, &mut col);
+    let lines = structured_rich_with_links(html);
     let line = lines
         .iter()
         .find(|l| l.iter().any(|s| s.text.contains("before")));
@@ -416,8 +401,7 @@ fn strike_and_plain_text_in_same_line() {
 fn pre_preserves_internal_whitespace_and_newlines() {
     use crate::richtext::{structured_rich_with_links, RichStyle};
     let html = "<pre>a    b\n  c</pre>";
-    let mut col = LinkCollector::new();
-    let lines = structured_rich_with_links(html, &mut col);
+    let lines = structured_rich_with_links(html);
     let code_lines: Vec<_> = lines
         .iter()
         .filter(|l| l.iter().any(|s| s.style == RichStyle::Code))
@@ -445,8 +429,7 @@ fn pre_preserves_internal_whitespace_and_newlines() {
 fn pre_block_framed_by_blank_lines() {
     use crate::richtext::structured_rich_with_links;
     let html = "before<pre>code</pre>after";
-    let mut col = LinkCollector::new();
-    let lines = structured_rich_with_links(html, &mut col);
+    let lines = structured_rich_with_links(html);
     let idx_before = lines
         .iter()
         .position(|l| l.iter().any(|s| s.text.contains("before")));
@@ -480,8 +463,7 @@ fn pre_block_framed_by_blank_lines() {
 fn unclosed_pre_does_not_panic_and_emits_text() {
     use crate::richtext::{structured_rich_with_links, RichStyle};
     let html = "<pre>orphaned code";
-    let mut col = LinkCollector::new();
-    let lines = structured_rich_with_links(html, &mut col);
+    let lines = structured_rich_with_links(html);
     let has_code = lines.iter().any(|l| {
         l.iter()
             .any(|s| s.style == RichStyle::Code && s.text.contains("orphaned code"))
@@ -496,8 +478,7 @@ fn unclosed_pre_does_not_panic_and_emits_text() {
 fn pre_inline_emphasis_bold_survives_inside_pre() {
     use crate::richtext::{structured_rich_with_links, RichStyle};
     let html = "<pre>a <b>bold</b> b</pre>";
-    let mut col = LinkCollector::new();
-    let lines = structured_rich_with_links(html, &mut col);
+    let lines = structured_rich_with_links(html);
     let bold_span = lines
         .iter()
         .flat_map(|l| l.iter())
@@ -528,8 +509,7 @@ fn pre_inline_emphasis_bold_survives_inside_pre() {
 fn pre_inline_emphasis_italic_survives_inside_pre() {
     use crate::richtext::{structured_rich_with_links, RichStyle};
     let html = "<pre>x <em>italic</em> y</pre>";
-    let mut col = LinkCollector::new();
-    let lines = structured_rich_with_links(html, &mut col);
+    let lines = structured_rich_with_links(html);
     let italic_span = lines
         .iter()
         .flat_map(|l| l.iter())
@@ -544,8 +524,7 @@ fn pre_inline_emphasis_italic_survives_inside_pre() {
 fn pre_multiline_with_emphasis_preserves_newlines_and_styles() {
     use crate::richtext::{structured_rich_with_links, RichStyle};
     let html = "<pre>line1\n<b>line2</b>\nline3</pre>";
-    let mut col = LinkCollector::new();
-    let lines = structured_rich_with_links(html, &mut col);
+    let lines = structured_rich_with_links(html);
     let non_blank: Vec<_> = lines.iter().filter(|l| !l.is_empty()).collect();
     assert!(
         non_blank.len() >= 3,
@@ -568,8 +547,7 @@ fn two_by_two_table_emits_two_rows() {
     use crate::richtext::structured_rich_with_links;
     let html =
         "<table><tr><th>Name</th><th>Age</th></tr><tr><td>Alice</td><td>30</td></tr></table>";
-    let mut col = LinkCollector::new();
-    let lines = structured_rich_with_links(html, &mut col);
+    let lines = structured_rich_with_links(html);
     let non_blank: Vec<_> = lines.iter().filter(|l| !l.is_empty()).collect();
     assert_eq!(
         non_blank.len(),
@@ -583,8 +561,7 @@ fn table_header_cells_are_bold() {
     use crate::richtext::{structured_rich_with_links, RichStyle};
     let html =
         "<table><tr><th>Name</th><th>Age</th></tr><tr><td>Alice</td><td>30</td></tr></table>";
-    let mut col = LinkCollector::new();
-    let lines = structured_rich_with_links(html, &mut col);
+    let lines = structured_rich_with_links(html);
     let header_row = lines
         .iter()
         .find(|l| l.iter().any(|s| s.text.contains("Name")));
@@ -599,8 +576,7 @@ fn table_header_cells_are_bold() {
 fn table_data_cells_are_plain() {
     use crate::richtext::{structured_rich_with_links, RichStyle};
     let html = "<table><tr><th>Name</th></tr><tr><td>Alice</td></tr></table>";
-    let mut col = LinkCollector::new();
-    let lines = structured_rich_with_links(html, &mut col);
+    let lines = structured_rich_with_links(html);
     let data_row = lines
         .iter()
         .find(|l| l.iter().any(|s| s.text.contains("Alice")));
@@ -616,8 +592,7 @@ fn table_columns_are_padded_to_widest_cell() {
     use crate::render::display_width;
     use crate::richtext::structured_rich_with_links;
     let html = "<table><tr><td>short</td><td>x</td></tr><tr><td>a</td><td>y</td></tr></table>";
-    let mut col = LinkCollector::new();
-    let lines = structured_rich_with_links(html, &mut col);
+    let lines = structured_rich_with_links(html);
     let non_blank: Vec<_> = lines.iter().filter(|l| !l.is_empty()).collect();
     assert_eq!(non_blank.len(), 2, "must have 2 data rows");
     let row0_text: String = non_blank[0].iter().map(|s| s.text.as_str()).collect();
@@ -642,8 +617,7 @@ fn table_columns_are_padded_to_widest_cell() {
 fn ragged_table_does_not_panic_missing_cells_empty() {
     use crate::richtext::structured_rich_with_links;
     let html = "<table><tr><td>a</td><td>b</td><td>c</td></tr><tr><td>x</td></tr></table>";
-    let mut col = LinkCollector::new();
-    let lines = structured_rich_with_links(html, &mut col);
+    let lines = structured_rich_with_links(html);
     let non_blank: Vec<_> = lines.iter().filter(|l| !l.is_empty()).collect();
     assert_eq!(
         non_blank.len(),
@@ -661,8 +635,7 @@ fn ragged_table_does_not_panic_missing_cells_empty() {
 fn empty_table_does_not_panic() {
     use crate::richtext::structured_rich_with_links;
     let html = "<table></table>";
-    let mut col = LinkCollector::new();
-    let lines = structured_rich_with_links(html, &mut col);
+    let lines = structured_rich_with_links(html);
     assert!(
         lines.is_empty() || lines.iter().all(|l| l.is_empty()),
         "empty table must produce no content: {lines:?}"
@@ -673,8 +646,7 @@ fn empty_table_does_not_panic() {
 fn table_framed_by_blank_lines() {
     use crate::richtext::structured_rich_with_links;
     let html = "before<table><tr><td>cell</td></tr></table>after";
-    let mut col = LinkCollector::new();
-    let lines = structured_rich_with_links(html, &mut col);
+    let lines = structured_rich_with_links(html);
     let idx_before = lines
         .iter()
         .position(|l| l.iter().any(|s| s.text.contains("before")));
