@@ -1,3 +1,4 @@
+pub(crate) mod detail_geometry;
 pub mod drawer;
 pub mod events;
 pub(crate) mod hit_test;
