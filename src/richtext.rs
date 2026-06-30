@@ -372,10 +372,7 @@ fn flush_heading_rich(inner: &str, lines: &mut Vec<RichLine>) {
 }
 
 /// Flush any unclosed contexts remaining after the final tag.
-fn flush_open_contexts_rich(
-    state: &mut RichParseState,
-    _collector: &mut crate::render::LinkCollector,
-) {
+fn flush_open_contexts_rich(state: &mut RichParseState) {
     if state.in_anchor {
         let inner_text = spans_to_text(&state.anchor_spans);
         let label = match state.anchor_href.take() {
@@ -411,11 +408,7 @@ fn flush_open_contexts_rich(
 }
 
 /// Thin tag dispatcher for the rich parser.
-fn process_tag_rich(
-    raw_tag: &str,
-    state: &mut RichParseState,
-    collector: &mut crate::render::LinkCollector,
-) {
+fn process_tag_rich(raw_tag: &str, state: &mut RichParseState) {
     let tag_lower = raw_tag.to_ascii_lowercase();
     let tag_body = tag_lower
         .trim_start_matches('<')
@@ -435,7 +428,7 @@ fn process_tag_rich(
         "li" if !is_closing => handle_list_item_open_rich(state),
         "li" => {}
         "blockquote" => handle_blockquote_tag_rich(is_closing, state),
-        "a" => handle_anchor_tag_rich(is_closing, raw_tag, state, collector),
+        "a" => handle_anchor_tag_rich(is_closing, raw_tag, state),
         "strong" | "b" => handle_emphasis_tag_rich(EmphasisKind::Bold, is_closing, state),
         "em" | "i" => handle_emphasis_tag_rich(EmphasisKind::Italic, is_closing, state),
         "code" => handle_emphasis_tag_rich(EmphasisKind::Code, is_closing, state),
@@ -497,12 +490,7 @@ fn handle_heading_tag_rich(is_closing: bool, state: &mut RichParseState) {
     }
 }
 
-fn handle_anchor_tag_rich(
-    is_closing: bool,
-    raw_tag: &str,
-    state: &mut RichParseState,
-    collector: &mut crate::render::LinkCollector,
-) {
+fn handle_anchor_tag_rich(is_closing: bool, raw_tag: &str, state: &mut RichParseState) {
     if !is_closing {
         if let Some(url) = extract_href(raw_tag) {
             state.in_anchor = true;
@@ -510,11 +498,11 @@ fn handle_anchor_tag_rich(
             state.anchor_spans.clear();
         }
     } else if state.in_anchor {
-        close_anchor_rich(state, collector);
+        close_anchor_rich(state);
     }
 }
 
-fn close_anchor_rich(state: &mut RichParseState, collector: &mut crate::render::LinkCollector) {
+fn close_anchor_rich(state: &mut RichParseState) {
     state.in_anchor = false;
     let inner_text = spans_to_text(&state.anchor_spans);
     let label = match state.anchor_href.take() {
@@ -523,7 +511,6 @@ fn close_anchor_rich(state: &mut RichParseState, collector: &mut crate::render::
     };
     push_to_current_line(&mut state.current_line, &label, RichStyle::Plain);
     state.anchor_spans.clear();
-    let _ = collector;
 }
 
 fn handle_emphasis_tag_rich(kind: EmphasisKind, is_closing: bool, state: &mut RichParseState) {
@@ -737,10 +724,7 @@ fn is_heading_tag(element: &str) -> bool {
 ///
 /// The function never panics on malformed HTML — it degrades gracefully.
 /// It is pure: no I/O, no async, no time access.
-pub fn structured_rich_with_links(
-    html: &str,
-    collector: &mut crate::render::LinkCollector,
-) -> Vec<RichLine> {
+pub fn structured_rich_with_links(html: &str) -> Vec<RichLine> {
     if html.is_empty() {
         return vec![];
     }
@@ -752,11 +736,11 @@ pub fn structured_rich_with_links(
     for m in tag_re.find_iter(html) {
         state.accumulate_text(&html[last_byte..m.start()]);
         last_byte = m.end();
-        process_tag_rich(m.as_str(), &mut state, collector);
+        process_tag_rich(m.as_str(), &mut state);
     }
 
     state.accumulate_text(&html[last_byte..]);
-    flush_open_contexts_rich(&mut state, collector);
+    flush_open_contexts_rich(&mut state);
 
     let raw_lines = state.finish();
     normalize_rich_lines(raw_lines)
@@ -788,30 +772,6 @@ fn normalize_rich_lines(lines: Vec<RichLine>) -> Vec<RichLine> {
     }
 
     result
-}
-
-/// Flatten `Vec<RichLine>` to a plain `String`, joining lines with `'\n'`.
-///
-/// Mirrors the output of the former `structured_text_with_links` function so
-/// that all R3a tests remain green without code changes in the test files.
-/// The CLI path is unchanged — this is TUI-only.
-#[allow(dead_code)]
-pub fn structured_text_with_links(
-    html: &str,
-    collector: &mut crate::render::LinkCollector,
-) -> String {
-    if html.is_empty() {
-        return String::new();
-    }
-    let rich = structured_rich_with_links(html, collector);
-    let joined = rich
-        .iter()
-        .map(|line| line.iter().map(|s| s.text.as_str()).collect::<String>())
-        .collect::<Vec<_>>()
-        .join("\n");
-    joined
-        .trim_matches(|c: char| c.is_ascii_whitespace())
-        .to_owned()
 }
 
 #[cfg(test)]
