@@ -121,7 +121,12 @@ flowchart TD
   click-time re-derivation — `resolve_wrapped_url` + the inverse-wrap helpers, and the asset
   `section_lines` re-call — is **deleted** (retiring the obs-35 latent over-join bug), and
   the five scattered click functions collapse into the one `hit_test` module. Style and
-  hit-target now share one single-source discipline.
+  hit-target now share one single-source discipline. The viewport↔content row mapping that
+  `hit_test` (and the V6 selection/copy paths `is_in_body_area` / `extract_selected_text`)
+  rely on lives once in a pure `src/tui/detail_geometry.rs`
+  ([ADR 0045](/adr/0045-detail-viewport-geometry-module.md)): `DETAIL_TEXT_TOP`,
+  `content_height`, `is_in_content`, and `row_to_line_idx` — so hit-test, selection, and copy
+  cannot drift on which content line a terminal row maps to.
 
 ## Read / browse data flow
 
