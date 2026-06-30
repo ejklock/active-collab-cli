@@ -86,8 +86,8 @@ flowchart TD
   (centered + clamped `Rect`) plus a `render_modal` helper that dims the backdrop
   (`Modifier::DIM` over the content cells), `Clear`s the modal `Rect`, and draws a
   bordered box with title + body + an in-box hint/status.  Both the **comment compose**
-  (`compose.is_some()`, title `Novo`/`Editar comentário`, the buffer + `Ctrl+S`/`Esc`
-  hint + `Enviando…`/error status) and the **delete-confirm** (`confirm_delete.is_some()`,
+  (`overlay.is_compose()`, title `Novo`/`Editar comentário`, the buffer + `Ctrl+S`/`Esc`
+  hint + `Enviando…`/error status) and the **delete-confirm** (`overlay.is_confirm()`,
   `[confirmar]`/`[cancelar]` buttons, also Enter/Esc) draw through it — so `reflow_detail`
   no longer appends the compose lines and `build_detail_content` no longer renders the
   inline confirm tokens.  While a modal is open it owns the hint/status; the footer does
@@ -233,9 +233,11 @@ sequenceDiagram
   `X-Angie-AuthApiToken` only via the same `host_gated_token_header` gate as
   `authed_get` ([ADR 0033](/adr/0033-authenticated-write-seam-comment-client.md)).
   Gate-checked by a negative test (no token off-host).
-- **`tui/model.update` stays pure** through the write path: it owns the compose state
-  machine (`Screen::Detail.compose`, `confirm_delete`) and emits write `Cmd`s, but never
-  performs I/O. The shell owns the mode-aware key mapping (which keys are *text*) and the
+- **`tui/model.update` stays pure** through the write path: it owns the Detail overlay state
+  as one typed `Screen::Detail.overlay: DetailOverlay { None, Compose(Compose), ConfirmDelete }`
+  — compose and delete-confirm are mutually exclusive by construction
+  ([ADR 0047](/adr/0047-detail-overlay-as-one-typed-state.md)) — and emits write `Cmd`s, but
+  never performs I/O. The shell owns the mode-aware key mapping (which keys are *text*) and the
   spawned write ([ADR 0034](/adr/0034-comment-compose-mode-multiline.md)).
 - **No optimistic mutation:** the mutation arms construct no synthetic comment; the
   thread is always re-derived from the server after a 2xx
