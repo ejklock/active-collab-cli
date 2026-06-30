@@ -53,3 +53,4 @@ TUI/UX work (V/R/ARCH slices), tracing to
 | [0045](/issues/0045-asset-hit-target-structural.md) | HT1 | asset hit-target emitted structurally (OpenAsset span); asset_panel_cmd_at becomes a lookup | closed | — |
 | [0046](/issues/0046-body-link-hit-target-structural.md) | HT2 | body-link hit-target emitted structurally (OpenUrl span); delete resolve_wrapped_url + inverse-wrap helpers (obs 35) | closed | 0045 |
 | [0047](/issues/0047-hit-test-module-extraction.md) | HT3 | detail click resolution becomes one deep tui/hit_test module (resolve_detail_click → DetailClickTarget); delete the five scattered click functions | closed | — |
+| [0048](/issues/0048-detail-viewport-geometry-module.md) | HT4 | detail viewport↔content geometry becomes one pure tui/detail_geometry module; the row→line_idx mapping + text_top=2 stop being copied across hit_test, is_in_body_area, extract_selected_text | closed | — |
