@@ -85,10 +85,7 @@ fn setup_terminal() -> io::Result<(TerminalGuard, Terminal<CrosstermBackend<io::
 fn compose_active(model: &Model) -> bool {
     matches!(
         model.top(),
-        Some(model::Screen::Detail {
-            compose: Some(_),
-            ..
-        })
+        Some(model::Screen::Detail { overlay, .. }) if overlay.is_compose()
     )
 }
 
@@ -96,10 +93,7 @@ fn compose_active(model: &Model) -> bool {
 fn confirm_active(model: &Model) -> bool {
     matches!(
         model.top(),
-        Some(model::Screen::Detail {
-            confirm_delete: Some(_),
-            ..
-        })
+        Some(model::Screen::Detail { overlay, .. }) if overlay.is_confirm()
     )
 }
 
