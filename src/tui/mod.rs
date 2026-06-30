@@ -1,5 +1,6 @@
 pub mod drawer;
 pub mod events;
+pub(crate) mod hit_test;
 pub mod model;
 pub mod screens;
 pub mod theme;

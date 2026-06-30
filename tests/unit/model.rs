@@ -5481,3 +5481,270 @@ fn plain_click_outside_buttons_while_modal_open_is_noop() {
         "selection must NOT start behind the confirm modal (modal captures clicks)"
     );
 }
+
+// ── hit_test::resolve_detail_click unit tests (AC4, AC5, TE) ─────────────────
+
+use super::super::hit_test::{resolve_detail_click, DetailClickTarget};
+use crate::render::{AffordanceKind, LocalAffordance};
+
+/// Build a minimal Detail model with the given lines and affordances for
+/// resolve_detail_click tests. Viewport (80, 24), offset 0, instance "inst".
+fn hit_test_model(lines: Vec<String>, affordances: Vec<LocalAffordance>) -> Model {
+    Model {
+        stack: vec![Screen::Detail {
+            instance: "inst".into(),
+            project_id: 1,
+            task_id: 1,
+            task: serde_json::Value::Null,
+            comments: vec![],
+            user_map: HashMap::new(),
+            lines,
+            line_styles: vec![],
+            assets: vec![],
+            offset: 0,
+            loading: false,
+            rendered_width: usize::MAX,
+            compose: None,
+            current_user_id: None,
+            affordances,
+            confirm_delete: None,
+            focused_comment: None,
+            auth_error: false,
+            comment_spans: vec![],
+        }],
+        should_quit: false,
+        header: empty_header(),
+        viewport: (80, 24),
+        click_targets: vec![],
+        modal_button_targets: vec![],
+        last_loaded: None,
+        selection: None,
+        copied_feedback: false,
+    }
+}
+
+// AC4 / TE: plain click (has_modifier=false) always resolves to None.
+#[test]
+fn resolve_detail_click_plain_click_is_none() {
+    let m = hit_test_model(
+        vec!["line 0".into()],
+        vec![LocalAffordance {
+            line_idx: 0,
+            col_start: 0,
+            col_end: 5,
+            kind: AffordanceKind::Edit(1),
+        }],
+    );
+    let result = resolve_detail_click(&m, 2, 2, false);
+    assert!(
+        result.is_none(),
+        "plain click (has_modifier=false) must resolve to None"
+    );
+}
+
+// AC4 / TE: Ctrl/Cmd click on an Edit affordance resolves to CommentEdit(id).
+#[test]
+fn resolve_detail_click_edit_affordance_returns_comment_edit() {
+    let m = hit_test_model(
+        vec!["line 0".into()],
+        vec![LocalAffordance {
+            line_idx: 0,
+            col_start: 2,
+            col_end: 10,
+            kind: AffordanceKind::Edit(42),
+        }],
+    );
+    // row=2 is text_top, offset=0 → line_idx=0; column=5 is in [2,10).
+    let result = resolve_detail_click(&m, 5, 2, true);
+    assert!(
+        matches!(result, Some(DetailClickTarget::CommentEdit(42))),
+        "Edit affordance hit must return CommentEdit(42); got {:?}",
+        result.map(|_| "Some(_)")
+    );
+}
+
+// AC4 / TE: Ctrl/Cmd click on a Delete affordance resolves to CommentDelete(id).
+#[test]
+fn resolve_detail_click_delete_affordance_returns_comment_delete() {
+    let m = hit_test_model(
+        vec!["line 0".into()],
+        vec![LocalAffordance {
+            line_idx: 0,
+            col_start: 2,
+            col_end: 10,
+            kind: AffordanceKind::Delete(99),
+        }],
+    );
+    let result = resolve_detail_click(&m, 5, 2, true);
+    assert!(
+        matches!(result, Some(DetailClickTarget::CommentDelete(99))),
+        "Delete affordance hit must return CommentDelete(99)"
+    );
+}
+
+// AC4 / TE: Ctrl/Cmd click on an OpenUrl affordance resolves to OpenUrl(url).
+#[test]
+fn resolve_detail_click_open_url_affordance_returns_open_url() {
+    let url = "https://example.com/doc.pdf";
+    let m = hit_test_model(
+        vec!["line 0".into()],
+        vec![LocalAffordance {
+            line_idx: 0,
+            col_start: 3,
+            col_end: 3 + url.len(),
+            kind: AffordanceKind::OpenUrl(url.to_string()),
+        }],
+    );
+    let result = resolve_detail_click(&m, 5, 2, true);
+    match result {
+        Some(DetailClickTarget::OpenUrl(u)) => {
+            assert_eq!(u, url, "OpenUrl must carry the exact url");
+        }
+        other => panic!("expected OpenUrl, got {:?}", other.map(|_| "Some(_)")),
+    }
+}
+
+// AC4 / TE: asset whole-row rule — Ctrl/Cmd click anywhere on an OpenAsset line
+// resolves to OpenAsset(url), even if the column is outside [col_start, col_end).
+#[test]
+fn resolve_detail_click_open_asset_matches_whole_row() {
+    let url = "https://example.com/file.pdf";
+    let m = hit_test_model(
+        vec!["line 0".into()],
+        vec![LocalAffordance {
+            // Link span is narrow: columns 5–15.
+            line_idx: 0,
+            col_start: 5,
+            col_end: 15,
+            kind: AffordanceKind::OpenAsset(url.to_string()),
+        }],
+    );
+    // Click at column 2, well outside [5, 15) — must still match via is_row_target.
+    let result = resolve_detail_click(&m, 2, 2, true);
+    match result {
+        Some(DetailClickTarget::OpenAsset(u)) => {
+            assert_eq!(u, url, "OpenAsset whole-row rule: url must match");
+        }
+        other => panic!(
+            "expected OpenAsset for whole-row click, got {:?}",
+            other.map(|_| "Some(_)")
+        ),
+    }
+}
+
+// AC4 / TE: non-row-target (Edit) outside [col_start, col_end) resolves to None.
+#[test]
+fn resolve_detail_click_edit_outside_col_range_is_none() {
+    let m = hit_test_model(
+        vec!["line 0".into()],
+        vec![LocalAffordance {
+            line_idx: 0,
+            col_start: 5,
+            col_end: 15,
+            kind: AffordanceKind::Edit(42),
+        }],
+    );
+    // Column 2 is outside [5, 15) and Edit is NOT is_row_target → None.
+    let result = resolve_detail_click(&m, 2, 2, true);
+    assert!(
+        result.is_none(),
+        "Edit click outside col range must be None (not a row target)"
+    );
+}
+
+// AC5 / TE: line_idx >= lines.len() out-of-range guard → None (no panic, no stale hit).
+// A Ctrl/Cmd+click whose scroll-aware line_idx exceeds the content must resolve to None,
+// even when an affordance exists at that line_idx in the affordance list.
+#[test]
+fn resolve_detail_click_out_of_range_line_idx_is_none() {
+    // Only 1 line in the model; an affordance at line_idx=1 (past the end).
+    let m = hit_test_model(
+        vec!["only line".into()],
+        vec![LocalAffordance {
+            line_idx: 1,
+            col_start: 0,
+            col_end: 10,
+            kind: AffordanceKind::Edit(42),
+        }],
+    );
+    // row=3, text_top=2, offset=0 → line_idx = 0 + (3-2) = 1; lines.len()=1 → out of range.
+    let result = resolve_detail_click(&m, 2, 3, true);
+    assert!(
+        result.is_none(),
+        "line_idx >= lines.len() must resolve to None (bounds guard)"
+    );
+}
+
+// AC4 / TE: click outside the text viewport (row < text_top) resolves to None.
+#[test]
+fn resolve_detail_click_row_above_text_top_is_none() {
+    let m = hit_test_model(
+        vec!["line 0".into()],
+        vec![LocalAffordance {
+            line_idx: 0,
+            col_start: 0,
+            col_end: 10,
+            kind: AffordanceKind::Edit(1),
+        }],
+    );
+    // row=1 is below text_top=2 (the header bar row).
+    let result = resolve_detail_click(&m, 5, 1, true);
+    assert!(
+        result.is_none(),
+        "click above text_top (row 1) must resolve to None"
+    );
+}
+
+// AC4 / TE: swapping the arm would miss — Edit and Delete variants map to distinct targets.
+#[test]
+fn resolve_detail_click_edit_and_delete_map_to_distinct_targets() {
+    let m_edit = hit_test_model(
+        vec!["line 0".into()],
+        vec![LocalAffordance {
+            line_idx: 0,
+            col_start: 2,
+            col_end: 8,
+            kind: AffordanceKind::Edit(10),
+        }],
+    );
+    let m_delete = hit_test_model(
+        vec!["line 0".into()],
+        vec![LocalAffordance {
+            line_idx: 0,
+            col_start: 2,
+            col_end: 8,
+            kind: AffordanceKind::Delete(20),
+        }],
+    );
+    let edit_result = resolve_detail_click(&m_edit, 4, 2, true);
+    let delete_result = resolve_detail_click(&m_delete, 4, 2, true);
+    assert!(
+        matches!(edit_result, Some(DetailClickTarget::CommentEdit(10))),
+        "Edit kind must map to CommentEdit, not CommentDelete"
+    );
+    assert!(
+        matches!(delete_result, Some(DetailClickTarget::CommentDelete(20))),
+        "Delete kind must map to CommentDelete, not CommentEdit"
+    );
+}
+
+// AC4: is_row_target predicate — OpenAsset returns true, all others return false.
+#[test]
+fn affordance_kind_is_row_target_only_for_open_asset() {
+    assert!(
+        AffordanceKind::OpenAsset("u".into()).is_row_target(),
+        "OpenAsset must be a row target"
+    );
+    assert!(
+        !AffordanceKind::Edit(1).is_row_target(),
+        "Edit must NOT be a row target"
+    );
+    assert!(
+        !AffordanceKind::Delete(1).is_row_target(),
+        "Delete must NOT be a row target"
+    );
+    assert!(
+        !AffordanceKind::OpenUrl("u".into()).is_row_target(),
+        "OpenUrl must NOT be a row target"
+    );
+}
