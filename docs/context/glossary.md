@@ -60,3 +60,9 @@ the doc language (English).
   edit/delete a comment, open a URL, open an asset). Emitted structurally by the
   layout alongside the lines and style runs, paralleling structural link **style**
   (ADR 0032) — style and hit-target share the same single-source discipline.
+- **DetailClickTarget** — the typed result of resolving a detail click
+  (`CommentEdit`/`CommentDelete`/`OpenUrl`/`OpenAsset`), returned by the pure
+  `hit_test::resolve_detail_click`. It decouples the layout artifact (`AffordanceKind`)
+  from the resolution result from the effect (`Cmd`); the model maps it to the TEA effect
+  (ADR 0044). The home of detail click resolution: one coordinate translation + one
+  registry lookup, replacing the five scattered click functions formerly in `model.rs`.
