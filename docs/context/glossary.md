@@ -64,7 +64,9 @@ the doc language (English).
   `[DETAIL_TEXT_TOP, DETAIL_TEXT_TOP + content_height)` (top row `2`, height
   `viewport_rows - DETAIL_CHROME_ROWS`) mapping a terminal row to a content `line_idx` via
   `offset + (row - DETAIL_TEXT_TOP)`. Single-homed in the pure `src/tui/detail_geometry.rs`
-  (`is_in_content`, `row_to_line_idx`), shared by hit-test, selection, and copy (ADR 0045).
+  (`is_in_content`, `row_to_line_idx`), shared by hit-test, selection, and copy (ADR 0045). The
+  same module owns `content_height` and `content_height_clamped` (the body height floored at one
+  row) that the scroll/offset-clamp math derives from (issue 0052).
 - **DetailClickTarget** — the typed result of resolving a detail click
   (`CommentEdit`/`CommentDelete`/`OpenUrl`/`OpenAsset`), returned by the pure
   `hit_test::resolve_detail_click`. It decouples the layout artifact (`AffordanceKind`)
