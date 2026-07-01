@@ -1,6 +1,7 @@
 use crate::i18n::t;
 use crate::render::{Asset, MineTableRow, StyleRun};
 use crate::store::instances::Instance;
+use crate::tui::detail_geometry::Selection;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -361,18 +362,6 @@ impl Screen {
 /// Page size for Detail screen scroll (PageUp/PageDown).
 pub const PAGE_SIZE: usize = 10;
 
-/// Rows consumed by the Detail content block's chrome that are not scrollable text.
-/// Breakdown: 1 top border + 1 bottom border + 1 header bar row + 1 footer bar row.
-pub(crate) const DETAIL_CHROME_ROWS: u16 = 4;
-
-/// Left-border columns added by the ratatui `Block::borders(ALL)` that `render_content`
-/// wraps the body behind. This border is NOT part of the boxed panel lines stored in
-/// `Screen::Detail.lines`; those lines carry their own `│ … │` chrome counted in
-/// `BODY_LEFT_CHROME_COLS`. The full absolute-frame → inner-content left offset is
-/// `DETAIL_CONTENT_BLOCK_BORDER_COLS + BODY_LEFT_CHROME_COLS` (total 3), matching
-/// the offset used by `body_link_cmd_at`.
-const DETAIL_CONTENT_BLOCK_BORDER_COLS: u16 = 1;
-
 /// True maximum scroll offset for the Detail screen.
 ///
 /// Assets are now inline in `lines` (no separate fixed panel), so the text
@@ -442,35 +431,6 @@ fn select_action(stack: &[Screen]) -> Option<SelectAction> {
             })
         }
         Screen::Detail { .. } => None,
-    }
-}
-
-/// An active text selection anchored at a body cell and extended by drag.
-///
-/// Coordinates are (viewport_row, viewport_col) — terminal cell positions
-/// within the full frame. Anchor is set on mouse-down; cursor tracks drag.
-/// Text is extracted when the button is released.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Selection {
-    pub anchor: (u16, u16),
-    pub cursor: (u16, u16),
-}
-
-impl Selection {
-    /// Whether the selection spans more than a single cell (i.e. a real drag).
-    pub fn is_drag(&self) -> bool {
-        self.anchor != self.cursor
-    }
-
-    /// Return (top_left, bottom_right) in reading order (row-major).
-    pub fn normalized(&self) -> ((u16, u16), (u16, u16)) {
-        let (ar, ac) = self.anchor;
-        let (cr, cc) = self.cursor;
-        if (ar, ac) <= (cr, cc) {
-            ((ar, ac), (cr, cc))
-        } else {
-            ((cr, cc), (ar, ac))
-        }
     }
 }
 
@@ -708,7 +668,7 @@ impl Model {
 
         *card_heights = tasks
             .iter()
-            .map(|t| task_card_height(t, card_inner_w))
+            .map(|t| crate::tui::task_layout::card_height(t, card_inner_w))
             .collect();
 
         let mut offsets = Vec::with_capacity(card_heights.len() + 1);
@@ -721,17 +681,6 @@ impl Model {
         *card_offsets = offsets;
         *rendered_width = card_inner_w;
     }
-}
-
-/// Card height for a single task: 2 border rows + wrapped title rows + 1 due-date row.
-///
-/// Exposed for use by both `reflow_tasks` (model layer) and `draw_tasks` (view layer)
-/// so the height formula has a single source of truth.
-pub(crate) fn task_card_height(task: &TaskRow, card_inner_w: usize) -> u16 {
-    let content = format!("#{}  {}", task.task_number, task.name);
-    let lines = crate::render::wrap_text(&content, card_inner_w.max(1));
-    let body_rows = if lines.is_empty() { 1 } else { lines.len() };
-    2 + body_rows as u16 + 1
 }
 
 /// Pure update — returns new model and any effects to run.
@@ -1209,94 +1158,22 @@ fn handle_mouse_up(
         return (model, vec![]);
     }
 
-    let text = extract_selected_text(&model, &sel);
+    let (_viewport_cols, viewport_rows) = model.viewport;
+    let anchor = sel.anchor;
+    let Screen::Detail { lines, offset, .. } = model.top().expect("detail screen") else {
+        return (model, vec![]);
+    };
+    let text = crate::tui::detail_geometry::selected_text(*offset, viewport_rows, sel, lines);
     if text.is_empty() {
         return (model, vec![]);
     }
 
     model.selection = Some(Selection {
-        anchor: sel.anchor,
+        anchor,
         cursor: (row, column),
     });
 
     (model, vec![Cmd::CopyToClipboard(text)])
-}
-
-/// Extract the text covered by `sel` from the Detail body lines.
-///
-/// Strips the box chrome (│ border + HPAD) from each logical line before slicing,
-/// so the copied text is chrome-free and char-correct (Sc.8, Sc.9).
-/// Row→line mapping delegates to `detail_geometry::row_to_line_idx`.
-/// Returns text in reading order (anchor normalized to be before cursor).
-fn extract_selected_text(model: &Model, sel: &Selection) -> String {
-    let Screen::Detail { lines, offset, .. } = model.top().expect("detail screen") else {
-        return String::new();
-    };
-
-    let (_viewport_cols, viewport_rows) = model.viewport;
-    let ((top_row, top_col), (bot_row, bot_col)) = sel.normalized();
-
-    let mut parts: Vec<String> = Vec::new();
-
-    for vp_row in top_row..=bot_row {
-        let Some(line_idx) =
-            crate::tui::detail_geometry::row_to_line_idx(*offset, viewport_rows, vp_row)
-        else {
-            continue;
-        };
-        let Some(line) = lines.get(line_idx) else {
-            continue;
-        };
-        let chunk = extract_line_slice(line, vp_row, top_row, bot_row, top_col, bot_col);
-        if !chunk.is_empty() {
-            parts.push(chunk);
-        }
-    }
-
-    parts.join("\n")
-}
-
-use crate::render::BODY_LEFT_CHROME_COLS;
-
-/// Extract the relevant text slice from a single boxed body line.
-///
-/// Maps an absolute frame column from a `Selection` to an inner-content display column
-/// by subtracting the full left offset: `DETAIL_CONTENT_BLOCK_BORDER_COLS` (ratatui
-/// `Block::borders(ALL)` left edge) plus `BODY_LEFT_CHROME_COLS` (panel `│` + HPAD),
-/// totalling 3 — the same offset used by `body_link_cmd_at` so highlight and copy
-/// resolve the same column to the same content position.
-///
-/// Delegates to `render::slice_by_display_cols` which walks chars accumulating display
-/// width, correctly handling double-width chars (emoji, CJK). Trailing padding spaces
-/// added by `fit_to_display_width` are stripped before slicing.
-fn extract_line_slice(
-    line: &str,
-    vp_row: u16,
-    top_row: u16,
-    bot_row: u16,
-    top_col: u16,
-    bot_col: u16,
-) -> String {
-    let inner = crate::render::box_inner_content_pub(line).unwrap_or("");
-    let trimmed = inner.trim_end_matches(' ');
-    let inner_display_width = crate::render::display_width(trimmed);
-
-    let left_offset = DETAIL_CONTENT_BLOCK_BORDER_COLS as usize + BODY_LEFT_CHROME_COLS;
-    let start_inner_col = if vp_row == top_row {
-        (top_col as usize).saturating_sub(left_offset)
-    } else {
-        0
-    };
-    let end_inner_col = if vp_row == bot_row {
-        (bot_col as usize)
-            .saturating_sub(left_offset)
-            .saturating_add(1)
-            .min(inner_display_width)
-    } else {
-        inner_display_width
-    };
-
-    crate::render::slice_by_display_cols(trimmed, start_inner_col, end_inner_col)
 }
 
 fn handle_select(model: Model) -> (Model, Vec<Cmd>) {
