@@ -1,5 +1,9 @@
-use crate::render::{display_width, wrap_text, PANEL_HPAD};
-use crate::tui::model::{relative_due, task_card_height, ClickTarget, TaskRow};
+use crate::render::{
+    display_width, truncate_to_display_width, wrap_text, BOX_BL, BOX_BR, BOX_H, BOX_TL, BOX_TR,
+    BOX_V, PANEL_HPAD,
+};
+use crate::tui::model::{relative_due, ClickTarget, TaskRow};
+use crate::tui::task_layout;
 use crate::tui::theme;
 use ratatui::{
     style::Style,
@@ -7,25 +11,6 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
     Frame,
 };
-
-const BOX_TL: &str = "\u{256D}";
-const BOX_TR: &str = "\u{256E}";
-const BOX_BL: &str = "\u{2570}";
-const BOX_BR: &str = "\u{256F}";
-const BOX_H: &str = "\u{2500}";
-const BOX_V: &str = "\u{2502}";
-
-/// Width consumed by one card's left+right chrome: 2 border cols + 2×PANEL_HPAD.
-pub(crate) const CARD_CHROME: u16 = 2 + 2 * PANEL_HPAD as u16;
-
-/// Compute the card inner width from the full terminal width.
-///
-/// The outer Tasks block has 1-col borders each side (2 total), and each card
-/// adds `CARD_CHROME` more columns. This is the single source of truth used by
-/// both `reflow_tasks` (pre-draw in the shell) and `draw_tasks` (render pass).
-pub fn tasks_card_inner_w(terminal_width: u16) -> usize {
-    terminal_width.saturating_sub(2).saturating_sub(CARD_CHROME) as usize
-}
 
 /// Draw the Tasks screen (project task list) as stacked bordered cards.
 ///
@@ -72,7 +57,7 @@ pub fn draw_tasks(
         return;
     }
 
-    let card_inner_w = tasks_card_inner_w(inner.width + 2);
+    let card_inner_w = task_layout::inner_w(inner.width + 2);
     let visible_h = inner.height;
 
     let (card_heights, total_rows) = resolve_heights(
@@ -83,7 +68,7 @@ pub fn draw_tasks(
         cache_rendered_width,
     );
 
-    let first_visible = first_visible_card(
+    let first_visible = task_layout::first_visible(
         card_offsets_cache,
         cache_rendered_width,
         card_inner_w,
@@ -135,83 +120,10 @@ fn resolve_heights<'a>(
 
     let heights: Vec<u16> = tasks
         .iter()
-        .map(|t| task_card_height(t, card_inner_w))
+        .map(|t| task_layout::card_height(t, card_inner_w))
         .collect();
     let total: u32 = heights.iter().map(|&h| h as u32).sum();
     (std::borrow::Cow::Owned(heights), total)
-}
-
-/// Compute the first-visible card index so the selected card is fully on screen.
-///
-/// Uses a binary search over the prefix-sum offsets (O(log T)) when the cache
-/// is valid. Falls back to a linear walk on the inline-computed heights when
-/// the cache does not match the current width (defensive floor).
-///
-/// Preserves the exact semantics of the previous linear implementation:
-/// - Returns 0 when `selected == 0` or `visible_h == 0`.
-/// - Returns 0 when the selected card fits without scrolling.
-/// - Otherwise returns the smallest first-visible index such that `sel_end`
-///   fits within `first_start + visible_h`.
-pub(crate) fn first_visible_card(
-    cache_offsets: &[u32],
-    cache_rendered_width: usize,
-    card_inner_w: usize,
-    inline_heights: &[u16],
-    selected: usize,
-    visible_h: u16,
-) -> usize {
-    if selected == 0 || visible_h == 0 {
-        return 0;
-    }
-
-    let cache_valid =
-        cache_rendered_width == card_inner_w && cache_offsets.len() == inline_heights.len() + 1;
-
-    if cache_valid {
-        first_visible_binary(cache_offsets, selected, visible_h)
-    } else {
-        first_visible_linear(inline_heights, selected, visible_h)
-    }
-}
-
-/// Binary search over the prefix-sum offsets to find the first-visible card index.
-pub(crate) fn first_visible_binary(offsets: &[u32], selected: usize, visible_h: u16) -> usize {
-    let sel_end = offsets[selected + 1];
-    let visible_h32 = visible_h as u32;
-
-    if sel_end <= visible_h32 {
-        return 0;
-    }
-
-    // Find the smallest first in 0..=selected such that offsets[first] + visible_h >= sel_end.
-    let first = offsets[..=selected].partition_point(|&start| start + visible_h32 < sel_end);
-    first.min(selected)
-}
-
-/// Linear walk fallback used when the prefix-sum cache is not valid for this width.
-fn first_visible_linear(heights: &[u16], selected: usize, visible_h: u16) -> usize {
-    let mut cum: Vec<u16> = Vec::with_capacity(heights.len());
-    let mut acc = 0u16;
-    for &h in heights {
-        cum.push(acc);
-        acc = acc.saturating_add(h);
-    }
-
-    let sel_start = cum[selected];
-    let sel_end = sel_start.saturating_add(heights[selected]);
-
-    if sel_end <= visible_h {
-        return 0;
-    }
-
-    for (first, &start) in cum.iter().enumerate().take(selected + 1) {
-        let window_end = start.saturating_add(visible_h);
-        if sel_end <= window_end {
-            return first;
-        }
-    }
-
-    selected
 }
 
 /// Render visible task cards into `area` and record click targets.
@@ -273,7 +185,7 @@ fn render_single_card(
     is_selected: bool,
     today: chrono::NaiveDate,
 ) {
-    let content = task_card_content(task);
+    let content = task_layout::card_content(task);
     let wrapped = wrap_text(&content, card_inner_w.max(1));
     let body_lines = if wrapped.is_empty() {
         vec![String::new()]
@@ -304,11 +216,6 @@ fn render_single_card(
 
     let text = Text::from(lines);
     frame.render_widget(Paragraph::new(text), card_rect);
-}
-
-/// Build the first-line content string for a task card: `#<number>  <name>`.
-fn task_card_content(task: &TaskRow) -> String {
-    format!("#{}  {}", task.task_number, task.name)
 }
 
 /// Build the due-date content line (line 2) for a task card.
@@ -397,19 +304,4 @@ fn fit_to_card_width(s: &str, width: usize) -> String {
         let padding = width - w;
         format!("{}{}", s, " ".repeat(padding))
     }
-}
-
-/// Truncate `s` to at most `width` display columns.
-fn truncate_to_display_width(s: &str, width: usize) -> String {
-    let mut acc = 0usize;
-    let mut result = String::new();
-    for ch in s.chars() {
-        let cw = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
-        if acc + cw > width {
-            break;
-        }
-        result.push(ch);
-        acc += cw;
-    }
-    result
 }

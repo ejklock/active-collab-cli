@@ -3604,7 +3604,8 @@ fn draw_detail_comment_with_long_url_renders_inline_with_link_style() {
 
 mod v6_view {
     use crate::i18n::set_language;
-    use crate::tui::model::{DetailOverlay, Header, Model, Screen, Selection};
+    use crate::tui::detail_geometry::Selection;
+    use crate::tui::model::{DetailOverlay, Header, Model, Screen};
     use crate::tui::view::view;
     use ratatui::{backend::TestBackend, Terminal};
 

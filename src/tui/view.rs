@@ -1,7 +1,8 @@
 use crate::i18n::t;
 use crate::render::{display_width, wrap_text};
+use crate::tui::detail_geometry::Selection;
 use crate::tui::model::{
-    ClickTarget, Compose, ComposeKind, ComposeStatus, ModalButtonTarget, Model, Screen, Selection,
+    ClickTarget, Compose, ComposeKind, ComposeStatus, ModalButtonTarget, Model, Screen,
 };
 use crate::tui::screens::{draw_detail, draw_projects, draw_tasks, DetailParams};
 use crate::tui::theme;

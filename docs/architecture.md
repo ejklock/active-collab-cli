@@ -29,7 +29,7 @@ flowchart TD
     view --> widgets["tui/widgets/modal.rs\nreusable centered modal overlay\n(DIM backdrop + Clear + bordered box)\ncompose · delete-confirm"]
     widgets --> theme
     screens --> asset_panel["tui/screens/asset_panel.rs\nAnexos/Artefatos composition source\nlayout → Vec&lt;PanelRow&gt; → inline content lines\n+ pure line→asset-index map"]
-    render --> asset_panel
+    detail_render --> asset_panel
     model --> asset_panel
     screens --> drawer
     screens --> theme
@@ -40,14 +40,32 @@ flowchart TD
     controller --> client["client\n(ActiveCollab API)"]
     client --> http["http\n(reqwest + rustls)"]
     controller --> store["store\n(rusqlite: instances · settings ·\ncache: TaskCache · UserMapCache · ProjectNamesCache · TaskListCache)"]
-    commands --> render["render\ndomain string rendering\n(get/current/mine non-TTY)\n+ TUI detail content (panels · style runs)"]
-    render --> richtext["richtext\nHTML → structured rich text\n(TUI detail: lists · headings · emphasis · links)"]
+    commands --> cli_render["render/cli_render\nnon-TTY CLI strings\n(get·current·mine parity)"]
+    view --> detail_render["render/detail_render\nTUI DetailContent builders\n(panels · style runs · affordances)"]
+    screens --> detail_render
+    cli_render --> wrap["render/wrap\ngreedy word-wrap engine\n(wrap_text · wrap_rich)"]
+    detail_render --> wrap
+    cli_render --> text_measure["render/text_measure\npure width·slice·box·chrome core\n(richtext-free)"]
+    detail_render --> text_measure
+    wrap --> text_measure
+    cli_render --> richtext["richtext\nHTML → structured rich text\n(TUI detail: lists · headings · emphasis · links)"]
+    detail_render --> richtext
     commands --> i18n["i18n (en · pt-BR)"]
     client --> models["models (serde)"]
 ```
 
 **Boundaries / fitness:**
 
+- **render is a layered stack, not a god-module** ([ADR 0049](/adr/0049-split-render-into-text-measure-wrap-and-render-adapters.md)):
+  a pure, `richtext`-free `render/text_measure` core (display-width / slice / box-unwrap
+  primitives + chrome constants + box-drawing chars) sits at the bottom; `render/wrap` (the
+  ADR 0048 greedy word-wrap engine) depends on it; and two output adapters sit on top —
+  `render/cli_render` (the non-TTY `get`/`current`/`mine` parity strings) and
+  `render/detail_render` (the TUI `DetailContent` builders + affordance registry). The two
+  adapters never depend on each other; `render/mod.rs` is a thin root holding only the shared
+  low-level helpers/types both use, plus the re-export surface. Fitness: `text_measure` imports
+  no `richtext`; `cli_render`/`detail_render` do not reference each other; the split is
+  behavior-preserving (the whole `cargo test` suite is green on the combined tree).
 - **tui/model.update** is pure — no terminal, no async, no I/O. Gate-checked by unit
   tests (BDR 0001) and `cargo test` running headless.
 - **client/http** is the only outbound-network boundary; **token host isolation**
