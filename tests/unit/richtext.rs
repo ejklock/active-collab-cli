@@ -927,13 +927,13 @@ fn wrap_rich_empty_line_returns_empty_vec() {
     );
 }
 
-/// Geometry 2 — an all-whitespace line is returned as a single unwrapped result line.
+/// Geometry 2 — an all-whitespace line normalizes to one canonical BLANK line (ADR 0048).
 ///
-/// render.rs:1166: `if plain.chars().all(|c| c.is_ascii_whitespace()) { return vec![line.clone()]; }`
-/// A mutant that drops this guard would re-process the whitespace-only text and
-/// produce an empty Vec (no words), failing the count and span assertions here.
+/// A wordless segment always yields exactly one empty output line — a mutant that drops
+/// this wordless-segment fallback would produce an empty Vec (no words), failing the
+/// count assertion here.
 #[test]
-fn wrap_rich_all_whitespace_returns_single_line_unchanged() {
+fn wrap_rich_all_whitespace_returns_single_blank_line() {
     use crate::render::wrap_rich;
     use crate::richtext::{RichSpan, RichStyle};
 
@@ -949,18 +949,49 @@ fn wrap_rich_all_whitespace_returns_single_line_unchanged() {
     );
     let row_text: String = result[0].iter().map(|s| s.text.as_str()).collect();
     assert_eq!(
-        row_text, "   ",
-        "all-whitespace line content must be unchanged: {result:?}"
+        row_text, "",
+        "all-whitespace line normalizes to a canonical blank line: {result:?}"
+    );
+}
+
+/// Blank lines between paragraphs are preserved, not dropped (ADR 0048's fix).
+///
+/// A mutant that drops the wordless-segment fallback (or merges consecutive newline
+/// segments) would collapse the empty middle segment, producing two lines instead of
+/// three and failing the length + content assertions here.
+#[test]
+fn wrap_rich_blank_line_between_paragraphs_preserved() {
+    use crate::render::wrap_rich;
+    use crate::richtext::{RichSpan, RichStyle};
+
+    let line = vec![RichSpan {
+        text: "a\n\nb".to_string(),
+        style: RichStyle::Plain,
+    }];
+    let result = wrap_rich(&line, 10);
+    assert_eq!(
+        result.len(),
+        3,
+        "blank line between paragraphs must be preserved as a third result line: {result:?}"
+    );
+    let texts: Vec<String> = result
+        .iter()
+        .map(|row| row.iter().map(|s| s.text.as_str()).collect())
+        .collect();
+    assert_eq!(
+        texts,
+        vec!["a".to_string(), "".to_string(), "b".to_string()],
+        "expected [\"a\", \"\", \"b\"]: {result:?}"
     );
 }
 
 /// Geometry 3 — a styled word wider than `width` hard-splits into multiple lines,
 /// and every chunk retains the word's original style.
 ///
-/// render.rs:1284: `if word_dw <= width { … } else { hard_split_rich_word(…) }`
-/// Dropping the hard-split branch (always `emit_styled_chars`) produces a single
-/// oversized line, failing the len > 1 assertion. Dropping the per-char style
-/// threading produces Plain spans, failing the Bold assertion.
+/// render.rs:1223 (`append_word`): `if word_dw <= width { … } else { hard_split(…) }`
+/// Dropping the hard-split branch (always pushing every char onto one line) produces a
+/// single oversized line, failing the len > 1 assertion. Dropping the per-char style
+/// threading (`expand_to_styled_chars`) produces Plain spans, failing the Bold assertion.
 #[test]
 fn wrap_rich_word_wider_than_width_hard_splits_with_style_preserved() {
     use crate::render::wrap_rich;
@@ -1056,7 +1087,7 @@ fn wrap_rich_one_over_exact_width_breaks_to_second_line() {
 
 /// Geometry 5 — an embedded `\n` splits the input into two independent wrapped segments.
 ///
-/// render.rs:1176: `for segment in styled_chars.split(|(ch, _)| *ch == '\n') { … }`
+/// render.rs:1156 (`greedy_wrap`): `for segment in cells.split(|c| c.is_newline())`
 /// Dropping the split produces a single result line containing both words,
 /// failing the len == 2 assertion and the per-line content checks.
 #[test]
@@ -1086,9 +1117,9 @@ fn wrap_rich_embedded_newline_produces_two_segments() {
 /// Geometry 6 — a word whose display width exactly equals `width` occupies its own
 /// line with no spurious extra break.
 ///
-/// render.rs:1284: `if word_dw <= width` — equality must pass into `emit_styled_chars`,
-/// not into `hard_split_rich_word`.  A mutant that changes `<=` to `<` here would
-/// route an exact-width word through hard_split, yielding an extra empty line.
+/// render.rs:1223 (`append_word`): `if word_dw <= width` — equality must pass into the
+/// direct push-cell branch, not into `hard_split`. A mutant that changes `<=` to `<` here
+/// would route an exact-width word through `hard_split`, yielding an extra empty line.
 #[test]
 fn wrap_rich_word_exactly_equal_to_width_fits_without_spurious_break() {
     use crate::render::wrap_rich;
