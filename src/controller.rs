@@ -91,15 +91,11 @@ fn fresh_project_names_cache_read(
         task_cache_ttl_hours: 24,
     };
     let store = Store::open(&config).ok()?;
-    let cached = ProjectNamesCache::new(store.conn())
-        .read(instance_name)
-        .ok()??;
-    let age = crate::store::now_epoch_secs() - cached.fetched_at;
-    if age <= PROJECT_NAMES_TTL_SECS {
-        Some(cached.names)
-    } else {
-        None
-    }
+    ProjectNamesCache::new(store.conn())
+        .read_fresh(instance_name, PROJECT_NAMES_TTL_SECS)
+        .ok()
+        .flatten()
+        .map(|cached| cached.names)
 }
 
 fn try_project_names_cache_write(
