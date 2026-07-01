@@ -164,6 +164,26 @@ impl<'a> ProjectNamesCache<'a> {
         }
     }
 
+    /// Reads the cached entry and returns it only if still within
+    /// `max_age_secs` of `now_epoch_secs()`; absent or stale entries yield
+    /// `None` (ADR 0052 — the cache owns freshness, not its callers).
+    pub fn read_fresh(
+        &self,
+        instance: &str,
+        max_age_secs: i64,
+    ) -> Result<Option<CachedProjectNames>> {
+        let cached = match self.read(instance)? {
+            Some(cached) => cached,
+            None => return Ok(None),
+        };
+        let age = now_epoch_secs() - cached.fetched_at;
+        if age <= max_age_secs {
+            Ok(Some(cached))
+        } else {
+            Ok(None)
+        }
+    }
+
     pub fn write(&self, instance: &str, names: &HashMap<i64, String>) -> Result<()> {
         self.write_with_fetched_at(instance, names, now_epoch_secs())
     }

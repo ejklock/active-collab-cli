@@ -79,10 +79,15 @@ flowchart TD
   white on cyan, bold), a variable-height content area, and a footer.  The footer
   itself is **two stacked regions** ([ADR 0038](/adr/0038-detail-footer-contextual-hint-and-status-line.md)):
   a **contextual instruction line** whose Detail-screen text changes by mode
-  (browsing / composing / confirming-delete / own-comment-focused, via `detail_hint`
-  in `FooterPlan`), and a **thin status line** that surfaces one derived transient
+  (browsing / composing / confirming-delete / own-comment-focused, via `detail_hint`),
+  and a **thin status line** that surfaces one derived transient
   string (`Enviando…`, a write error, `Copiado ✓`) and is blank — collapsing the row —
-  when idle.  The too-small guard (width < 24 or height < 6) bypasses all three and
+  when idle.  The whole footer decision — hint selection (with the modal one-home
+  suppression), the transient status, and the `FooterPlan` layout — is single-homed in a
+  pure `src/tui/footer.rs` behind one `footer::plan(screen, …)`
+  ([ADR 0053](/adr/0053-footer-decision-as-pure-module.md)); `view()` is a draw-only
+  adapter over it (mirroring the pure `detail_geometry`/`task_layout` split).
+  The too-small guard (width < 24 or height < 6) bypasses all three and
   renders only a centered `"Terminal too small"` message.  List screens render a
   ratatui `Table` driven by width `Constraint`s (no fixed-width truncation) with a
   `TableState`-driven selection highlight; the detail screen wraps long lines and

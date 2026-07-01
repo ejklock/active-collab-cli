@@ -19,6 +19,30 @@ impl std::fmt::Display for Unauthorized {
 
 impl std::error::Error for Unauthorized {}
 
+/// Typed outcome of a comment-write call (create/update/delete), classified
+/// once by the client instead of by each caller (ADR 0054).
+#[derive(Debug)]
+pub enum CommentWriteOutcome {
+    /// 2xx — carries the response body when present (`None` for delete).
+    Ok(Option<Value>),
+    /// HTTP 401.
+    Unauthorized,
+    /// Any other status.
+    Failed(u16),
+}
+
+/// Classify a comment-write response status/body into a `CommentWriteOutcome`:
+/// (200..=299) -> Ok(body), HTTP_UNAUTHORIZED -> Unauthorized, else -> Failed(status).
+fn classify_comment_write(status: u16, body: Option<Value>) -> CommentWriteOutcome {
+    if (200..=299).contains(&status) {
+        return CommentWriteOutcome::Ok(body);
+    }
+    if status == HTTP_UNAUTHORIZED {
+        return CommentWriteOutcome::Unauthorized;
+    }
+    CommentWriteOutcome::Failed(status)
+}
+
 pub struct ActiveCollabClient {
     instance: Instance,
     http: Http,
@@ -193,9 +217,10 @@ impl ActiveCollabClient {
         self.list_projects().await
     }
 
-    /// POST /api/v1/comments/task/{task_id}. Returns (status, Some(comment))
-    /// on 2xx, (status, None) otherwise.
-    pub async fn create_comment(&self, task_id: i64, body: &str) -> Result<(u16, Option<Value>)> {
+    /// POST /api/v1/comments/task/{task_id}. Classifies the response into a
+    /// `CommentWriteOutcome`: (200..=299) -> Ok(Some(comment)), 401 ->
+    /// Unauthorized, else -> Failed(status).
+    pub async fn create_comment(&self, task_id: i64, body: &str) -> Result<CommentWriteOutcome> {
         let base = self.instance.base_url.trim_end_matches('/');
         let url = format!("{}/api/v1/comments/task/{}", base, task_id);
         let payload = serde_json::json!({ "body": body });
@@ -208,19 +233,18 @@ impl ActiveCollabClient {
                 &payload,
             )
             .await?;
-        if (200..=299).contains(&status) {
-            return Ok((status, serde_json::from_slice(&raw).ok()));
-        }
-        Ok((status, None))
+        let body = if (200..=299).contains(&status) {
+            serde_json::from_slice(&raw).ok()
+        } else {
+            None
+        };
+        Ok(classify_comment_write(status, body))
     }
 
-    /// PUT /api/v1/comments/{comment_id}. Returns (status, Some(comment))
-    /// on 2xx, (status, None) otherwise.
-    pub async fn update_comment(
-        &self,
-        comment_id: i64,
-        body: &str,
-    ) -> Result<(u16, Option<Value>)> {
+    /// PUT /api/v1/comments/{comment_id}. Classifies the response into a
+    /// `CommentWriteOutcome`: (200..=299) -> Ok(Some(comment)), 401 ->
+    /// Unauthorized, else -> Failed(status).
+    pub async fn update_comment(&self, comment_id: i64, body: &str) -> Result<CommentWriteOutcome> {
         let base = self.instance.base_url.trim_end_matches('/');
         let url = format!("{}/api/v1/comments/{}", base, comment_id);
         let payload = serde_json::json!({ "body": body });
@@ -233,21 +257,25 @@ impl ActiveCollabClient {
                 &payload,
             )
             .await?;
-        if (200..=299).contains(&status) {
-            return Ok((status, serde_json::from_slice(&raw).ok()));
-        }
-        Ok((status, None))
+        let body = if (200..=299).contains(&status) {
+            serde_json::from_slice(&raw).ok()
+        } else {
+            None
+        };
+        Ok(classify_comment_write(status, body))
     }
 
-    /// DELETE /api/v1/comments/{comment_id}. Returns the response status.
-    pub async fn delete_comment(&self, comment_id: i64) -> Result<u16> {
+    /// DELETE /api/v1/comments/{comment_id}. Classifies the response into a
+    /// `CommentWriteOutcome`: (200..=299) -> Ok(None) (no response body),
+    /// 401 -> Unauthorized, else -> Failed(status).
+    pub async fn delete_comment(&self, comment_id: i64) -> Result<CommentWriteOutcome> {
         let base = self.instance.base_url.trim_end_matches('/');
         let url = format!("{}/api/v1/comments/{}", base, comment_id);
         let (status, _) = self
             .http
             .authed_delete(&url, &self.instance.base_url, &self.instance.token)
             .await?;
-        Ok(status)
+        Ok(classify_comment_write(status, None))
     }
 }
 

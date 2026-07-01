@@ -1,5 +1,5 @@
 use crate::agent_json;
-use crate::client::{ActiveCollabClient, Unauthorized};
+use crate::client::{ActiveCollabClient, CommentWriteOutcome, Unauthorized};
 use crate::http::{Http, HTTP_UNAUTHORIZED};
 use crate::i18n::{t, SUPPORTED};
 use crate::render::{self, MineTableRow};
@@ -795,7 +795,7 @@ pub async fn comment_core(
             write_comment_failure(&e.to_string(), json, out, err);
             1
         }
-        Ok((status, comment_opt)) if (200u16..=299).contains(&status) => {
+        Ok(CommentWriteOutcome::Ok(comment_opt)) => {
             let comment_id = comment_opt
                 .as_ref()
                 .and_then(|c| c.get("id").and_then(|v| v.as_i64()))
@@ -803,7 +803,7 @@ pub async fn comment_core(
             write_comment_success(comment_id, task_id, project_id, json, out);
             0
         }
-        Ok((HTTP_UNAUTHORIZED, _)) => {
+        Ok(CommentWriteOutcome::Unauthorized) => {
             write_comment_failure(
                 &t("Token invalid or revoked — run `ac setup add` to re-authenticate."),
                 json,
@@ -812,7 +812,7 @@ pub async fn comment_core(
             );
             1
         }
-        Ok((status, _)) => {
+        Ok(CommentWriteOutcome::Failed(status)) => {
             let reason = format!(
                 "HTTP {status} posting comment to task {project_id}/{task_id}",
                 status = status,

@@ -237,6 +237,73 @@ fn project_names_cache_write_with_fetched_at_stamps_supplied_timestamp() {
     );
 }
 
+// ADR 0052: read_fresh returns Some for a recently-written entry when
+// max_age_secs is large enough to cover its age.
+#[test]
+fn project_names_cache_read_fresh_returns_some_for_recent_entry() {
+    let (_dir, store) = make_store();
+    let cache = ProjectNamesCache::new(store.conn());
+    let recent_ts = crate::store::now_epoch_secs() - 60;
+    let names: HashMap<i64, String> = [(1i64, "Fresh Project".to_string())].into_iter().collect();
+    cache
+        .write_with_fetched_at("acme", &names, recent_ts)
+        .unwrap();
+    let result = cache.read_fresh("acme", 3600).unwrap();
+    assert_eq!(
+        result.unwrap().names.get(&1).map(|s| s.as_str()),
+        Some("Fresh Project"),
+        "entry 60s old with max_age=3600 must be a hit"
+    );
+}
+
+// ADR 0052: read_fresh returns None for a stale entry when max_age_secs is
+// smaller than the entry's age.
+#[test]
+fn project_names_cache_read_fresh_returns_none_for_stale_entry() {
+    let (_dir, store) = make_store();
+    let cache = ProjectNamesCache::new(store.conn());
+    let old_ts = crate::store::now_epoch_secs() - 7200;
+    let names: HashMap<i64, String> = [(1i64, "Stale Project".to_string())].into_iter().collect();
+    cache.write_with_fetched_at("acme", &names, old_ts).unwrap();
+    let result = cache.read_fresh("acme", 3600).unwrap();
+    assert!(
+        result.is_none(),
+        "entry older than max_age_secs must be treated as a miss"
+    );
+}
+
+// ADR 0052: read_fresh returns None when no entry has been written.
+#[test]
+fn project_names_cache_read_fresh_returns_none_when_absent() {
+    let (_dir, store) = make_store();
+    let cache = ProjectNamesCache::new(store.conn());
+    let result = cache.read_fresh("nonexistent", 3600).unwrap();
+    assert!(result.is_none());
+}
+
+// ADR 0052: entry exactly at the max_age boundary reads Some (age ==
+// max_age_secs), mirroring the TaskListCache boundary test below — the
+// read_fresh comparison must be inclusive, not strict.
+#[test]
+fn project_names_cache_read_fresh_at_exact_max_age_returns_some() {
+    let (_dir, store) = make_store();
+    let cache = ProjectNamesCache::new(store.conn());
+    let max_age_secs = 3600;
+    let boundary_ts = crate::store::now_epoch_secs() - max_age_secs;
+    let names: HashMap<i64, String> = [(1i64, "Boundary Project".to_string())]
+        .into_iter()
+        .collect();
+    cache
+        .write_with_fetched_at("acme", &names, boundary_ts)
+        .unwrap();
+    let result = cache.read_fresh("acme", max_age_secs).unwrap();
+    assert_eq!(
+        result.unwrap().names.get(&1).map(|s| s.as_str()),
+        Some("Boundary Project"),
+        "entry with age == max_age_secs must be a hit (inclusive boundary)"
+    );
+}
+
 fn make_instance(name: &str) -> Instance {
     Instance {
         name: name.to_string(),
