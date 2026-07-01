@@ -394,7 +394,7 @@ pub fn detail_max_offset(
     assets: &[Asset],
 ) -> usize {
     let _ = (viewport_cols, assets);
-    let text_viewport_height = (viewport_rows.saturating_sub(DETAIL_CHROME_ROWS) as usize).max(1);
+    let text_viewport_height = crate::tui::detail_geometry::content_height_clamped(viewport_rows);
     lines_len.saturating_sub(text_viewport_height)
 }
 
@@ -1032,7 +1032,7 @@ pub(crate) fn scroll_offset_for_card(
     viewport_rows: u16,
     max_offset: usize,
 ) -> usize {
-    let text_vh = (viewport_rows.saturating_sub(DETAIL_CHROME_ROWS) as usize).max(1);
+    let text_vh = crate::tui::detail_geometry::content_height_clamped(viewport_rows);
     let card_end = card_start + card_count;
     let viewport_end = current_offset + text_vh;
 
