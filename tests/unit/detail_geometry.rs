@@ -1,4 +1,7 @@
-use super::{content_height, is_in_content, row_to_line_idx, DETAIL_TEXT_TOP};
+use super::{
+    content_height, content_height_clamped, is_in_content, row_to_line_idx, DETAIL_TEXT_TOP,
+};
+use crate::tui::model::DETAIL_CHROME_ROWS;
 
 // AC4: is_in_content — row just below DETAIL_TEXT_TOP is out of the body area.
 #[test]
@@ -94,5 +97,53 @@ fn detail_text_top_is_two() {
     assert_eq!(
         DETAIL_TEXT_TOP, 2,
         "DETAIL_TEXT_TOP must be 2 (top border + header bar rows above the scrollable body)",
+    );
+}
+
+// AC3: content_height_clamped — viewport smaller than the chrome yields 1 (the floor).
+// Dropping the .max(1) floor causes this to return 0.
+#[test]
+fn content_height_clamped_below_chrome_returns_one() {
+    let viewport_rows = DETAIL_CHROME_ROWS - 1;
+    assert_eq!(
+        content_height_clamped(viewport_rows),
+        1,
+        "viewport_rows={viewport_rows} (< DETAIL_CHROME_ROWS={DETAIL_CHROME_ROWS}) must clamp to 1",
+    );
+}
+
+// AC3: content_height_clamped — viewport exactly equal to the chrome yields 1 (the floor).
+// Dropping the .max(1) floor causes this to return 0 (content_height returns 0 at the boundary).
+#[test]
+fn content_height_clamped_at_chrome_boundary_returns_one() {
+    let viewport_rows = DETAIL_CHROME_ROWS;
+    assert_eq!(
+        content_height_clamped(viewport_rows),
+        1,
+        "viewport_rows={viewport_rows} (== DETAIL_CHROME_ROWS={DETAIL_CHROME_ROWS}) must clamp to 1",
+    );
+}
+
+// AC3: content_height_clamped — viewport with N body rows above the chrome yields N.
+// Dropping the chrome subtraction causes this to return viewport_rows (too large).
+#[test]
+fn content_height_clamped_above_chrome_returns_body_rows() {
+    let body_rows: u16 = 10;
+    let viewport_rows = DETAIL_CHROME_ROWS + body_rows;
+    assert_eq!(
+        content_height_clamped(viewport_rows),
+        body_rows as usize,
+        "viewport_rows={viewport_rows} with {body_rows} body rows must return {body_rows}",
+    );
+}
+
+// TE mutation floor: viewport=0 (degenerate) also hits the floor — ensures zero-height
+// does not slip through even without saturating_sub.
+#[test]
+fn content_height_clamped_zero_viewport_returns_one() {
+    assert_eq!(
+        content_height_clamped(0),
+        1,
+        "viewport_rows=0 must clamp to 1 to prevent degenerate scroll arithmetic",
     );
 }
