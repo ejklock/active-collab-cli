@@ -787,6 +787,20 @@ fn wrap_text_preserves_embedded_newlines_as_independent_wraps() {
     assert_eq!(result, vec!["foo bar", "baz qux"], "got: {:?}", result);
 }
 
+/// Blank line between paragraphs preserved (ADR 0048's canonical wrap contract) — a
+/// mutant that drops the wordless-segment fallback would collapse the empty middle
+/// segment, producing 2 lines instead of 3.
+#[test]
+fn wrap_text_blank_line_between_paragraphs_preserved() {
+    let result = wrap_text("a\n\nb", 10);
+    assert_eq!(
+        result,
+        vec!["a".to_string(), "".to_string(), "b".to_string()],
+        "got: {:?}",
+        result
+    );
+}
+
 #[test]
 fn wrap_text_embedded_newline_line_that_wraps() {
     let result = wrap_text("short\na very long line here", 10);
