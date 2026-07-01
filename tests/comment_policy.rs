@@ -15,40 +15,32 @@ impl std::fmt::Display for ViolationKind {
     }
 }
 
-fn find_line_comment(line: &str) -> Option<usize> {
-    let bytes = line.as_bytes();
-    let len = bytes.len();
-    let mut i = 0;
-    while i < len {
-        let ch = bytes[i];
-        if ch == b'"' {
+/// Advance past a quoted literal opened at `from - 1`, returning the index just
+/// past its closing `quote` (or `bytes.len()` if unterminated). Handles `\` escapes.
+fn skip_quoted(bytes: &[u8], from: usize, quote: u8) -> usize {
+    let mut i = from;
+    while i < bytes.len() {
+        if bytes[i] == b'\\' {
+            i += 2;
+        } else if bytes[i] == quote {
             i += 1;
-            while i < len {
-                if bytes[i] == b'\\' {
-                    i += 2;
-                } else if bytes[i] == b'"' {
-                    i += 1;
-                    break;
-                } else {
-                    i += 1;
-                }
-            }
-        } else if ch == b'\'' {
-            i += 1;
-            while i < len {
-                if bytes[i] == b'\\' {
-                    i += 2;
-                } else if bytes[i] == b'\'' {
-                    i += 1;
-                    break;
-                } else {
-                    i += 1;
-                }
-            }
-        } else if ch == b'/' && i + 1 < len && bytes[i + 1] == b'/' {
-            return Some(i);
+            break;
         } else {
             i += 1;
+        }
+    }
+    i
+}
+
+fn find_line_comment(line: &str) -> Option<usize> {
+    let bytes = line.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'"' => i = skip_quoted(bytes, i + 1, b'"'),
+            b'\'' => i = skip_quoted(bytes, i + 1, b'\''),
+            b'/' if i + 1 < bytes.len() && bytes[i + 1] == b'/' => return Some(i),
+            _ => i += 1,
         }
     }
     None
