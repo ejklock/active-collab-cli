@@ -1063,132 +1063,222 @@ fn panel_content_width(width: usize) -> usize {
     width.saturating_sub(2 + 2 * PANEL_HPAD)
 }
 
+/// A single wrap-stream cell — a `char` for plain text, `(char, RichStyle)` for rich
+/// text. `greedy_wrap` only needs to measure and classify a cell, never its concrete type.
+trait WrapCell {
+    fn display_width(&self) -> usize;
+    /// Ascii whitespace that is NOT a newline — a word boundary within a segment.
+    fn is_word_separator(&self) -> bool;
+    fn is_newline(&self) -> bool;
+}
+
+impl WrapCell for char {
+    fn display_width(&self) -> usize {
+        unicode_width::UnicodeWidthChar::width(*self).unwrap_or(0)
+    }
+
+    fn is_word_separator(&self) -> bool {
+        self.is_ascii_whitespace() && *self != '\n'
+    }
+
+    fn is_newline(&self) -> bool {
+        *self == '\n'
+    }
+}
+
+impl WrapCell for (char, crate::richtext::RichStyle) {
+    fn display_width(&self) -> usize {
+        self.0.display_width()
+    }
+
+    fn is_word_separator(&self) -> bool {
+        self.0.is_word_separator()
+    }
+
+    fn is_newline(&self) -> bool {
+        self.0.is_newline()
+    }
+}
+
+/// A line accumulated by `greedy_wrap` — `String` for plain text, `RichLine` for rich
+/// text. The core owns the running display-width count; the line only knows how to append.
+trait WrapLine: Default {
+    type Cell;
+    fn push_cell(&mut self, cell: &Self::Cell);
+    fn push_separator(&mut self);
+    fn is_empty(&self) -> bool;
+}
+
+impl WrapLine for String {
+    type Cell = char;
+
+    fn push_cell(&mut self, cell: &char) {
+        self.push(*cell);
+    }
+
+    fn push_separator(&mut self) {
+        self.push(' ');
+    }
+
+    fn is_empty(&self) -> bool {
+        str::is_empty(self)
+    }
+}
+
+impl WrapLine for crate::richtext::RichLine {
+    type Cell = (char, crate::richtext::RichStyle);
+
+    fn push_cell(&mut self, cell: &Self::Cell) {
+        let mut buf = [0u8; 4];
+        let s = cell.0.encode_utf8(&mut buf);
+        push_rich_span(self, s, cell.1);
+    }
+
+    fn push_separator(&mut self) {
+        push_rich_span(self, " ", crate::richtext::RichStyle::Plain);
+    }
+
+    fn is_empty(&self) -> bool {
+        <[_]>::is_empty(self)
+    }
+}
+
+/// The one greedy word-wrap algorithm shared by `wrap_text` and `wrap_rich` (ADR 0048).
+///
+/// `cells` is split on newline cells into segments; every segment yields at least one
+/// output line, so an empty segment (a blank line between paragraphs) produces one empty
+/// line instead of being dropped — the canonical contract that fixes the prior rich-only
+/// blank-line drop. Within a segment, words (maximal runs of non-separator cells) are
+/// greedily placed on the current line, joined by a single separator when they fit within
+/// `width`; a word wider than `width` on its own is hard-split by accumulated display width.
+fn greedy_wrap<C: WrapCell, L: WrapLine<Cell = C>>(cells: &[C], width: usize) -> Vec<L> {
+    let mut result = Vec::new();
+    for segment in cells.split(|c| c.is_newline()) {
+        result.extend(wrap_segment(segment, width));
+    }
+    result
+}
+
+/// Maximal runs of non-separator cells within a segment — the words to place.
+fn words<C: WrapCell>(segment: &[C]) -> impl Iterator<Item = &[C]> {
+    segment
+        .split(|c| c.is_word_separator())
+        .filter(|word| !word.is_empty())
+}
+
+/// Greedy-wrap one newline-delimited segment into its own output line(s).
+///
+/// A wordless segment (empty, or whitespace only) still yields exactly one empty line.
+fn wrap_segment<C: WrapCell, L: WrapLine<Cell = C>>(segment: &[C], width: usize) -> Vec<L> {
+    let mut result = Vec::new();
+    let mut current = L::default();
+    let mut current_dw = 0usize;
+
+    for word in words(segment) {
+        place_word(word, width, &mut current, &mut current_dw, &mut result);
+    }
+
+    if !current.is_empty() || result.is_empty() {
+        result.push(current);
+    }
+    result
+}
+
+/// Place one word on the current line, joined by a separator when it fits within `width`;
+/// otherwise flush the current line and start a new one with this word.
+fn place_word<C: WrapCell, L: WrapLine<Cell = C>>(
+    word: &[C],
+    width: usize,
+    current: &mut L,
+    current_dw: &mut usize,
+    result: &mut Vec<L>,
+) {
+    let word_dw: usize = word.iter().map(WrapCell::display_width).sum();
+
+    if *current_dw > 0 {
+        if *current_dw + 1 + word_dw <= width {
+            current.push_separator();
+            for cell in word {
+                current.push_cell(cell);
+            }
+            *current_dw += 1 + word_dw;
+            return;
+        }
+        result.push(std::mem::take(current));
+        *current_dw = 0;
+    }
+
+    append_word(word, word_dw, width, current, current_dw, result);
+}
+
+/// Append a word to the (empty) current line, or hard-split it if wider than `width`.
+fn append_word<C: WrapCell, L: WrapLine<Cell = C>>(
+    word: &[C],
+    word_dw: usize,
+    width: usize,
+    current: &mut L,
+    current_dw: &mut usize,
+    result: &mut Vec<L>,
+) {
+    if word_dw <= width {
+        for cell in word {
+            current.push_cell(cell);
+        }
+        *current_dw = word_dw;
+    } else {
+        hard_split(word, width, current, current_dw, result);
+    }
+}
+
+/// Hard-split a word wider than `width` columns, flushing full chunks as separate lines.
+fn hard_split<C: WrapCell, L: WrapLine<Cell = C>>(
+    word: &[C],
+    width: usize,
+    current: &mut L,
+    current_dw: &mut usize,
+    result: &mut Vec<L>,
+) {
+    let mut acc = 0usize;
+    for cell in word {
+        let cw = cell.display_width();
+        if acc + cw > width {
+            result.push(std::mem::take(current));
+            acc = 0;
+        }
+        current.push_cell(cell);
+        acc += cw;
+    }
+    *current_dw = acc;
+}
+
 /// Parity: Python tui.py wrap_text.
 ///
-/// Greedy word-wrap on whitespace to at most `width` DISPLAY columns per line.
+/// Greedy word-wrap on ascii whitespace to at most `width` DISPLAY columns per line.
 /// Display width is measured via unicode-width (same crate ratatui uses), so CJK and
 /// combining characters are handled correctly. A single word wider than `width` is
-/// hard-split by accumulated display width. Existing line breaks are preserved —
-/// each input line is wrapped independently. Empty input yields an empty Vec.
+/// hard-split by accumulated display width. Existing line breaks are preserved, including
+/// blank lines between them (ADR 0048). Empty input yields an empty Vec.
 pub fn wrap_text(text: &str, width: usize) -> Vec<String> {
     if text.is_empty() || width == 0 {
         return vec![];
     }
-    let mut result = Vec::new();
-    for input_line in text.split('\n') {
-        wrap_single_line(input_line, width, &mut result);
-    }
-    result
-}
-
-fn append_word_to_line(
-    word: &str,
-    word_dw: usize,
-    width: usize,
-    current: &mut String,
-    current_dw: &mut usize,
-    out: &mut Vec<String>,
-) {
-    if word_dw <= width {
-        current.push_str(word);
-        *current_dw = word_dw;
-    } else {
-        hard_split_word(word, width, current, current_dw, out);
-    }
-}
-
-fn wrap_single_line(line: &str, width: usize, out: &mut Vec<String>) {
-    let mut current = String::new();
-    let mut current_dw = 0usize;
-
-    for word in line.split_whitespace() {
-        let word_dw = display_width(word);
-
-        if current_dw == 0 {
-            append_word_to_line(word, word_dw, width, &mut current, &mut current_dw, out);
-            continue;
-        }
-
-        if current_dw + 1 + word_dw <= width {
-            current.push(' ');
-            current.push_str(word);
-            current_dw += 1 + word_dw;
-            continue;
-        }
-
-        out.push(current.clone());
-        current.clear();
-        current_dw = 0;
-        append_word_to_line(word, word_dw, width, &mut current, &mut current_dw, out);
-    }
-
-    if !current.is_empty() || line.chars().next().is_none() {
-        out.push(current);
-    }
-}
-
-fn hard_split_word(
-    word: &str,
-    width: usize,
-    current: &mut String,
-    current_dw: &mut usize,
-    out: &mut Vec<String>,
-) {
-    let mut acc = 0usize;
-    let mut chunk = String::new();
-    for ch in word.chars() {
-        let cw = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
-        if acc + cw > width {
-            out.push(chunk.clone());
-            chunk.clear();
-            acc = 0;
-        }
-        chunk.push(ch);
-        acc += cw;
-    }
-    *current = chunk;
-    *current_dw = acc;
+    let cells: Vec<char> = text.chars().collect();
+    greedy_wrap::<char, String>(&cells, width)
 }
 
 /// Greedy word-wrap for a `RichLine`, preserving span emphasis across breaks.
 ///
-/// Mirrors `wrap_text`'s greedy display-width algorithm but operates on
-/// `Vec<RichSpan>` so that a span whose style is Bold/Italic/Code carries that
-/// style on every wrapped fragment.  Style is threaded per-character so repeated
-/// words with different emphasis and substring words each keep their own style
-/// (ADR 0030, BDR 0023).  Empty input yields an empty Vec.
+/// Shares `wrap_text`'s greedy display-width core (ADR 0048) over `(char, RichStyle)`
+/// cells, so a span whose style is Bold/Italic/Code carries that style on every wrapped
+/// fragment, and blank lines between paragraphs are preserved rather than dropped. Style
+/// is threaded per-character so repeated words with different emphasis and substring words
+/// each keep their own style (ADR 0030, BDR 0023). Empty input yields an empty Vec.
 pub fn wrap_rich(line: &crate::richtext::RichLine, width: usize) -> Vec<crate::richtext::RichLine> {
-    use crate::richtext::RichLine;
     if line.is_empty() || width == 0 {
         return vec![];
     }
-    let plain: String = line.iter().map(|s| s.text.as_str()).collect();
-    if plain.is_empty() || plain.chars().all(|c| c.is_ascii_whitespace()) {
-        return vec![line.clone()];
-    }
-
-    let styled_chars = expand_to_styled_chars(line);
-    let mut result: Vec<RichLine> = Vec::new();
-    let mut current: RichLine = Vec::new();
-    let mut current_dw = 0usize;
-    let mut first_segment = true;
-
-    for segment in styled_chars.split(|(ch, _)| *ch == '\n') {
-        if !first_segment && !current.is_empty() {
-            result.push(std::mem::take(&mut current));
-            current_dw = 0;
-        }
-        first_segment = false;
-        wrap_rich_single_line(segment, width, &mut result, &mut current, &mut current_dw);
-    }
-
-    if !current.is_empty() {
-        result.push(current);
-    } else if plain.chars().next().is_none() {
-        result.push(vec![]);
-    }
-
-    result
+    let cells = expand_to_styled_chars(line);
+    greedy_wrap::<_, crate::richtext::RichLine>(&cells, width)
 }
 
 /// Expand a `RichLine` to an ordered sequence of `(char, RichStyle)` pairs.
@@ -1202,116 +1292,6 @@ fn expand_to_styled_chars(
     line.iter()
         .flat_map(|span| span.text.chars().map(move |ch| (ch, span.style)))
         .collect()
-}
-
-/// Wrap a single segment of styled characters (between hard newlines) using greedy width.
-///
-/// Words are maximal non-whitespace runs in the styled-char stream.  Each word's
-/// characters carry their per-character style through to the output spans, so a word
-/// that straddles an emphasis boundary keeps both styles as adjacent spans.
-fn wrap_rich_single_line(
-    styled_chars: &[(char, crate::richtext::RichStyle)],
-    width: usize,
-    result: &mut Vec<crate::richtext::RichLine>,
-    current: &mut crate::richtext::RichLine,
-    current_dw: &mut usize,
-) {
-    use crate::richtext::RichStyle;
-
-    let mut i = 0;
-    while i < styled_chars.len() {
-        // Skip whitespace (but not newlines — those are already split out).
-        if styled_chars[i].0.is_ascii_whitespace() {
-            i += 1;
-            continue;
-        }
-
-        // Collect one word: a maximal run of non-whitespace styled chars.
-        let word_start = i;
-        while i < styled_chars.len() && !styled_chars[i].0.is_ascii_whitespace() {
-            i += 1;
-        }
-        let word_chars = &styled_chars[word_start..i];
-        let word_dw = word_display_width(word_chars);
-
-        if *current_dw == 0 {
-            append_rich_word(word_chars, word_dw, width, current, current_dw, result);
-            continue;
-        }
-
-        if *current_dw + 1 + word_dw <= width {
-            push_rich_span(current, " ", RichStyle::Plain);
-            emit_styled_chars(current, word_chars);
-            *current_dw += 1 + word_dw;
-            continue;
-        }
-
-        result.push(std::mem::take(current));
-        *current_dw = 0;
-        append_rich_word(word_chars, word_dw, width, current, current_dw, result);
-    }
-}
-
-/// Compute the display width of a slice of styled characters.
-fn word_display_width(chars: &[(char, crate::richtext::RichStyle)]) -> usize {
-    chars
-        .iter()
-        .map(|(ch, _)| unicode_width::UnicodeWidthChar::width(*ch).unwrap_or(0))
-        .sum()
-}
-
-/// Push each styled character onto the current line via `push_rich_span`, coalescing runs.
-fn emit_styled_chars(
-    current: &mut crate::richtext::RichLine,
-    chars: &[(char, crate::richtext::RichStyle)],
-) {
-    for (ch, style) in chars {
-        let mut buf = [0u8; 4];
-        let s = ch.encode_utf8(&mut buf);
-        push_rich_span(current, s, *style);
-    }
-}
-
-/// Append a word (or hard-split it) to the current rich line being built.
-fn append_rich_word(
-    word_chars: &[(char, crate::richtext::RichStyle)],
-    word_dw: usize,
-    width: usize,
-    current: &mut crate::richtext::RichLine,
-    current_dw: &mut usize,
-    result: &mut Vec<crate::richtext::RichLine>,
-) {
-    if word_dw <= width {
-        emit_styled_chars(current, word_chars);
-        *current_dw = word_dw;
-    } else {
-        hard_split_rich_word(word_chars, width, current, current_dw, result);
-    }
-}
-
-/// Hard-split a word wider than `width` columns, flushing full chunks as separate lines.
-///
-/// Each character retains its per-character style when placed into a chunk.
-fn hard_split_rich_word(
-    word_chars: &[(char, crate::richtext::RichStyle)],
-    width: usize,
-    current: &mut crate::richtext::RichLine,
-    current_dw: &mut usize,
-    result: &mut Vec<crate::richtext::RichLine>,
-) {
-    let mut acc = 0usize;
-    for (ch, style) in word_chars {
-        let cw = unicode_width::UnicodeWidthChar::width(*ch).unwrap_or(0);
-        if acc + cw > width {
-            result.push(std::mem::take(current));
-            acc = 0;
-        }
-        let mut buf = [0u8; 4];
-        let s = ch.encode_utf8(&mut buf);
-        push_rich_span(current, s, *style);
-        acc += cw;
-    }
-    *current_dw = acc;
 }
 
 /// Push a text fragment onto a `RichLine`, merging adjacent same-style spans.
