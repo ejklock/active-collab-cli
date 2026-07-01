@@ -12,6 +12,16 @@ pub(crate) fn content_height(viewport_rows: u16) -> u16 {
     viewport_rows.saturating_sub(crate::tui::model::DETAIL_CHROME_ROWS)
 }
 
+/// Number of scrollable body rows available, clamped to a minimum of 1.
+///
+/// Why the floor is 1: a zero-height body viewport makes the scroll and offset arithmetic
+/// degenerate — `viewport_end = offset + height` and `lines_len.saturating_sub(height)`
+/// both produce misleading values when height is 0. The floor keeps model-only tests at
+/// viewport=(0,0) consistent with render behaviour, where at least one row is assumed.
+pub(crate) fn content_height_clamped(viewport_rows: u16) -> usize {
+    (content_height(viewport_rows) as usize).max(1)
+}
+
 /// Return true when `row` falls within the scrollable body text area.
 ///
 /// The body spans `[DETAIL_TEXT_TOP, DETAIL_TEXT_TOP + content_height(viewport_rows))`.
