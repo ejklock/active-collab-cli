@@ -1,6 +1,7 @@
 pub(crate) mod detail_geometry;
 pub mod drawer;
 pub mod events;
+pub(crate) mod footer;
 pub(crate) mod hit_test;
 pub mod model;
 pub mod screens;
@@ -14,6 +15,7 @@ pub use model::{
 };
 pub use view::view;
 
+use crate::client::CommentWriteOutcome;
 use crate::controller;
 use crate::http::Http;
 use crate::render::MineTableRow;
@@ -673,24 +675,19 @@ fn spawn_comment_write(
             return;
         };
         let client = crate::client::ActiveCollabClient::new(inst, http);
-        let status_result: Result<u16, _> = match write {
-            CommentWrite::Create { task_id } => {
-                client.create_comment(task_id, &body).await.map(|(s, _)| s)
-            }
-            CommentWrite::Update { comment_id } => client
-                .update_comment(comment_id, &body)
-                .await
-                .map(|(s, _)| s),
+        let outcome = match write {
+            CommentWrite::Create { task_id } => client.create_comment(task_id, &body).await,
+            CommentWrite::Update { comment_id } => client.update_comment(comment_id, &body).await,
             CommentWrite::Delete { comment_id } => client.delete_comment(comment_id).await,
         };
-        match status_result {
-            Ok(status) if (200..=299).contains(&(status as u32)) => {
+        match outcome {
+            Ok(CommentWriteOutcome::Ok(_)) => {
                 let _ = tx.send(Msg::CommentMutationOk);
             }
-            Ok(status) if status == crate::http::HTTP_UNAUTHORIZED => {
+            Ok(CommentWriteOutcome::Unauthorized) => {
                 let _ = tx.send(Msg::AuthExpired);
             }
-            _ => {
+            Ok(CommentWriteOutcome::Failed(_)) | Err(_) => {
                 let _ = tx.send(Msg::CommentMutationErr(crate::i18n::t(
                     "Failed to post comment",
                 )));

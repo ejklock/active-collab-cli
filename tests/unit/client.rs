@@ -554,14 +554,16 @@ async fn create_comment_posts_to_correct_path_with_body() {
         .await;
 
     let client = make_client(&server.uri());
-    let (status, payload) = client.create_comment(42, "hello").await.unwrap();
-    assert_eq!(status, 200);
-    assert_eq!(payload.unwrap(), comment);
+    let outcome = client.create_comment(42, "hello").await.unwrap();
+    match outcome {
+        CommentWriteOutcome::Ok(payload) => assert_eq!(payload.unwrap(), comment),
+        other => panic!("expected Ok outcome, got {other:?}"),
+    }
     server.verify().await;
 }
 
 #[tokio::test]
-async fn create_comment_non_2xx_returns_status_with_none() {
+async fn create_comment_non_2xx_returns_failed_with_status() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/api/v1/comments/task/42"))
@@ -571,9 +573,29 @@ async fn create_comment_non_2xx_returns_status_with_none() {
         .await;
 
     let client = make_client(&server.uri());
-    let (status, payload) = client.create_comment(42, "hello").await.unwrap();
-    assert_eq!(status, 403);
-    assert!(payload.is_none());
+    let outcome = client.create_comment(42, "hello").await.unwrap();
+    match outcome {
+        CommentWriteOutcome::Failed(status) => assert_eq!(status, 403),
+        other => panic!("expected Failed(403), got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn create_comment_401_returns_unauthorized() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/comments/task/42"))
+        .respond_with(ResponseTemplate::new(401).set_body_string("unauthorized"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = make_client(&server.uri());
+    let outcome = client.create_comment(42, "hello").await.unwrap();
+    assert!(
+        matches!(outcome, CommentWriteOutcome::Unauthorized),
+        "expected Unauthorized, got {outcome:?}"
+    );
 }
 
 #[tokio::test]
@@ -588,8 +610,8 @@ async fn create_comment_attaches_token_header() {
         .await;
 
     let client = make_client(&server.uri());
-    let (status, _) = client.create_comment(5, "text").await.unwrap();
-    assert_eq!(status, 200);
+    let outcome = client.create_comment(5, "text").await.unwrap();
+    assert!(matches!(outcome, CommentWriteOutcome::Ok(_)));
     server.verify().await;
 }
 
@@ -606,14 +628,16 @@ async fn update_comment_puts_to_correct_path_with_body() {
         .await;
 
     let client = make_client(&server.uri());
-    let (status, payload) = client.update_comment(99, "updated text").await.unwrap();
-    assert_eq!(status, 200);
-    assert_eq!(payload.unwrap(), comment);
+    let outcome = client.update_comment(99, "updated text").await.unwrap();
+    match outcome {
+        CommentWriteOutcome::Ok(payload) => assert_eq!(payload.unwrap(), comment),
+        other => panic!("expected Ok outcome, got {other:?}"),
+    }
     server.verify().await;
 }
 
 #[tokio::test]
-async fn update_comment_non_2xx_returns_status_with_none() {
+async fn update_comment_non_2xx_returns_failed_with_status() {
     let server = MockServer::start().await;
     Mock::given(method("PUT"))
         .and(path("/api/v1/comments/99"))
@@ -623,9 +647,29 @@ async fn update_comment_non_2xx_returns_status_with_none() {
         .await;
 
     let client = make_client(&server.uri());
-    let (status, payload) = client.update_comment(99, "text").await.unwrap();
-    assert_eq!(status, 404);
-    assert!(payload.is_none());
+    let outcome = client.update_comment(99, "text").await.unwrap();
+    match outcome {
+        CommentWriteOutcome::Failed(status) => assert_eq!(status, 404),
+        other => panic!("expected Failed(404), got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn update_comment_401_returns_unauthorized() {
+    let server = MockServer::start().await;
+    Mock::given(method("PUT"))
+        .and(path("/api/v1/comments/99"))
+        .respond_with(ResponseTemplate::new(401).set_body_string("unauthorized"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = make_client(&server.uri());
+    let outcome = client.update_comment(99, "text").await.unwrap();
+    assert!(
+        matches!(outcome, CommentWriteOutcome::Unauthorized),
+        "expected Unauthorized, got {outcome:?}"
+    );
 }
 
 #[tokio::test]
@@ -640,8 +684,8 @@ async fn update_comment_attaches_token_header() {
         .await;
 
     let client = make_client(&server.uri());
-    let (status, _) = client.update_comment(7, "new text").await.unwrap();
-    assert_eq!(status, 200);
+    let outcome = client.update_comment(7, "new text").await.unwrap();
+    assert!(matches!(outcome, CommentWriteOutcome::Ok(_)));
     server.verify().await;
 }
 
@@ -656,13 +700,16 @@ async fn delete_comment_sends_delete_to_correct_path() {
         .await;
 
     let client = make_client(&server.uri());
-    let status = client.delete_comment(55).await.unwrap();
-    assert_eq!(status, 200);
+    let outcome = client.delete_comment(55).await.unwrap();
+    match outcome {
+        CommentWriteOutcome::Ok(body) => assert!(body.is_none(), "delete body must be None"),
+        other => panic!("expected Ok(None), got {other:?}"),
+    }
     server.verify().await;
 }
 
 #[tokio::test]
-async fn delete_comment_returns_non_2xx_status() {
+async fn delete_comment_non_2xx_returns_failed_with_status() {
     let server = MockServer::start().await;
     Mock::given(method("DELETE"))
         .and(path("/api/v1/comments/55"))
@@ -672,8 +719,29 @@ async fn delete_comment_returns_non_2xx_status() {
         .await;
 
     let client = make_client(&server.uri());
-    let status = client.delete_comment(55).await.unwrap();
-    assert_eq!(status, 403);
+    let outcome = client.delete_comment(55).await.unwrap();
+    match outcome {
+        CommentWriteOutcome::Failed(status) => assert_eq!(status, 403),
+        other => panic!("expected Failed(403), got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn delete_comment_401_returns_unauthorized() {
+    let server = MockServer::start().await;
+    Mock::given(method("DELETE"))
+        .and(path("/api/v1/comments/55"))
+        .respond_with(ResponseTemplate::new(401).set_body_string("unauthorized"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = make_client(&server.uri());
+    let outcome = client.delete_comment(55).await.unwrap();
+    assert!(
+        matches!(outcome, CommentWriteOutcome::Unauthorized),
+        "expected Unauthorized, got {outcome:?}"
+    );
 }
 
 #[tokio::test]
@@ -688,8 +756,8 @@ async fn delete_comment_attaches_token_header() {
         .await;
 
     let client = make_client(&server.uri());
-    let status = client.delete_comment(12).await.unwrap();
-    assert_eq!(status, 200);
+    let outcome = client.delete_comment(12).await.unwrap();
+    assert!(matches!(outcome, CommentWriteOutcome::Ok(_)));
     server.verify().await;
 }
 

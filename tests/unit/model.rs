@@ -1680,7 +1680,7 @@ fn d_key_does_not_enter_download_mode() {
 // and does NOT contain 'Ctrl/Cmd' or 'abrir anexo' (hint moved into the Artifacts card).
 #[test]
 fn detail_footer_hint_with_assets_has_no_ctrl_cmd_reference() {
-    use crate::tui::view::hint_for_screen;
+    use crate::tui::footer::hint_for_screen;
 
     let assets = vec![make_asset("a.pdf", "https://example.com/a.pdf")];
     let screen = Screen::Detail {
