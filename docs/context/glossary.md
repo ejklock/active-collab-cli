@@ -67,7 +67,14 @@ the doc language (English).
   (`is_in_content`, `row_to_line_idx`), shared by hit-test, selection, and copy (ADR 0045). The
   same module owns `content_height` and `content_height_clamped` (the body height floored at one
   row) that the scroll/offset-clamp math derives from (issue 0052).
-- **Wrap engine** — the greedy word-wrap by display width in `src/render.rs`. One core,
+- **text_measure** — the pure, `richtext`-free width/box/chrome core at the bottom of the render
+  stack (`src/render/text_measure.rs`, ADR 0049): `display_width`, `slice_by_display_cols`,
+  `fit_to_display_width`, `box_inner_content` (the single public box-unwrap, replacing the retired
+  `box_inner_content_pub`), the chrome constants (`PANEL_HPAD`, `BODY_LEFT_CHROME_COLS`), and the
+  box-drawing chars — single-homed so the wrap engine, the two render adapters, and (later)
+  `detail_geometry`/`task_layout` all measure through one interface without dragging `richtext`.
+- **Wrap engine** — the greedy word-wrap by display width in `src/render/wrap.rs` (ADR 0049 split it
+  out of the old `render.rs`). One core,
   `greedy_wrap`, over a `WrapCell`/`WrapLine` abstraction: it splits a cell stream on newlines
   (preserving blank segments), places each word on the current line if it fits within `width`
   display columns (else flushes), and hard-splits a word wider than `width`. Two thin adapters

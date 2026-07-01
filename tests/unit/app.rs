@@ -2144,7 +2144,7 @@ fn new_tasks_screen_born_with_empty_cache() {
     }
 }
 
-/// Linear-scan oracle for `first_visible_card` tests.
+/// Linear-scan oracle for `first_visible` tests.
 ///
 /// Returns the smallest index `first` such that
 /// `offsets[first] + visible_h >= offsets[selected + 1]`, or 0 when the
@@ -2167,13 +2167,13 @@ fn first_visible_linear_oracle(offsets: &[u32], selected: usize, visible_h: u16)
     selected
 }
 
-// ADR 0031 AC3: first_visible_card calls the production binary search and returns
+// ADR 0031 AC3: first_visible calls the production binary search and returns
 // the same index as the linear oracle for every selected across the fixture,
 // including selection near the end, the exact-boundary case (kills < vs <= mutant),
 // and the card-taller-than-viewport case (kills dropped .min(selected) mutant).
 #[test]
 fn first_visible_card_binary_equals_linear_for_fixture() {
-    use crate::tui::screens::tasks::first_visible_card;
+    use crate::tui::task_layout::first_visible;
 
     let card_inner_w: usize = 40;
     let tasks: Vec<TaskRow> = (0..10)
@@ -2207,11 +2207,11 @@ fn first_visible_card_binary_equals_linear_for_fixture() {
     // Normal sweep: every selected with visible_h=8 (two cards fit at height 4 each).
     let visible_h: u16 = 8;
     for selected in 0..tasks.len() {
-        let got = first_visible_card(&offsets, rw, card_inner_w, &heights, selected, visible_h);
+        let got = first_visible(&offsets, rw, card_inner_w, &heights, selected, visible_h);
         let want = first_visible_linear_oracle(&offsets, selected, visible_h);
         assert_eq!(
             got, want,
-            "selected={selected}: production first_visible_card={got} oracle={want}"
+            "selected={selected}: production first_visible={got} oracle={want}"
         );
     }
 
@@ -2222,7 +2222,7 @@ fn first_visible_card_binary_equals_linear_for_fixture() {
     // If predicate uses `<=` instead of `<`, partition_point skips index 1 and returns 2.
     {
         let (sel, vh, want) = (2, 8u16, 1usize);
-        let got = first_visible_card(&offsets, rw, card_inner_w, &heights, sel, vh);
+        let got = first_visible(&offsets, rw, card_inner_w, &heights, sel, vh);
         assert_eq!(
             got, want,
             "boundary: selected={sel} visible_h={vh}: got={got} want={want}"
@@ -2236,7 +2236,7 @@ fn first_visible_card_binary_equals_linear_for_fixture() {
     {
         let vh = 3u16;
         for selected in 1..tasks.len() {
-            let got = first_visible_card(&offsets, rw, card_inner_w, &heights, selected, vh);
+            let got = first_visible(&offsets, rw, card_inner_w, &heights, selected, vh);
             assert_eq!(
                 got, selected,
                 "tall-card: selected={selected} visible_h={vh}: got={got} want={selected}"
@@ -2279,4 +2279,117 @@ fn card_offsets_do_not_saturate_beyond_u16_max() {
         total, expected,
         "total rows must be exact (no u32 saturation): total={total} expected={expected}"
     );
+}
+
+// ADR 0051: pure task_layout unit tests, from primitives only — no Frame, no Model.
+
+fn task_row_named(name: &str) -> TaskRow {
+    TaskRow {
+        task_id: 1,
+        task_number: 7,
+        name: name.into(),
+        instance: "inst".into(),
+        project_id: 0,
+        due_on: None,
+        project_name: None,
+    }
+}
+
+#[test]
+fn card_height_single_line_title_is_four_rows() {
+    use crate::tui::task_layout::card_height;
+
+    // "#7  Short" fits on one line at width 40: 2 border rows + 1 body row + 1 due row.
+    let task = task_row_named("Short");
+    assert_eq!(card_height(&task, 40), 4);
+}
+
+#[test]
+fn card_height_wrapped_title_adds_body_rows() {
+    use crate::tui::task_layout::card_height;
+
+    // A long title wrapped to a narrow width spans multiple body rows; each
+    // extra wrapped row adds exactly one row to the total card height.
+    let narrow = task_row_named("a long task name that wraps across several lines");
+    let wide_w = 200;
+    let narrow_w = 10;
+
+    let height_wide = card_height(&narrow, wide_w);
+    let height_narrow = card_height(&narrow, narrow_w);
+
+    assert_eq!(height_wide, 4, "single-line body at a wide width is 4 rows");
+    assert!(
+        height_narrow > height_wide,
+        "wrapping at a narrow width must add body rows: narrow={height_narrow} wide={height_wide}"
+    );
+}
+
+#[test]
+fn inner_w_subtracts_outer_border_and_card_chrome() {
+    use crate::tui::task_layout::{inner_w, CARD_CHROME};
+
+    let terminal_width: u16 = 80;
+    let expected = (terminal_width - 2 - CARD_CHROME) as usize;
+    assert_eq!(inner_w(terminal_width), expected);
+}
+
+#[test]
+fn inner_w_saturates_to_zero_when_narrower_than_chrome() {
+    use crate::tui::task_layout::inner_w;
+
+    // Terminal narrower than the fixed chrome must floor at 0, never underflow.
+    assert_eq!(inner_w(0), 0);
+    assert_eq!(inner_w(3), 0);
+}
+
+#[test]
+fn first_visible_returns_zero_when_selected_is_zero() {
+    use crate::tui::task_layout::first_visible;
+
+    let offsets = [0u32, 4, 8, 12];
+    let heights = [4u16, 4, 4];
+    assert_eq!(first_visible(&offsets, 40, 40, &heights, 0, 8), 0);
+}
+
+#[test]
+fn first_visible_returns_zero_when_selection_fits_in_viewport() {
+    use crate::tui::task_layout::first_visible;
+
+    // Three 4-row cards; selecting index 1 (offsets end at 8) fits in an 8-row viewport.
+    let offsets = [0u32, 4, 8, 12];
+    let heights = [4u16, 4, 4];
+    assert_eq!(first_visible(&offsets, 40, 40, &heights, 1, 8), 0);
+}
+
+#[test]
+fn first_visible_scrolls_when_selection_overflows_viewport() {
+    use crate::tui::task_layout::first_visible;
+
+    // Four 4-row cards, 8-row viewport: selecting the last card (offsets end at 16)
+    // must scroll so the window covers it, landing on first=2.
+    let offsets = [0u32, 4, 8, 12, 16];
+    let heights = [4u16, 4, 4, 4];
+    assert_eq!(first_visible(&offsets, 40, 40, &heights, 3, 8), 2);
+}
+
+#[test]
+fn first_visible_binary_and_linear_agree_on_a_stale_cache_fallback() {
+    use crate::tui::task_layout::{first_visible_binary, first_visible_linear};
+
+    // Same underlying layout expressed two ways: prefix-sum offsets for the
+    // binary path and raw heights for the linear fallback path. Both must
+    // agree, since `first_visible` picks one or the other by cache validity.
+    let offsets = [0u32, 4, 8, 12, 16, 20];
+    let heights = [4u16, 4, 4, 4, 4];
+
+    for selected in 0..heights.len() {
+        for visible_h in [3u16, 4, 8, 12] {
+            let via_binary = first_visible_binary(&offsets, selected, visible_h);
+            let via_linear = first_visible_linear(&heights, selected, visible_h);
+            assert_eq!(
+                via_binary, via_linear,
+                "selected={selected} visible_h={visible_h}: binary={via_binary} linear={via_linear}"
+            );
+        }
+    }
 }

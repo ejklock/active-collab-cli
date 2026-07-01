@@ -1,7 +1,7 @@
 use super::{
-    content_height, content_height_clamped, is_in_content, row_to_line_idx, DETAIL_TEXT_TOP,
+    content_height, content_height_clamped, is_in_content, row_to_line_idx, selected_text,
+    Selection, DETAIL_CHROME_ROWS, DETAIL_TEXT_TOP,
 };
-use crate::tui::model::DETAIL_CHROME_ROWS;
 
 // AC4: is_in_content — row just below DETAIL_TEXT_TOP is out of the body area.
 #[test]
@@ -145,5 +145,113 @@ fn content_height_clamped_zero_viewport_returns_one() {
         content_height_clamped(0),
         1,
         "viewport_rows=0 must clamp to 1 to prevent degenerate scroll arithmetic",
+    );
+}
+
+// --- ADR 0050: selected_text — the column half absorbed from model.rs ---
+
+// A boxed Detail body line: `│ {content} │`, matching the chrome
+// `box_inner_content` strips (border + HPAD on each side).
+fn boxed(content: &str) -> String {
+    format!("\u{2502} {content} \u{2502}")
+}
+
+// Absolute-frame column offset for inner-content column 0: the ratatui outer
+// block border (1 col) plus the panel's own `│ ` chrome (2 cols) — total 3,
+// matching DETAIL_CONTENT_BLOCK_BORDER_COLS + BODY_LEFT_CHROME_COLS.
+const LEFT_OFFSET: u16 = 3;
+
+// AC5: single-row selection extracts the exact inner-content slice.
+#[test]
+fn selected_text_single_row_extracts_slice() {
+    let lines = vec![boxed("hello world")];
+    let sel = Selection {
+        anchor: (2, LEFT_OFFSET),
+        cursor: (2, LEFT_OFFSET + 4),
+    };
+    assert_eq!(
+        selected_text(0, 24, sel, &lines),
+        "hello",
+        "selecting inner cols [0,5) of 'hello world' must yield 'hello'",
+    );
+}
+
+// AC5: multi-row selection joins each row's slice with '\n', trimming to the
+// selection start column on the first row and the end column on the last row.
+#[test]
+fn selected_text_multi_row_joins_with_newline() {
+    let lines = vec![boxed("hello world"), boxed("second line")];
+    let sel = Selection {
+        anchor: (2, LEFT_OFFSET + 6),
+        cursor: (3, LEFT_OFFSET + 5),
+    };
+    assert_eq!(
+        selected_text(0, 24, sel, &lines),
+        "world\nsecond",
+        "row0 tail from col6 is 'world'; row1 head through col5 is 'second'",
+    );
+}
+
+// AC5: partial-column selection starting and ending mid-line (not at a line edge).
+#[test]
+fn selected_text_partial_column_mid_line() {
+    let lines = vec![boxed("hello world")];
+    let sel = Selection {
+        anchor: (2, LEFT_OFFSET + 3),
+        cursor: (2, LEFT_OFFSET + 7),
+    };
+    assert_eq!(
+        selected_text(0, 24, sel, &lines),
+        "lo wo",
+        "selecting inner cols [3,8) of 'hello world' must yield 'lo wo'",
+    );
+}
+
+// AC5: double-width (emoji) selection never splits a glyph — the window boundary
+// falls exactly on the glyph edge so only the first emoji is included.
+#[test]
+fn selected_text_double_width_glyph_not_split() {
+    let lines = vec![boxed("\u{1F600}\u{1F600}")];
+    let sel = Selection {
+        anchor: (2, LEFT_OFFSET),
+        cursor: (2, LEFT_OFFSET + 1),
+    };
+    assert_eq!(
+        selected_text(0, 24, sel, &lines),
+        "\u{1F600}",
+        "inner cols [0,2) must select exactly the first (2-col-wide) emoji",
+    );
+}
+
+// AC5: a scroll offset shifts which logical line a viewport row maps to, but the
+// extracted text is unaffected by the shift itself — proves selected_text composes
+// row_to_line_idx rather than assuming offset=0.
+#[test]
+fn selected_text_applies_scroll_offset_to_row_mapping() {
+    let lines = vec![boxed("first"), boxed("second"), boxed("third")];
+    let sel = Selection {
+        anchor: (2, LEFT_OFFSET),
+        cursor: (2, LEFT_OFFSET + 5),
+    };
+    assert_eq!(
+        selected_text(1, 24, sel, &lines),
+        "second",
+        "offset=1 shifts viewport row 2 to line_idx 1 ('second'), not line_idx 0",
+    );
+}
+
+// AC5: a selection row outside the scrollable body area contributes nothing —
+// row_to_line_idx returns None and the row is skipped rather than panicking.
+#[test]
+fn selected_text_row_outside_content_is_skipped() {
+    let lines = vec![boxed("only line")];
+    let sel = Selection {
+        anchor: (0, LEFT_OFFSET),
+        cursor: (2, LEFT_OFFSET + 3),
+    };
+    assert_eq!(
+        selected_text(0, 24, sel, &lines),
+        "only",
+        "row 0 and 1 are above DETAIL_TEXT_TOP and contribute nothing; only row 2 does",
     );
 }
