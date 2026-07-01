@@ -1043,7 +1043,7 @@ fn plain_click_no_drag_emits_no_copy_and_clears_selection() {
     let lines = vec!["hello world".to_string()];
     let mut m = detail_model_for_selection(lines, (80, 24), 0);
     // Pre-set a selection.
-    use crate::tui::model::Selection;
+    use crate::tui::detail_geometry::Selection;
     m.selection = Some(Selection {
         anchor: (2, 0),
         cursor: (2, 5),
@@ -1431,7 +1431,8 @@ fn selection_is_scroll_stable_after_offset_change() {
 // V3-A3: navigation messages produce the same state transitions regardless of prior selection.
 #[test]
 fn navigation_msgs_behave_identically_regardless_of_selection_state() {
-    use crate::tui::model::{ProjectGroup, Selection};
+    use crate::tui::detail_geometry::Selection;
+    use crate::tui::model::ProjectGroup;
 
     let groups = vec![
         ProjectGroup {
@@ -1720,7 +1721,7 @@ fn detail_footer_hint_with_assets_has_no_ctrl_cmd_reference() {
 // V3-A3: Quit sets should_quit regardless of selection state.
 #[test]
 fn quit_sets_should_quit_regardless_of_selection_mode() {
-    use crate::tui::model::Selection;
+    use crate::tui::detail_geometry::Selection;
 
     let normal = projects_browse_model();
     let (normal_after, _) = update(normal, Msg::Quit);
