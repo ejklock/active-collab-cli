@@ -3346,7 +3346,7 @@ mod footer_refresh_hint {
     // R1b-A2: format_br_datetime converts BRT ISO string to DD/MM/YYYY HH:MM.
     #[test]
     fn format_br_datetime_valid_produces_dd_mm_yyyy_hhmm() {
-        use crate::tui::view::format_br_datetime;
+        use crate::tui::footer::format_br_datetime;
         assert_eq!(
             format_br_datetime("2026-06-25T11:07:03"),
             Some("25/06/2026 11:07".to_string()),
@@ -3357,7 +3357,7 @@ mod footer_refresh_hint {
     // R1b-A2: format_br_datetime returns None for a string shorter than 16 chars.
     #[test]
     fn format_br_datetime_short_input_returns_none() {
-        use crate::tui::view::format_br_datetime;
+        use crate::tui::footer::format_br_datetime;
         assert_eq!(
             format_br_datetime("2026-06"),
             None,
@@ -3369,7 +3369,7 @@ mod footer_refresh_hint {
     // R1b-A2: format_br_datetime handles minimum-length input (exactly 16 chars).
     #[test]
     fn format_br_datetime_minimum_length_input_produces_result() {
-        use crate::tui::view::format_br_datetime;
+        use crate::tui::footer::format_br_datetime;
         assert_eq!(
             format_br_datetime("2026-06-25T11:07"),
             Some("25/06/2026 11:07".to_string()),
@@ -4706,8 +4706,8 @@ fn draw_detail_assets_card_last_interior_line_is_italic_hint() {
 // scroll hint and contains neither 'Ctrl/Cmd' nor 'abrir anexo'.
 #[test]
 fn hint_for_screen_detail_with_assets_has_no_ctrl_cmd_in_footer() {
+    use crate::tui::footer::hint_for_screen;
     use crate::tui::model::Screen;
-    use crate::tui::view::hint_for_screen;
 
     let assets = vec![Asset {
         name: "a.pdf".into(),
@@ -4745,6 +4745,77 @@ fn hint_for_screen_detail_with_assets_has_no_ctrl_cmd_in_footer() {
     assert!(
         hint.contains("j/k"),
         "footer hint for Detail must contain 'j/k' navigation (ADR 0038 browsing hint): {hint:?}"
+    );
+}
+
+// AC1 (ADR 0053): footer::plan for a non-Detail screen yields the browse hint
+// with status_line None, matching hint_for_screen for the same screen.
+#[test]
+fn footer_plan_projects_screen_yields_browse_hint_with_no_status() {
+    use crate::tui::footer::{hint_for_screen, plan};
+    use crate::tui::model::Screen;
+
+    let screen = Screen::Projects {
+        groups: vec![],
+        selected: 0,
+        loading: false,
+        revalidating: false,
+    };
+    let result = plan(&screen, None, false, 80);
+    assert_eq!(
+        result.status_line, None,
+        "non-Detail screen must yield status_line None: {:?}",
+        result.status_line
+    );
+    assert_eq!(
+        result.hint,
+        hint_for_screen(&screen),
+        "footer::plan hint must match hint_for_screen for the same screen"
+    );
+}
+
+// AC1 (ADR 0053): footer::plan for a Detail screen with auth_error true carries
+// the re-auth message in status_line, taking priority over copied_feedback.
+#[test]
+fn footer_plan_detail_auth_error_carries_reauth_status() {
+    use crate::i18n::set_language;
+    use crate::tui::footer::plan;
+    use crate::tui::model::{DetailOverlay, Screen};
+
+    let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+    set_language("en");
+
+    let screen = Screen::Detail {
+        instance: "inst".into(),
+        project_id: 1,
+        task_id: 1,
+        task: serde_json::Value::Null,
+        comments: vec![],
+        user_map: HashMap::new(),
+        lines: vec![],
+        line_styles: vec![],
+        assets: vec![],
+        offset: 0,
+        loading: false,
+        rendered_width: usize::MAX,
+        overlay: DetailOverlay::None,
+        current_user_id: None,
+        affordances: vec![],
+        focused_comment: None,
+        auth_error: true,
+        comment_spans: vec![],
+    };
+    let result = plan(&screen, None, true, 80);
+    set_language("en");
+
+    let status = result
+        .status_line
+        .as_deref()
+        .unwrap_or_else(|| panic!("Detail screen with auth_error must carry a status_line"));
+    assert!(
+        status.contains("re-authenticate"),
+        "auth_error status_line must carry the re-auth message, took priority over \
+         copied_feedback: {status:?}"
     );
 }
 
