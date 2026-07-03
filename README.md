@@ -260,18 +260,34 @@ curl -fsSL https://raw.githubusercontent.com/ejklock/active-collab-cli/main/inst
 curl -fsSL https://raw.githubusercontent.com/ejklock/active-collab-cli/main/install-skill.sh | sh -s -- --harness all
 ```
 
-| Harness | File written |
-|---|---|
-| Claude Code | `.claude/skills/ac-json/SKILL.md` |
-| Codex CLI | `.codex/skills/ac-json/SKILL.md` |
-| OpenCode | `.opencode/skills/ac-json/SKILL.md` |
-| pi | `.pi/skills/ac-json/SKILL.md` |
-| GitHub Copilot | `.github/skills/ac-json/SKILL.md` |
-| Cursor | `.cursor/rules/ac-json.mdc` |
+| Harness | Project file (`--scope project`, default) | User-level file (`--scope global`) |
+|---|---|---|
+| Claude Code | `.claude/skills/ac-json/SKILL.md` | `~/.claude/skills/ac-json/SKILL.md` |
+| pi | `.pi/skills/ac-json/SKILL.md` | `~/.pi/agent/skills/ac-json/SKILL.md` |
+| Codex CLI | `.codex/skills/ac-json/SKILL.md` | `~/.codex/skills/ac-json/SKILL.md` |
+| OpenCode | `.opencode/skills/ac-json/SKILL.md` | — (install per-project) |
+| GitHub Copilot | `.github/skills/ac-json/SKILL.md` | — (install per-project) |
+| Cursor | `.cursor/rules/ac-json.mdc` | — (install per-project) |
 
 Claude Code, OpenCode, and pi can also read `.claude/skills/ac-json/SKILL.md`
-directly. The installer writes into the current directory by default; pass
-`--dir <path>` to target another project.
+directly.
+
+**Scope.** By default the installer writes into the **current project**
+(`--scope project`); pass `--dir <path>` to target another project. Use
+`--scope global` to install once at the **user level** so the skill is available in
+every project:
+
+```sh
+# install the ac-json pointer once, for every harness that supports a user-level dir
+curl -fsSL https://raw.githubusercontent.com/ejklock/active-collab-cli/main/install-skill.sh | sh -s -- --harness all --scope global
+```
+
+Global scope supports Claude Code, pi, and Codex (the harnesses with a standard
+user-level skills directory). OpenCode, Copilot, and Cursor have no such directory, so
+`--scope global` reports them as unsupported — install those per-project. Running the
+installer directly in a terminal (not via `curl | sh`) prompts for project-vs-global; the
+piped one-liner stays non-interactive and defaults to project. To install into a specific
+pi profile, use `--scope project --dir ~/.pi/agent-profiles/<name>`.
 
 > This tool only ever **reads** your ActiveCollab tasks over the `--json` contract; the
 > skill grants an agent no write access beyond the CLI commands you already run yourself.
