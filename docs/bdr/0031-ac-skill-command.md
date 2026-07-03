@@ -11,6 +11,13 @@ timestamp: 2026-07-03T00:00:00Z
 
 # 0031. `ac skill` serves the embedded agent skill
 
+> **Amended by [ADR 0059](/adr/0059-rename-skill-to-active-collab.md):** the single
+> registered skill was renamed `ac-json` → `active-collab`. The command mechanics below
+> (list, bare-single, unknown → exit 2, no `get` rewrite) are unchanged; read every
+> `ac skill ac-json` as `ac skill active-collab`, the registered name `ac-json` as
+> `active-collab`, and the canonical path `.claude/skills/ac-json/SKILL.md` as
+> `.claude/skills/active-collab/SKILL.md`. `ac skill ac-json` now exits 2 (unknown skill).
+
 ## Context
 
 The `--json` read contract ([BDR 0010](/bdr/0010-agent-json-output-contract.md)) is

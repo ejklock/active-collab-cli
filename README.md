@@ -242,15 +242,15 @@ The full contract lives in **one place** — inside the binary — and `ac` prin
 demand:
 
 ```sh
-ac skill list        # list the available skills
-ac skill ac-json     # print the full ac-json contract (schemas, the round-trippable ref, flags)
-ac skill             # with one skill registered, prints it directly
+ac skill list           # list the available skills
+ac skill active-collab  # print the full active-collab contract (schemas, the round-trippable ref, flags)
+ac skill                # with one skill registered, prints it directly
 ```
 
 ### Install the skill into your agent harness
 
 Every supported harness loads a small **thin pointer** whose only job is to tell the
-agent to run `ac skill ac-json`. Because the pointer carries no schema, it never goes
+agent to run `ac skill active-collab`. Because the pointer carries no schema, it never goes
 stale when the `--json` contract changes — only the binary does. Run the installer
 from your project root for the harness you use (or `all`):
 
@@ -262,14 +262,14 @@ curl -fsSL https://raw.githubusercontent.com/ejklock/active-collab-cli/main/inst
 
 | Harness | Project file (`--scope project`, default) | User-level file (`--scope global`) |
 |---|---|---|
-| Claude Code | `.claude/skills/ac-json/SKILL.md` | `~/.claude/skills/ac-json/SKILL.md` |
-| pi | `.pi/skills/ac-json/SKILL.md` | `~/.pi/agent/skills/ac-json/SKILL.md` |
-| Codex CLI | `.codex/skills/ac-json/SKILL.md` | `~/.codex/skills/ac-json/SKILL.md` |
-| OpenCode | `.opencode/skills/ac-json/SKILL.md` | — (install per-project) |
-| GitHub Copilot | `.github/skills/ac-json/SKILL.md` | — (install per-project) |
-| Cursor | `.cursor/rules/ac-json.mdc` | — (install per-project) |
+| Claude Code | `.claude/skills/active-collab/SKILL.md` | `~/.claude/skills/active-collab/SKILL.md` |
+| pi | `.pi/skills/active-collab/SKILL.md` | `~/.pi/agent/skills/active-collab/SKILL.md` |
+| Codex CLI | `.codex/skills/active-collab/SKILL.md` | `~/.codex/skills/active-collab/SKILL.md` |
+| OpenCode | `.opencode/skills/active-collab/SKILL.md` | — (install per-project) |
+| GitHub Copilot | `.github/skills/active-collab/SKILL.md` | — (install per-project) |
+| Cursor | `.cursor/rules/active-collab.mdc` | — (install per-project) |
 
-Claude Code, OpenCode, and pi can also read `.claude/skills/ac-json/SKILL.md`
+Claude Code, OpenCode, and pi can also read `.claude/skills/active-collab/SKILL.md`
 directly.
 
 **Scope.** By default the installer writes into the **current project**
@@ -278,7 +278,7 @@ directly.
 every project:
 
 ```sh
-# install the ac-json pointer once, for every harness that supports a user-level dir
+# install the active-collab pointer once, for every harness that supports a user-level dir
 curl -fsSL https://raw.githubusercontent.com/ejklock/active-collab-cli/main/install-skill.sh | sh -s -- --harness all --scope global
 ```
 

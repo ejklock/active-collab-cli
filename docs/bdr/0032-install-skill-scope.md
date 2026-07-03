@@ -11,6 +11,11 @@ timestamp: 2026-07-03T00:00:00Z
 
 # 0032. `install-skill.sh --scope project|global`
 
+> **Amended by [ADR 0059](/adr/0059-rename-skill-to-active-collab.md):** the skill was
+> renamed `ac-json` → `active-collab`. The scope behavior below is unchanged; read every
+> `…/skills/ac-json/SKILL.md` as `…/skills/active-collab/SKILL.md` and
+> `.cursor/rules/ac-json.mdc` as `.cursor/rules/active-collab.mdc`.
+
 ## Context
 
 [BDR 0031](/bdr/0031-ac-skill-command.md) specifies the `ac skill` command; the thin

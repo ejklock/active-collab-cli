@@ -11,6 +11,12 @@ timestamp: 2026-07-03T00:00:00Z
 
 # 0058. `install-skill.sh` gains a `--scope project|global` selector
 
+> **Amended by [ADR 0059](/adr/0059-rename-skill-to-active-collab.md):** the skill was
+> renamed `ac-json` → `active-collab`. The `--scope project|global` behavior below is
+> unchanged; only the leaf name differs — read every `…/skills/ac-json/SKILL.md` as
+> `…/skills/active-collab/SKILL.md` and `.cursor/rules/ac-json.mdc` as
+> `.cursor/rules/active-collab.mdc`.
+
 ## Context
 
 [ADR 0057](/adr/0057-agent-skill-served-by-ac-skill-command.md) made `install-skill.sh`
