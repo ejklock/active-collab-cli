@@ -64,6 +64,13 @@ panel border.
 name, When the detail renders, Then the `Projeto` row shows the defined fallback (never
 an empty value).
 
+> **Refined by [BDR 0030](/bdr/0030-detail-project-name-resolved-on-miss.md)
+> ([ADR 0056](/adr/0056-detail-project-name-network-fallback.md)):** Scenario 3's
+> cache miss now first resolves the name over the network (one
+> `GET /api/v1/projects/{id}`) and writes it back to the cache; the fallback shown
+> here appears only when that fetch also yields no name. The `Título`/`Projeto`
+> layout below is unchanged.
+
 **Scenario 4: long title wraps** — Given a title longer than the panel width, When the
 detail renders on a narrow terminal, Then the `Título` row wraps within the panel like
 any other row.

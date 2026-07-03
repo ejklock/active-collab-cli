@@ -295,6 +295,72 @@ async fn fetch_task_404_returns_none() {
 }
 
 #[tokio::test]
+async fn fetch_project_name_200_with_name_returns_some() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/projects/722"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": 722,
+            "name": "Base · Sustentação"
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = make_client(&server.uri());
+    let name = client.fetch_project_name(722).await.unwrap();
+    assert_eq!(name, Some("Base · Sustentação".to_string()));
+}
+
+#[tokio::test]
+async fn fetch_project_name_non_200_returns_none() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/projects/722"))
+        .respond_with(ResponseTemplate::new(404).set_body_string("not found"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = make_client(&server.uri());
+    let name = client.fetch_project_name(722).await.unwrap();
+    assert!(name.is_none());
+}
+
+#[tokio::test]
+async fn fetch_project_name_200_with_empty_name_returns_none() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/projects/722"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": 722,
+            "name": ""
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = make_client(&server.uri());
+    let name = client.fetch_project_name(722).await.unwrap();
+    assert!(name.is_none());
+}
+
+#[tokio::test]
+async fn fetch_project_name_200_missing_name_field_returns_none() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/projects/722"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({ "id": 722 })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = make_client(&server.uri());
+    let name = client.fetch_project_name(722).await.unwrap();
+    assert!(name.is_none());
+}
+
+#[tokio::test]
 async fn fetch_open_tasks_no_user_id_returns_empty() {
     let http = Http::new().unwrap();
     let instance = Instance {

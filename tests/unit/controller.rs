@@ -917,6 +917,11 @@ async fn load_task_core_served_from_cache_makes_no_task_fetch() {
     });
     seed_task_cache(&fix.db_path, "inst", &task_fields);
 
+    let names: std::collections::HashMap<i64, String> = [(10i64, "Cached Project".to_string())]
+        .into_iter()
+        .collect();
+    seed_project_names_cache(&fix.db_path, "inst", &names);
+
     let core = load_task_core(fix.db_path, fix.inst, fix.http, 10, 99, false).await;
     assert_eq!(core.task["name"], "Cached Core Task");
 
@@ -971,9 +976,124 @@ async fn load_task_core_enriches_task_with_project_name_from_cache() {
         project_line.contains("Acme Corp"),
         "Projeto row must show resolved project name: {project_line:?}"
     );
+
+    assert_no_project_fetches(
+        &server,
+        10,
+        "warm cache hit must issue zero projects/{id} requests (ADR 0014 guarantee)",
+    )
+    .await;
 }
 
-// D1a-A4: on cache miss, load_task_core injects the fallback → Projeto row never blank.
+async fn assert_no_project_fetches(server: &wiremock::MockServer, project_id: i64, context: &str) {
+    let reqs = server.received_requests().await.unwrap();
+    let expected_path = format!("/api/v1/projects/{project_id}");
+    let hits: Vec<_> = reqs
+        .iter()
+        .filter(|r| r.url.path() == expected_path)
+        .collect();
+    assert!(hits.is_empty(), "{context}: got {hits:?}");
+}
+
+// D1a-A5 / AC2: on a cache miss, when the server names the project, load_task_core
+// resolves the name over the network and issues exactly one request.
+#[tokio::test]
+async fn load_task_core_resolves_project_name_on_cache_miss() {
+    let server = MockServer::start().await;
+    let fix = CoreTestFixture::with_server(&server).await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/projects/10/tasks/99"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "single": {
+                "id": 99,
+                "name": "Work item",
+                "project_id": 10
+            },
+            "tracked_time": null,
+            "comments": []
+        })))
+        .mount(&server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/projects/10"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": 10,
+            "name": "Base · Sustentação"
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let core = load_task_core(fix.db_path, fix.inst, fix.http, 10, 99, false).await;
+
+    assert_eq!(
+        core.task["project_name"].as_str(),
+        Some("Base · Sustentação"),
+        "project_name must be resolved over the network on a cache miss: {:?}",
+        core.task
+    );
+    server.verify().await;
+}
+
+// D1a-A6 / AC3: after a miss resolves and writes back, a second load_task_core for
+// the same project id serves the name from cache with zero further requests.
+#[tokio::test]
+async fn load_task_core_caches_resolved_project_name() {
+    let server = MockServer::start().await;
+    let fix = CoreTestFixture::with_server(&server).await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/projects/10/tasks/99"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "single": {
+                "id": 99,
+                "name": "Work item",
+                "project_id": 10
+            },
+            "tracked_time": null,
+            "comments": []
+        })))
+        .mount(&server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/projects/10"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": 10,
+            "name": "Base · Sustentação"
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let first = load_task_core(
+        fix.db_path.clone(),
+        fix.inst.clone(),
+        fix.http.clone(),
+        10,
+        99,
+        false,
+    )
+    .await;
+    assert_eq!(
+        first.task["project_name"].as_str(),
+        Some("Base · Sustentação")
+    );
+
+    let second = load_task_core(fix.db_path, fix.inst, fix.http, 10, 99, false).await;
+    assert_eq!(
+        second.task["project_name"].as_str(),
+        Some("Base · Sustentação"),
+        "second load must still show the resolved name from cache"
+    );
+
+    server.verify().await;
+}
+
+// D1a-A4 / AC5: on a cache miss where the server yields no usable name (non-200),
+// load_task_core injects the fallback → Projeto row never blank.
 #[tokio::test]
 async fn load_task_core_project_name_fallback_when_cache_miss() {
     let server = MockServer::start().await;
@@ -990,6 +1110,13 @@ async fn load_task_core_project_name_fallback_when_cache_miss() {
             "tracked_time": null,
             "comments": []
         })))
+        .mount(&server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/projects/10"))
+        .respond_with(ResponseTemplate::new(404).set_body_string("not found"))
+        .expect(1)
         .mount(&server)
         .await;
 
@@ -1013,6 +1140,7 @@ async fn load_task_core_project_name_fallback_when_cache_miss() {
         !project_line.trim_end().ends_with("Project"),
         "Project row value must not be blank: {project_line:?}"
     );
+    server.verify().await;
 }
 
 // D1a-A3: project_name_from_cache returns the cached name when fresh.
