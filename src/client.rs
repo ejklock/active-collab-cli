@@ -204,8 +204,10 @@ impl ActiveCollabClient {
     }
 
     /// GET /api/v1/projects/{project_id}.
-    /// Returns `Some(name)` on a 200 with a non-empty `name`, `None` otherwise
-    /// (non-200, unparseable body, or missing/empty `name`).
+    /// ActiveCollab wraps single-object GET-by-id responses in a `single` object,
+    /// so `name` is read from there first, with a flat top-level fallback for
+    /// robustness. Returns `Some(name)` on a 200 with a non-empty resolved `name`,
+    /// `None` otherwise (non-200, unparseable body, or missing/empty `name`).
     pub async fn fetch_project_name(&self, project_id: i64) -> Result<Option<String>> {
         let base = self.instance.base_url.trim_end_matches('/');
         let url = format!("{}/api/v1/projects/{}", base, project_id);
@@ -218,7 +220,9 @@ impl ActiveCollabClient {
         }
         let data: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
         let name = data
-            .get("name")
+            .get("single")
+            .and_then(|s| s.get("name"))
+            .or_else(|| data.get("name"))
             .and_then(|v| v.as_str())
             .filter(|s| !s.is_empty())
             .map(|s| s.to_string());
