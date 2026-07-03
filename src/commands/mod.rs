@@ -3,6 +3,7 @@ mod mine;
 mod presenter;
 mod resolve;
 mod setup;
+mod skill;
 mod task;
 
 pub(crate) use comment::comment_core;
@@ -11,6 +12,7 @@ pub(crate) use resolve::*;
 pub(crate) use setup::{
     setup_add, setup_language, setup_list, setup_remove, setup_test, SetupAddFields,
 };
+pub(crate) use skill::skill_output;
 pub(crate) use task::{current_core, get_core, DisplayFlags};
 #[cfg(test)]
 pub(crate) use task::{do_get_task, load_task};
