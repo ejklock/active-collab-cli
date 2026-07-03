@@ -1019,8 +1019,10 @@ async fn load_task_core_resolves_project_name_on_cache_miss() {
     Mock::given(method("GET"))
         .and(path("/api/v1/projects/10"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "id": 10,
-            "name": "Base · Sustentação"
+            "single": {
+                "id": 10,
+                "name": "Base · Sustentação"
+            }
         })))
         .expect(1)
         .mount(&server)
@@ -1061,8 +1063,10 @@ async fn load_task_core_caches_resolved_project_name() {
     Mock::given(method("GET"))
         .and(path("/api/v1/projects/10"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "id": 10,
-            "name": "Base · Sustentação"
+            "single": {
+                "id": 10,
+                "name": "Base · Sustentação"
+            }
         })))
         .expect(1)
         .mount(&server)
