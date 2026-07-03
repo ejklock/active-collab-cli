@@ -29,6 +29,36 @@ The data shown is fictional; no real instance or client data is depicted.*
 
 ---
 
+## Quickstart
+
+From zero to your first task in three steps:
+
+```sh
+# 1 · Install (macOS / Linux — Windows: see the PowerShell one-liner below)
+curl -fsSL https://raw.githubusercontent.com/ejklock/active-collab-cli/main/install.sh | sh
+
+# 2 · Register your self-hosted ActiveCollab instance.
+#     Prompts once for your password to exchange an API token — the password is never stored.
+ac setup add --name collab --url https://collab.example.com --email you@example.com
+
+# 3 · List the open tasks assigned to you
+ac mine
+```
+
+Then, day to day:
+
+```sh
+ac                  # the task for your current git branch (e.g. feature/665-75159)
+ac get 665/75159    # a specific task by short form or full URL
+ac browse           # full interactive TUI: projects → tasks → detail → assets
+ac mine --json      # machine-readable output for scripts and agents
+```
+
+New here? `ac setup add` walks you through it interactively if you omit the flags.
+See [Usage](#usage) for every command and flag.
+
+---
+
 ## Install
 
 ### macOS / Linux (curl one-liner)

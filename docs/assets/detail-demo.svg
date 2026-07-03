@@ -13,29 +13,29 @@
   <text x="24" y="64" fill="#e6edf3" font-weight="bold">active-collab</text>
   <text x="736" y="64" text-anchor="end" fill="#a5f3fc">Alex Rivera · acme</text>
 
-  <!-- Detalhes panel -->
+  <!-- Details panel -->
   <rect x="24" y="88" width="712" height="252" rx="6" fill="none" stroke="#30363d"/>
-  <rect x="40" y="80" width="72" height="16" fill="#0d1117"/>
-  <text x="48" y="93" fill="#56d4dd">Detalhes</text>
+  <rect x="40" y="80" width="64" height="16" fill="#0d1117"/>
+  <text x="48" y="93" fill="#56d4dd">Details</text>
 
   <g fill="#e6edf3">
-    <text x="48" y="120"><tspan fill="#8b949e">Tarefa</tspan><tspan x="184">128-4821</tspan></text>
-    <text x="48" y="144"><tspan fill="#8b949e">Título</tspan><tspan x="184">[Acme · Store] Fix checkout redirect on Safari</tspan></text>
-    <text x="48" y="168"><tspan fill="#8b949e">Projeto</tspan><tspan x="184">Acme · Store</tspan></text>
-    <text x="48" y="192"><tspan fill="#8b949e">Status</tspan><tspan x="184" fill="#3fb950">Aberto</tspan></text>
-    <text x="48" y="216"><tspan fill="#8b949e">Responsável</tspan><tspan x="184">Alex Rivera (12)</tspan></text>
-    <text x="48" y="240"><tspan fill="#8b949e">Início</tspan><tspan x="184">2026-07-06</tspan></text>
-    <text x="48" y="264"><tspan fill="#8b949e">Prazo</tspan><tspan x="184" fill="#d29922">2026-07-08</tspan></text>
-    <text x="48" y="288"><tspan fill="#8b949e">Estimativa</tspan><tspan x="184">4h</tspan></text>
-    <text x="48" y="312"><tspan fill="#8b949e">Registrado</tspan><tspan x="184">1h</tspan></text>
+    <text x="48" y="120"><tspan fill="#8b949e">Task</tspan><tspan x="184">128-4821</tspan></text>
+    <text x="48" y="144"><tspan fill="#8b949e">Title</tspan><tspan x="184">[Acme · Store] Fix checkout redirect on Safari</tspan></text>
+    <text x="48" y="168"><tspan fill="#8b949e">Project</tspan><tspan x="184">Acme · Store</tspan></text>
+    <text x="48" y="192"><tspan fill="#8b949e">Status</tspan><tspan x="184" fill="#3fb950">Open</tspan></text>
+    <text x="48" y="216"><tspan fill="#8b949e">Assignee</tspan><tspan x="184">Alex Rivera (12)</tspan></text>
+    <text x="48" y="240"><tspan fill="#8b949e">Start</tspan><tspan x="184">2026-07-06</tspan></text>
+    <text x="48" y="264"><tspan fill="#8b949e">Due</tspan><tspan x="184" fill="#d29922">2026-07-08</tspan></text>
+    <text x="48" y="288"><tspan fill="#8b949e">Estimate</tspan><tspan x="184">4h</tspan></text>
+    <text x="48" y="312"><tspan fill="#8b949e">Logged</tspan><tspan x="184">1h</tspan></text>
   </g>
 
-  <!-- Descrição panel -->
+  <!-- Description panel -->
   <rect x="24" y="364" width="712" height="128" rx="6" fill="none" stroke="#30363d"/>
-  <rect x="40" y="356" width="80" height="16" fill="#0d1117"/>
-  <text x="48" y="369" fill="#56d4dd">Descrição</text>
+  <rect x="40" y="356" width="92" height="16" fill="#0d1117"/>
+  <text x="48" y="369" fill="#56d4dd">Description</text>
 
-  <text x="48" y="392" fill="#e6edf3" font-weight="bold">Título original:</text>
+  <text x="48" y="392" fill="#e6edf3" font-weight="bold">Original title:</text>
   <text x="48" y="414"><tspan fill="#58a6ff">◆</tspan><tspan x="66" fill="#e6edf3">[Acme · Store] Fix checkout redirect on Safari</tspan></text>
   <text x="48" y="444" fill="#e6edf3">Customers on Safari 17 hit a redirect loop at</text>
   <text x="48" y="464"><tspan fill="#3fb950" text-decoration="underline">https://store.acme.example/checkout</tspan><tspan fill="#e6edf3"> after applying a</tspan></text>
