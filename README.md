@@ -1,12 +1,31 @@
 # active-collab-cli
 
-Command-line tool and interactive terminal UI (TUI) for reading and browsing
-[ActiveCollab](https://activecollab.com) tasks from self-hosted instances.
-Supports multi-instance configuration, SQLite-backed token storage, and outputs
-human-readable or JSON task views.
+**Unofficial** command-line tool and interactive terminal UI (TUI) for reading
+and browsing [ActiveCollab](https://activecollab.com) tasks from self-hosted
+instances. Supports multi-instance configuration, SQLite-backed token storage,
+and outputs human-readable or JSON task views.
 
 The application ships as a single self-contained binary (`ac`) built with Rust
 (ratatui + crossterm + tokio). No interpreter or runtime is required on the target.
+
+> ## ⚠️ Unofficial — not affiliated with ActiveCollab
+>
+> This is an independent, community-built project. It is **not** an official
+> ActiveCollab product and is **not affiliated with, endorsed by, sponsored by,
+> or supported by** ActiveCollab or A51 d.o.o. **"ActiveCollab" is a trademark of
+> its respective owner** and is used here **only** to describe compatibility with
+> the ActiveCollab REST API of your own self-hosted instance. This tool stores no
+> credentials beyond a local API token, sends that token only to your configured
+> host, and is provided "as is", without warranty. Use at your own risk.
+
+---
+
+## Screenshot
+
+![The ac browse task-detail view, rendered with fictional demo data](docs/assets/detail-demo.svg)
+
+*Interactive TUI — the task-detail view (project, status, description, assets).
+The data shown is fictional; no real instance or client data is depicted.*
 
 ---
 
