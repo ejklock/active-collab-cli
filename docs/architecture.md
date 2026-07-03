@@ -41,6 +41,7 @@ flowchart TD
         cmd_task["task.rs\nget · current"]
         cmd_comment["comment.rs\ncomment_core"]
         cmd_mine["mine.rs\nmine_core · collect_mine_rows"]
+        cmd_skill["skill.rs\nskill_output · SKILL registry\n(body = include_str! canonical SKILL.md)"]
         cmd_resolve["resolve.rs (master 1)\ninput resolution\nparse_task_ref · branch · pick_instance"]
         cmd_presenter["presenter.rs (master 3)\nuser-facing strings\nreauth_message · write_comment_*"]
         cmd_task --> cmd_resolve
@@ -93,6 +94,18 @@ flowchart TD
   `setup` presents inline and depends on neither), never the reverse; the re-auth literal appears once
   within `src/commands/`; `main.rs` and `tui/mod.rs` are untouched (the seam holds via re-exports);
   behavior-preserving (full `cargo test` green under `--test-threads=1`).
+- **the agent skill is served by the binary, integrations are thin pointers**
+  ([ADR 0057](/adr/0057-agent-skill-served-by-ac-skill-command.md),
+  [BDR 0031](/bdr/0031-ac-skill-command.md)): the `ac skill` command reads a pure,
+  network-free `src/commands/skill.rs` registry whose `ac-json` body is
+  `include_str!`-embedded from the **one** canonical `.claude/skills/ac-json/SKILL.md`
+  (the same file Claude Code, OpenCode, and pi read natively) — so the `--json` contract
+  ([ADR 0011](/adr/0011-agent-json-output-contract.md)) has a single home. Every other
+  harness (Codex, Copilot, Cursor) integrates via a thin stub that defers to
+  `ac skill ac-json` rather than copying the contract, written at each harness's path by
+  `install-skill.sh`. `skill` is in `KNOWN_COMMANDS` so a bare `ac skill …` is not
+  rewritten to `get`. Fitness: the registry body equals the embedded `SKILL.md` bytes
+  (a unit test pins it), and `skill_output` takes no store/HTTP dependency.
 - **tui/model.update** is pure — no terminal, no async, no I/O. Gate-checked by unit
   tests (BDR 0001) and `cargo test` running headless.
 - **client/http** is the only outbound-network boundary; **token host isolation**
