@@ -17,7 +17,7 @@ use clap::{CommandFactory, Parser};
 use cli::{bare_no_command_action, BareNoCommandAction, Cli, Command};
 use commands::{
     comment_core, current_core, get_core, mine_core, pick_instance, setup_add, setup_language,
-    setup_list, setup_remove, setup_test, DisplayFlags, MineOutcome, SetupAddFields,
+    setup_list, setup_remove, setup_test, skill_output, DisplayFlags, MineOutcome, SetupAddFields,
 };
 use std::io::IsTerminal;
 use std::process;
@@ -95,7 +95,16 @@ async fn dispatch(command: Command) -> i32 {
         Command::Mine(args) => dispatch_mine(args).await,
         Command::Browse(args) => dispatch_browse(args).await,
         Command::Comment(args) => dispatch_comment(args).await,
+        Command::Skill(args) => dispatch_skill(args),
     }
+}
+
+fn dispatch_skill(args: cli::SkillArgs) -> i32 {
+    skill_output(
+        args.name.as_deref(),
+        &mut std::io::stdout(),
+        &mut std::io::stderr(),
+    )
 }
 
 async fn dispatch_setup(cmd: cli::SetupCmd) -> i32 {

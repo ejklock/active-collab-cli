@@ -1,7 +1,7 @@
 use clap::{Args, Parser, Subcommand};
 
-pub const KNOWN_COMMANDS: [&str; 7] = [
-    "setup", "get", "current", "mine", "list", "browse", "comment",
+pub const KNOWN_COMMANDS: [&str; 8] = [
+    "setup", "get", "current", "mine", "list", "browse", "comment", "skill",
 ];
 
 /// Fetch ActiveCollab tasks from one or more configured instances.
@@ -27,6 +27,8 @@ pub enum Command {
     Browse(BrowseArgs),
     /// Post a comment to a task as the logged-in user.
     Comment(CommentArgs),
+    /// Print an embedded agent skill (ac skill list | ac skill <name>).
+    Skill(SkillArgs),
 }
 
 /// Wrapper that holds the setup subcommand.
@@ -143,6 +145,12 @@ pub struct CommentArgs {
     /// Force a named instance.
     #[arg(long)]
     pub instance: Option<String>,
+}
+
+#[derive(Args, Debug)]
+pub struct SkillArgs {
+    /// Skill name, or `list`. Omit to print the single skill.
+    pub name: Option<String>,
 }
 
 /// Mirror of Python `_normalize_argv`.
