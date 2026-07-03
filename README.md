@@ -1,12 +1,61 @@
 # active-collab-cli
 
-Command-line tool and interactive terminal UI (TUI) for reading and browsing
-[ActiveCollab](https://activecollab.com) tasks from self-hosted instances.
-Supports multi-instance configuration, SQLite-backed token storage, and outputs
-human-readable or JSON task views.
+**Unofficial** command-line tool and interactive terminal UI (TUI) for reading
+and browsing [ActiveCollab](https://activecollab.com) tasks from self-hosted
+instances. Supports multi-instance configuration, SQLite-backed token storage,
+and outputs human-readable or JSON task views.
 
 The application ships as a single self-contained binary (`ac`) built with Rust
 (ratatui + crossterm + tokio). No interpreter or runtime is required on the target.
+
+> ## ⚠️ Unofficial — not affiliated with ActiveCollab
+>
+> This is an independent, community-built project. It is **not** an official
+> ActiveCollab product and is **not affiliated with, endorsed by, sponsored by,
+> or supported by** ActiveCollab or A51 d.o.o. **"ActiveCollab" is a trademark of
+> its respective owner** and is used here **only** to describe compatibility with
+> the ActiveCollab REST API of your own self-hosted instance. This tool stores no
+> credentials beyond a local API token, sends that token only to your configured
+> host, and is provided "as is", without warranty. Use at your own risk.
+
+---
+
+## Screenshot
+
+![The ac browse task-detail view, rendered with fictional demo data](docs/assets/detail-demo.svg)
+
+*Interactive TUI — the task-detail view (project, status, description, assets).
+The data shown is fictional; no real instance or client data is depicted.*
+
+---
+
+## Quickstart
+
+From zero to your first task in three steps:
+
+```sh
+# 1 · Install (macOS / Linux — Windows: see the PowerShell one-liner below)
+curl -fsSL https://raw.githubusercontent.com/ejklock/active-collab-cli/main/install.sh | sh
+
+# 2 · Register your self-hosted ActiveCollab instance.
+#     Prompts once for your password to exchange an API token — the password is never stored.
+ac setup add --name collab --url https://collab.example.com --email you@example.com
+
+# 3 · List the open tasks assigned to you
+ac mine
+```
+
+Then, day to day:
+
+```sh
+ac                  # the task for your current git branch (e.g. feature/665-75159)
+ac get 665/75159    # a specific task by short form or full URL
+ac browse           # full interactive TUI: projects → tasks → detail → assets
+ac mine --json      # machine-readable output for scripts and agents
+```
+
+New here? `ac setup add` walks you through it interactively if you omit the flags.
+See [Usage](#usage) for every command and flag.
 
 ---
 

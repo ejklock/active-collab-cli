@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="556" viewBox="0 0 760 556" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="13">
+  <!-- terminal window -->
+  <rect x="8" y="8" width="744" height="540" rx="10" fill="#0d1117" stroke="#30363d"/>
+  <!-- title bar -->
+  <circle cx="32" cy="30" r="6" fill="#ff5f56"/>
+  <circle cx="52" cy="30" r="6" fill="#ffbd2e"/>
+  <circle cx="72" cy="30" r="6" fill="#27c93f"/>
+  <text x="380" y="34" text-anchor="middle" fill="#8b949e">ac browse — active-collab-cli (demo data)</text>
+  <line x1="8" y1="48" x2="752" y2="48" stroke="#30363d"/>
+
+  <!-- app identity header -->
+  <rect x="8" y="49" width="744" height="22" fill="#164e63"/>
+  <text x="24" y="64" fill="#e6edf3" font-weight="bold">active-collab</text>
+  <text x="736" y="64" text-anchor="end" fill="#a5f3fc">Alex Rivera · acme</text>
+
+  <!-- Details panel -->
+  <rect x="24" y="88" width="712" height="252" rx="6" fill="none" stroke="#30363d"/>
+  <rect x="40" y="80" width="64" height="16" fill="#0d1117"/>
+  <text x="48" y="93" fill="#56d4dd">Details</text>
+
+  <g fill="#e6edf3">
+    <text x="48" y="120"><tspan fill="#8b949e">Task</tspan><tspan x="184">128-4821</tspan></text>
+    <text x="48" y="144"><tspan fill="#8b949e">Title</tspan><tspan x="184">[Acme · Store] Fix checkout redirect on Safari</tspan></text>
+    <text x="48" y="168"><tspan fill="#8b949e">Project</tspan><tspan x="184">Acme · Store</tspan></text>
+    <text x="48" y="192"><tspan fill="#8b949e">Status</tspan><tspan x="184" fill="#3fb950">Open</tspan></text>
+    <text x="48" y="216"><tspan fill="#8b949e">Assignee</tspan><tspan x="184">Alex Rivera (12)</tspan></text>
+    <text x="48" y="240"><tspan fill="#8b949e">Start</tspan><tspan x="184">2026-07-06</tspan></text>
+    <text x="48" y="264"><tspan fill="#8b949e">Due</tspan><tspan x="184" fill="#d29922">2026-07-08</tspan></text>
+    <text x="48" y="288"><tspan fill="#8b949e">Estimate</tspan><tspan x="184">4h</tspan></text>
+    <text x="48" y="312"><tspan fill="#8b949e">Logged</tspan><tspan x="184">1h</tspan></text>
+  </g>
+
+  <!-- Description panel -->
+  <rect x="24" y="364" width="712" height="128" rx="6" fill="none" stroke="#30363d"/>
+  <rect x="40" y="356" width="92" height="16" fill="#0d1117"/>
+  <text x="48" y="369" fill="#56d4dd">Description</text>
+
+  <text x="48" y="392" fill="#e6edf3" font-weight="bold">Original title:</text>
+  <text x="48" y="414"><tspan fill="#58a6ff">◆</tspan><tspan x="66" fill="#e6edf3">[Acme · Store] Fix checkout redirect on Safari</tspan></text>
+  <text x="48" y="444" fill="#e6edf3">Customers on Safari 17 hit a redirect loop at</text>
+  <text x="48" y="464"><tspan fill="#3fb950" text-decoration="underline">https://store.acme.example/checkout</tspan><tspan fill="#e6edf3"> after applying a</tspan></text>
+  <text x="48" y="484" fill="#e6edf3">coupon. Repro + HAR attached; expected: land on /order/confirm.</text>
+
+  <!-- footer hints -->
+  <text x="24" y="524" fill="#8b949e">
+    <tspan fill="#484f58">[</tspan><tspan fill="#c9d1d9">↑/↓</tspan><tspan fill="#484f58">]</tspan> move
+    <tspan dx="6" fill="#484f58">[</tspan><tspan fill="#c9d1d9">Enter</tspan><tspan fill="#484f58">]</tspan> select
+    <tspan dx="6" fill="#484f58">[</tspan><tspan fill="#c9d1d9">a</tspan><tspan fill="#484f58">]</tspan> assets
+    <tspan dx="6" fill="#484f58">[</tspan><tspan fill="#c9d1d9">r</tspan><tspan fill="#484f58">]</tspan> refresh
+    <tspan dx="6" fill="#484f58">[</tspan><tspan fill="#c9d1d9">q</tspan><tspan fill="#484f58">]</tspan> quit
+  </text>
+</svg>
