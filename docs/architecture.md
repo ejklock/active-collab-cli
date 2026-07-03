@@ -34,7 +34,21 @@ flowchart TD
     screens --> drawer
     screens --> theme
     main --> cli["cli (clap)"]
-    cli --> commands["commands\nsetup · get · current · mine · browse · comment"]
+    cli --> commands
+    subgraph commands["commands/ — three masters (ADR 0055)"]
+        direction TB
+        cmd_setup["setup.rs\nsetup list·remove·language·test·add"]
+        cmd_task["task.rs\nget · current"]
+        cmd_comment["comment.rs\ncomment_core"]
+        cmd_mine["mine.rs\nmine_core · collect_mine_rows"]
+        cmd_resolve["resolve.rs (master 1)\ninput resolution\nparse_task_ref · branch · pick_instance"]
+        cmd_presenter["presenter.rs (master 3)\nuser-facing strings\nreauth_message · write_comment_*"]
+        cmd_task --> cmd_resolve
+        cmd_task --> cmd_presenter
+        cmd_comment --> cmd_resolve
+        cmd_comment --> cmd_presenter
+        cmd_mine --> cmd_presenter
+    end
     commands --> controller["controller\n(async orchestration)"]
     model --> controller
     controller --> client["client\n(ActiveCollab API)"]
@@ -66,6 +80,19 @@ flowchart TD
   low-level helpers/types both use, plus the re-export surface. Fitness: `text_measure` imports
   no `richtext`; `cli_render`/`detail_render` do not reference each other; the split is
   behavior-preserving (the whole `cargo test` suite is green on the combined tree).
+- **commands is a directory of deep modules, not a flat god-file** ([ADR 0055](/adr/0055-commands-split-three-masters.md)):
+  the 1035-line `commands.rs` splits into `src/commands/` where each command core served three
+  masters at once — input resolution, orchestration, presentation. Now `resolve.rs` (master 1)
+  owns input resolution (`parse_task_ref`/`parse_branch_ref`/`pick_instance`/`resolve_task_ref_for_comment`),
+  `presenter.rs` (master 3) owns the user-facing strings and single-homes the [ADR 0042](/adr/0042-detect-401-and-guide-reauthentication.md)
+  re-auth message in one `reauth_message()`, and one orchestration module per family
+  (`setup.rs`/`task.rs`/`comment.rs`/`mine.rs`) wires the two. `mod.rs` is a thin root: only
+  `mod` declarations, the `pub(crate) use` re-export surface, and the `#[path]` test include.
+  Fitness: `resolve.rs` imports no client/cache; `presenter.rs` imports only `i18n`/`agent_json`/`Write`;
+  the family modules may depend on the masters (`task`/`comment` on both, `mine` on `presenter`;
+  `setup` presents inline and depends on neither), never the reverse; the re-auth literal appears once
+  within `src/commands/`; `main.rs` and `tui/mod.rs` are untouched (the seam holds via re-exports);
+  behavior-preserving (full `cargo test` green under `--test-threads=1`).
 - **tui/model.update** is pure — no terminal, no async, no I/O. Gate-checked by unit
   tests (BDR 0001) and `cargo test` running headless.
 - **client/http** is the only outbound-network boundary; **token host isolation**
