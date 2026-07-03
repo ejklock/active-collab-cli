@@ -1,0 +1,152 @@
+#!/bin/sh
+set -eu
+
+usage() {
+  cat <<'EOF'
+Usage: install-skill.sh --harness <name> [--dir <path>] [--force]
+       install-skill.sh -h | --help
+
+Installs the ac-json agent-skill thin-pointer stub for one or more agent
+harnesses. Each stub only tells the agent to run `ac skill ac-json` to load
+the full ActiveCollab --json read contract from the CLI; it carries no
+--json schema fields, so it can never drift from the contract.
+
+Options:
+  --harness <name>   Harness to install for. One of:
+                      claude, codex, opencode, pi, copilot, cursor, all
+  --dir <path>       Base directory to install into (default: .)
+  --force            Overwrite an existing target file
+  -h, --help         Show this help and exit
+EOF
+}
+
+skill_md_body() {
+  cat <<'EOF'
+---
+name: ac-json
+description: Read ActiveCollab task data as machine-readable JSON from the `ac` CLI (ac get/current/mine/browse --json). Run `ac skill ac-json` to load the full contract.
+---
+
+# ac-json (thin pointer)
+
+The full, authoritative ActiveCollab `--json` read contract is served by the CLI itself.
+
+Run:
+
+    ac skill ac-json
+
+and follow its output. It documents the curated minified JSON schemas for
+`ac get`, `ac current`, `ac mine`, and `ac browse` with `--json`, the round-trippable `ref`,
+and the cache / `--no-comments` flags.
+EOF
+}
+
+skill_mdc_body() {
+  cat <<'EOF'
+---
+description: Read ActiveCollab task data as JSON via the `ac` CLI. Run `ac skill ac-json` for the full contract.
+globs:
+alwaysApply: false
+---
+
+# ac-json (thin pointer)
+
+The full ActiveCollab `--json` read contract is served by the CLI. Run `ac skill ac-json`
+and follow its output — it documents the `--json` schemas for get/current/mine/browse,
+the round-trippable `ref`, and the cache flags.
+EOF
+}
+
+write_stub() {
+  _target="$1"
+  _body_fn="$2"
+
+  if [ -f "${_target}" ] && [ "${_force}" -ne 1 ]; then
+    echo "exists, skipping: ${_target} (use --force to overwrite)"
+    return 0
+  fi
+
+  mkdir -p "$(dirname "${_target}")"
+  "${_body_fn}" > "${_target}"
+  echo "wrote: ${_target}"
+}
+
+install_harness() {
+  _name="$1"
+  case "${_name}" in
+    claude) write_stub "${_dir}/.claude/skills/ac-json/SKILL.md" skill_md_body ;;
+    codex) write_stub "${_dir}/.codex/skills/ac-json/SKILL.md" skill_md_body ;;
+    opencode) write_stub "${_dir}/.opencode/skills/ac-json/SKILL.md" skill_md_body ;;
+    pi) write_stub "${_dir}/.pi/skills/ac-json/SKILL.md" skill_md_body ;;
+    copilot) write_stub "${_dir}/.github/skills/ac-json/SKILL.md" skill_md_body ;;
+    cursor) write_stub "${_dir}/.cursor/rules/ac-json.mdc" skill_mdc_body ;;
+  esac
+}
+
+_harness=""
+_dir="."
+_force=0
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --harness)
+      if [ $# -lt 2 ]; then
+        echo "Error: --harness requires a value" >&2
+        usage >&2
+        exit 2
+      fi
+      _harness="$2"
+      shift 2
+      ;;
+    --dir)
+      if [ $# -lt 2 ]; then
+        echo "Error: --dir requires a value" >&2
+        usage >&2
+        exit 2
+      fi
+      _dir="$2"
+      shift 2
+      ;;
+    --force)
+      _force=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Error: unknown option: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+if [ -z "${_harness}" ]; then
+  echo "Error: --harness is required" >&2
+  usage >&2
+  exit 2
+fi
+
+case "${_harness}" in
+  claude|codex|opencode|pi|copilot|cursor|all) ;;
+  *)
+    echo "Error: unknown harness: ${_harness}" >&2
+    usage >&2
+    exit 2
+    ;;
+esac
+
+_count=0
+if [ "${_harness}" = "all" ]; then
+  for _h in claude codex opencode pi copilot cursor; do
+    install_harness "${_h}"
+    _count=$((_count + 1))
+  done
+else
+  install_harness "${_harness}"
+  _count=1
+fi
+
+echo "Done: processed ${_count} harness target(s)."
