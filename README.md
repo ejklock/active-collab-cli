@@ -234,6 +234,50 @@ ac               # same as: ac current (when branch matches)
 
 ---
 
+## Agent skill
+
+`ac` ships a self-describing **agent skill** for the `--json` read contract, so an
+LLM coding agent can learn how to read your ActiveCollab tasks non-interactively.
+The full contract lives in **one place** — inside the binary — and `ac` prints it on
+demand:
+
+```sh
+ac skill list        # list the available skills
+ac skill ac-json     # print the full ac-json contract (schemas, the round-trippable ref, flags)
+ac skill             # with one skill registered, prints it directly
+```
+
+### Install the skill into your agent harness
+
+Every supported harness loads a small **thin pointer** whose only job is to tell the
+agent to run `ac skill ac-json`. Because the pointer carries no schema, it never goes
+stale when the `--json` contract changes — only the binary does. Run the installer
+from your project root for the harness you use (or `all`):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/ejklock/active-collab-cli/main/install-skill.sh | sh -s -- --harness cursor
+# or wire up every harness at once:
+curl -fsSL https://raw.githubusercontent.com/ejklock/active-collab-cli/main/install-skill.sh | sh -s -- --harness all
+```
+
+| Harness | File written |
+|---|---|
+| Claude Code | `.claude/skills/ac-json/SKILL.md` |
+| Codex CLI | `.codex/skills/ac-json/SKILL.md` |
+| OpenCode | `.opencode/skills/ac-json/SKILL.md` |
+| pi | `.pi/skills/ac-json/SKILL.md` |
+| GitHub Copilot | `.github/skills/ac-json/SKILL.md` |
+| Cursor | `.cursor/rules/ac-json.mdc` |
+
+Claude Code, OpenCode, and pi can also read `.claude/skills/ac-json/SKILL.md`
+directly. The installer writes into the current directory by default; pass
+`--dir <path>` to target another project.
+
+> This tool only ever **reads** your ActiveCollab tasks over the `--json` contract; the
+> skill grants an agent no write access beyond the CLI commands you already run yourself.
+
+---
+
 ## Internationalization
 
 The binary ships with English (default) and Brazilian Portuguese (`pt_BR`)
