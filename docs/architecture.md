@@ -200,11 +200,18 @@ call. Fitness: a warm refresh issues **zero** `list_projects` requests
 
 The **detail load** enriches the task with its **project name** before rendering
 ([ADR 0022](/adr/0022-detail-title-as-meta-row.md),
-[BDR 0016](/bdr/0016-detail-title-row-project-name.md)): the task JSON carries only
-`project_id`, so the load path resolves the name from the **same** per-instance
-`ProjectNamesCache` the browse/mine list uses and injects `project_name`, which the
-`Detalhes` panel renders in the `Projeto` row (with a fallback on a cache miss). No new
-network call — the name comes from the existing cache.
+[BDR 0016](/bdr/0016-detail-title-row-project-name.md); miss behavior amended by
+[ADR 0056](/adr/0056-detail-project-name-network-fallback.md) /
+[BDR 0030](/bdr/0030-detail-project-name-resolved-on-miss.md)): the task JSON carries
+only `project_id`, so the load path first resolves the name from the **same**
+per-instance `ProjectNamesCache` the browse/mine list uses and injects `project_name`,
+which the `Detalhes` panel renders in the `Projeto` row. On a **cache miss** (cold,
+stale, or the id was never listed) it issues **one** `GET /api/v1/projects/{id}`
+(`client.fetch_project_name`), renders the resolved name, and **writes it back** into
+`ProjectNamesCache` (merged into the instance map, so a later load serves it from
+cache) — extending the browse SWR to the single-project detail case. The
+`(unknown)` fallback is shown only when that single fetch also yields no name; a warm
+cache hit still issues **zero** `projects/{id}` requests.
 
 Background results (e.g. `Msg::LoadedTasksByProject`) are delivered over a
 `tokio::sync::mpsc` channel that is a first-class arm of the `tokio::select!`
