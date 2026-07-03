@@ -8,9 +8,9 @@ pub(crate) struct SkillEntry {
 }
 
 pub(crate) const SKILLS: &[SkillEntry] = &[SkillEntry {
-    name: "ac-json",
-    description: "Read ActiveCollab task data as machine-readable JSON from the ac CLI",
-    body: include_str!("../../.claude/skills/ac-json/SKILL.md"),
+    name: "active-collab",
+    description: "Read ActiveCollab task data — a task, your assignments, comments, or projects — as machine-readable JSON from the ac CLI, non-interactively without the TUI.",
+    body: include_str!("../../.claude/skills/active-collab/SKILL.md"),
 }];
 
 fn find_skill(name: &str) -> Option<&'static SkillEntry> {

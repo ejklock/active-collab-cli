@@ -1,6 +1,6 @@
 ---
-name: ac-json
-description: Read ActiveCollab task data as machine-readable JSON from the `ac` CLI. Use when an agent or script needs task, assignment, or project data non-interactively (without the TUI) — `ac get --json`, `ac current --json`, `ac mine --json`, `ac browse --json`. Covers the curated minified schemas, the round-trippable `ref`, and the cache/no-comments flags.
+name: active-collab
+description: Read ActiveCollab task data — a task, your assignments, comments, or projects — as machine-readable JSON from the `ac` CLI, non-interactively without the TUI. Use when an agent or script needs to fetch a task by id or URL, list the logged-in user's open tasks, read the task for the current git branch, or browse projects, and wants structured JSON instead of the interactive terminal UI. Covers `ac get`, `ac current`, `ac mine`, and `ac browse` with `--json` — the curated minified schemas, the round-trippable `ref`, and the cache/`--no-comments` flags.
 ---
 
 # ac --json — agent read contract

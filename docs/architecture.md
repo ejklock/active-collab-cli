@@ -97,12 +97,12 @@ flowchart TD
 - **the agent skill is served by the binary, integrations are thin pointers**
   ([ADR 0057](/adr/0057-agent-skill-served-by-ac-skill-command.md),
   [BDR 0031](/bdr/0031-ac-skill-command.md)): the `ac skill` command reads a pure,
-  network-free `src/commands/skill.rs` registry whose `ac-json` body is
-  `include_str!`-embedded from the **one** canonical `.claude/skills/ac-json/SKILL.md`
+  network-free `src/commands/skill.rs` registry whose `active-collab` body is
+  `include_str!`-embedded from the **one** canonical `.claude/skills/active-collab/SKILL.md`
   (the same file Claude Code, OpenCode, and pi read natively) — so the `--json` contract
   ([ADR 0011](/adr/0011-agent-json-output-contract.md)) has a single home. Every other
   harness (Codex, Copilot, Cursor) integrates via a thin stub that defers to
-  `ac skill ac-json` rather than copying the contract, written at each harness's path by
+  `ac skill active-collab` rather than copying the contract, written at each harness's path by
   `install-skill.sh`. `skill` is in `KNOWN_COMMANDS` so a bare `ac skill …` is not
   rewritten to `get`. Fitness: the registry body equals the embedded `SKILL.md` bytes
   (a unit test pins it), and `skill_output` takes no store/HTTP dependency.
