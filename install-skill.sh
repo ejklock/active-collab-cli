@@ -6,10 +6,11 @@ usage() {
 Usage: install-skill.sh --harness <name> [--scope project|global] [--dir <path>] [--force]
        install-skill.sh -h | --help
 
-Installs the ac-json agent-skill thin-pointer stub for one or more agent
-harnesses. Each stub only tells the agent to run `ac skill ac-json` to load
-the full ActiveCollab --json read contract from the CLI; it carries no
---json schema fields, so it can never drift from the contract.
+Installs the active-collab agent-skill thin-pointer stub for one or more
+agent harnesses. Each stub only tells the agent to run `ac skill
+active-collab` to load the full ActiveCollab --json read contract from the
+CLI; it carries no --json schema fields, so it can never drift from the
+contract.
 
 Options:
   --harness <name>   Harness to install for. One of:
@@ -33,17 +34,17 @@ EOF
 skill_md_body() {
   cat <<'EOF'
 ---
-name: ac-json
-description: Read ActiveCollab task data as machine-readable JSON from the `ac` CLI (ac get/current/mine/browse --json). Run `ac skill ac-json` to load the full contract.
+name: active-collab
+description: Read ActiveCollab task data — a task, your assignments, comments, or projects — as machine-readable JSON from the `ac` CLI, non-interactively without the TUI. Use when an agent or script needs to fetch a task by id or URL, list the logged-in user's open tasks, read the task for the current git branch, or browse projects, and wants structured JSON instead of the interactive terminal UI. Covers `ac get`, `ac current`, `ac mine`, and `ac browse` with `--json` — the curated minified schemas, the round-trippable `ref`, and the cache/`--no-comments` flags.
 ---
 
-# ac-json (thin pointer)
+# active-collab (thin pointer)
 
 The full, authoritative ActiveCollab `--json` read contract is served by the CLI itself.
 
 Run:
 
-    ac skill ac-json
+    ac skill active-collab
 
 and follow its output. It documents the curated minified JSON schemas for
 `ac get`, `ac current`, `ac mine`, and `ac browse` with `--json`, the round-trippable `ref`,
@@ -54,14 +55,14 @@ EOF
 skill_mdc_body() {
   cat <<'EOF'
 ---
-description: Read ActiveCollab task data as JSON via the `ac` CLI. Run `ac skill ac-json` for the full contract.
+description: Read ActiveCollab task/assignment/comment/project data as JSON via the `ac` CLI (get/current/mine/browse --json), non-interactively. Run `ac skill active-collab` for the full contract.
 globs:
 alwaysApply: false
 ---
 
-# ac-json (thin pointer)
+# active-collab (thin pointer)
 
-The full ActiveCollab `--json` read contract is served by the CLI. Run `ac skill ac-json`
+The full ActiveCollab `--json` read contract is served by the CLI. Run `ac skill active-collab`
 and follow its output — it documents the `--json` schemas for get/current/mine/browse,
 the round-trippable `ref`, and the cache flags.
 EOF
@@ -88,20 +89,20 @@ unsupported_under_global() {
 
 install_harness_project() {
   case "$1" in
-    claude) write_stub "${_dir}/.claude/skills/ac-json/SKILL.md" skill_md_body ;;
-    codex) write_stub "${_dir}/.codex/skills/ac-json/SKILL.md" skill_md_body ;;
-    opencode) write_stub "${_dir}/.opencode/skills/ac-json/SKILL.md" skill_md_body ;;
-    pi) write_stub "${_dir}/.pi/skills/ac-json/SKILL.md" skill_md_body ;;
-    copilot) write_stub "${_dir}/.github/skills/ac-json/SKILL.md" skill_md_body ;;
-    cursor) write_stub "${_dir}/.cursor/rules/ac-json.mdc" skill_mdc_body ;;
+    claude) write_stub "${_dir}/.claude/skills/active-collab/SKILL.md" skill_md_body ;;
+    codex) write_stub "${_dir}/.codex/skills/active-collab/SKILL.md" skill_md_body ;;
+    opencode) write_stub "${_dir}/.opencode/skills/active-collab/SKILL.md" skill_md_body ;;
+    pi) write_stub "${_dir}/.pi/skills/active-collab/SKILL.md" skill_md_body ;;
+    copilot) write_stub "${_dir}/.github/skills/active-collab/SKILL.md" skill_md_body ;;
+    cursor) write_stub "${_dir}/.cursor/rules/active-collab.mdc" skill_mdc_body ;;
   esac
 }
 
 install_harness_global() {
   case "$1" in
-    claude) write_stub "${HOME}/.claude/skills/ac-json/SKILL.md" skill_md_body ;;
-    pi) write_stub "${HOME}/.pi/agent/skills/ac-json/SKILL.md" skill_md_body ;;
-    codex) write_stub "${HOME}/.codex/skills/ac-json/SKILL.md" skill_md_body ;;
+    claude) write_stub "${HOME}/.claude/skills/active-collab/SKILL.md" skill_md_body ;;
+    pi) write_stub "${HOME}/.pi/agent/skills/active-collab/SKILL.md" skill_md_body ;;
+    codex) write_stub "${HOME}/.codex/skills/active-collab/SKILL.md" skill_md_body ;;
     opencode|copilot|cursor) unsupported_under_global "$1" ;;
   esac
 }
