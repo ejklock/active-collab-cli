@@ -372,7 +372,7 @@ pub async fn load_task_core(
     let client = ActiveCollabClient::new(inst.clone(), http);
     let (mut task, comments, unauthorized) =
         load_task_data_from_path(&db_path, &inst, &client, project_id, task_id, refresh).await;
-    enrich_task_with_project_name(&mut task, &db_path, &inst.name, project_id);
+    enrich_task_with_project_name(&mut task, &db_path, &inst.name, project_id, &client).await;
     let assets = extract_assets(&task, &comments);
     TaskCore {
         task,
@@ -382,20 +382,74 @@ pub async fn load_task_core(
     }
 }
 
-/// Injects `project_name` into `task` by reading the per-instance project-name cache.
+/// Injects `project_name` into `task`, resolving it on a cache miss (ADR 0056).
 ///
-/// No network call is made. On cache miss the key is set to `t("(unknown)")` so the
-/// Projeto row in the Details panel is never blank.
-fn enrich_task_with_project_name(
+/// A fresh cache hit for `project_id` is used with no network call. On a miss the
+/// name is fetched via one `GET /api/v1/projects/{id}`, written back to
+/// `ProjectNamesCache` merged into the instance's existing map, and used; a fetch
+/// failure or nameless response falls back to `t("(unknown)")` so the Projeto row
+/// in the Details panel is never blank.
+async fn enrich_task_with_project_name(
     task: &mut Value,
     db_path: &Path,
     instance_name: &str,
     project_id: i64,
+    client: &ActiveCollabClient,
 ) {
-    let name = project_name_from_cache(db_path, instance_name, project_id);
+    let name = resolve_project_name(db_path, instance_name, project_id, client).await;
     if let Some(obj) = task.as_object_mut() {
         obj.insert("project_name".to_string(), Value::String(name));
     }
+}
+
+/// Resolve the display name for `project_id`: fresh cache hit first, otherwise a
+/// single `fetch_project_name` call with write-back on success and the
+/// `t("(unknown)")` fallback otherwise.
+async fn resolve_project_name(
+    db_path: &Path,
+    instance_name: &str,
+    project_id: i64,
+    client: &ActiveCollabClient,
+) -> String {
+    if let Some(name) = fresh_project_names_cache_read(db_path, instance_name)
+        .and_then(|names| names.get(&project_id).cloned())
+    {
+        return name;
+    }
+    match client.fetch_project_name(project_id).await {
+        Ok(Some(name)) => {
+            try_project_name_cache_merge_write(db_path, instance_name, project_id, &name);
+            name
+        }
+        _ => project_name_from_cache(db_path, instance_name, project_id),
+    }
+}
+
+/// Merge `{project_id: name}` into the instance's existing project-names map and
+/// write the merged map back, preserving sibling entries.
+fn try_project_name_cache_merge_write(
+    db_path: &Path,
+    instance_name: &str,
+    project_id: i64,
+    name: &str,
+) {
+    let config = Config {
+        db_path: db_path.to_path_buf(),
+        task_cache_ttl_hours: 24,
+    };
+    let store = match Store::open(&config) {
+        Ok(store) => store,
+        Err(_) => return,
+    };
+    let cache = ProjectNamesCache::new(store.conn());
+    let mut names = cache
+        .read(instance_name)
+        .ok()
+        .flatten()
+        .map(|cached| cached.names)
+        .unwrap_or_default();
+    names.insert(project_id, name.to_string());
+    cache.write(instance_name, &names).ok();
 }
 
 /// Read the project name for `project_id` from the per-instance cache.

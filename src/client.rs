@@ -203,6 +203,28 @@ impl ActiveCollabClient {
         Ok(tasks)
     }
 
+    /// GET /api/v1/projects/{project_id}.
+    /// Returns `Some(name)` on a 200 with a non-empty `name`, `None` otherwise
+    /// (non-200, unparseable body, or missing/empty `name`).
+    pub async fn fetch_project_name(&self, project_id: i64) -> Result<Option<String>> {
+        let base = self.instance.base_url.trim_end_matches('/');
+        let url = format!("{}/api/v1/projects/{}", base, project_id);
+        let (status, body) = self
+            .http
+            .authed_get(&url, &self.instance.base_url, &self.instance.token)
+            .await?;
+        if status != 200 {
+            return Ok(None);
+        }
+        let data: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
+        let name = data
+            .get("name")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string());
+        Ok(name)
+    }
+
     /// GET /api/v1/projects. Used by connectivity checks.
     pub async fn list_projects(&self) -> Result<(u16, bytes::Bytes)> {
         let base = self.instance.base_url.trim_end_matches('/');
