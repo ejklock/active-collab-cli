@@ -77,3 +77,7 @@ See [research/](/research/index.md).
 
 See [issues/](/issues/index.md) — slices R0–R8 of the Rust rewrite plus the
 post-parity TUI/UX slices (V3, C1, R2, R3, ARCH, R4, V5, V6, D1).
+
+## Assets
+
+See [assets/](/assets/index.md) — static image assets (README screenshot).
