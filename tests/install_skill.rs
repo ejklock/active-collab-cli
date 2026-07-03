@@ -45,14 +45,14 @@ fn run_install_home(home: &Path, harness: &str, extra_args: &[&str]) -> Output {
 }
 
 const SKILL_MD_HARNESSES: &[(&str, &str)] = &[
-    ("claude", ".claude/skills/ac-json/SKILL.md"),
-    ("codex", ".codex/skills/ac-json/SKILL.md"),
-    ("opencode", ".opencode/skills/ac-json/SKILL.md"),
-    ("pi", ".pi/skills/ac-json/SKILL.md"),
-    ("copilot", ".github/skills/ac-json/SKILL.md"),
+    ("claude", ".claude/skills/active-collab/SKILL.md"),
+    ("codex", ".codex/skills/active-collab/SKILL.md"),
+    ("opencode", ".opencode/skills/active-collab/SKILL.md"),
+    ("pi", ".pi/skills/active-collab/SKILL.md"),
+    ("copilot", ".github/skills/active-collab/SKILL.md"),
 ];
 
-const CURSOR_PATH: &str = ".cursor/rules/ac-json.mdc";
+const CURSOR_PATH: &str = ".cursor/rules/active-collab.mdc";
 
 #[test]
 fn installs_all_six_harness_stubs() {
@@ -70,7 +70,7 @@ fn installs_all_six_harness_stubs() {
         assert!(full.is_file(), "expected {} to exist", full.display());
         let contents = std::fs::read_to_string(&full).unwrap();
         assert!(
-            contents.contains("ac skill ac-json"),
+            contents.contains("ac skill active-collab"),
             "{} should contain the pointer command, got:\n{contents}",
             full.display()
         );
@@ -84,7 +84,7 @@ fn installs_all_six_harness_stubs() {
     );
     let cursor_contents = std::fs::read_to_string(&cursor_full).unwrap();
     assert!(
-        cursor_contents.contains("ac skill ac-json"),
+        cursor_contents.contains("ac skill active-collab"),
         "cursor stub should contain the pointer command, got:\n{cursor_contents}"
     );
 
@@ -107,8 +107,8 @@ fn skill_stub_has_required_frontmatter() {
             full.display()
         );
         assert!(
-            contents.contains("name: ac-json"),
-            "{} frontmatter should declare name: ac-json",
+            contents.contains("name: active-collab"),
+            "{} frontmatter should declare name: active-collab",
             full.display()
         );
         assert!(
@@ -167,7 +167,7 @@ fn existing_file_not_clobbered() {
     let first = run_install(&tmp, "all", &[]);
     assert!(first.status.success());
 
-    let claude_path = tmp.join(".claude/skills/ac-json/SKILL.md");
+    let claude_path = tmp.join(".claude/skills/active-collab/SKILL.md");
     let sentinel = "CANONICAL CONTENT DO NOT OVERWRITE";
     std::fs::write(&claude_path, sentinel).unwrap();
 
@@ -262,7 +262,7 @@ fn project_scope_defaults_without_dir_or_scope_on_non_tty() {
         "non-TTY run must not emit the interactive scope prompt, got stdout:\n{stdout}"
     );
 
-    let claude_stub = cwd.join(".claude/skills/ac-json/SKILL.md");
+    let claude_stub = cwd.join(".claude/skills/active-collab/SKILL.md");
     assert!(
         claude_stub.is_file(),
         "expected project-scope install under cwd, got: {}",
@@ -285,16 +285,16 @@ fn global_scope_all_writes_supported_harnesses_under_home() {
     );
 
     let expected = [
-        ".claude/skills/ac-json/SKILL.md",
-        ".pi/agent/skills/ac-json/SKILL.md",
-        ".codex/skills/ac-json/SKILL.md",
+        ".claude/skills/active-collab/SKILL.md",
+        ".pi/agent/skills/active-collab/SKILL.md",
+        ".codex/skills/active-collab/SKILL.md",
     ];
     for rel_path in expected {
         let full = home.join(rel_path);
         assert!(full.is_file(), "expected {} to exist", full.display());
         let contents = std::fs::read_to_string(&full).unwrap();
         assert!(
-            contents.contains("ac skill ac-json"),
+            contents.contains("ac skill active-collab"),
             "{} should contain the pointer command, got:\n{contents}",
             full.display()
         );
@@ -315,9 +315,9 @@ fn global_scope_all_skips_unsupported_harnesses() {
     );
 
     for rel_path in [
-        ".opencode/skills/ac-json/SKILL.md",
-        ".github/skills/ac-json/SKILL.md",
-        ".cursor/rules/ac-json.mdc",
+        ".opencode/skills/active-collab/SKILL.md",
+        ".github/skills/active-collab/SKILL.md",
+        ".cursor/rules/active-collab.mdc",
     ] {
         let full = home.join(rel_path);
         assert!(

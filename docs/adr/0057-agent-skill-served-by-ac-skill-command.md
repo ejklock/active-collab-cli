@@ -11,6 +11,12 @@ timestamp: 2026-07-03T00:00:00Z
 
 # 0057. The agent skill is served by an `ac skill` command; per-harness integrations are thin pointers
 
+> **Amended by [ADR 0059](/adr/0059-rename-skill-to-active-collab.md):** the skill was
+> renamed `ac-json` → `active-collab` (the command stays `ac`). Throughout this record,
+> read the `ac-json` skill name as `active-collab`, `…/skills/ac-json/SKILL.md` as
+> `…/skills/active-collab/SKILL.md`, `.cursor/rules/ac-json.mdc` as
+> `.cursor/rules/active-collab.mdc`, and `ac skill ac-json` as `ac skill active-collab`.
+
 ## Context
 
 [ADR 0011](/adr/0011-agent-json-output-contract.md) gave agents a curated,
