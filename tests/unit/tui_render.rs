@@ -1,5 +1,5 @@
 use crate::i18n::set_language;
-use crate::render::{build_detail_content, build_header_lines, Asset, StyleRun};
+use crate::render::{build_detail_content, build_header_lines, Asset, StyleRun, BOX_BL, BOX_TL};
 use crate::richtext::RichStyle;
 use crate::store::instances::Instance;
 use crate::tui::model::{DetailOverlay, Header, ProjectGroup, TaskRow};
@@ -309,10 +309,10 @@ fn draw_tasks_card_layout_no_nome_header_has_bordered_card() {
         content.contains("My Task"),
         "card content must contain the task name: {content}"
     );
-    // Card uses rounded-corner box chars
+    // Card uses squared-corner box chars (ADR 0061)
     assert!(
-        content.contains('\u{256D}') || content.contains('\u{2570}'),
-        "card must use rounded-box border chars: {content}"
+        content.contains(BOX_TL) || content.contains(BOX_BL),
+        "card must use squared-box border chars: {content}"
     );
 }
 
@@ -443,7 +443,7 @@ fn draw_tasks_long_name_wraps_inside_card() {
     let box_rows: Vec<usize> = rows
         .iter()
         .enumerate()
-        .filter(|(_, r)| r.contains('\u{256D}') || r.contains('\u{2570}') || r.contains('\u{2502}'))
+        .filter(|(_, r)| r.contains(BOX_TL) || r.contains(BOX_BL) || r.contains('\u{2502}'))
         .map(|(i, _)| i)
         .collect();
     assert!(
@@ -869,7 +869,7 @@ fn draw_detail_without_assets_no_panel_and_no_marker() {
     );
 }
 
-// P2-A1: build_detail_content produces boxed lines (rounded corners + comment author)
+// P2-A1: build_detail_content produces boxed lines (squared corners + comment author)
 // each fitting within inner_width, after a reflow at that width.
 #[test]
 fn build_detail_lines_with_comment_produces_boxed_lines_fitting_width() {
@@ -900,13 +900,13 @@ fn build_detail_lines_with_comment_produces_boxed_lines_fitting_width() {
         );
     }
 
-    // At least one line must contain a rounded corner glyph (box is present)
+    // At least one line must contain a squared corner glyph (box is present)
     let has_box = lines
         .iter()
-        .any(|l| l.contains('\u{256D}') || l.contains('\u{2570}'));
+        .any(|l| l.contains(BOX_TL) || l.contains(BOX_BL));
     assert!(
         has_box,
-        "output must contain rounded comment box corners: {lines:?}"
+        "output must contain squared comment box corners: {lines:?}"
     );
 
     // At least one line must contain the author name
@@ -1829,7 +1829,10 @@ fn build_detail_lines_reflow_at_different_widths_changes_output() {
 
 // U6c-A1: draw_detail renders a single globally-scrollable content block.
 // Assets are inline at the end of the content (no separate Artifacts panel box).
-// There is exactly ONE top-left corner glyph (┌) for the single content block.
+// The fixture legitimately renders 5 top-left corners: outer frame + Details panel
+// + Description panel + Comments panel + the nested Alice comment card. Assets
+// stay inline in the Artifacts section (plain text, no box) — if assets ever grew
+// their own panel this count would increase and the test would fail.
 #[test]
 fn draw_detail_renders_single_global_content_block() {
     let _guard = LANG_MUTEX.lock().unwrap();
@@ -1866,11 +1869,12 @@ fn draw_detail_renders_single_global_content_block() {
         content.contains("Artifacts"),
         "inline Artifacts section header must appear when assets present: {content}"
     );
-    // Exactly ONE bordered box: the single globally-scrollable content block.
-    let box_count = content.matches('┌').count();
+    // Exactly 5 bordered boxes: outer frame + Details + Description + Comments +
+    // the nested comment card. Assets add no panel box of their own.
+    let box_count = content.matches(BOX_TL).count();
     assert_eq!(
-        box_count, 1,
-        "exactly 1 bordered box must render (single scrollable content, assets inline), found {box_count}: {content}"
+        box_count, 5,
+        "expected outer + Details + Description + Comments + nested comment card = 5 boxes (assets inline add none), found {box_count}: {content}"
     );
 }
 
@@ -5402,10 +5406,12 @@ mod asset_panel_inline {
 
 // --- S2b: AC1 render-buffer tests (BDR 0022 Sc.1, 3, 4) ---
 
-// AC1 (BDR 0022 Sc.1): draw_detail renders assets INLINE with a single bordered box.
-// There is exactly ONE top-left corner glyph (┌), proving no separate Artifacts panel.
+// AC1 (BDR 0022 Sc.1): draw_detail renders assets INLINE — assets add no panel box
+// of their own. The fixture legitimately renders 3 top-left corners: outer frame +
+// Details panel + Description panel. If assets ever grew their own panel, this count
+// would increase and the test would fail.
 #[test]
-fn draw_detail_assets_inline_single_bordered_box() {
+fn draw_detail_assets_inline_adds_no_extra_box() {
     let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
     set_language("en");
 
@@ -5414,10 +5420,10 @@ fn draw_detail_assets_inline_single_bordered_box() {
     let content = buf_to_string(&buf);
 
     set_language("en");
-    let box_count = content.matches('┌').count();
+    let box_count = content.matches(BOX_TL).count();
     assert_eq!(
-        box_count, 1,
-        "exactly 1 bordered box must render (assets inline, no separate panel): {content}"
+        box_count, 3,
+        "expected outer + Details + Description = 3 boxes (assets inline add none), found {box_count}: {content}"
     );
     assert!(
         content.contains("Artifacts"),
@@ -5445,7 +5451,9 @@ fn draw_detail_empty_assets_no_inline_section() {
         !content.contains("[1]"),
         "no '[1]' marker when assets empty: {content}"
     );
-    let box_count = content.matches('┌').count();
+    // Exactly 1 box: the outer content block only (no Details/Description panels
+    // are built when `lines` is raw text, and assets are empty so no Artifacts section).
+    let box_count = content.matches(BOX_TL).count();
     assert_eq!(
         box_count, 1,
         "exactly 1 bordered box (content block only) when no assets: {content}"
@@ -5855,8 +5863,7 @@ mod compose_render {
         // panel borders.
         let modal_border_fg = theme::modal_border_style().fg;
         let border_chars = [
-            '\u{250C}', '\u{2510}', '\u{2514}', '\u{2518}', '\u{2502}', '\u{2500}', '\u{256D}',
-            '\u{256E}', '\u{2570}', '\u{256F}',
+            '\u{250C}', '\u{2510}', '\u{2514}', '\u{2518}', '\u{2502}', '\u{2500}',
         ];
         let is_modal_border = |x: u16, y: u16| -> bool {
             buf.cell((x, y))
