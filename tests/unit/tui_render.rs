@@ -544,7 +544,6 @@ fn draw_projects_selected_row_has_selection_symbol() {
 // must have at least one cell with the amber selection background.
 #[test]
 fn draw_tasks_selected_card_all_rows_carry_selection_style() {
-    use ratatui::style::Color;
     let tasks = make_tasks(&["Task One", "Task Two"]);
     let backend = TestBackend::new(80, 15);
     let mut terminal = Terminal::new(backend).unwrap();
@@ -568,22 +567,22 @@ fn draw_tasks_selected_card_all_rows_carry_selection_style() {
         })
         .unwrap();
     let buf = terminal.backend().buffer();
-    let amber = Color::Rgb(210, 160, 90);
+    let selection_bg = theme::ANGIE_DARK.selection;
     // Find the click target for card 0 (the selected one)
     let target = captured_targets
         .iter()
         .find(|t| t.index == 0)
         .expect("click target for card 0 must be recorded");
-    // Every row in the selected card's range must have at least one amber-bg cell
+    // Every row in the selected card's range must have at least one selection-bg cell
     for y in target.y_start..target.y_end {
-        let has_amber = (0..80u16).any(|x| {
+        let has_selection_bg = (0..80u16).any(|x| {
             buf.cell((x, y))
-                .map(|c| c.style().bg == Some(amber))
+                .map(|c| c.style().bg == Some(selection_bg))
                 .unwrap_or(false)
         });
         assert!(
-            has_amber,
-            "selected card row y={y} must have amber-bg selection style (D2a-AC4)"
+            has_selection_bg,
+            "selected card row y={y} must have the selection token bg (D2a-AC4)"
         );
     }
 }
@@ -918,47 +917,48 @@ fn build_detail_lines_with_comment_produces_boxed_lines_fitting_width() {
     );
 }
 
-// U8-A1: sober cool retro theme — exact Rgb channels + modifiers for every style fn.
+// U8-A1 / ADR 0060: token-driven theme — every style fn reads its Rgb channels
+// from the active palette's named tokens, never a literal hue.
 #[test]
-fn footer_style_is_light_grey_on_steel_bg_bold() {
-    use ratatui::style::{Color, Modifier, Style};
+fn footer_style_is_footer_token_on_raised_band_bold() {
+    use ratatui::style::{Modifier, Style};
     let style = theme::footer_style();
     assert_eq!(
         style,
         Style::default()
-            .fg(Color::Rgb(208, 216, 224))
-            .bg(Color::Rgb(38, 52, 74))
+            .fg(theme::ANGIE_DARK.footer)
+            .bg(theme::ANGIE_DARK.surface_raised)
             .add_modifier(Modifier::BOLD),
-        "footer_style must be light-grey on steel-blue band, bold (sober palette)"
+        "footer_style must be the footer token on the raised-band token, bold"
     );
 }
 
-// U8-A1: selection_style — near-black on discreet amber, bold.
+// U8-A1 / ADR 0060: selection_style — selection_fg token on selection token, bold.
 #[test]
-fn selection_style_is_near_black_on_amber_bold() {
-    use ratatui::style::{Color, Modifier, Style};
+fn selection_style_is_selection_fg_token_on_selection_token_bold() {
+    use ratatui::style::{Modifier, Style};
     let style = theme::selection_style();
     assert_eq!(
         style,
         Style::default()
-            .fg(Color::Rgb(13, 13, 13))
-            .bg(Color::Rgb(210, 160, 90))
+            .fg(theme::ANGIE_DARK.selection_fg)
+            .bg(theme::ANGIE_DARK.selection)
             .add_modifier(Modifier::BOLD),
-        "selection_style must be near-black on amber+bold (sober palette)"
+        "selection_style must be the selection_fg token on the selection token, bold"
     );
 }
 
-// U8-A1: column_header_style — soft cyan fg + bold.
+// U8-A1 / ADR 0060: column_header_style — accent token fg + bold.
 #[test]
-fn column_header_style_is_soft_cyan_bold() {
-    use ratatui::style::{Color, Modifier, Style};
+fn column_header_style_is_accent_token_bold() {
+    use ratatui::style::{Modifier, Style};
     let style = theme::column_header_style();
     assert_eq!(
         style,
         Style::default()
-            .fg(Color::Rgb(102, 204, 204))
+            .fg(theme::ANGIE_DARK.accent)
             .add_modifier(Modifier::BOLD),
-        "column_header_style must be soft-cyan+bold (sober palette)"
+        "column_header_style must be the accent token + bold"
     );
 }
 
@@ -972,10 +972,9 @@ fn selection_symbol_is_unchanged() {
     );
 }
 
-// U8-A2: TestBackend confirms column_header_style fg (soft cyan Rgb(102,204,204)) is applied to the header row.
+// U8-A2: TestBackend confirms column_header_style's fg is applied to the header row.
 #[test]
 fn render_table_header_row_carries_column_header_style() {
-    use ratatui::style::Color;
     use ratatui::{backend::TestBackend, layout::Constraint, text::Text, Terminal};
 
     let backend = TestBackend::new(80, 10);
@@ -1009,19 +1008,19 @@ fn render_table_header_row_carries_column_header_style() {
 
     // The header row is at y=1 (y=0 is the top border drawn by the Block).
     // Walk all non-space cells in that row and verify at least one carries
-    // soft-cyan Rgb(102,204,204) fg — proof that column_header_style is wired to the header row.
-    let soft_cyan = Color::Rgb(102, 204, 204);
-    let mut found_soft_cyan_fg = false;
+    // column_header_style's fg — proof that the builder is wired to the header row.
+    let expected_fg = theme::column_header_style().fg;
+    let mut found_header_fg = false;
     for x in 0..area.width {
         let cell = buf.cell((x, 1)).unwrap();
-        if cell.symbol() != " " && cell.style().fg == Some(soft_cyan) {
-            found_soft_cyan_fg = true;
+        if cell.symbol() != " " && cell.style().fg == expected_fg {
+            found_header_fg = true;
             break;
         }
     }
     assert!(
-        found_soft_cyan_fg,
-        "header row (y=1) must have at least one non-space cell with soft-cyan Rgb(102,204,204) fg — \
+        found_header_fg,
+        "header row (y=1) must have at least one non-space cell with column_header_style's fg — \
          column_header_style must be wired to the header row"
     );
 }
@@ -1201,10 +1200,9 @@ fn draw_tasks_due_line_shows_relative_due_text() {
     );
 }
 
-// D2c-AC2: overdue task's due cells carry the red fg.
+// D2c-AC2: overdue task's due cells carry the danger fg.
 #[test]
 fn draw_tasks_overdue_task_due_cells_carry_red_fg() {
-    use ratatui::style::Color;
     let task = TaskRow {
         task_id: 1,
         task_number: 1,
@@ -1236,7 +1234,7 @@ fn draw_tasks_overdue_task_due_cells_carry_red_fg() {
         })
         .unwrap();
     let buf = terminal.backend().buffer();
-    let due_red = Color::Rgb(220, 80, 80);
+    let due_red = theme::ANGIE_DARK.danger;
     // The due line is the second content row inside the card (row after the name row).
     // Locate via the click target: card spans y_start..y_end; due row = y_end - 2 (before bot border).
     let card = targets.iter().find(|t| t.index == 0).unwrap();
@@ -1248,14 +1246,13 @@ fn draw_tasks_overdue_task_due_cells_carry_red_fg() {
     });
     assert!(
         found_red,
-        "overdue card's due row (y={due_row}) must have at least one red-fg cell (D2c-AC2)"
+        "overdue card's due row (y={due_row}) must have at least one danger-token-fg cell (D2c-AC2)"
     );
 }
 
-// D2c-AC2: near-due task's due cells carry the yellow fg.
+// D2c-AC2: near-due task's due cells carry the warning fg.
 #[test]
 fn draw_tasks_near_due_task_due_cells_carry_yellow_fg() {
-    use ratatui::style::Color;
     let task = TaskRow {
         task_id: 1,
         task_number: 1,
@@ -1287,7 +1284,7 @@ fn draw_tasks_near_due_task_due_cells_carry_yellow_fg() {
         })
         .unwrap();
     let buf = terminal.backend().buffer();
-    let due_yellow = Color::Rgb(210, 180, 60);
+    let due_yellow = theme::ANGIE_DARK.warning;
     let card = targets.iter().find(|t| t.index == 0).unwrap();
     let due_row = card.y_end - 2;
     let found_yellow = (0..80u16).any(|x| {
@@ -1297,14 +1294,13 @@ fn draw_tasks_near_due_task_due_cells_carry_yellow_fg() {
     });
     assert!(
         found_yellow,
-        "near-due card's due row (y={due_row}) must have at least one yellow-fg cell (D2c-AC2)"
+        "near-due card's due row (y={due_row}) must have at least one warning-token-fg cell (D2c-AC2)"
     );
 }
 
 // D2c-AC3: a task with no due_on shows 'sem data' on line 2 with neither red nor yellow fg.
 #[test]
 fn draw_tasks_no_due_shows_sem_data_with_default_style() {
-    use ratatui::style::Color;
     let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
     set_language("pt_BR");
     let task = TaskRow {
@@ -1344,8 +1340,8 @@ fn draw_tasks_no_due_shows_sem_data_with_default_style() {
         content.contains("sem data"),
         "no-due task must show 'sem data' on line 2: {content}"
     );
-    let due_red = Color::Rgb(220, 80, 80);
-    let due_yellow = Color::Rgb(210, 180, 60);
+    let due_red = theme::ANGIE_DARK.danger;
+    let due_yellow = theme::ANGIE_DARK.warning;
     let card = targets.iter().find(|t| t.index == 0).unwrap();
     let due_row = card.y_end - 2;
     let has_urgency_color = (0..80u16).any(|x| {
@@ -1355,15 +1351,14 @@ fn draw_tasks_no_due_shows_sem_data_with_default_style() {
     });
     assert!(
         !has_urgency_color,
-        "no-due task's due row must NOT have red or yellow fg (D2c-AC3): row y={due_row}"
+        "no-due task's due row must NOT have danger- or warning-token fg (D2c-AC3): row y={due_row}"
     );
 }
 
 // D2c-AC4: the selected card highlights every row including the due line (line 2),
-// AND the due color (red/yellow) remains visible on the selected row.
+// AND the due color (danger/warning) remains visible on the selected row.
 #[test]
-fn draw_tasks_selected_card_due_line_keeps_color_on_amber_bg() {
-    use ratatui::style::Color;
+fn draw_tasks_selected_card_due_line_keeps_color_on_selection_bg() {
     let task = TaskRow {
         task_id: 1,
         task_number: 1,
@@ -1395,24 +1390,24 @@ fn draw_tasks_selected_card_due_line_keeps_color_on_amber_bg() {
         })
         .unwrap();
     let buf = terminal.backend().buffer();
-    let amber = Color::Rgb(210, 160, 90);
-    let due_red = Color::Rgb(220, 80, 80);
+    let selection_bg = theme::ANGIE_DARK.selection;
+    let due_red = theme::ANGIE_DARK.danger;
     let card = targets.iter().find(|t| t.index == 0).unwrap();
 
-    // Every row in the card must have amber bg (selection style covers all rows).
+    // Every row in the card must have selection-token bg (selection style covers all rows).
     for y in card.y_start..card.y_end {
-        let has_amber = (0..80u16).any(|x| {
+        let has_selection_bg = (0..80u16).any(|x| {
             buf.cell((x, y))
-                .map(|c| c.style().bg == Some(amber))
+                .map(|c| c.style().bg == Some(selection_bg))
                 .unwrap_or(false)
         });
         assert!(
-            has_amber,
-            "selected card row y={y} must have amber-bg (D2c-AC4 whole-card highlight)"
+            has_selection_bg,
+            "selected card row y={y} must have the selection token bg (D2c-AC4 whole-card highlight)"
         );
     }
 
-    // The due row must also carry red fg (urgency color over amber bg).
+    // The due row must also carry danger fg (urgency color over the selection bg).
     let due_row = card.y_end - 2;
     let has_red_on_due_row = (0..80u16).any(|x| {
         buf.cell((x, due_row))
@@ -1421,7 +1416,7 @@ fn draw_tasks_selected_card_due_line_keeps_color_on_amber_bg() {
     });
     assert!(
         has_red_on_due_row,
-        "selected overdue card's due row (y={due_row}) must still carry red fg over amber bg (D2c-AC4)"
+        "selected overdue card's due row (y={due_row}) must still carry danger-token fg over the selection bg (D2c-AC4)"
     );
 }
 
@@ -1490,7 +1485,6 @@ fn draw_tasks_due_line_with_project_name_shows_due_separator_project() {
 // Verified by reading per-cell styles from the REAL buffer.
 #[test]
 fn draw_tasks_due_line_project_portion_has_default_style_not_due_color() {
-    use ratatui::style::Color;
     let task = TaskRow {
         task_id: 1,
         task_number: 1,
@@ -1522,7 +1516,7 @@ fn draw_tasks_due_line_project_portion_has_default_style_not_due_color() {
         })
         .unwrap();
     let buf = terminal.backend().buffer();
-    let due_red = Color::Rgb(220, 80, 80);
+    let due_red = theme::ANGIE_DARK.danger;
     let card = targets.iter().find(|t| t.index == 0).unwrap();
     let due_row = card.y_end - 2;
 
@@ -2230,12 +2224,11 @@ fn header_line_with_name_and_extra() {
     assert_eq!(h.header_line(), "Carol <carol@co.io> · co (+2 more)");
 }
 
-// U8-A2: view() renders header bar on top row with app_header_style (soft-cyan on steel-blue band, bold).
+// U8-A2: view() renders header bar on top row with app_header_style (accent on the raised-band token, bold).
 #[test]
-fn view_renders_header_on_top_row_with_app_header_style_is_soft_cyan_on_steel() {
+fn view_renders_header_on_top_row_with_app_header_style() {
     use crate::tui::model::{Model, Screen};
     use crate::tui::view::view;
-    use ratatui::style::Color;
 
     let inst = make_instance("prod", "alice@example.com");
     let header = Header::from_instances(&[inst], None);
@@ -2276,19 +2269,18 @@ fn view_renders_header_on_top_row_with_app_header_style_is_soft_cyan_on_steel() 
         "top row must contain the instance name: {top_row_content}"
     );
 
-    let soft_cyan = Color::Rgb(102, 204, 204);
-    let steel_bg = Color::Rgb(38, 52, 74);
+    let expected = theme::app_header_style();
     let mut found_header_style = false;
     for x in 0..80u16 {
         let cell = buf.cell((x, 0)).unwrap();
-        if cell.style().fg == Some(soft_cyan) && cell.style().bg == Some(steel_bg) {
+        if cell.style().fg == expected.fg && cell.style().bg == expected.bg {
             found_header_style = true;
             break;
         }
     }
     assert!(
         found_header_style,
-        "top row must have at least one cell with soft-cyan Rgb(102,204,204) fg and steel-bg Rgb(38,52,74) bg (app_header_style)"
+        "top row must have at least one cell with app_header_style's fg and bg"
     );
 }
 
@@ -2435,32 +2427,32 @@ fn view_too_small_suppresses_header_and_footer() {
     );
 }
 
-// U8-A1 (theme): badge_style returns amber Rgb(210,160,90) fg + BOLD modifier.
+// U8-A1 (theme): badge_style returns the selection token fg + BOLD modifier.
 #[test]
-fn badge_style_is_amber_bold() {
-    use ratatui::style::{Color, Modifier, Style};
+fn badge_style_is_selection_token_bold() {
+    use ratatui::style::{Modifier, Style};
     let style = theme::badge_style();
     assert_eq!(
         style,
         Style::default()
-            .fg(Color::Rgb(210, 160, 90))
+            .fg(theme::ANGIE_DARK.selection)
             .add_modifier(Modifier::BOLD),
-        "badge_style must be amber Rgb(210,160,90)+bold (sober palette)"
+        "badge_style must be the selection token + bold"
     );
 }
 
-// U8-A1 (theme): app_header_style is soft-cyan on steel-blue band, bold.
+// U8-A1 (theme): app_header_style is the accent token on the raised-band token, bold.
 #[test]
-fn app_header_style_is_soft_cyan_on_steel_bold() {
-    use ratatui::style::{Color, Modifier, Style};
+fn app_header_style_is_accent_on_raised_band_bold() {
+    use ratatui::style::{Modifier, Style};
     let style = theme::app_header_style();
     assert_eq!(
         style,
         Style::default()
-            .fg(Color::Rgb(102, 204, 204))
-            .bg(Color::Rgb(38, 52, 74))
+            .fg(theme::ANGIE_DARK.accent)
+            .bg(theme::ANGIE_DARK.surface_raised)
             .add_modifier(Modifier::BOLD),
-        "app_header_style must be soft-cyan on steel-blue band, bold (sober palette)"
+        "app_header_style must be the accent token on the raised-band token, bold"
     );
 }
 
@@ -2513,7 +2505,7 @@ fn draw_tasks_no_instance_header_and_name_fits_full_width() {
 #[test]
 fn draw_detail_url_in_description_body_has_link_style() {
     use crate::render::build_detail_content;
-    use ratatui::style::{Color, Modifier};
+    use ratatui::style::Modifier;
 
     let task = json!({
         "id": 1,
@@ -2533,7 +2525,7 @@ fn draw_detail_url_in_description_body_has_link_style() {
 
     let buf = render_detail_to_buf(&lines, &[], 0, width, 30);
 
-    let muted_green = Color::Rgb(120, 190, 130);
+    let link_fg = theme::link_style().fg;
     let underline = Modifier::UNDERLINED;
 
     let mut found_link_cell = false;
@@ -2545,12 +2537,11 @@ fn draw_detail_url_in_description_body_has_link_style() {
             let cell = buf.cell((x, y)).unwrap();
             let sym = cell.symbol();
             // Any cell that is part of the URL must carry link_style
-            if cell.style().fg == Some(muted_green) && cell.style().add_modifier.contains(underline)
-            {
+            if cell.style().fg == link_fg && cell.style().add_modifier.contains(underline) {
                 found_link_cell = true;
             }
             // "V" in "Visit" must not carry link style
-            if sym == "V" && cell.style().fg != Some(muted_green) {
+            if sym == "V" && cell.style().fg != link_fg {
                 found_normal_cell = true;
             }
         }
@@ -2558,7 +2549,7 @@ fn draw_detail_url_in_description_body_has_link_style() {
 
     assert!(
         found_link_cell,
-        "inline URL cells must carry muted-green+underline link_style"
+        "inline URL cells must carry link_style's fg+underline"
     );
     assert!(
         found_normal_cell,
@@ -2571,7 +2562,7 @@ fn draw_detail_url_in_description_body_has_link_style() {
 #[test]
 fn draw_detail_url_in_comment_body_has_link_style() {
     use crate::render::build_detail_content;
-    use ratatui::style::{Color, Modifier};
+    use ratatui::style::Modifier;
 
     let task = json!({
         "id": 1,
@@ -2596,7 +2587,7 @@ fn draw_detail_url_in_comment_body_has_link_style() {
 
     let buf = render_detail_to_buf(&lines, &[], 0, width, 40);
 
-    let muted_green = Color::Rgb(120, 190, 130);
+    let link_fg = theme::link_style().fg;
     let underline = Modifier::UNDERLINED;
 
     let mut found_link_cell = false;
@@ -2605,8 +2596,7 @@ fn draw_detail_url_in_comment_body_has_link_style() {
     for y in 0..area.height {
         for x in 0..area.width {
             let cell = buf.cell((x, y)).unwrap();
-            if cell.style().fg == Some(muted_green) && cell.style().add_modifier.contains(underline)
-            {
+            if cell.style().fg == link_fg && cell.style().add_modifier.contains(underline) {
                 found_link_cell = true;
                 break;
             }
@@ -2618,14 +2608,14 @@ fn draw_detail_url_in_comment_body_has_link_style() {
 
     assert!(
         found_link_cell,
-        "inline URL cells in Comment body must carry muted-green+underline link_style"
+        "inline URL cells in Comment body must carry link_style's fg+underline"
     );
 }
 
 // D3-A2: Border chars │ are never styled as links; a no-URL line renders without link_style.
 #[test]
 fn draw_detail_border_and_no_url_lines_have_default_style() {
-    use ratatui::style::{Color, Modifier};
+    use ratatui::style::Modifier;
 
     let task = json!({
         "id": 1,
@@ -2638,7 +2628,7 @@ fn draw_detail_border_and_no_url_lines_have_default_style() {
 
     let buf = render_detail_to_buf(&lines, &[], 0, width, 20);
 
-    let muted_green = Color::Rgb(120, 190, 130);
+    let link_fg = theme::link_style().fg;
     let underline = Modifier::UNDERLINED;
     let area = buf.area();
 
@@ -2649,7 +2639,7 @@ fn draw_detail_border_and_no_url_lines_have_default_style() {
             // │ border chars must never carry link_style
             if sym == "\u{2502}" {
                 assert!(
-                    cell.style().fg != Some(muted_green),
+                    cell.style().fg != link_fg,
                     "│ border at ({x},{y}) must NOT carry link fg color"
                 );
                 assert!(
@@ -2659,25 +2649,24 @@ fn draw_detail_border_and_no_url_lines_have_default_style() {
             }
             // No cell should carry link style in a no-URL description
             assert!(
-                !(cell.style().fg == Some(muted_green)
-                    && cell.style().add_modifier.contains(underline)),
+                !(cell.style().fg == link_fg && cell.style().add_modifier.contains(underline)),
                 "cell ({x},{y}) sym={sym:?} must NOT carry link_style when no URL present"
             );
         }
     }
 }
 
-// D3-A1: link_style fn returns muted green + underline.
+// D3-A1: link_style fn returns the success token + underline.
 #[test]
-fn link_style_is_muted_green_underlined() {
-    use ratatui::style::{Color, Modifier, Style};
+fn link_style_is_success_token_underlined() {
+    use ratatui::style::{Modifier, Style};
     let style = theme::link_style();
     assert_eq!(
         style,
         Style::default()
-            .fg(Color::Rgb(120, 190, 130))
+            .fg(theme::ANGIE_DARK.success)
             .add_modifier(Modifier::UNDERLINED),
-        "link_style must be muted-green+underlined (Color::Rgb(120, 190, 130))"
+        "link_style must be the success token + underlined"
     );
 }
 
@@ -3541,7 +3530,7 @@ mod footer_refresh_hint {
 #[test]
 fn draw_detail_comment_with_long_url_renders_inline_with_link_style() {
     use crate::render::build_detail_content;
-    use ratatui::style::{Color, Modifier};
+    use ratatui::style::Modifier;
 
     let long_url = "https://very-long-domain.example.com/path/to/resource?param=value&other=thing";
     let task = json!({
@@ -3575,7 +3564,7 @@ fn draw_detail_comment_with_long_url_renders_inline_with_link_style() {
         "inline URL must appear in TestBackend output: {rendered}"
     );
 
-    let muted_green = Color::Rgb(120, 190, 130);
+    let link_fg = theme::link_style().fg;
     let underline = Modifier::UNDERLINED;
     let area = buf.area();
     let mut found_link_cell = false;
@@ -3583,8 +3572,7 @@ fn draw_detail_comment_with_long_url_renders_inline_with_link_style() {
     for y in 0..area.height {
         for x in 0..area.width {
             let cell = buf.cell((x, y)).unwrap();
-            if cell.style().fg == Some(muted_green) && cell.style().add_modifier.contains(underline)
-            {
+            if cell.style().fg == link_fg && cell.style().add_modifier.contains(underline) {
                 found_link_cell = true;
                 break;
             }
@@ -3596,7 +3584,7 @@ fn draw_detail_comment_with_long_url_renders_inline_with_link_style() {
 
     assert!(
         found_link_cell,
-        "inline URL cells must carry muted-green+underline link_style"
+        "inline URL cells must carry link_style's fg+underline"
     );
 }
 
@@ -5499,7 +5487,7 @@ fn draw_detail_assets_inline_ptbr_artifacts_label() {
 // section_lines, or emitting a Plain run, each cause at least one assertion to fail.
 #[test]
 fn asset_row_cells_carry_link_style_structural_not_url_detection() {
-    use ratatui::style::{Color, Modifier};
+    use ratatui::style::Modifier;
     let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
     set_language("en");
 
@@ -5507,7 +5495,7 @@ fn asset_row_cells_carry_link_style_structural_not_url_detection() {
     let attachments = &[("report.pdf", "https://example.com/report.pdf")];
     let buf = build_and_render_detail_with_assets(attachments, 0, 80, 30);
 
-    let muted_green = Color::Rgb(120, 190, 130);
+    let link_fg = theme::link_style().fg;
 
     // Scan all rows to find the asset row (contains "[1]") and a separator/hint row.
     let area = buf.area();
@@ -5568,20 +5556,18 @@ fn asset_row_cells_carry_link_style_structural_not_url_detection() {
         if cell.symbol() == " " && x > bracket_start_col + 2 {
             break;
         }
-        if cell.style().fg == Some(muted_green)
-            && cell.style().add_modifier.contains(Modifier::UNDERLINED)
-        {
+        if cell.style().fg == link_fg && cell.style().add_modifier.contains(Modifier::UNDERLINED) {
             found_link_cell = true;
             break;
         }
     }
     assert!(
         found_link_cell,
-        "asset row at y={asset_y} must have at least one cell with muted-green fg + UNDERLINED \
+        "asset row at y={asset_y} must have at least one cell with link_style's fg + UNDERLINED \
          (structural Link run, not URL detection): row={asset_text:?}"
     );
 
-    // 2. Hint row cells must carry ITALIC (not muted green).
+    // 2. Hint row cells must carry ITALIC (not the link fg).
     let hint_cells_have_italic = (0..area.width).any(|x| {
         let cell = buf.cell((x, hint_y)).unwrap();
         cell.symbol() != " " && cell.style().add_modifier.contains(Modifier::ITALIC)
@@ -5590,26 +5576,26 @@ fn asset_row_cells_carry_link_style_structural_not_url_detection() {
         hint_cells_have_italic,
         "hint row at y={hint_y} must have italic cells (Italic StyleRun)"
     );
-    let hint_cells_have_muted_green = (0..area.width).any(|x| {
+    let hint_cells_have_link_fg = (0..area.width).any(|x| {
         buf.cell((x, hint_y))
-            .map(|c| c.style().fg == Some(muted_green))
+            .map(|c| c.style().fg == link_fg)
             .unwrap_or(false)
     });
     assert!(
-        !hint_cells_have_muted_green,
-        "hint row at y={hint_y} must NOT have muted-green fg (it is italic, not a link)"
+        !hint_cells_have_link_fg,
+        "hint row at y={hint_y} must NOT have link_style's fg (it is italic, not a link)"
     );
 
     // 3. A separator row (blank row between asset section rows) must be unstyled.
     if let Some(sep_y) = separator_row_y {
-        let sep_has_muted_green = (0..area.width).any(|x| {
+        let sep_has_link_fg = (0..area.width).any(|x| {
             buf.cell((x, sep_y))
-                .map(|c| c.style().fg == Some(muted_green))
+                .map(|c| c.style().fg == link_fg)
                 .unwrap_or(false)
         });
         assert!(
-            !sep_has_muted_green,
-            "separator row at y={sep_y} must NOT carry muted-green fg (unstyled blank row)"
+            !sep_has_link_fg,
+            "separator row at y={sep_y} must NOT carry link_style's fg (unstyled blank row)"
         );
     }
 }
@@ -5624,13 +5610,16 @@ mod compose_render {
     use crate::tui::model::{
         Compose, ComposeKind, ComposeStatus, DetailOverlay, Header, Model, Screen,
     };
+    use crate::tui::theme;
     use crate::tui::view::view;
     use ratatui::{backend::TestBackend, Terminal};
     use serde_json::Value;
     use std::collections::HashMap;
-    use std::sync::Mutex;
 
-    static LANG_MUTEX: Mutex<()> = Mutex::new(());
+    // Reuse the file-level LANG_MUTEX (not a module-local one) so language-mutating
+    // tests in this module serialize with every other module's language-mutating
+    // tests instead of racing on the shared global i18n state.
+    use super::LANG_MUTEX;
 
     fn compose_editing(buffer: &str) -> Compose {
         Compose {
@@ -5846,12 +5835,11 @@ mod compose_render {
 
     // AC1 (slice-1b, BDR 0026 Sc.9): the rendered modal box occupies ≈70% of the frame.
     // On a 100×40 frame the modal width must be in 64..=76 and height in 24..=32
-    // (70%±~10%). Box extents are derived from the buffer: border cells with the modal's
-    // soft-cyan fg color (theme::modal_border_style) isolate the modal from the detail
-    // panel borders (which use a different color). Geometry is never assumed.
+    // (70%±~10%). Box extents are derived from the buffer: border cells with
+    // theme::modal_border_style()'s fg isolate the modal from the detail panel
+    // borders (which use a different style). Geometry is never assumed.
     #[test]
     fn compose_modal_renders_at_70_percent_of_frame() {
-        use ratatui::style::Color;
         let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         set_language("en");
         let model = make_detail_model(DetailOverlay::Compose(compose_editing("hello")));
@@ -5863,9 +5851,9 @@ mod compose_render {
         let buf = terminal.backend().buffer();
         let area = buf.area();
 
-        // The modal border uses theme::modal_border_style() = SOFT_CYAN fg.
-        // Filter by fg=SOFT_CYAN to distinguish modal borders from the detail panel borders.
-        let soft_cyan = Color::Rgb(102, 204, 204);
+        // Filter by modal_border_style's fg to distinguish modal borders from the detail
+        // panel borders.
+        let modal_border_fg = theme::modal_border_style().fg;
         let border_chars = [
             '\u{250C}', '\u{2510}', '\u{2514}', '\u{2518}', '\u{2502}', '\u{2500}', '\u{256D}',
             '\u{256E}', '\u{2570}', '\u{256F}',
@@ -5875,7 +5863,7 @@ mod compose_render {
                 .map(|c| {
                     let sym = c.symbol();
                     let is_bc = border_chars.iter().any(|bc| sym.contains(*bc));
-                    is_bc && c.style().fg == Some(soft_cyan)
+                    is_bc && c.style().fg == modal_border_fg
                 })
                 .unwrap_or(false)
         };
@@ -5889,11 +5877,11 @@ mod compose_render {
 
         assert!(
             !modal_cols.is_empty(),
-            "must find at least one soft-cyan modal border column"
+            "must find at least one modal_border_style-fg column"
         );
         assert!(
             !modal_rows.is_empty(),
-            "must find at least one soft-cyan modal border row"
+            "must find at least one modal_border_style-fg row"
         );
 
         let min_col = *modal_cols.iter().min().unwrap();
@@ -5917,15 +5905,15 @@ mod compose_render {
     // AC2 (slice-1b, BDR 0026 Sc.1): a backdrop cell at (0,0) carries BOTH Modifier::DIM
     // AND the dark backdrop background from theme::modal_backdrop_style().
     #[test]
-    fn compose_modal_backdrop_cell_carries_dim_and_dark_bg() {
-        use ratatui::style::{Color, Modifier};
+    fn compose_modal_backdrop_cell_carries_dim_and_surface_base_bg() {
+        use ratatui::style::Modifier;
         let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         set_language("en");
         let model = make_detail_model(DetailOverlay::Compose(compose_editing("hi")));
         let buf = render_via_view(&model, 80, 24);
         set_language("en");
 
-        let dark_bg = Color::Rgb(13, 13, 13);
+        let backdrop_bg = theme::modal_backdrop_style().bg;
 
         let cell = buf.cell((0, 0)).expect("cell (0,0) must exist");
         assert!(
@@ -5935,8 +5923,8 @@ mod compose_render {
         );
         assert_eq!(
             cell.style().bg,
-            Some(dark_bg),
-            "backdrop cell (0,0) must carry the dark backdrop bg (NEAR_BLACK Rgb(13,13,13)); got {:?}",
+            backdrop_bg,
+            "backdrop cell (0,0) must carry modal_backdrop_style's bg (surface_base token); got {:?}",
             cell.style().bg
         );
     }
@@ -5951,9 +5939,11 @@ mod confirm_modal_buttons {
     use ratatui::{backend::TestBackend, Terminal};
     use serde_json::Value;
     use std::collections::HashMap;
-    use std::sync::Mutex;
 
-    static LANG_MUTEX: Mutex<()> = Mutex::new(());
+    // Reuse the file-level LANG_MUTEX (not a module-local one) so language-mutating
+    // tests in this module serialize with every other module's language-mutating
+    // tests instead of racing on the shared global i18n state.
+    use super::LANG_MUTEX;
 
     fn make_confirm_model(comment_id: i64) -> Model {
         Model {
@@ -6220,9 +6210,11 @@ mod yes_no_confirm_labels {
     use ratatui::{backend::TestBackend, Terminal};
     use serde_json::Value;
     use std::collections::HashMap;
-    use std::sync::Mutex;
 
-    static LANG_MUTEX: Mutex<()> = Mutex::new(());
+    // Reuse the file-level LANG_MUTEX (not a module-local one) so language-mutating
+    // tests in this module serialize with every other module's language-mutating
+    // tests instead of racing on the shared global i18n state.
+    use super::LANG_MUTEX;
 
     fn make_confirm_model(comment_id: i64) -> Model {
         Model {
@@ -7656,14 +7648,15 @@ fn build_and_render_detail_with_own_comment(
     (terminal.backend().buffer().clone(), content)
 }
 
-// AC1: On an own comment rendered to TestBackend, [editar] cells carry SOFT_CYAN fg + UNDERLINED.
+// AC1: On an own comment rendered to TestBackend, [editar] cells carry
+// edit_affordance_style's fg + UNDERLINED.
 //
 // The block rendered in the test frame has its left outer border at x=0, so the
 // block's inner area starts at x=1. Lines render starting at y=1 (inner top after
 // the block's top border). Buffer cell x = 1 + col where col is the string column.
 #[test]
-fn own_comment_editar_cells_carry_soft_cyan_and_underlined() {
-    use ratatui::style::{Color, Modifier};
+fn own_comment_editar_cells_carry_edit_affordance_style() {
+    use ratatui::style::Modifier;
 
     let (buf, content) = build_and_render_detail_with_own_comment(80, 40, Some(7));
 
@@ -7673,7 +7666,7 @@ fn own_comment_editar_cells_carry_soft_cyan_and_underlined() {
         .find(|a| matches!(a.kind, crate::render::AffordanceKind::Edit(_)))
         .expect("own comment must have an Edit affordance");
 
-    let soft_cyan = Color::Rgb(102, 204, 204);
+    let edit_fg = theme::edit_affordance_style().fg;
     // In the test frame the outer block starts at y=0, so inner starts at y=1.
     // lines[line_idx] renders at buffer y = 1 + line_idx.
     let render_y = (1 + edit_aff.line_idx) as u16;
@@ -7686,8 +7679,8 @@ fn own_comment_editar_cells_carry_soft_cyan_and_underlined() {
             if cell.symbol() != " " {
                 assert_eq!(
                     cell.style().fg,
-                    Some(soft_cyan),
-                    "[editar] cell at x={buf_x} y={render_y} must have SOFT_CYAN fg; got {:?}",
+                    edit_fg,
+                    "[editar] cell at x={buf_x} y={render_y} must have edit_affordance_style's fg; got {:?}",
                     cell.style().fg
                 );
                 assert!(
@@ -7701,15 +7694,16 @@ fn own_comment_editar_cells_carry_soft_cyan_and_underlined() {
     assert!(
         found_styled_cell,
         "[editar] token span (col_start={}, col_end={}) must contain at least one non-space cell \
-         with SOFT_CYAN fg + UNDERLINED (AC1)",
+         with edit_affordance_style's fg + UNDERLINED (AC1)",
         edit_aff.col_start, edit_aff.col_end
     );
 }
 
-// AC2: On an own comment rendered to TestBackend, [excluir] cells carry DUE_RED fg + UNDERLINED.
+// AC2: On an own comment rendered to TestBackend, [excluir] cells carry
+// delete_affordance_style's fg + UNDERLINED.
 #[test]
-fn own_comment_excluir_cells_carry_due_red_and_underlined() {
-    use ratatui::style::{Color, Modifier};
+fn own_comment_excluir_cells_carry_delete_affordance_style() {
+    use ratatui::style::Modifier;
 
     let (buf, content) = build_and_render_detail_with_own_comment(80, 40, Some(7));
 
@@ -7719,7 +7713,7 @@ fn own_comment_excluir_cells_carry_due_red_and_underlined() {
         .find(|a| matches!(a.kind, crate::render::AffordanceKind::Delete(_)))
         .expect("own comment must have a Delete affordance");
 
-    let due_red = Color::Rgb(220, 80, 80);
+    let delete_fg = theme::delete_affordance_style().fg;
     let render_y = (1 + delete_aff.line_idx) as u16;
 
     let mut found_styled_cell = false;
@@ -7729,8 +7723,8 @@ fn own_comment_excluir_cells_carry_due_red_and_underlined() {
             if cell.symbol() != " " {
                 assert_eq!(
                     cell.style().fg,
-                    Some(due_red),
-                    "[excluir] cell at x={buf_x} y={render_y} must have DUE_RED fg; got {:?}",
+                    delete_fg,
+                    "[excluir] cell at x={buf_x} y={render_y} must have delete_affordance_style's fg; got {:?}",
                     cell.style().fg
                 );
                 assert!(
@@ -7744,7 +7738,7 @@ fn own_comment_excluir_cells_carry_due_red_and_underlined() {
     assert!(
         found_styled_cell,
         "[excluir] token span (col_start={}, col_end={}) must contain at least one non-space cell \
-         with DUE_RED fg + UNDERLINED (AC2)",
+         with delete_affordance_style's fg + UNDERLINED (AC2)",
         delete_aff.col_start, delete_aff.col_end
     );
 }
@@ -7757,7 +7751,6 @@ fn ctrl_click_on_editar_cell_opens_compose_edit_regression() {
     use crate::tui::model::{update, Header};
     use crate::tui::model::{ComposeKind, ComposeStatus, Model, Screen};
     use crossterm::event::KeyModifiers;
-    use ratatui::style::Color;
     use serde_json::json;
     use std::collections::HashMap;
 
@@ -7786,7 +7779,7 @@ fn ctrl_click_on_editar_cell_opens_compose_edit_regression() {
         .find(|a| matches!(a.kind, crate::render::AffordanceKind::Edit(_)))
         .expect("edit affordance must exist for own comment");
 
-    let soft_cyan = Color::Rgb(102, 204, 204);
+    let edit_fg = theme::edit_affordance_style().fg;
     // In the test frame (block at y=0), the line renders at buffer y = 1 + line_idx.
     let render_y = (1 + edit_aff.line_idx) as u16;
     // affordance_at uses text_top=2 in the model (header bar + title bar above the block).
@@ -7800,8 +7793,8 @@ fn ctrl_click_on_editar_cell_opens_compose_edit_regression() {
         if cell.symbol() != " " {
             assert_eq!(
                 cell.style().fg,
-                Some(soft_cyan),
-                "the [editar] cell must carry SOFT_CYAN (regression: color is present before click)"
+                edit_fg,
+                "the [editar] cell must carry edit_affordance_style's fg (regression: color is present before click)"
             );
         }
     }
