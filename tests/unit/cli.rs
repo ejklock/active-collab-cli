@@ -210,6 +210,30 @@ fn parse_setup_language_with_code() {
 }
 
 #[test]
+fn parse_setup_theme_no_arg() {
+    let cli = parse(&["setup", "theme"]).unwrap();
+    let Command::Setup(opts) = cli.command.unwrap() else {
+        panic!()
+    };
+    let SetupCmd::Theme(t) = opts.subcommand else {
+        panic!()
+    };
+    assert!(t.code.is_none());
+}
+
+#[test]
+fn parse_setup_theme_with_code() {
+    let cli = parse(&["setup", "theme", "nord"]).unwrap();
+    let Command::Setup(opts) = cli.command.unwrap() else {
+        panic!()
+    };
+    let SetupCmd::Theme(t) = opts.subcommand else {
+        panic!()
+    };
+    assert_eq!(t.code.as_deref(), Some("nord"));
+}
+
+#[test]
 fn parse_get_with_ref_and_display_flags() {
     let cli = parse(&[
         "get",
