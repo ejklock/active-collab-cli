@@ -4229,9 +4229,12 @@ fn build_detail_content_structured_path_preserves_plain_text() {
     );
 }
 
-// R3b-A3: Plain lines (no emphasis HTML) produce empty style-run vecs.
+// R3b-A3: Plain lines (no emphasis HTML) produce no content-emphasis style
+// runs (Bold/Italic/Code/Link/affordances). The structural RichStyle::PanelTitle
+// run on the Details/Description top-border rows is expected by design
+// (ADR 0063) and is not a content-emphasis run, so it is excluded here.
 #[test]
-fn plain_body_produces_empty_style_runs_per_line() {
+fn plain_body_produces_no_content_emphasis_style_runs() {
     let task = json!({
         "name": "Plain body",
         "id": 22,
@@ -4242,17 +4245,17 @@ fn plain_body_produces_empty_style_runs_per_line() {
     let user_map: HashMap<i64, String> = HashMap::new();
     let content = build_detail_content(&task, &[], &user_map, 80, None);
 
-    let body_lines_with_style_runs: Vec<&str> = content
+    let body_lines_with_content_emphasis: Vec<&str> = content
         .lines
         .iter()
         .zip(&content.line_styles)
-        .filter(|(_, runs)| !runs.is_empty())
+        .filter(|(_, runs)| runs.iter().any(|r| r.style != RichStyle::PanelTitle))
         .map(|(l, _)| l.as_str())
         .collect();
 
     assert!(
-        body_lines_with_style_runs.is_empty(),
-        "plain HTML body must produce no non-empty style-run vecs; affected lines: {body_lines_with_style_runs:?}"
+        body_lines_with_content_emphasis.is_empty(),
+        "plain HTML body must produce no content-emphasis style runs (structural PanelTitle runs on panel borders are expected per ADR 0063); affected lines: {body_lines_with_content_emphasis:?}"
     );
 }
 
