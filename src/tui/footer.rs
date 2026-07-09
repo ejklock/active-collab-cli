@@ -81,9 +81,9 @@ pub(crate) fn detail_hint(
         return t("Enter/click confirm · Esc cancel");
     }
     if is_own_comment_focused(focused_comment, comments, current_user_id) {
-        return t("j/k move · Ctrl+click edit/delete · c new");
+        return t("↑/↓ · j/k move · Ctrl+click edit/delete · c new");
     }
-    t("j/k move · c comment · r refresh · Esc/b back · q quit")
+    t("↑/↓ · j/k move · c comment · r refresh · Esc/b back · q quit")
 }
 
 pub(crate) fn is_own_comment_focused(
