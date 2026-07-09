@@ -50,6 +50,8 @@ pub enum SetupCmd {
     Test(TestArgs),
     /// Show or set the display language.
     Language(LanguageArgs),
+    /// Show or set the color theme (angie, slate, nord).
+    Theme(ThemeArgs),
 }
 
 #[derive(Args, Debug)]
@@ -82,6 +84,12 @@ pub struct TestArgs {
 #[derive(Args, Debug)]
 pub struct LanguageArgs {
     /// Language code to set (en, pt_BR). Omit to show current.
+    pub code: Option<String>,
+}
+
+#[derive(Args, Debug)]
+pub struct ThemeArgs {
+    /// Theme name: angie, slate, or nord. Omit to show current.
     pub code: Option<String>,
 }
 

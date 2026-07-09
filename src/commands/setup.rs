@@ -126,6 +126,55 @@ pub(crate) fn setup_language(
     }
 }
 
+const THEMES: [&str; 3] = ["angie", "slate", "nord"];
+
+/// Parity: setup_language, adapted for the theme setting (ADR 0062).
+pub(crate) fn setup_theme(
+    settings: &SettingsRepository<'_>,
+    code: Option<&str>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    match code {
+        None => {
+            let current = settings
+                .get("theme", Some("angie"))
+                .unwrap_or(Some("angie".to_owned()))
+                .unwrap_or_else(|| "angie".to_owned());
+            writeln!(
+                out,
+                "{}",
+                t(&format!("Current theme: {code}", code = current))
+            )
+            .ok();
+            0
+        }
+        Some(c) => {
+            let c = c.to_ascii_lowercase();
+            if !THEMES.contains(&c.as_str()) {
+                let list = THEMES.join(", ");
+                writeln!(
+                    err,
+                    "{}",
+                    t(&format!(
+                        "Error: unsupported theme '{code}'. Supported: {list}.",
+                        code = c,
+                        list = list
+                    ))
+                )
+                .ok();
+                return 2;
+            }
+            if let Err(e) = settings.set("theme", &c) {
+                writeln!(err, "Error saving theme: {e}").ok();
+                return 1;
+            }
+            writeln!(out, "{}", t(&format!("Theme set to '{code}'.", code = c))).ok();
+            0
+        }
+    }
+}
+
 /// Inner core for connectivity test — takes pre-resolved rows.
 ///
 /// Parity: Python cmd_setup_test inner loop.

@@ -17,7 +17,8 @@ use clap::{CommandFactory, Parser};
 use cli::{bare_no_command_action, BareNoCommandAction, Cli, Command};
 use commands::{
     comment_core, current_core, get_core, mine_core, pick_instance, setup_add, setup_language,
-    setup_list, setup_remove, setup_test, skill_output, DisplayFlags, MineOutcome, SetupAddFields,
+    setup_list, setup_remove, setup_test, setup_theme, skill_output, DisplayFlags, MineOutcome,
+    SetupAddFields,
 };
 use std::io::IsTerminal;
 use std::process;
@@ -49,6 +50,7 @@ async fn run(raw_argv: Vec<String>) -> i32 {
         return match bare_no_command_action(is_tty) {
             BareNoCommandAction::RunMine => {
                 init_language();
+                init_theme();
                 dispatch(Command::Mine(cli::MineArgs {
                     instance: None,
                     json: false,
@@ -65,6 +67,7 @@ async fn run(raw_argv: Vec<String>) -> i32 {
     };
 
     init_language();
+    init_theme();
 
     dispatch(command).await
 }
@@ -85,6 +88,28 @@ fn init_language() {
 
     let lang = i18n::resolve_language(env_value.as_deref(), db_value.as_deref());
     i18n::set_language(&lang);
+}
+
+/// Read ACTIVE_COLLAB_THEME env + DB `theme` setting, then apply via `tui::theme::set_active`.
+/// Any error reading the DB is silently ignored (falls back to env or "angie").
+fn init_theme() {
+    let env_value = std::env::var("ACTIVE_COLLAB_THEME").ok();
+
+    let db_value: Option<String> = (|| -> Option<String> {
+        let config = config::load();
+        let store = store::Store::open(&config).ok()?;
+        store::settings::SettingsRepository::new(store.conn())
+            .get("theme", None)
+            .ok()
+            .flatten()
+    })();
+
+    let resolved = env_value
+        .as_deref()
+        .or(db_value.as_deref())
+        .unwrap_or("angie");
+    let choice = tui::theme::theme_from_str(resolved);
+    tui::theme::set_active(choice, tui::theme::Mode::Dark);
 }
 
 async fn dispatch(command: Command) -> i32 {
@@ -114,6 +139,7 @@ async fn dispatch_setup(cmd: cli::SetupCmd) -> i32 {
         cli::SetupCmd::Remove(args) => dispatch_setup_remove(args),
         cli::SetupCmd::Test(args) => dispatch_setup_test(args).await,
         cli::SetupCmd::Language(args) => dispatch_setup_language(args),
+        cli::SetupCmd::Theme(args) => dispatch_setup_theme(args),
     }
 }
 
@@ -160,6 +186,20 @@ fn dispatch_setup_language(args: cli::LanguageArgs) -> i32 {
     };
     let settings = store::settings::SettingsRepository::new(store.conn());
     setup_language(
+        &settings,
+        args.code.as_deref(),
+        &mut std::io::stdout(),
+        &mut std::io::stderr(),
+    )
+}
+
+fn dispatch_setup_theme(args: cli::ThemeArgs) -> i32 {
+    let store = match open_store() {
+        Some(s) => s,
+        None => return 1,
+    };
+    let settings = store::settings::SettingsRepository::new(store.conn());
+    setup_theme(
         &settings,
         args.code.as_deref(),
         &mut std::io::stdout(),
