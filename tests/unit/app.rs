@@ -912,7 +912,7 @@ fn refresh_on_idle_detail_emits_load_detail_refresh_true() {
     assert!(
         matches!(&cmds[0], Cmd::LoadDetail { refresh: true, .. }),
         "cmd must be LoadDetail with refresh:true, got: {:?}",
-        &cmds[0]
+        cmds[0]
     );
     match m.stack.last() {
         Some(Screen::Detail {
