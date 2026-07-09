@@ -246,6 +246,115 @@ fn setup_language_unsupported_shows_supported_list() {
     }
 }
 
+#[test]
+fn setup_theme_none_shows_default_angie() {
+    let (_dir, store) = make_store();
+    let settings = SettingsRepository::new(store.conn());
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    let code = setup_theme(&settings, None, &mut out, &mut err);
+    assert_eq!(code, 0);
+    assert!(
+        output_str(&out).contains("Current theme: angie"),
+        "got: {}",
+        output_str(&out)
+    );
+}
+
+#[test]
+fn setup_theme_none_shows_previously_set_theme() {
+    let (_dir, store) = make_store();
+    let settings = SettingsRepository::new(store.conn());
+    settings.set("theme", "nord").unwrap();
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    let code = setup_theme(&settings, None, &mut out, &mut err);
+    assert_eq!(code, 0);
+    assert!(
+        output_str(&out).contains("nord"),
+        "got: {}",
+        output_str(&out)
+    );
+}
+
+#[test]
+fn setup_theme_set_valid_persists_and_returns_0() {
+    let (_dir, store) = make_store();
+    let settings = SettingsRepository::new(store.conn());
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    let code = setup_theme(&settings, Some("slate"), &mut out, &mut err);
+    assert_eq!(code, 0);
+    assert!(
+        output_str(&out).contains("slate"),
+        "got: {}",
+        output_str(&out)
+    );
+    let stored = settings.get("theme", None).unwrap();
+    assert_eq!(stored, Some("slate".to_owned()));
+}
+
+#[test]
+fn setup_theme_set_uppercase_is_lowercased_and_persisted() {
+    let (_dir, store) = make_store();
+    let settings = SettingsRepository::new(store.conn());
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    let code = setup_theme(&settings, Some("NORD"), &mut out, &mut err);
+    assert_eq!(code, 0);
+    let stored = settings.get("theme", None).unwrap();
+    assert_eq!(stored, Some("nord".to_owned()));
+}
+
+#[test]
+fn setup_theme_unsupported_returns_exit2_with_error_and_does_not_persist() {
+    let (_dir, store) = make_store();
+    let settings = SettingsRepository::new(store.conn());
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    let code = setup_theme(&settings, Some("neon"), &mut out, &mut err);
+    assert_eq!(code, 2);
+    assert!(
+        output_str(&err).contains("unsupported theme"),
+        "err: {}",
+        output_str(&err)
+    );
+    assert!(
+        output_str(&err).contains("neon"),
+        "err: {}",
+        output_str(&err)
+    );
+    let stored = settings.get("theme", None).unwrap();
+    assert_eq!(stored, None, "unsupported theme must not be persisted");
+}
+
+#[test]
+fn setup_theme_unsupported_shows_supported_list() {
+    let (_dir, store) = make_store();
+    let settings = SettingsRepository::new(store.conn());
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    setup_theme(&settings, Some("bogus"), &mut out, &mut err);
+    let e = output_str(&err);
+    for theme in ["angie", "slate", "nord"] {
+        assert!(e.contains(theme), "missing {theme} in: {e}");
+    }
+}
+
+#[test]
+fn setup_theme_uses_theme_settings_key() {
+    let (_dir, store) = make_store();
+    let settings = SettingsRepository::new(store.conn());
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    setup_theme(&settings, Some("slate"), &mut out, &mut err);
+    assert_eq!(
+        settings.get("theme", None).unwrap(),
+        Some("slate".to_owned()),
+        "setup_theme must persist under the 'theme' settings key"
+    );
+}
+
 #[tokio::test]
 async fn setup_test_named_missing_returns_exit2() {
     let (_dir, store) = make_store();

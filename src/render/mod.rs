@@ -34,7 +34,7 @@ pub use detail_render::build_detail_content;
 use detail_render::format_asset_row;
 pub(crate) use detail_render::PANEL_VPAD;
 #[cfg(test)]
-use detail_render::{build_body_lines, build_comment_lines};
+use detail_render::{build_body_lines, build_comment_lines, fit_panel_header, panel_title_run};
 #[cfg(test)]
 pub(crate) use detail_render::{build_header_lines, comment_box, panel_box, DetailContent};
 

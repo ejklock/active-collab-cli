@@ -355,6 +355,63 @@ pub fn panel_box_rich(
         .collect()
 }
 
+/// Compute the fitted (clipped-if-needed) top-border label and its display width
+/// for a panel of the given full box `width`.
+///
+/// Shared by `panel_box` (which draws the fitted label into the border) and
+/// `panel_title_run` (which styles that same span) so the two can never drift
+/// apart (ADR 0063).
+pub(crate) fn fit_panel_header(label: &str, width: usize) -> (String, usize) {
+    let inner = width.saturating_sub(2);
+    let header_text = format!(" {} ", label);
+    let max_header = inner.saturating_sub(2);
+    let header_chars: Vec<char> = header_text.chars().collect();
+    let header_fitted = if header_chars.len() > max_header {
+        let clipped: String = header_chars[..max_header.saturating_sub(1)]
+            .iter()
+            .collect();
+        format!("{}{} ", clipped, ELLIPSIS)
+    } else {
+        header_text.clone()
+    };
+    let fitted_dw = super::display_width(&header_fitted);
+    (header_fitted, fitted_dw)
+}
+
+/// Layout-emitted `StyleRun` covering a panel's fitted top-border label span.
+///
+/// `start` is always 2 (past `BOX_TL` + one `BOX_H` cell) — matching the
+/// coordinates `panel_box` actually draws. Returns `None` when the panel is too
+/// narrow to draw (`width < 4`, the same guard `panel_box` uses) or the fitted
+/// label is empty.
+pub(crate) fn panel_title_run(label: &str, width: usize) -> Option<StyleRun> {
+    use crate::richtext::RichStyle;
+    if width < 4 {
+        return None;
+    }
+    let (_, fitted_dw) = fit_panel_header(label, width);
+    if fitted_dw == 0 {
+        return None;
+    }
+    Some(StyleRun {
+        start: 2,
+        len: fitted_dw,
+        style: RichStyle::PanelTitle,
+    })
+}
+
+/// Push a `PanelTitle` run onto `line_styles[0]` (the panel's top-border row).
+///
+/// No-op when `line_styles` is empty or `panel_title_run` returns `None`.
+fn seed_panel_title_run(line_styles: &mut [Vec<StyleRun>], label: &str, width: usize) {
+    let Some(run) = panel_title_run(label, width) else {
+        return;
+    };
+    if let Some(first) = line_styles.first_mut() {
+        first.push(run);
+    }
+}
+
 /// Single rounded-box primitive used by all section panels and comment cards.
 ///
 /// Draws a rounded box of exactly `width` DISPLAY columns per line. Returns `vec![]`
@@ -370,18 +427,7 @@ pub fn panel_box(label: &str, inner_lines: &[String], width: usize) -> Vec<Strin
     let content_width = super::panel_content_width(width);
     let hpad = " ".repeat(PANEL_HPAD);
 
-    let header_text = format!(" {} ", label);
-    let max_header = inner.saturating_sub(2);
-    let header_chars: Vec<char> = header_text.chars().collect();
-    let header_fitted = if header_chars.len() > max_header {
-        let clipped: String = header_chars[..max_header.saturating_sub(1)]
-            .iter()
-            .collect();
-        format!("{}{} ", clipped, ELLIPSIS)
-    } else {
-        header_text.clone()
-    };
-    let fitted_dw = super::display_width(&header_fitted);
+    let (header_fitted, fitted_dw) = fit_panel_header(label, width);
     let h_right = if inner > 1 + fitted_dw {
         BOX_H.repeat(inner - 1 - fitted_dw)
     } else {
@@ -462,7 +508,8 @@ pub(crate) fn build_body_lines(
 
     let raw_affs = collect_body_url_affordances(&body_rich, content_width);
     let boxed = panel_box_rich(&t("Description"), &body_rich, inner_width);
-    let (lines, styles) = unzip_boxed(boxed);
+    let (lines, mut styles) = unzip_boxed(boxed);
+    seed_panel_title_run(&mut styles, &t("Description"), inner_width);
 
     // Content rows start after the top border + PANEL_VPAD blank rows.
     let content_row_offset = 1 + PANEL_VPAD;
@@ -683,7 +730,7 @@ pub(crate) fn build_comment_lines(
     let content_start = 1 + PANEL_VPAD;
     let content_end = outer_lines.len().saturating_sub(1 + PANEL_VPAD);
 
-    let merged_styles = merge_nested_styles_into_outer(
+    let mut merged_styles = merge_nested_styles_into_outer(
         &outer_lines,
         &outer_box_styles,
         &nested_styles,
@@ -691,6 +738,7 @@ pub(crate) fn build_comment_lines(
         content_end,
         chrome,
     );
+    seed_panel_title_run(&mut merged_styles, &label, inner_width);
 
     let translated_affordances: Vec<CardAffordance> = card_affordances
         .into_iter()
@@ -900,7 +948,9 @@ pub fn build_detail_content(
     let header_lines = build_header_lines(task, user_map, inner_width);
     let header_count = header_lines.len();
     lines.extend(header_lines);
-    line_styles.extend(std::iter::repeat_n(vec![], header_count));
+    let mut header_styles: Vec<Vec<StyleRun>> = vec![vec![]; header_count];
+    seed_panel_title_run(&mut header_styles, &t("Details"), inner_width);
+    line_styles.extend(header_styles);
 
     lines.push(String::new());
     line_styles.push(vec![]);

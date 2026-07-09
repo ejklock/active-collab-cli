@@ -82,8 +82,9 @@ fn box_inner_content_non_boxed_line_returns_none() {
 }
 
 #[test]
-fn box_inner_content_rounded_corner_row_returns_none() {
-    assert_eq!(box_inner_content("\u{256D}\u{2500}\u{2500}\u{256E}"), None);
+fn box_inner_content_corner_border_row_returns_none() {
+    let row = format!("{BOX_TL}{}{BOX_TR}", BOX_H.repeat(2));
+    assert_eq!(box_inner_content(&row), None);
 }
 
 #[test]
