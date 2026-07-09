@@ -4,7 +4,8 @@ use super::model::Msg;
 
 /// Map focus-movement and scroll keys for browse mode.
 ///
-/// Handles j/k (comment focus) and Up/Down/PageUp/PageDown (line scroll).
+/// Handles j/k and ↑/↓ (comment focus on the Detail screen, list selection
+/// elsewhere) plus PageUp/PageDown (page scroll).
 fn map_focus_or_scroll_key(code: KeyCode) -> Option<Msg> {
     match code {
         KeyCode::Char('j') => Some(Msg::FocusNextComment),

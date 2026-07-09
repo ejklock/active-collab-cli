@@ -771,13 +771,13 @@ fn panel_box_top_border_starts_with_tl_and_ends_with_tr() {
     assert!(!lines.is_empty(), "must produce lines");
     let top = &lines[0];
     assert!(
-        top.starts_with('\u{256D}'),
-        "top must start with BOX_TL ╭: {:?}",
+        top.starts_with('\u{250C}'),
+        "top must start with BOX_TL ┌: {:?}",
         top
     );
     assert!(
-        top.ends_with('\u{256E}'),
-        "top must end with BOX_TR ╮: {:?}",
+        top.ends_with('\u{2510}'),
+        "top must end with BOX_TR ┐: {:?}",
         top
     );
 }
@@ -794,17 +794,17 @@ fn panel_box_top_border_embeds_label() {
 }
 
 #[test]
-fn panel_box_bottom_border_has_rounded_corners() {
+fn panel_box_bottom_border_has_squared_corners() {
     let lines = panel_box("L", &["x".into()], 20);
     let bottom = lines.last().unwrap();
     assert!(
-        bottom.starts_with('\u{2570}'),
-        "bottom must start with BOX_BL ╰: {:?}",
+        bottom.starts_with('\u{2514}'),
+        "bottom must start with BOX_BL └: {:?}",
         bottom
     );
     assert!(
-        bottom.ends_with('\u{256F}'),
-        "bottom must end with BOX_BR ╯: {:?}",
+        bottom.ends_with('\u{2518}'),
+        "bottom must end with BOX_BR ┘: {:?}",
         bottom
     );
 }
@@ -891,7 +891,7 @@ fn panel_box_long_label_clipped_with_ellipsis() {
         top
     );
     assert!(
-        top.ends_with('\u{256E}'),
+        top.ends_with('\u{2510}'),
         "top must still end with TR corner: {:?}",
         top
     );
@@ -963,7 +963,7 @@ fn panel_box_every_line_exactly_width_display_cols_cjk() {
             "CJK: every line must be exactly {width} display cols (right │ must close): {line:?}"
         );
         assert!(
-            line.ends_with('\u{2502}') || line.ends_with('\u{256E}') || line.ends_with('\u{256F}'),
+            line.ends_with('\u{2502}') || line.ends_with('\u{2510}') || line.ends_with('\u{2518}'),
             "CJK: line must end with a box char: {line:?}"
         );
     }
@@ -1082,16 +1082,16 @@ fn comment_box_short_comment_every_line_is_exactly_width_chars() {
 }
 
 #[test]
-fn comment_box_top_border_contains_author_and_when_with_rounded_corners() {
+fn comment_box_top_border_contains_author_and_when_with_squared_corners() {
     let lines = comment_box("Alice", "2024-01-01 10:00", "body", 60);
     let top = &lines[0];
     assert!(
-        top.starts_with('\u{256D}'),
+        top.starts_with('\u{250C}'),
         "top must start with corner: {:?}",
         top
     );
     assert!(
-        top.ends_with('\u{256E}'),
+        top.ends_with('\u{2510}'),
         "top must end with corner: {:?}",
         top
     );
@@ -1109,16 +1109,16 @@ fn comment_box_top_border_contains_author_and_when_with_rounded_corners() {
 }
 
 #[test]
-fn comment_box_bottom_border_has_rounded_corners() {
+fn comment_box_bottom_border_has_squared_corners() {
     let lines = comment_box("Alice", "2024-01-01", "body", 40);
     let bottom = lines.last().unwrap();
     assert!(
-        bottom.starts_with('\u{2570}'),
+        bottom.starts_with('\u{2514}'),
         "bottom must start with bl: {:?}",
         bottom
     );
     assert!(
-        bottom.ends_with('\u{256F}'),
+        bottom.ends_with('\u{2518}'),
         "bottom must end with br: {:?}",
         bottom
     );
@@ -1153,7 +1153,7 @@ fn comment_box_long_header_is_clipped_with_ellipsis_before_corner() {
         top
     );
     assert!(
-        top.ends_with('\u{256E}'),
+        top.ends_with('\u{2510}'),
         "top must end with corner: {:?}",
         top
     );
@@ -1210,9 +1210,9 @@ fn build_header_lines_returns_panel_with_details_label() {
     });
     let lines = build_header_lines(&task, &HashMap::new(), 80);
     let joined = lines.join("\n");
-    // Must be a panel with rounded borders
+    // Must be a panel with squared borders
     assert!(
-        lines[0].starts_with('\u{256D}'),
+        lines[0].starts_with(BOX_TL),
         "first line must be panel top border: {:?}",
         lines[0]
     );
@@ -1221,7 +1221,7 @@ fn build_header_lines_returns_panel_with_details_label() {
         "panel top must contain 'Details' label: {joined}"
     );
     assert!(
-        lines.last().unwrap().starts_with('\u{2570}'),
+        lines.last().unwrap().starts_with(BOX_BL),
         "last line must be panel bottom border"
     );
     // Meta rows are inside
@@ -1529,7 +1529,7 @@ fn build_body_lines_is_panel_with_description_label() {
     let task = json!({ "id": 1, "body": "<p>Hello world</p>" });
     let (lines, _, _) = build_body_lines(&task, 80);
     assert!(
-        lines[0].starts_with('\u{256D}'),
+        lines[0].starts_with(BOX_TL),
         "first line must be panel top border: {:?}",
         lines[0]
     );
@@ -1539,7 +1539,7 @@ fn build_body_lines_is_panel_with_description_label() {
         lines[0]
     );
     assert!(
-        lines.last().unwrap().starts_with('\u{2570}'),
+        lines.last().unwrap().starts_with(BOX_BL),
         "last line must be panel bottom border"
     );
 }
@@ -1627,7 +1627,7 @@ fn build_comment_lines_returns_outer_panel_for_single_comment() {
     let joined = lines.join("\n");
     // Must be wrapped in an outer panel
     assert!(
-        lines[0].starts_with('\u{256D}'),
+        lines[0].starts_with(BOX_TL),
         "outer panel top must start with BOX_TL: {:?}",
         lines[0]
     );
@@ -1720,8 +1720,8 @@ fn build_detail_lines_first_line_is_details_panel_top_border() {
     assert!(!lines.is_empty(), "must produce lines");
     let first = &lines[0];
     assert!(
-        first.starts_with('\u{256D}'),
-        "first line must be the Details panel top border (╭): {:?}",
+        first.starts_with(BOX_TL),
+        "first line must be the Details panel top border (┌): {:?}",
         first
     );
     assert!(
@@ -1751,7 +1751,7 @@ fn build_detail_lines_details_panel_is_first() {
         lines
     );
     assert!(
-        lines[0].starts_with('\u{256D}'),
+        lines[0].starts_with(BOX_TL),
         "lines[0] must be Details panel top: {:?}",
         lines[0]
     );
@@ -1829,8 +1829,8 @@ fn build_detail_lines_comments_panel_present_when_non_empty() {
     );
     // Must have box corners (from panels)
     assert!(
-        joined.contains('\u{256D}'),
-        "must have rounded box corners: {joined}"
+        joined.contains(BOX_TL),
+        "must have squared box corners: {joined}"
     );
 }
 
@@ -2320,6 +2320,116 @@ fn url_at_plain_text_returns_none() {
     assert!(
         result.is_none(),
         "url_at on plain text must return None: {result:?}"
+    );
+}
+
+// --- S4 / ADR 0063: layout-emitted PanelTitle StyleRun on section panel headers ---
+
+#[test]
+fn description_panel_top_border_carries_panel_title_run() {
+    use crate::richtext::RichStyle;
+    let task = json!({ "id": 1, "body": "<p>Hello</p>" });
+    let inner_width = 80;
+    let (_, styles, _) = build_body_lines(&task, inner_width);
+    let (_, expected_len) = fit_panel_header(&crate::i18n::t("Description"), inner_width);
+    let run = styles[0]
+        .iter()
+        .find(|r| r.style == RichStyle::PanelTitle)
+        .expect("Description top border must carry a PanelTitle run");
+    assert_eq!(run.start, 2, "PanelTitle run must start at col 2");
+    assert_eq!(
+        run.len, expected_len,
+        "PanelTitle run len must match fit_panel_header's fitted width"
+    );
+}
+
+#[test]
+fn comments_panel_top_border_carries_panel_title_run() {
+    use crate::richtext::RichStyle;
+    let comments = vec![json!({
+        "created_by_name": "Alice",
+        "created_on": 1614556800i64,
+        "body_plain_text": "LGTM!"
+    })];
+    let inner_width = 60;
+    let (_, styles, _, _) = build_comment_lines(&comments, inner_width, None);
+    let label = format!("{} ({})", crate::i18n::t("Comments"), comments.len());
+    let (_, expected_len) = fit_panel_header(&label, inner_width);
+    let run = styles[0]
+        .iter()
+        .find(|r| r.style == RichStyle::PanelTitle)
+        .expect("Comments top border must carry a PanelTitle run");
+    assert_eq!(run.start, 2, "PanelTitle run must start at col 2");
+    assert_eq!(
+        run.len, expected_len,
+        "PanelTitle run len must match fit_panel_header's fitted width"
+    );
+}
+
+#[test]
+fn details_panel_top_border_carries_panel_title_run() {
+    use crate::richtext::RichStyle;
+    let task = json!({ "id": 1, "name": "T" });
+    let inner_width = 80;
+    let content = build_detail_content(&task, &[], &HashMap::new(), inner_width, None);
+    let (_, expected_len) = fit_panel_header(&crate::i18n::t("Details"), inner_width);
+    let run = content.line_styles[0]
+        .iter()
+        .find(|r| r.style == RichStyle::PanelTitle)
+        .expect("Details top border must carry a PanelTitle run");
+    assert_eq!(run.start, 2, "PanelTitle run must start at col 2");
+    assert_eq!(
+        run.len, expected_len,
+        "PanelTitle run len must match fit_panel_header's fitted width"
+    );
+}
+
+#[test]
+fn panel_title_run_returns_none_when_width_less_than_4() {
+    assert!(panel_title_run("Label", 3).is_none());
+    assert!(panel_title_run("Label", 0).is_none());
+}
+
+#[test]
+fn panel_title_run_start_and_len_match_fit_panel_header() {
+    use crate::richtext::RichStyle;
+    let width = 40;
+    let label = "Details";
+    let run = panel_title_run(label, width).expect("valid width must produce a run");
+    let (_, expected_len) = fit_panel_header(label, width);
+    assert_eq!(run.start, 2, "run must start at col 2");
+    assert_eq!(run.len, expected_len, "run len must match fit_panel_header");
+    assert_eq!(run.style, RichStyle::PanelTitle);
+}
+
+#[test]
+fn comment_card_header_has_no_panel_title_run() {
+    // ADR 0063 constraint: the title run is emitted only at the three build_* sites,
+    // NOT inside panel_box_rich — comment-card headers keep only their own affordance
+    // runs, never PanelTitle.
+    use crate::richtext::RichStyle;
+    let own_comment = json!({
+        "id": 42i64,
+        "created_by_id": 7i64,
+        "created_by_name": "Me",
+        "created_on": 1700000000u64,
+        "body_plain_text": "Hello"
+    });
+    let user_map: HashMap<i64, String> = HashMap::new();
+    let task = json!({ "name": "T", "id": 1, "project_id": 1, "is_completed": false });
+    let content = build_detail_content(&task, &[own_comment], &user_map, 80, Some(7));
+
+    let edit_aff = content
+        .affordances
+        .iter()
+        .find(|a| matches!(a.kind, AffordanceKind::Edit(_)))
+        .expect("own comment must have an Edit affordance");
+    let card_header_runs = &content.line_styles[edit_aff.line_idx];
+    assert!(
+        !card_header_runs
+            .iter()
+            .any(|r| r.style == RichStyle::PanelTitle),
+        "comment card header must not carry a PanelTitle run: {card_header_runs:?}"
     );
 }
 

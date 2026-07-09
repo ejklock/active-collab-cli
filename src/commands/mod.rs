@@ -10,7 +10,7 @@ pub(crate) use comment::comment_core;
 pub(crate) use mine::{collect_mine_rows, mine_core, MineOutcome};
 pub(crate) use resolve::*;
 pub(crate) use setup::{
-    setup_add, setup_language, setup_list, setup_remove, setup_test, SetupAddFields,
+    setup_add, setup_language, setup_list, setup_remove, setup_test, setup_theme, SetupAddFields,
 };
 pub(crate) use skill::skill_output;
 pub(crate) use task::{current_core, get_core, DisplayFlags};

@@ -15,11 +15,12 @@ use unicode_width::UnicodeWidthStr;
 /// padding on each side of a panel's content.
 pub(crate) const PANEL_HPAD: usize = 1;
 
-/// Box-drawing glyphs used by rounded panels and cards (ADR 0049 single home).
-pub(crate) const BOX_TL: &str = "\u{256D}";
-pub(crate) const BOX_TR: &str = "\u{256E}";
-pub(crate) const BOX_BL: &str = "\u{2570}";
-pub(crate) const BOX_BR: &str = "\u{256F}";
+/// Box-drawing glyphs used by squared legend panels and cards (ADR 0049 single
+/// home, ADR 0061 squared corners).
+pub(crate) const BOX_TL: &str = "\u{250C}";
+pub(crate) const BOX_TR: &str = "\u{2510}";
+pub(crate) const BOX_BL: &str = "\u{2514}";
+pub(crate) const BOX_BR: &str = "\u{2518}";
 pub(crate) const BOX_H: &str = "\u{2500}";
 pub(crate) const BOX_V: &str = "\u{2502}";
 
@@ -29,7 +30,7 @@ pub(crate) const BOX_V: &str = "\u{2502}";
 /// and the surrounding space is PANEL_HPAD (1 byte each side). Returns the inner
 /// content slice `{content}` (including any trailing-space padding added by
 /// `fit_to_display_width`), or `None` when the string is not a box content line
-/// (e.g. a rounded-corner border row starting with `╭` or `╰`).
+/// (e.g. a border row starting with `┌` or `└`).
 ///
 /// This is the single public interface for this primitive — the `_pub`
 /// pass-through wrapper that used to live in `render.rs` is retired (ADR 0049).

@@ -70,6 +70,7 @@ fn emphasis_style(rs: RichStyle) -> Style {
         RichStyle::Link => theme::link_style(),
         RichStyle::EditAffordance => theme::edit_affordance_style(),
         RichStyle::DeleteAffordance => theme::delete_affordance_style(),
+        RichStyle::PanelTitle => theme::panel_title_style(),
         RichStyle::Plain => Style::default(),
     }
 }
