@@ -7345,9 +7345,9 @@ mod contextual_footer {
 
         assert_eq!(
             catalog
-                .get("j/k move · c comment · r refresh · Esc/b back · q quit")
+                .get("↑/↓ · j/k move · c comment · r refresh · Esc/b back · q quit")
                 .map(String::as_str),
-            Some("j/k mover · c comentar · r atualizar · Esc/b voltar · q sair"),
+            Some("↑/↓ · j/k mover · c comentar · r atualizar · Esc/b voltar · q sair"),
             "pt_BR must have browsing hint"
         );
         assert_eq!(
@@ -7359,9 +7359,9 @@ mod contextual_footer {
         );
         assert_eq!(
             catalog
-                .get("j/k move · Ctrl+click edit/delete · c new")
+                .get("↑/↓ · j/k move · Ctrl+click edit/delete · c new")
                 .map(String::as_str),
-            Some("j/k mover · Ctrl+clique editar/excluir · c novo"),
+            Some("↑/↓ · j/k mover · Ctrl+clique editar/excluir · c novo"),
             "pt_BR must have own-focused hint"
         );
         assert_eq!(
