@@ -358,8 +358,6 @@ pub fn focused_comment_style() -> Style {
 /// accent + bold. Carried structurally as a `RichStyle::PanelTitle` run over the
 /// label span of the top-border row (ADR 0063), mirroring how the comment
 /// edit/delete affordances style tokens on that same border row.
-// Unused until slice S4 wires panel titles into the layout (ADR 0063).
-#[allow(dead_code)]
 pub fn panel_title_style() -> Style {
     Style::default()
         .fg(palette().accent)

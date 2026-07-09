@@ -27,6 +27,12 @@ pub enum RichStyle {
     /// headers — same coordinates as the hit-test span (single source of truth,
     /// ADR 0032 / ADR 0041).
     DeleteAffordance,
+    /// Layout-emitted panel title: accent + bold.
+    ///
+    /// Applied structurally over a panel's top-border label span (the Details,
+    /// Description and Comments section panels), never produced by the HTML
+    /// parser (ADR 0063).
+    PanelTitle,
 }
 
 /// A single styled text fragment within a rich line.
