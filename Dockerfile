@@ -15,6 +15,8 @@ RUN mkdir src && printf 'fn main() {}\n' > src/main.rs && \
 COPY src ./src
 # locales/ must be present at compile time so include_str! embeds the pt-BR catalog
 COPY locales ./locales
+# .claude/skills/ must be present at compile time so include_str! embeds SKILL.md (ADR 0057)
+COPY .claude/skills ./.claude/skills
 RUN cargo build --release
 
 FROM debian:trixie-slim AS runtime
