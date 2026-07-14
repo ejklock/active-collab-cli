@@ -1,4 +1,5 @@
 use crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEventKind};
+use tui_textarea::Input;
 
 use super::model::Msg;
 
@@ -44,20 +45,17 @@ pub fn map_browse_key_event(key: crossterm::event::KeyEvent) -> Option<Msg> {
 
 /// Map a key event when compose mode is active.
 ///
-/// Ctrl+C quits; Ctrl+S submits; Esc cancels; Enter inserts a newline;
-/// Backspace deletes the last character; a plain printable character appends.
-/// All other combinations (including Alt+key) produce None.
+/// Ctrl+S submits and Esc cancels — the only two keys the shell intercepts before
+/// they reach the editor. Every other key (printable chars, Enter, caret movement,
+/// Backspace/Delete, undo/redo, ...) converts to the backend-neutral
+/// `tui_textarea::Input` and is carried by `Msg::ComposeInput` for `update()` to
+/// apply via `TextArea::input` (ADR 0064).
 pub fn map_compose_key_event(key: crossterm::event::KeyEvent) -> Option<Msg> {
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
-    let alt = key.modifiers.contains(KeyModifiers::ALT);
     match key.code {
-        KeyCode::Char('c') if ctrl => Some(Msg::Quit),
         KeyCode::Char('s') if ctrl => Some(Msg::ComposeSubmit),
         KeyCode::Esc => Some(Msg::ComposeCancel),
-        KeyCode::Enter => Some(Msg::ComposeNewline),
-        KeyCode::Backspace => Some(Msg::ComposeBackspace),
-        KeyCode::Char(c) if !ctrl && !alt => Some(Msg::ComposeInput(c)),
-        _ => None,
+        _ => Some(Msg::ComposeInput(Input::from(key))),
     }
 }
 

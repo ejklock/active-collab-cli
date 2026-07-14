@@ -3,6 +3,7 @@ use crate::render::Asset;
 use crate::tui::screens::asset_panel;
 use crossterm::event::KeyModifiers;
 use std::collections::HashMap;
+use tui_textarea::{Input, Key};
 
 fn empty_header() -> Header {
     Header::from_instances(&[], None)
@@ -3306,15 +3307,53 @@ fn extract_compose(model: &Model) -> Option<&Compose> {
     }
 }
 
-// AC1-part1: ComposeOpen on a Detail screen sets compose=Some(Editing, empty buffer).
+/// Build a backend-neutral `Input` for a plain (unmodified) printable char.
+fn char_input(c: char) -> Input {
+    Input {
+        key: Key::Char(c),
+        ctrl: false,
+        alt: false,
+        shift: false,
+    }
+}
+
+/// Build a backend-neutral `Input` for an unmodified non-char key (Enter, arrows, ...).
+fn key_input(key: Key) -> Input {
+    Input {
+        key,
+        ctrl: false,
+        alt: false,
+        shift: false,
+    }
+}
+
+/// Build a backend-neutral `Input` for a Ctrl-modified key (undo/redo shortcuts).
+fn ctrl_input(key: Key) -> Input {
+    Input {
+        key,
+        ctrl: true,
+        alt: false,
+        shift: false,
+    }
+}
+
+/// Drive `ComposeInput(char_input(c))` through `update()` for every char in `s`, in order.
+fn type_str(mut model: Model, s: &str) -> Model {
+    for c in s.chars() {
+        model = update(model, Msg::ComposeInput(char_input(c))).0;
+    }
+    model
+}
+
+// AC1-part1: ComposeOpen on a Detail screen sets compose=Some(Editing, empty editor).
 #[test]
-fn compose_open_on_detail_sets_editing_state_with_empty_buffer() {
+fn compose_open_on_detail_sets_editing_state_with_empty_editor() {
     let m = detail_model_for_compose("inst", 10, 42);
     let (m, cmds) = update(m, Msg::ComposeOpen);
     assert!(cmds.is_empty(), "ComposeOpen must emit no Cmd");
     let cp = extract_compose(&m).expect("compose must be Some after ComposeOpen");
     assert_eq!(cp.kind, ComposeKind::New);
-    assert_eq!(cp.buffer, "");
+    assert_eq!(cp.editor.lines(), [""]);
     assert_eq!(cp.status, ComposeStatus::Editing);
 }
 
@@ -3328,58 +3367,144 @@ fn compose_open_when_already_active_is_noop() {
     {
         *overlay = DetailOverlay::Compose(Compose {
             kind: ComposeKind::New,
-            buffer: "existing".into(),
+            editor: tui_textarea::TextArea::from(["existing"]),
             status: ComposeStatus::Editing,
         });
     }
     let (m, _) = update(m, Msg::ComposeOpen);
     let cp = extract_compose(&m).expect("compose must still be Some");
-    assert_eq!(cp.buffer, "existing", "existing buffer must be preserved");
+    assert_eq!(
+        cp.editor.lines(),
+        ["existing"],
+        "existing editor content must be preserved"
+    );
 }
 
-// AC1-part3: ComposeInput appends a character to the buffer.
+// AC1-part3: ComposeInput appends a character to the editor.
 #[test]
-fn compose_input_appends_character_to_buffer() {
+fn compose_input_appends_character_to_editor() {
     let m = detail_model_for_compose("inst", 10, 42);
     let (m, _) = update(m, Msg::ComposeOpen);
-    let (m, cmds) = update(m, Msg::ComposeInput('h'));
+    let (m, cmds) = update(m, Msg::ComposeInput(char_input('h')));
     assert!(cmds.is_empty());
-    let (m, _) = update(m, Msg::ComposeInput('i'));
+    let (m, _) = update(m, Msg::ComposeInput(char_input('i')));
     let cp = extract_compose(&m).expect("compose must be Some");
-    assert_eq!(cp.buffer, "hi");
+    assert_eq!(cp.editor.lines(), ["hi"]);
 }
 
-// AC1-part4: ComposeNewline inserts '\n' — Enter is a newline, NOT submit.
+// AC1-part4: an Enter Input inserts a newline — it is NOT a submit.
 #[test]
-fn compose_newline_inserts_newline_not_submit() {
+fn compose_enter_input_inserts_newline_not_submit() {
     let m = detail_model_for_compose("inst", 10, 42);
     let (m, _) = update(m, Msg::ComposeOpen);
-    let (m, _) = update(m, Msg::ComposeInput('a'));
-    let (m, cmds) = update(m, Msg::ComposeNewline);
+    let (m, _) = update(m, Msg::ComposeInput(char_input('a')));
+    let (m, cmds) = update(m, Msg::ComposeInput(key_input(Key::Enter)));
     assert!(
         cmds.is_empty(),
-        "ComposeNewline must emit no Cmd (not a submit)"
+        "Enter Input must emit no Cmd (not a submit)"
     );
-    let (m, _) = update(m, Msg::ComposeInput('b'));
+    let (m, _) = update(m, Msg::ComposeInput(char_input('b')));
     let cp = extract_compose(&m).expect("compose must be Some");
-    assert_eq!(cp.buffer, "a\nb", "buffer must contain embedded newline");
-    assert!(
-        cp.buffer.contains('\n'),
-        "buffer must have \\n after ComposeNewline"
+    assert_eq!(
+        cp.editor.lines(),
+        ["a", "b"],
+        "Enter must split the editor into two lines"
     );
 }
 
-// AC1-part5: ComposeBackspace removes the last character.
+// AC1-part5: a Backspace Input removes the last character.
 #[test]
-fn compose_backspace_removes_last_character() {
+fn compose_backspace_input_removes_last_character() {
     let m = detail_model_for_compose("inst", 10, 42);
     let (m, _) = update(m, Msg::ComposeOpen);
-    let (m, _) = update(m, Msg::ComposeInput('a'));
-    let (m, _) = update(m, Msg::ComposeInput('b'));
-    let (m, cmds) = update(m, Msg::ComposeBackspace);
+    let (m, _) = update(m, Msg::ComposeInput(char_input('a')));
+    let (m, _) = update(m, Msg::ComposeInput(char_input('b')));
+    let (m, cmds) = update(m, Msg::ComposeInput(key_input(Key::Backspace)));
     assert!(cmds.is_empty());
     let cp = extract_compose(&m).expect("compose must be Some");
-    assert_eq!(cp.buffer, "a");
+    assert_eq!(cp.editor.lines(), ["a"]);
+}
+
+// AC1 (caret): Left moves the caret back without modifying text; a subsequent insert
+// lands at the caret's new position, not at the end of the line.
+#[test]
+fn compose_left_input_moves_caret_so_insert_lands_mid_line() {
+    let m = detail_model_for_compose("inst", 1, 1);
+    let m = type_str(update(m, Msg::ComposeOpen).0, "ac");
+    let (m, _) = update(m, Msg::ComposeInput(key_input(Key::Left)));
+    let (m, _) = update(m, Msg::ComposeInput(char_input('b')));
+    let cp = extract_compose(&m).expect("compose must be Some");
+    assert_eq!(
+        cp.editor.lines(),
+        ["abc"],
+        "Left then insert must place the char before the caret's prior position"
+    );
+}
+
+// AC1 (caret): Home/End move the caret to the line's start/end.
+#[test]
+fn compose_home_end_input_move_caret_to_line_bounds() {
+    let m = detail_model_for_compose("inst", 1, 1);
+    let m = type_str(update(m, Msg::ComposeOpen).0, "hello");
+    let (m, _) = update(m, Msg::ComposeInput(key_input(Key::Home)));
+    let (m, _) = update(m, Msg::ComposeInput(char_input('>')));
+    let cp = extract_compose(&m).expect("compose must be Some");
+    assert_eq!(
+        cp.editor.lines(),
+        [">hello"],
+        "Home must move the caret to line start"
+    );
+
+    let (m, _) = update(m, Msg::ComposeInput(key_input(Key::End)));
+    let (m, _) = update(m, Msg::ComposeInput(char_input('<')));
+    let cp = extract_compose(&m).expect("compose must be Some");
+    assert_eq!(
+        cp.editor.lines(),
+        [">hello<"],
+        "End must move the caret to line end"
+    );
+}
+
+// AC1 (caret): Up moves the caret to the previous line.
+#[test]
+fn compose_up_input_moves_caret_to_previous_line() {
+    let m = detail_model_for_compose("inst", 1, 1);
+    let (m, _) = update(m, Msg::ComposeOpen);
+    let m = type_str(m, "one");
+    let (m, _) = update(m, Msg::ComposeInput(key_input(Key::Enter)));
+    let m = type_str(m, "two");
+    let (m, _) = update(m, Msg::ComposeInput(key_input(Key::Up)));
+    let (m, _) = update(m, Msg::ComposeInput(key_input(Key::End)));
+    let (m, _) = update(m, Msg::ComposeInput(char_input('!')));
+    let cp = extract_compose(&m).expect("compose must be Some");
+    assert_eq!(
+        cp.editor.lines(),
+        ["one!", "two"],
+        "Up then End must land the caret at the end of the first line"
+    );
+}
+
+// AC1 (undo/redo): Ctrl+U undoes the last edit; Ctrl+R redoes it.
+#[test]
+fn compose_undo_redo_input_revert_and_reapply_edit() {
+    let m = detail_model_for_compose("inst", 1, 1);
+    let (m, _) = update(m, Msg::ComposeOpen);
+    let (m, _) = update(m, Msg::ComposeInput(char_input('x')));
+    let (m, _) = update(m, Msg::ComposeInput(ctrl_input(Key::Char('u'))));
+    let cp = extract_compose(&m).expect("compose must be Some");
+    assert_eq!(
+        cp.editor.lines(),
+        [""],
+        "Ctrl+U must undo the typed character"
+    );
+
+    let (m, _) = update(m, Msg::ComposeInput(ctrl_input(Key::Char('r'))));
+    let cp = extract_compose(&m).expect("compose must be Some");
+    assert_eq!(
+        cp.editor.lines(),
+        ["x"],
+        "Ctrl+R must redo the undone character"
+    );
 }
 
 // AC1-part6: ComposeCancel clears compose and emits no Cmd.
@@ -3387,7 +3512,7 @@ fn compose_backspace_removes_last_character() {
 fn compose_cancel_clears_compose_and_emits_no_cmd() {
     let m = detail_model_for_compose("inst", 10, 42);
     let (m, _) = update(m, Msg::ComposeOpen);
-    let (m, _) = update(m, Msg::ComposeInput('x'));
+    let (m, _) = update(m, Msg::ComposeInput(char_input('x')));
     let (m, cmds) = update(m, Msg::ComposeCancel);
     assert!(cmds.is_empty(), "ComposeCancel must emit no Cmd");
     assert!(
@@ -3396,14 +3521,14 @@ fn compose_cancel_clears_compose_and_emits_no_cmd() {
     );
 }
 
-// AC2-part1: ComposeSubmit on non-empty Editing buffer emits exactly one Cmd::SubmitComment
+// AC2-part1: ComposeSubmit on non-empty Editing editor emits exactly one Cmd::SubmitComment
 // with the correct fields and sets status=Submitting.
 #[test]
-fn compose_submit_nonempty_buffer_emits_submit_comment_cmd() {
+fn compose_submit_nonempty_editor_emits_submit_comment_cmd() {
     let m = detail_model_for_compose("myinst", 5, 99);
     let (m, _) = update(m, Msg::ComposeOpen);
-    let (m, _) = update(m, Msg::ComposeInput('h'));
-    let (m, _) = update(m, Msg::ComposeInput('i'));
+    let (m, _) = update(m, Msg::ComposeInput(char_input('h')));
+    let (m, _) = update(m, Msg::ComposeInput(char_input('i')));
     let (m, cmds) = update(m, Msg::ComposeSubmit);
 
     assert_eq!(cmds.len(), 1, "must emit exactly one Cmd::SubmitComment");
@@ -3429,15 +3554,27 @@ fn compose_submit_nonempty_buffer_emits_submit_comment_cmd() {
     );
 }
 
-// AC2-part2: ComposeSubmit on an empty buffer emits no Cmd.
+// AC2-part2: ComposeSubmit on an empty editor emits no Cmd.
 #[test]
-fn compose_submit_empty_buffer_emits_no_cmd() {
+fn compose_submit_empty_editor_emits_no_cmd() {
     let m = detail_model_for_compose("inst", 1, 1);
     let (m, _) = update(m, Msg::ComposeOpen);
     let (_m, cmds) = update(m, Msg::ComposeSubmit);
     assert!(
         cmds.is_empty(),
-        "ComposeSubmit on empty buffer must emit no Cmd"
+        "ComposeSubmit on empty editor must emit no Cmd"
+    );
+}
+
+// AC1: ComposeSubmit on a whitespace-only editor also emits no Cmd (tightened guard).
+#[test]
+fn compose_submit_whitespace_only_editor_emits_no_cmd() {
+    let m = detail_model_for_compose("inst", 1, 1);
+    let m = type_str(update(m, Msg::ComposeOpen).0, "   ");
+    let (_m, cmds) = update(m, Msg::ComposeSubmit);
+    assert!(
+        cmds.is_empty(),
+        "ComposeSubmit on a whitespace-only editor must emit no Cmd"
     );
 }
 
@@ -3446,7 +3583,7 @@ fn compose_submit_empty_buffer_emits_no_cmd() {
 fn comment_mutation_ok_clears_compose_and_emits_load_detail_refresh() {
     let m = detail_model_for_compose("inst", 7, 13);
     let (m, _) = update(m, Msg::ComposeOpen);
-    let (m, _) = update(m, Msg::ComposeInput('x'));
+    let (m, _) = update(m, Msg::ComposeInput(char_input('x')));
     let (m, cmds) = update(m, Msg::CommentMutationOk);
 
     assert!(
@@ -3470,20 +3607,20 @@ fn comment_mutation_ok_clears_compose_and_emits_load_detail_refresh() {
     }
 }
 
-// AC3-part2: CommentMutationErr keeps the buffer intact and sets status=Error(msg), emits no Cmd.
+// AC3-part2: CommentMutationErr keeps the editor intact and sets status=Error(msg), emits no Cmd.
 #[test]
-fn comment_mutation_err_preserves_buffer_and_sets_error_status() {
+fn comment_mutation_err_preserves_editor_and_sets_error_status() {
     let m = detail_model_for_compose("inst", 1, 1);
-    let (m, _) = update(m, Msg::ComposeOpen);
-    let (m, _) = update(m, Msg::ComposeInput('t'));
-    let (m, _) = update(m, Msg::ComposeInput('e'));
-    let (m, _) = update(m, Msg::ComposeInput('x'));
-    let (m, _) = update(m, Msg::ComposeInput('t'));
+    let m = type_str(update(m, Msg::ComposeOpen).0, "text");
     let (m, cmds) = update(m, Msg::CommentMutationErr("Network error".into()));
 
     assert!(cmds.is_empty(), "CommentMutationErr must emit no Cmd");
     let cp = extract_compose(&m).expect("compose must still be Some after error");
-    assert_eq!(cp.buffer, "text", "buffer must be preserved after error");
+    assert_eq!(
+        cp.editor.lines(),
+        ["text"],
+        "editor content must be preserved after error"
+    );
     assert_eq!(
         cp.status,
         ComposeStatus::Error("Network error".into()),
@@ -3491,9 +3628,10 @@ fn comment_mutation_err_preserves_buffer_and_sets_error_status() {
     );
 }
 
-// AC4-part1: map_compose_key_event maps Enter->ComposeNewline.
+// AC4-part1: map_compose_key_event maps Enter -> ComposeInput(Input{key: Enter}) — the
+// editor (not a distinct Msg) turns it into a newline.
 #[test]
-fn map_compose_key_event_enter_yields_compose_newline() {
+fn map_compose_key_event_enter_yields_compose_input_with_enter_key() {
     use crate::tui::events::map_compose_key_event;
     use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState};
     let key = KeyEvent {
@@ -3503,12 +3641,20 @@ fn map_compose_key_event_enter_yields_compose_newline() {
         state: KeyEventState::NONE,
     };
     assert!(
-        matches!(map_compose_key_event(key), Some(Msg::ComposeNewline)),
-        "Enter must map to ComposeNewline"
+        matches!(
+            map_compose_key_event(key),
+            Some(Msg::ComposeInput(Input {
+                key: Key::Enter,
+                ctrl: false,
+                alt: false,
+                shift: false,
+            }))
+        ),
+        "Enter must map to ComposeInput(Input{{key: Enter}})"
     );
 }
 
-// AC4-part2: map_compose_key_event maps a printable char -> ComposeInput(c).
+// AC4-part2: map_compose_key_event maps a printable char -> ComposeInput(Input{key: Char(c)}).
 #[test]
 fn map_compose_key_event_printable_char_yields_compose_input() {
     use crate::tui::events::map_compose_key_event;
@@ -3520,8 +3666,42 @@ fn map_compose_key_event_printable_char_yields_compose_input() {
         state: KeyEventState::NONE,
     };
     assert!(
-        matches!(map_compose_key_event(key), Some(Msg::ComposeInput('a'))),
-        "printable char must map to ComposeInput(char)"
+        matches!(
+            map_compose_key_event(key),
+            Some(Msg::ComposeInput(Input {
+                key: Key::Char('a'),
+                ctrl: false,
+                alt: false,
+                shift: false,
+            }))
+        ),
+        "printable char must map to ComposeInput(Input{{key: Char(c)}})"
+    );
+}
+
+// AC4: map_compose_key_event maps Backspace -> ComposeInput(Input{key: Backspace}) — the
+// generic Input path, not a distinct Msg.
+#[test]
+fn map_compose_key_event_backspace_yields_compose_input_with_backspace_key() {
+    use crate::tui::events::map_compose_key_event;
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState};
+    let key = KeyEvent {
+        code: KeyCode::Backspace,
+        modifiers: KeyModifiers::NONE,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+    assert!(
+        matches!(
+            map_compose_key_event(key),
+            Some(Msg::ComposeInput(Input {
+                key: Key::Backspace,
+                ctrl: false,
+                alt: false,
+                shift: false,
+            }))
+        ),
+        "Backspace must map to ComposeInput(Input{{key: Backspace}})"
     );
 }
 
@@ -3593,27 +3773,18 @@ fn map_browse_key_event_ctrl_c_still_quits() {
     );
 }
 
-// AC1-multiline: a sequence of ComposeInput + ComposeNewline yields a buffer with '\n'.
+// AC1-multiline: a sequence of ComposeInput chars + an Enter Input yields two editor lines.
 #[test]
-fn compose_multiline_buffer_contains_embedded_newline() {
+fn compose_multiline_editor_produces_two_lines() {
     let m = detail_model_for_compose("inst", 1, 1);
-    let (m, _) = update(m, Msg::ComposeOpen);
-    let (m, _) = update(m, Msg::ComposeInput('l'));
-    let (m, _) = update(m, Msg::ComposeInput('i'));
-    let (m, _) = update(m, Msg::ComposeInput('n'));
-    let (m, _) = update(m, Msg::ComposeInput('e'));
-    let (m, _) = update(m, Msg::ComposeInput('1'));
-    let (m, _) = update(m, Msg::ComposeNewline);
-    let (m, _) = update(m, Msg::ComposeInput('l'));
-    let (m, _) = update(m, Msg::ComposeInput('2'));
+    let m = type_str(update(m, Msg::ComposeOpen).0, "line1");
+    let (m, _) = update(m, Msg::ComposeInput(key_input(Key::Enter)));
+    let m = type_str(m, "l2");
     let cp = extract_compose(&m).expect("compose must be Some");
     assert_eq!(
-        cp.buffer, "line1\nl2",
-        "buffer must contain embedded newline"
-    );
-    assert!(
-        cp.buffer.contains('\n'),
-        "\\n must be in buffer (Enter is newline, not submit)"
+        cp.editor.lines(),
+        ["line1", "l2"],
+        "Enter must split the editor into two lines"
     );
 }
 
@@ -3741,8 +3912,8 @@ fn compose_submit_with_edit_kind_emits_update_comment_cmd() {
 fn compose_submit_with_new_kind_still_emits_submit_comment_cmd() {
     let m = detail_model_for_compose("myinst", 5, 99);
     let (m, _) = update(m, Msg::ComposeOpen);
-    let (m, _) = update(m, Msg::ComposeInput('o'));
-    let (m, _) = update(m, Msg::ComposeInput('k'));
+    let (m, _) = update(m, Msg::ComposeInput(char_input('o')));
+    let (m, _) = update(m, Msg::ComposeInput(char_input('k')));
     let (_, cmds) = update(m, Msg::ComposeSubmit);
     assert_eq!(cmds.len(), 1, "must emit exactly one Cmd");
     assert!(
@@ -3800,8 +3971,9 @@ fn ctrl_click_on_edit_affordance_opens_compose_edit() {
         "compose kind must be Edit{{comment_id: {comment_id}}}"
     );
     assert_eq!(
-        cp.buffer, "My comment body",
-        "buffer must be pre-filled from body_plain_text"
+        cp.editor.lines(),
+        ["My comment body"],
+        "editor must be pre-filled from body_plain_text"
     );
     assert_eq!(cp.status, ComposeStatus::Editing, "status must be Editing");
 }
@@ -4234,7 +4406,7 @@ fn comment_mutation_err_does_not_emit_refresh() {
     }) = m.top_mut()
     {
         *overlay = DetailOverlay::Compose(crate::tui::model::Compose {
-            buffer: String::new(),
+            editor: tui_textarea::TextArea::default(),
             status: crate::tui::model::ComposeStatus::Submitting,
             kind: crate::tui::model::ComposeKind::New,
         });
@@ -4909,7 +5081,7 @@ fn reflow_detail_with_compose_does_not_append_compose_lines() {
     use crate::tui::model::{Compose, ComposeKind, ComposeStatus};
     let compose = Compose {
         kind: ComposeKind::New,
-        buffer: "compose body text".into(),
+        editor: tui_textarea::TextArea::from(["compose body text"]),
         status: ComposeStatus::Editing,
     };
     let mut m = Model {
@@ -4964,7 +5136,7 @@ fn reflow_detail_with_compose_does_not_append_compose_lines() {
 // is unaffected by moving the rendering to an overlay.
 
 #[test]
-fn ac7_regression_compose_newline_inserts_newline_not_submit_after_modal_migration() {
+fn ac7_regression_compose_enter_input_inserts_newline_not_submit_after_modal_migration() {
     use crate::tui::model::{Compose, ComposeKind, ComposeStatus};
     let m = Model {
         stack: vec![Screen::Detail {
@@ -4982,7 +5154,7 @@ fn ac7_regression_compose_newline_inserts_newline_not_submit_after_modal_migrati
             rendered_width: usize::MAX,
             overlay: DetailOverlay::Compose(Compose {
                 kind: ComposeKind::New,
-                buffer: "hello".into(),
+                editor: tui_textarea::TextArea::from(["hello"]),
                 status: ComposeStatus::Editing,
             }),
             current_user_id: None,
@@ -5000,18 +5172,18 @@ fn ac7_regression_compose_newline_inserts_newline_not_submit_after_modal_migrati
         selection: None,
         copied_feedback: false,
     };
-    let (m2, cmds) = update(m, Msg::ComposeNewline);
+    let (m2, cmds) = update(m, Msg::ComposeInput(key_input(Key::Enter)));
     assert!(
         cmds.is_empty(),
-        "ComposeNewline must emit no Cmd (no submit): {cmds:?}"
+        "an Enter Input must emit no Cmd (no submit): {cmds:?}"
     );
     match m2.top() {
         Some(Screen::Detail { overlay, .. }) => {
             let cp = overlay.compose().expect("compose must be active");
             assert!(
-                cp.buffer.contains('\n'),
-                "ComposeNewline must insert a newline into the buffer: {:?}",
-                cp.buffer
+                cp.editor.lines().len() > 1,
+                "an Enter Input must insert a newline into the editor: {:?}",
+                cp.editor.lines()
             );
         }
         _ => panic!("expected Detail with active compose"),
@@ -5037,7 +5209,7 @@ fn ac7_regression_compose_cancel_clears_compose_emits_no_cmd_after_modal_migrati
             rendered_width: usize::MAX,
             overlay: DetailOverlay::Compose(Compose {
                 kind: ComposeKind::New,
-                buffer: "draft text".into(),
+                editor: tui_textarea::TextArea::from(["draft text"]),
                 status: ComposeStatus::Editing,
             }),
             current_user_id: None,
@@ -5087,7 +5259,7 @@ fn ac7_regression_compose_submit_emits_write_cmd_after_modal_migration() {
             rendered_width: usize::MAX,
             overlay: DetailOverlay::Compose(Compose {
                 kind: ComposeKind::New,
-                buffer: "non empty".into(),
+                editor: tui_textarea::TextArea::from(["non empty"]),
                 status: ComposeStatus::Editing,
             }),
             current_user_id: None,

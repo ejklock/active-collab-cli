@@ -61,14 +61,17 @@ pub fn modal_target_size(frame_area: Rect, content: &ModalContent<'_>) -> (u16, 
 ///    computes and `Clear`s the modal `Rect` so the box is opaque.
 /// 3. Draws a bordered titled box with body lines and an optional hint line.
 ///
-/// Returns the modal `Rect` so the caller can register click targets.
+/// Returns the inner content (body) `Rect` — beneath the title border, above
+/// the hint row — so a caller can either register click targets relative to
+/// it (the confirm modal) or render a widget of its own into it (the compose
+/// modal's `TextArea`, on top of the body `Paragraph` this function already
+/// drew there).
 pub fn render_modal(frame: &mut Frame, frame_area: Rect, content: ModalContent<'_>) -> Rect {
     dim_backdrop(frame, frame_area);
     let (desired_w, desired_h) = modal_target_size(frame_area, &content);
     let area = modal_area(frame_area, desired_w, desired_h);
     frame.render_widget(Clear, area);
-    draw_modal_box(frame, area, content);
-    area
+    draw_modal_box(frame, area, content)
 }
 
 fn dim_backdrop(frame: &mut Frame, area: Rect) {
@@ -84,7 +87,7 @@ fn dim_backdrop(frame: &mut Frame, area: Rect) {
     }
 }
 
-fn draw_modal_box(frame: &mut Frame, area: Rect, content: ModalContent<'_>) {
+fn draw_modal_box(frame: &mut Frame, area: Rect, content: ModalContent<'_>) -> Rect {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(theme::modal_border_style())
@@ -92,10 +95,10 @@ fn draw_modal_box(frame: &mut Frame, area: Rect, content: ModalContent<'_>) {
         .title_style(theme::modal_title_style());
     let inner = block.inner(area);
     frame.render_widget(block, area);
-    draw_modal_body(frame, inner, content);
+    draw_modal_body(frame, inner, content)
 }
 
-fn draw_modal_body(frame: &mut Frame, inner: Rect, content: ModalContent<'_>) {
+fn draw_modal_body(frame: &mut Frame, inner: Rect, content: ModalContent<'_>) -> Rect {
     let hint_rows: u16 = if content.hint.is_some() { 1 } else { 0 };
     let body_h = inner.height.saturating_sub(hint_rows);
     let body_area = Rect::new(inner.x, inner.y, inner.width, body_h);
@@ -103,6 +106,7 @@ fn draw_modal_body(frame: &mut Frame, inner: Rect, content: ModalContent<'_>) {
     let body_paragraph = Paragraph::new(body_text.join("\n")).style(theme::modal_body_style());
     frame.render_widget(body_paragraph, body_area);
     draw_modal_hint(frame, inner, body_h, content.hint);
+    body_area
 }
 
 fn draw_modal_hint(frame: &mut Frame, inner: Rect, body_h: u16, hint: Option<&str>) {

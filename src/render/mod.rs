@@ -516,26 +516,6 @@ pub fn print_error(msg: &str) {
     eprintln!("{msg}");
 }
 
-/// Build the visible lines and style runs for the compose overlay area.
-///
-/// Build the modal body lines for the compose overlay.
-///
-/// Returns `(lines, line_styles)` — the buffer split on `\n`, with a parallel
-/// empty-style-run vec. No label, no status text: the modal box renders the
-/// title separately and the caller supplies the in-box hint/status line.
-/// Called by `view()` to populate the `ModalContent` body.
-pub fn compose_block_lines(cp: &crate::tui::model::Compose) -> (Vec<String>, Vec<Vec<StyleRun>>) {
-    let mut lines: Vec<String> = Vec::new();
-    let mut styles: Vec<Vec<StyleRun>> = Vec::new();
-
-    for body_line in cp.buffer.split('\n') {
-        lines.push(body_line.to_string());
-        styles.push(vec![]);
-    }
-
-    (lines, styles)
-}
-
 /// Returns `s` truncated to exactly `max_width` chars.
 ///
 /// When `s` fits within `max_width`, it is returned unchanged. When it is longer,
