@@ -5617,7 +5617,6 @@ fn asset_row_cells_carry_link_style_structural_not_url_detection() {
 
 mod compose_render {
     use crate::i18n::set_language;
-    use crate::render::compose_block_lines;
     use crate::tui::model::{
         Compose, ComposeKind, ComposeStatus, DetailOverlay, Header, Model, Screen,
     };
@@ -5626,24 +5625,25 @@ mod compose_render {
     use ratatui::{backend::TestBackend, Terminal};
     use serde_json::Value;
     use std::collections::HashMap;
+    use tui_textarea::TextArea;
 
     // Reuse the file-level LANG_MUTEX (not a module-local one) so language-mutating
     // tests in this module serialize with every other module's language-mutating
     // tests instead of racing on the shared global i18n state.
     use super::LANG_MUTEX;
 
-    fn compose_editing(buffer: &str) -> Compose {
+    fn compose_editing(text: &str) -> Compose {
         Compose {
             kind: ComposeKind::New,
-            buffer: buffer.into(),
+            editor: TextArea::from(text.lines()),
             status: ComposeStatus::Editing,
         }
     }
 
-    fn compose_edit_existing(comment_id: i64, buffer: &str) -> Compose {
+    fn compose_edit_existing(comment_id: i64, text: &str) -> Compose {
         Compose {
             kind: ComposeKind::Edit { comment_id },
-            buffer: buffer.into(),
+            editor: TextArea::from(text.lines()),
             status: ComposeStatus::Editing,
         }
     }
@@ -5808,16 +5808,44 @@ mod compose_render {
         );
     }
 
-    // AC3 (BDR 0026 Sc.3): compose body builder returns buffer lines (no label).
-    // compose_block_lines no longer prepends the '── Comment ──' label.
+    // AC2 (slice 0057b, BDR 0026): the compose body is painted by the tui_textarea
+    // `TextArea` widget, not a static `Paragraph` of its lines — so the widget's caret
+    // (Modifier::REVERSED cell) and current-line highlight (Modifier::UNDERLINED row)
+    // must be visible in the rendered buffer. No other style in this fixture (no
+    // selection, no comment body affordances) produces REVERSED/UNDERLINED cells, so
+    // their presence here is attributable only to `f.render_widget(&compose.editor, _)`.
     #[test]
-    fn compose_block_lines_returns_buffer_without_label() {
-        let cp = compose_editing("first\nsecond");
-        let (lines, _) = compose_block_lines(&cp);
-        assert_eq!(
-            lines,
-            vec!["first", "second"],
-            "compose_block_lines must return buffer lines only, no label: {lines:?}"
+    fn compose_editor_widget_renders_visible_caret_and_current_line_highlight() {
+        use ratatui::style::Modifier;
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let model = make_detail_model(DetailOverlay::Compose(compose_editing("hello")));
+        let buf = render_via_view(&model, 80, 24);
+        set_language("en");
+        let area = buf.area();
+
+        let has_caret_cell = (0..area.height).any(|y| {
+            (0..area.width).any(|x| {
+                buf.cell((x, y))
+                    .map(|c| c.modifier.contains(Modifier::REVERSED))
+                    .unwrap_or(false)
+            })
+        });
+        assert!(
+            has_caret_cell,
+            "compose modal must render the TextArea widget's caret (Modifier::REVERSED cell)"
+        );
+
+        let has_current_line_highlight = (0..area.height).any(|y| {
+            (0..area.width).any(|x| {
+                buf.cell((x, y))
+                    .map(|c| c.modifier.contains(Modifier::UNDERLINED))
+                    .unwrap_or(false)
+            })
+        });
+        assert!(
+            has_current_line_highlight,
+            "compose modal must render the TextArea widget's current-line highlight (Modifier::UNDERLINED)"
         );
     }
 
@@ -5937,6 +5965,71 @@ mod compose_render {
             "backdrop cell (0,0) must carry modal_backdrop_style's bg (surface_base token); got {:?}",
             cell.style().bg
         );
+    }
+}
+
+// AC B1 (slice 0057b): render_modal returns the inner content (body) Rect — the
+// area beneath the title border and above the hint row, not the outer bordered box.
+
+mod modal_render_inner_rect_contract {
+    use crate::tui::widgets::modal::{render_modal, ModalContent};
+    use ratatui::{backend::TestBackend, layout::Rect, Terminal};
+
+    fn cell_text(buf: &ratatui::buffer::Buffer, x: u16, y: u16) -> String {
+        buf.cell((x, y))
+            .map(|c| c.symbol().to_string())
+            .unwrap_or_default()
+    }
+
+    fn row_contains(buf: &ratatui::buffer::Buffer, y: u16, needle: &str) -> bool {
+        let width = buf.area().width;
+        let row: String = (0..width).map(|x| cell_text(buf, x, y)).collect();
+        row.contains(needle)
+    }
+
+    #[test]
+    fn render_modal_returns_body_rect_excluding_border_and_hint_row() {
+        let frame_area = Rect::new(0, 0, 40, 20);
+        let lines = vec!["one".to_string(), "two".to_string()];
+        let backend = TestBackend::new(40, 20);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut body_rect = Rect::default();
+        terminal
+            .draw(|frame| {
+                body_rect = render_modal(
+                    frame,
+                    frame_area,
+                    ModalContent {
+                        title: "Title",
+                        lines: &lines,
+                        hint: Some("the-hint"),
+                    },
+                );
+            })
+            .unwrap();
+        let buf = terminal.backend().buffer();
+
+        assert!(
+            body_rect.x > frame_area.x && body_rect.y > frame_area.y,
+            "body Rect must sit inside the border, not at the frame origin: {body_rect:?}"
+        );
+        assert!(
+            body_rect.height as usize >= lines.len(),
+            "body Rect must be tall enough to hold the body lines: {body_rect:?}"
+        );
+
+        // The hint row sits immediately below the returned body Rect, never inside it.
+        let hint_row = body_rect.y + body_rect.height;
+        assert!(
+            row_contains(buf, hint_row, "the-hint"),
+            "hint text must render on the row immediately below the returned body Rect"
+        );
+        for y in body_rect.y..(body_rect.y + body_rect.height) {
+            assert!(
+                !row_contains(buf, y, "the-hint"),
+                "the returned body Rect must not include the hint row (row {y})"
+            );
+        }
     }
 }
 
@@ -6880,6 +6973,7 @@ mod contextual_footer {
     use ratatui::{backend::TestBackend, Terminal};
     use serde_json::json;
     use std::collections::HashMap;
+    use tui_textarea::TextArea;
 
     fn buf_to_string(buf: &ratatui::buffer::Buffer) -> String {
         let area = buf.area();
@@ -6957,7 +7051,7 @@ mod contextual_footer {
     fn editing_compose() -> Compose {
         Compose {
             kind: ComposeKind::New,
-            buffer: String::new(),
+            editor: TextArea::default(),
             status: ComposeStatus::Editing,
         }
     }
@@ -6965,7 +7059,7 @@ mod contextual_footer {
     fn submitting_compose() -> Compose {
         Compose {
             kind: ComposeKind::New,
-            buffer: String::new(),
+            editor: TextArea::default(),
             status: ComposeStatus::Submitting,
         }
     }
@@ -6973,7 +7067,7 @@ mod contextual_footer {
     fn error_compose(msg: &str) -> Compose {
         Compose {
             kind: ComposeKind::New,
-            buffer: String::new(),
+            editor: TextArea::default(),
             status: ComposeStatus::Error(msg.to_string()),
         }
     }
@@ -7224,40 +7318,6 @@ mod contextual_footer {
                 && !last_row.contains("Copiado")
                 && !last_row.contains("Falha"),
             "idle Detail: last row must not contain any status text: {last_row}"
-        );
-    }
-
-    // AC3: compose_block_lines returns only the buffer body lines (no status, no label, no hint).
-    // Status and hint are rendered by the modal caller (view.rs), not by the body builder.
-    #[test]
-    fn compose_block_lines_does_not_contain_status_text() {
-        use crate::render::compose_block_lines;
-        let submitting = submitting_compose();
-        let (lines, _) = compose_block_lines(&submitting);
-        let joined = lines.join("\n");
-        assert!(
-            !joined.contains("Enviando"),
-            "compose_block_lines body must NOT contain 'Enviando' (status rendered by modal caller): {joined}"
-        );
-        assert!(
-            !joined.contains("Sending"),
-            "compose_block_lines body must NOT contain 'Sending…': {joined}"
-        );
-
-        let error = error_compose("oops");
-        let (lines_err, _) = compose_block_lines(&error);
-        let joined_err = lines_err.join("\n");
-        assert!(
-            !joined_err.contains("Failed"),
-            "compose_block_lines body must NOT contain error text: {joined_err}"
-        );
-
-        let editing = editing_compose();
-        let (lines_edit, _) = compose_block_lines(&editing);
-        let joined_edit = lines_edit.join("\n");
-        assert!(
-            !joined_edit.contains("Ctrl+S send"),
-            "compose_block_lines body must NOT contain hint text: {joined_edit}"
         );
     }
 
@@ -7884,6 +7944,7 @@ mod auth_error_render {
     use ratatui::{backend::TestBackend, Terminal};
     use serde_json::json;
     use std::collections::HashMap;
+    use tui_textarea::TextArea;
 
     const AUTH_ERR_EN: &str = "Token invalid or revoked — run `ac setup add` to re-authenticate.";
 
@@ -8008,14 +8069,14 @@ mod auth_error_render {
         );
     }
 
-    // AC2: Msg::AuthExpired sets auth_error and retains the compose buffer.
+    // AC2: Msg::AuthExpired sets auth_error and retains the compose editor content.
     #[test]
-    fn auth_expired_sets_auth_error_retains_compose_buffer() {
+    fn auth_expired_sets_auth_error_retains_compose_editor() {
         let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         set_language("en");
         let compose = Compose {
             kind: ComposeKind::New,
-            buffer: "my draft".into(),
+            editor: TextArea::from(["my draft"]),
             status: ComposeStatus::Editing,
         };
         let model = make_detail_model(false, DetailOverlay::Compose(compose));
@@ -8032,8 +8093,9 @@ mod auth_error_render {
                     .compose()
                     .expect("compose must be Some after AuthExpired");
                 assert_eq!(
-                    cp.buffer, "my draft",
-                    "compose buffer must be retained after AuthExpired"
+                    cp.editor.lines(),
+                    ["my draft"],
+                    "compose editor content must be retained after AuthExpired"
                 );
             }
             _ => panic!("expected Detail screen with compose"),

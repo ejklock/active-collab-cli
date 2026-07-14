@@ -181,28 +181,33 @@ fn compose_modal_hint(cp: &Compose) -> String {
     }
 }
 
+/// Render the compose modal chrome (backdrop/border/title/hint) via `render_modal`
+/// with an empty body, then paint `cp.editor` — the `tui_textarea::TextArea` — as a
+/// widget into the returned inner Rect. Routing the caret/selection/scroll through
+/// the widget itself (instead of a static `Paragraph` of `editor.lines()`) is what
+/// makes them visible; the shared `render_modal` primitive still owns the box.
 fn render_compose_modal(frame: &mut Frame, frame_area: ratatui::layout::Rect, cp: &Compose) {
     use crate::tui::widgets::modal::render_modal;
-    let (body_lines, _body_styles) = crate::render::compose_block_lines(cp);
     let hint = compose_modal_hint(cp);
     let title = compose_modal_title(cp);
-    render_modal(
+    let body_rect = render_modal(
         frame,
         frame_area,
         ModalContent {
             title: &title,
-            lines: &body_lines,
+            lines: &[],
             hint: Some(&hint),
         },
     );
+    frame.render_widget(&cp.editor, body_rect);
 }
 
 /// Render the delete-confirm modal overlay and register the two button click targets.
 ///
 /// Uses the shared `render_modal` primitive (ADR 0039) to dim the backdrop and draw a
 /// centered bordered box. The button row in the hint line shows `[Sim]  [Não]`;
-/// their absolute cell Rects are derived from the Rect `render_modal` returns so the
-/// hit-test geometry is single-sourced (never recomputed independently).
+/// their absolute cell Rects are derived from the body Rect `render_modal` returns so
+/// the hit-test geometry is single-sourced (never recomputed independently).
 fn render_confirm_modal(
     frame: &mut Frame,
     frame_area: ratatui::layout::Rect,
@@ -214,7 +219,7 @@ fn render_confirm_modal(
     let confirm_label = format!("[{}]", t("Yes"));
     let cancel_label = format!("[{}]", t("No"));
     let hint = format!("{}  {}", confirm_label, cancel_label);
-    let modal_rect = render_modal(
+    let body_rect = render_modal(
         frame,
         frame_area,
         ModalContent {
@@ -223,22 +228,23 @@ fn render_confirm_modal(
             hint: Some(&hint),
         },
     );
-    register_confirm_button_targets(modal_rect, &confirm_label, &cancel_label, btn_targets);
+    register_confirm_button_targets(body_rect, &confirm_label, &cancel_label, btn_targets);
 }
 
-/// Derive the absolute button cell Rects from the modal Rect and push them as targets.
+/// Derive the absolute button cell Rects from the modal body Rect and push them as targets.
 ///
-/// The hint row occupies the last inner row: `modal_rect.y + modal_rect.height - 2`
-/// (penultimate row before the bottom border). Buttons are left-aligned with a two-space
-/// gap between them. Column positions are computed from the label display widths.
+/// `body_rect` (from `render_modal`) already excludes the border and the hint row, so
+/// the hint row itself sits immediately below it: `body_rect.y + body_rect.height`.
+/// Buttons are left-aligned with a two-space gap between them; column positions are
+/// computed from the label display widths.
 fn register_confirm_button_targets(
-    modal_rect: ratatui::layout::Rect,
+    body_rect: ratatui::layout::Rect,
     confirm_label: &str,
     cancel_label: &str,
     btn_targets: &mut Vec<ModalButtonTarget>,
 ) {
-    let inner_x = modal_rect.x + 1;
-    let hint_row = modal_rect.y + modal_rect.height.saturating_sub(2);
+    let inner_x = body_rect.x;
+    let hint_row = body_rect.y + body_rect.height;
     let confirm_w = display_width(confirm_label) as u16;
     let cancel_start = inner_x + confirm_w + 2;
     let cancel_w = display_width(cancel_label) as u16;
