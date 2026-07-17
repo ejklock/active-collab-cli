@@ -5,6 +5,7 @@ use crate::tui::detail_geometry::Selection;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
+use tui_textarea::TextArea;
 
 /// Identity bar shown at the top of every screen.
 ///
@@ -159,6 +160,11 @@ pub enum Cmd {
         instance: String,
         comment_id: i64,
     },
+    /// Fetch and decode the image bytes for an opened image-viewer asset.
+    /// Handled entirely by the shell (ADR 0065); the pure Model never sees bytes.
+    LoadImage {
+        asset: ImageAssetRef,
+    },
 }
 
 /// What kind of comment compose operation is in progress.
@@ -179,11 +185,38 @@ pub enum ComposeStatus {
     Error(String),
 }
 
-/// Transient state for the in-progress comment compose area.
+/// The image asset the viewer overlay is displaying.
+///
+/// `label` is the display filename (used for the modal title and the
+/// loading/error placeholder text); `url` is the source location the shell
+/// fetches bytes from (slice 0059). Carries no protocol/bytes state (ADR 0065).
 #[derive(Debug, Clone, PartialEq)]
+pub struct ImageAssetRef {
+    pub url: String,
+    pub label: String,
+}
+
+/// Lifecycle phase of the image-viewer overlay.
+///
+/// The pure Model tracks only this lifecycle; the decoded bytes and the
+/// `ratatui-image` `StatefulProtocol` live in a shell-owned side table,
+/// never here (ADR 0065).
+#[derive(Debug, Clone, PartialEq)]
+pub enum ImageStatus {
+    Loading,
+    Ready,
+    Error(String),
+}
+
+/// Transient state for the in-progress comment compose area.
+///
+/// `editor` carries caret position, selection, and undo/redo history alongside the
+/// text — `tui_textarea::TextArea` does not implement `PartialEq`, so `Compose` (and
+/// its ancestors `DetailOverlay`/`Screen`) drop that derive (ADR 0064).
+#[derive(Debug, Clone)]
 pub struct Compose {
     pub kind: ComposeKind,
-    pub buffer: String,
+    pub editor: TextArea<'static>,
     pub status: ComposeStatus,
 }
 
@@ -192,11 +225,23 @@ pub struct Compose {
 /// Compose and the delete prompt are mutually exclusive by construction — only one overlay
 /// at a time. The combined state (both active) cannot be constructed with this enum,
 /// replacing the previous two independent `Option` fields (ADR 0047).
-#[derive(Debug, Clone, PartialEq)]
+///
+/// `Compose` is intentionally larger than `ConfirmDelete`: it carries a `TextArea` with
+/// caret/selection/undo history (ADR 0064). Construction happens only on open/edit, never
+/// per-keystroke, so boxing would add indirection with no practical benefit — same
+/// rationale as `Screen`'s `large_enum_variant` allow below.
+#[derive(Debug, Clone)]
+#[allow(clippy::large_enum_variant)]
 pub enum DetailOverlay {
     None,
     Compose(Compose),
-    ConfirmDelete { comment_id: i64 },
+    ConfirmDelete {
+        comment_id: i64,
+    },
+    ImageViewer {
+        asset: ImageAssetRef,
+        status: ImageStatus,
+    },
 }
 
 impl DetailOverlay {
@@ -221,12 +266,30 @@ impl DetailOverlay {
         }
     }
 
+    pub fn image_viewer(&self) -> Option<(&ImageAssetRef, &ImageStatus)> {
+        match self {
+            DetailOverlay::ImageViewer { asset, status } => Some((asset, status)),
+            _ => Option::None,
+        }
+    }
+
+    pub fn image_viewer_status_mut(&mut self) -> Option<&mut ImageStatus> {
+        match self {
+            DetailOverlay::ImageViewer { status, .. } => Some(status),
+            _ => Option::None,
+        }
+    }
+
     pub fn is_compose(&self) -> bool {
         matches!(self, DetailOverlay::Compose(_))
     }
 
     pub fn is_confirm(&self) -> bool {
         matches!(self, DetailOverlay::ConfirmDelete { .. })
+    }
+
+    pub fn is_image_viewer(&self) -> bool {
+        matches!(self, DetailOverlay::ImageViewer { .. })
     }
 }
 
@@ -255,7 +318,7 @@ pub struct DetailLoad {
 /// The Detail variant is intentionally large — it holds the full render cache
 /// for the open task. The stack is always shallow (≤ 3 elements) so heap
 /// boxing of the large variant would add indirection with no practical benefit.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 #[allow(clippy::large_enum_variant)]
 pub enum Screen {
     Projects {
@@ -519,12 +582,13 @@ pub enum Msg {
     HeaderNameResolved(String),
     /// Open the compose area on the current Detail screen.
     ComposeOpen,
-    /// Append a printable character to the compose buffer.
-    ComposeInput(char),
-    /// Insert a newline into the compose buffer (Enter key in compose mode).
-    ComposeNewline,
-    /// Delete the last character from the compose buffer.
-    ComposeBackspace,
+    /// Apply a backend-neutral key input to the compose editor.
+    ///
+    /// Carries everything but the shell-level Ctrl+S/Esc shortcuts: printable chars,
+    /// Enter (newline), caret movement, Home/End, Backspace/Delete, undo/redo. The
+    /// shell (events.rs) converts the crossterm `KeyEvent` to `tui_textarea::Input`;
+    /// `update()` applies it via `TextArea::input` (ADR 0064).
+    ComposeInput(tui_textarea::Input),
     /// Submit the current compose buffer as a new comment.
     ComposeSubmit,
     /// Cancel the compose area, discarding the buffer.
@@ -544,6 +608,18 @@ pub enum Msg {
     ConfirmDeleteComment,
     /// Cancel the pending delete (Esc key in confirm sub-mode).
     CancelDeleteComment,
+    /// The shell finished fetching and decoding the open viewer's image.
+    ///
+    /// Sent only by the shell wiring landing in slice 0059 (ADR 0065); this
+    /// slice's `update_image` handles the transition but nothing produces the
+    /// message yet, so tests construct it directly.
+    #[allow(dead_code)]
+    ImageLoaded,
+    /// The shell failed to fetch or decode the open viewer's image.
+    ///
+    /// See `ImageLoaded` above — same slice-0059 wiring boundary.
+    #[allow(dead_code)]
+    ImageLoadErr(String),
 }
 
 impl Model {
@@ -710,8 +786,6 @@ pub fn update(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
         | Msg::HeaderNameResolved(_)) => update_loaded(model, m),
         m @ (Msg::ComposeOpen
         | Msg::ComposeInput(_)
-        | Msg::ComposeNewline
-        | Msg::ComposeBackspace
         | Msg::ComposeSubmit
         | Msg::ComposeCancel
         | Msg::CommentMutationOk
@@ -721,7 +795,32 @@ pub fn update(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
         Msg::FocusPrevComment => (handle_focus_prev(model), vec![]),
         Msg::ConfirmDeleteComment => handle_confirm_delete(model),
         Msg::CancelDeleteComment => (handle_cancel_delete(model), vec![]),
+        m @ (Msg::ImageLoaded | Msg::ImageLoadErr(_)) => update_image(model, m),
     }
+}
+
+/// Apply the shell's image-fetch outcome to an open `ImageViewer` overlay.
+///
+/// No-op when the overlay is not `ImageViewer` (e.g. the user already closed
+/// it before the fetch settled).
+fn update_image(mut model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
+    let new_status = match msg {
+        Msg::ImageLoaded => Some(ImageStatus::Ready),
+        Msg::ImageLoadErr(reason) => Some(ImageStatus::Error(reason)),
+        _ => None,
+    };
+    let Some(new_status) = new_status else {
+        return (model, vec![]);
+    };
+    if let Some(Screen::Detail {
+        ref mut overlay, ..
+    }) = model.top_mut()
+    {
+        if let Some(status) = overlay.image_viewer_status_mut() {
+            *status = new_status;
+        }
+    }
+    (model, vec![])
 }
 
 fn update_scroll(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
@@ -786,9 +885,7 @@ fn update_loaded(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
 fn update_compose(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
     match msg {
         Msg::ComposeOpen => (handle_compose_open(model), vec![]),
-        Msg::ComposeInput(c) => (handle_compose_input(model, c), vec![]),
-        Msg::ComposeNewline => (handle_compose_newline(model), vec![]),
-        Msg::ComposeBackspace => (handle_compose_backspace(model), vec![]),
+        Msg::ComposeInput(input) => (handle_compose_input(model, input), vec![]),
         Msg::ComposeSubmit => handle_compose_submit(model),
         Msg::ComposeCancel => (handle_compose_cancel(model), vec![]),
         Msg::CommentMutationOk => handle_comment_mutation_ok(model),
@@ -1103,7 +1200,37 @@ fn apply_detail_click_target(
             };
             (model, vec![Cmd::OpenAsset { instance, url }])
         }
+        DetailClickTarget::ViewImage(asset) => {
+            if !matches!(model.top(), Some(Screen::Detail { .. })) {
+                return (model, vec![]);
+            }
+            (
+                handle_open_image_viewer(model, asset.clone()),
+                vec![Cmd::LoadImage { asset }],
+            )
+        }
     }
+}
+
+/// Set `overlay = ImageViewer { asset, status: Loading }`, opening the viewer.
+///
+/// Invalidates the render cache like the other overlay-open handlers
+/// (`handle_compose_open`, `handle_delete_comment_request`) so it appears on
+/// the next reflow. No-op when the top screen is not Detail.
+fn handle_open_image_viewer(mut model: Model, asset: ImageAssetRef) -> Model {
+    if let Some(Screen::Detail {
+        ref mut overlay,
+        ref mut rendered_width,
+        ..
+    }) = model.top_mut()
+    {
+        *overlay = DetailOverlay::ImageViewer {
+            asset,
+            status: ImageStatus::Loading,
+        };
+        *rendered_width = usize::MAX;
+    }
+    model
 }
 
 /// Return true when `row` falls within the scrollable body text area of the Detail screen.
@@ -1245,6 +1372,9 @@ fn handle_back(model: Model) -> Model {
         if overlay.is_confirm() {
             return handle_cancel_delete(model);
         }
+        if overlay.is_image_viewer() {
+            return handle_close_image_viewer(model);
+        }
     }
     let mut model = model;
     if model.stack.len() <= 1 {
@@ -1256,7 +1386,27 @@ fn handle_back(model: Model) -> Model {
 }
 
 fn handle_quit(mut model: Model) -> Model {
+    // When the image viewer is open, q closes it instead of quitting the app.
+    if let Some(Screen::Detail { overlay, .. }) = model.top() {
+        if overlay.is_image_viewer() {
+            return handle_close_image_viewer(model);
+        }
+    }
     model.should_quit = true;
+    model
+}
+
+/// Set `overlay = None`, closing the image viewer (Esc/q).
+fn handle_close_image_viewer(mut model: Model) -> Model {
+    if let Some(Screen::Detail {
+        ref mut overlay,
+        ref mut rendered_width,
+        ..
+    }) = model.top_mut()
+    {
+        *overlay = DetailOverlay::None;
+        *rendered_width = usize::MAX;
+    }
     model
 }
 
@@ -1443,7 +1593,7 @@ fn handle_compose_open(mut model: Model) -> Model {
         if !overlay.is_compose() {
             *overlay = DetailOverlay::Compose(Compose {
                 kind: ComposeKind::New,
-                buffer: String::new(),
+                editor: TextArea::default(),
                 status: ComposeStatus::Editing,
             });
             *rendered_width = usize::MAX;
@@ -1452,7 +1602,11 @@ fn handle_compose_open(mut model: Model) -> Model {
     model
 }
 
-fn handle_compose_input(mut model: Model, c: char) -> Model {
+/// Apply a backend-neutral key input to the compose editor.
+///
+/// A pure data operation: `TextArea::input` handles printable chars, newline,
+/// caret movement, Home/End, Backspace/Delete, and undo/redo internally.
+fn handle_compose_input(mut model: Model, input: tui_textarea::Input) -> Model {
     if let Some(Screen::Detail {
         ref mut overlay,
         ref mut rendered_width,
@@ -1461,41 +1615,7 @@ fn handle_compose_input(mut model: Model, c: char) -> Model {
     {
         if let Some(cp) = overlay.compose_mut() {
             if cp.status == ComposeStatus::Editing {
-                cp.buffer.push(c);
-                *rendered_width = usize::MAX;
-            }
-        }
-    }
-    model
-}
-
-fn handle_compose_newline(mut model: Model) -> Model {
-    if let Some(Screen::Detail {
-        ref mut overlay,
-        ref mut rendered_width,
-        ..
-    }) = model.top_mut()
-    {
-        if let Some(cp) = overlay.compose_mut() {
-            if cp.status == ComposeStatus::Editing {
-                cp.buffer.push('\n');
-                *rendered_width = usize::MAX;
-            }
-        }
-    }
-    model
-}
-
-fn handle_compose_backspace(mut model: Model) -> Model {
-    if let Some(Screen::Detail {
-        ref mut overlay,
-        ref mut rendered_width,
-        ..
-    }) = model.top_mut()
-    {
-        if let Some(cp) = overlay.compose_mut() {
-            if cp.status == ComposeStatus::Editing {
-                cp.buffer.pop();
+                cp.editor.input(input);
                 *rendered_width = usize::MAX;
             }
         }
@@ -1540,7 +1660,8 @@ fn handle_compose_submit(mut model: Model) -> (Model, Vec<Cmd>) {
 
 /// Extract the fields needed to submit a compose buffer, or None when the guard fails.
 ///
-/// Guard: overlay must be Compose, status must be `Editing`, and buffer must be non-empty.
+/// Guard: overlay must be Compose, status must be `Editing`, and the joined editor
+/// body must be non-empty after trimming (blocks whitespace-only submits).
 fn extract_compose_submit_info(model: &Model) -> Option<(String, i64, i64, ComposeKind, String)> {
     match model.top() {
         Some(Screen::Detail {
@@ -1551,13 +1672,14 @@ fn extract_compose_submit_info(model: &Model) -> Option<(String, i64, i64, Compo
             ..
         }) => {
             let cp = overlay.compose()?;
-            if cp.status == ComposeStatus::Editing && !cp.buffer.is_empty() {
+            let body = cp.editor.lines().join("\n");
+            if cp.status == ComposeStatus::Editing && !body.trim().is_empty() {
                 Some((
                     instance.clone(),
                     *project_id,
                     *task_id,
                     cp.kind.clone(),
-                    cp.buffer.clone(),
+                    body,
                 ))
             } else {
                 None
@@ -1615,7 +1737,7 @@ fn handle_edit_comment_request(mut model: Model, comment_id: i64) -> Model {
     {
         *overlay = DetailOverlay::Compose(Compose {
             kind: ComposeKind::Edit { comment_id },
-            buffer: body,
+            editor: TextArea::from(body.lines()),
             status: ComposeStatus::Editing,
         });
         *rendered_width = usize::MAX;
