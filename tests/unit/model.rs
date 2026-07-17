@@ -5892,3 +5892,161 @@ fn affordance_kind_is_row_target_only_for_open_asset() {
         "OpenUrl must NOT be a row target"
     );
 }
+
+// ── Image viewer overlay lifecycle tests (ADR 0065 slice 0058a) ──────────────
+
+use crate::tui::model::{ImageAssetRef, ImageStatus};
+
+fn image_asset(label: &str, url: &str) -> ImageAssetRef {
+    ImageAssetRef {
+        url: url.into(),
+        label: label.into(),
+    }
+}
+
+fn detail_model_with_overlay(new_overlay: DetailOverlay) -> Model {
+    let mut m = detail_model_for_compose("inst", 10, 42);
+    if let Some(Screen::Detail {
+        ref mut overlay, ..
+    }) = m.stack.last_mut()
+    {
+        *overlay = new_overlay;
+    }
+    m
+}
+
+fn extract_image_viewer(model: &Model) -> Option<(ImageAssetRef, ImageStatus)> {
+    match model.top() {
+        Some(Screen::Detail { overlay, .. }) => overlay
+            .image_viewer()
+            .map(|(asset, status)| (asset.clone(), status.clone())),
+        _ => None,
+    }
+}
+
+// A1: applying DetailClickTarget::ViewImage(asset) sets overlay=ImageViewer{Loading}
+// and emits Cmd::LoadImage{asset}.
+#[test]
+fn view_image_click_target_opens_viewer_loading_and_emits_load_image() {
+    let m = detail_model_for_compose("inst", 10, 42);
+    let asset = image_asset("photo.png", "https://example.test/photo.png");
+    let (m2, cmds) = apply_detail_click_target(m, DetailClickTarget::ViewImage(asset.clone()));
+
+    let (got_asset, status) =
+        extract_image_viewer(&m2).expect("overlay must be ImageViewer after ViewImage target");
+    assert_eq!(got_asset, asset);
+    assert_eq!(status, ImageStatus::Loading);
+
+    assert_eq!(cmds.len(), 1, "must emit exactly one Cmd; got {cmds:?}");
+    match &cmds[0] {
+        Cmd::LoadImage { asset: cmd_asset } => assert_eq!(*cmd_asset, asset),
+        other => panic!("expected Cmd::LoadImage, got {other:?}"),
+    }
+}
+
+// A2: ImageViewer replaces any pre-existing overlay by construction (mutual exclusion —
+// no state can hold ImageViewer together with Compose/ConfirmDelete).
+#[test]
+fn view_image_click_target_replaces_existing_confirm_overlay() {
+    let m = detail_model_with_overlay(DetailOverlay::ConfirmDelete { comment_id: 5 });
+    let asset = image_asset("photo.png", "u");
+    let (m2, _) = apply_detail_click_target(m, DetailClickTarget::ViewImage(asset));
+
+    let overlay = match m2.top() {
+        Some(Screen::Detail { overlay, .. }) => overlay,
+        _ => panic!("expected Detail screen"),
+    };
+    assert!(overlay.image_viewer().is_some());
+    assert!(
+        !overlay.is_confirm(),
+        "ImageViewer must replace ConfirmDelete, not coexist with it"
+    );
+}
+
+// A2: Msg::ImageLoaded flips an open viewer's status Loading -> Ready.
+#[test]
+fn image_loaded_msg_transitions_loading_to_ready() {
+    let asset = image_asset("a.png", "u");
+    let m = detail_model_with_overlay(DetailOverlay::ImageViewer {
+        asset: asset.clone(),
+        status: ImageStatus::Loading,
+    });
+    let (m2, cmds) = update(m, Msg::ImageLoaded);
+    assert!(cmds.is_empty(), "ImageLoaded must emit no Cmd");
+    let (got_asset, status) = extract_image_viewer(&m2).expect("overlay must stay ImageViewer");
+    assert_eq!(got_asset, asset);
+    assert_eq!(status, ImageStatus::Ready);
+}
+
+// A2: Msg::ImageLoadErr(reason) flips an open viewer's status Loading -> Error(reason).
+#[test]
+fn image_load_err_msg_transitions_loading_to_error_with_reason() {
+    let asset = image_asset("a.png", "u");
+    let m = detail_model_with_overlay(DetailOverlay::ImageViewer {
+        asset,
+        status: ImageStatus::Loading,
+    });
+    let (m2, cmds) = update(m, Msg::ImageLoadErr("fetch failed".into()));
+    assert!(cmds.is_empty(), "ImageLoadErr must emit no Cmd");
+    let (_, status) = extract_image_viewer(&m2).expect("overlay must stay ImageViewer");
+    assert_eq!(status, ImageStatus::Error("fetch failed".into()));
+}
+
+// Edge case: ImageLoaded/ImageLoadErr are no-ops when no viewer is open (e.g. the
+// user already closed it before the shell's fetch settled).
+#[test]
+fn image_loaded_msg_is_noop_when_no_viewer_open() {
+    let m = detail_model_for_compose("inst", 10, 42);
+    let (m2, cmds) = update(m, Msg::ImageLoaded);
+    assert!(cmds.is_empty());
+    assert!(extract_image_viewer(&m2).is_none());
+}
+
+// A2: Esc (Msg::Back) closes an open image viewer without popping the nav stack.
+#[test]
+fn esc_closes_open_image_viewer_without_popping_stack() {
+    let asset = image_asset("a.png", "u");
+    let m = detail_model_with_overlay(DetailOverlay::ImageViewer {
+        asset,
+        status: ImageStatus::Ready,
+    });
+    let (m2, cmds) = update(m, Msg::Back);
+    assert!(cmds.is_empty());
+    match m2.top() {
+        Some(Screen::Detail { overlay, .. }) => {
+            assert!(matches!(overlay, DetailOverlay::None))
+        }
+        _ => panic!("expected Detail screen; Esc must not pop the stack while the viewer is open"),
+    }
+    assert!(!m2.should_quit, "Esc must close the viewer, not quit");
+}
+
+// A2: q (Msg::Quit) closes an open image viewer instead of quitting the app.
+#[test]
+fn q_closes_open_image_viewer_instead_of_quitting() {
+    let asset = image_asset("a.png", "u");
+    let m = detail_model_with_overlay(DetailOverlay::ImageViewer {
+        asset,
+        status: ImageStatus::Error("boom".into()),
+    });
+    let (m2, cmds) = update(m, Msg::Quit);
+    assert!(cmds.is_empty());
+    match m2.top() {
+        Some(Screen::Detail { overlay, .. }) => {
+            assert!(matches!(overlay, DetailOverlay::None))
+        }
+        _ => panic!("expected Detail screen"),
+    }
+    assert!(
+        !m2.should_quit,
+        "q must close the viewer, not quit, while it is open"
+    );
+}
+
+// Regression guard: q still quits normally when no overlay is open.
+#[test]
+fn q_still_quits_when_no_overlay_open() {
+    let m = detail_model_for_compose("inst", 10, 42);
+    let (m2, _) = update(m, Msg::Quit);
+    assert!(m2.should_quit, "q must quit when no overlay is open");
+}

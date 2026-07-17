@@ -533,6 +533,10 @@ fn dispatch_cmds(
             | Cmd::DeleteComment { .. }) => {
                 dispatch_comment_write(cmd, targets, http, &tx);
             }
+            // The fetch/decode/StatefulProtocol handling for the image viewer is
+            // slice 0059 (ADR 0065); this slice only wires the pure overlay lifecycle,
+            // so the viewer stays on its Loading placeholder until that slice lands.
+            Cmd::LoadImage { .. } => {}
         }
     }
 }

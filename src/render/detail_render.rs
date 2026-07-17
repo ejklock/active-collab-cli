@@ -292,6 +292,19 @@ pub(crate) fn format_asset_row(prefix: &str, label: &str, width: usize) -> Vec<S
     result
 }
 
+/// Raster image extensions the in-TUI viewer can display (ADR 0065 §1).
+const IMAGE_EXTENSIONS: [&str; 6] = ["png", "jpg", "jpeg", "gif", "webp", "bmp"];
+
+/// Returns true when `name`'s derived filename (ADR 0023) ends in a viewable raster
+/// extension, matched case-insensitively. Extensionless names and non-raster
+/// extensions (e.g. `pdf`, `docx`, `txt`) return false.
+pub(crate) fn is_image_filename(name: &str) -> bool {
+    match name.rsplit_once('.') {
+        Some((_, ext)) => IMAGE_EXTENSIONS.contains(&ext.to_ascii_lowercase().as_str()),
+        None => false,
+    }
+}
+
 /// Compute the `StyleRun`s for a content row given its rich spans and the left chrome offset.
 ///
 /// Each span's text is measured in display columns. Runs that carry non-Plain styles
@@ -1015,12 +1028,17 @@ pub fn build_detail_content(
     }
 }
 
-/// Appends the asset panel section (blank separator, rendered rows, and
-/// `OpenAsset` affordances) to the running `lines`/`line_styles`/`affordances`
-/// vecs kept by `build_detail_content`.
+/// Appends the asset panel section (blank separator, rendered rows, and one
+/// `ViewImage` or `OpenAsset` affordance per asset row) to the running
+/// `lines`/`line_styles`/`affordances` vecs kept by `build_detail_content`.
+///
+/// An asset row emits `ViewImage` when its derived filename is a raster image
+/// ([ADR 0065] §1); every other row keeps `OpenAsset` (ADR 0025 external open).
 ///
 /// Called only when the asset list is non-empty; the blank separator line is
 /// included here so the caller's index alignment invariant is preserved.
+///
+/// [ADR 0065]: /adr/0065-image-attachment-viewer-modal-overlay.md
 fn splice_asset_section(
     assets: &[Asset],
     inner_width: usize,
@@ -1050,11 +1068,20 @@ fn splice_asset_section(
                 .iter()
                 .find(|r| r.style == crate::richtext::RichStyle::Link);
             if let Some(span) = link_span {
+                let asset = &assets[asset_idx];
+                let kind = if is_image_filename(&asset.name) {
+                    AffordanceKind::ViewImage {
+                        url: asset.url.clone(),
+                        label: asset.name.clone(),
+                    }
+                } else {
+                    AffordanceKind::OpenAsset(asset.url.clone())
+                };
                 affordances.push(LocalAffordance {
                     line_idx: section_base_idx + section_idx,
                     col_start: span.start,
                     col_end: span.start + span.len,
-                    kind: AffordanceKind::OpenAsset(assets[asset_idx].url.clone()),
+                    kind,
                 });
             }
         }

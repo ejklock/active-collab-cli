@@ -160,6 +160,11 @@ pub enum Cmd {
         instance: String,
         comment_id: i64,
     },
+    /// Fetch and decode the image bytes for an opened image-viewer asset.
+    /// Handled entirely by the shell (ADR 0065); the pure Model never sees bytes.
+    LoadImage {
+        asset: ImageAssetRef,
+    },
 }
 
 /// What kind of comment compose operation is in progress.
@@ -177,6 +182,29 @@ pub enum ComposeKind {
 pub enum ComposeStatus {
     Editing,
     Submitting,
+    Error(String),
+}
+
+/// The image asset the viewer overlay is displaying.
+///
+/// `label` is the display filename (used for the modal title and the
+/// loading/error placeholder text); `url` is the source location the shell
+/// fetches bytes from (slice 0059). Carries no protocol/bytes state (ADR 0065).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ImageAssetRef {
+    pub url: String,
+    pub label: String,
+}
+
+/// Lifecycle phase of the image-viewer overlay.
+///
+/// The pure Model tracks only this lifecycle; the decoded bytes and the
+/// `ratatui-image` `StatefulProtocol` live in a shell-owned side table,
+/// never here (ADR 0065).
+#[derive(Debug, Clone, PartialEq)]
+pub enum ImageStatus {
+    Loading,
+    Ready,
     Error(String),
 }
 
@@ -207,7 +235,13 @@ pub struct Compose {
 pub enum DetailOverlay {
     None,
     Compose(Compose),
-    ConfirmDelete { comment_id: i64 },
+    ConfirmDelete {
+        comment_id: i64,
+    },
+    ImageViewer {
+        asset: ImageAssetRef,
+        status: ImageStatus,
+    },
 }
 
 impl DetailOverlay {
@@ -232,12 +266,30 @@ impl DetailOverlay {
         }
     }
 
+    pub fn image_viewer(&self) -> Option<(&ImageAssetRef, &ImageStatus)> {
+        match self {
+            DetailOverlay::ImageViewer { asset, status } => Some((asset, status)),
+            _ => Option::None,
+        }
+    }
+
+    pub fn image_viewer_status_mut(&mut self) -> Option<&mut ImageStatus> {
+        match self {
+            DetailOverlay::ImageViewer { status, .. } => Some(status),
+            _ => Option::None,
+        }
+    }
+
     pub fn is_compose(&self) -> bool {
         matches!(self, DetailOverlay::Compose(_))
     }
 
     pub fn is_confirm(&self) -> bool {
         matches!(self, DetailOverlay::ConfirmDelete { .. })
+    }
+
+    pub fn is_image_viewer(&self) -> bool {
+        matches!(self, DetailOverlay::ImageViewer { .. })
     }
 }
 
@@ -556,6 +608,18 @@ pub enum Msg {
     ConfirmDeleteComment,
     /// Cancel the pending delete (Esc key in confirm sub-mode).
     CancelDeleteComment,
+    /// The shell finished fetching and decoding the open viewer's image.
+    ///
+    /// Sent only by the shell wiring landing in slice 0059 (ADR 0065); this
+    /// slice's `update_image` handles the transition but nothing produces the
+    /// message yet, so tests construct it directly.
+    #[allow(dead_code)]
+    ImageLoaded,
+    /// The shell failed to fetch or decode the open viewer's image.
+    ///
+    /// See `ImageLoaded` above — same slice-0059 wiring boundary.
+    #[allow(dead_code)]
+    ImageLoadErr(String),
 }
 
 impl Model {
@@ -731,7 +795,32 @@ pub fn update(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
         Msg::FocusPrevComment => (handle_focus_prev(model), vec![]),
         Msg::ConfirmDeleteComment => handle_confirm_delete(model),
         Msg::CancelDeleteComment => (handle_cancel_delete(model), vec![]),
+        m @ (Msg::ImageLoaded | Msg::ImageLoadErr(_)) => update_image(model, m),
     }
+}
+
+/// Apply the shell's image-fetch outcome to an open `ImageViewer` overlay.
+///
+/// No-op when the overlay is not `ImageViewer` (e.g. the user already closed
+/// it before the fetch settled).
+fn update_image(mut model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
+    let new_status = match msg {
+        Msg::ImageLoaded => Some(ImageStatus::Ready),
+        Msg::ImageLoadErr(reason) => Some(ImageStatus::Error(reason)),
+        _ => None,
+    };
+    let Some(new_status) = new_status else {
+        return (model, vec![]);
+    };
+    if let Some(Screen::Detail {
+        ref mut overlay, ..
+    }) = model.top_mut()
+    {
+        if let Some(status) = overlay.image_viewer_status_mut() {
+            *status = new_status;
+        }
+    }
+    (model, vec![])
 }
 
 fn update_scroll(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
@@ -1111,7 +1200,37 @@ fn apply_detail_click_target(
             };
             (model, vec![Cmd::OpenAsset { instance, url }])
         }
+        DetailClickTarget::ViewImage(asset) => {
+            if !matches!(model.top(), Some(Screen::Detail { .. })) {
+                return (model, vec![]);
+            }
+            (
+                handle_open_image_viewer(model, asset.clone()),
+                vec![Cmd::LoadImage { asset }],
+            )
+        }
     }
+}
+
+/// Set `overlay = ImageViewer { asset, status: Loading }`, opening the viewer.
+///
+/// Invalidates the render cache like the other overlay-open handlers
+/// (`handle_compose_open`, `handle_delete_comment_request`) so it appears on
+/// the next reflow. No-op when the top screen is not Detail.
+fn handle_open_image_viewer(mut model: Model, asset: ImageAssetRef) -> Model {
+    if let Some(Screen::Detail {
+        ref mut overlay,
+        ref mut rendered_width,
+        ..
+    }) = model.top_mut()
+    {
+        *overlay = DetailOverlay::ImageViewer {
+            asset,
+            status: ImageStatus::Loading,
+        };
+        *rendered_width = usize::MAX;
+    }
+    model
 }
 
 /// Return true when `row` falls within the scrollable body text area of the Detail screen.
@@ -1253,6 +1372,9 @@ fn handle_back(model: Model) -> Model {
         if overlay.is_confirm() {
             return handle_cancel_delete(model);
         }
+        if overlay.is_image_viewer() {
+            return handle_close_image_viewer(model);
+        }
     }
     let mut model = model;
     if model.stack.len() <= 1 {
@@ -1264,7 +1386,27 @@ fn handle_back(model: Model) -> Model {
 }
 
 fn handle_quit(mut model: Model) -> Model {
+    // When the image viewer is open, q closes it instead of quitting the app.
+    if let Some(Screen::Detail { overlay, .. }) = model.top() {
+        if overlay.is_image_viewer() {
+            return handle_close_image_viewer(model);
+        }
+    }
     model.should_quit = true;
+    model
+}
+
+/// Set `overlay = None`, closing the image viewer (Esc/q).
+fn handle_close_image_viewer(mut model: Model) -> Model {
+    if let Some(Screen::Detail {
+        ref mut overlay,
+        ref mut rendered_width,
+        ..
+    }) = model.top_mut()
+    {
+        *overlay = DetailOverlay::None;
+        *rendered_width = usize::MAX;
+    }
     model
 }
 

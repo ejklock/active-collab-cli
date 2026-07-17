@@ -3,16 +3,23 @@ use crate::render::{display_width, wrap_text};
 use crate::tui::detail_geometry::Selection;
 use crate::tui::footer::{self, FooterPlan};
 use crate::tui::model::{
-    ClickTarget, Compose, ComposeKind, ComposeStatus, ModalButtonTarget, Model, Screen,
+    ClickTarget, Compose, ComposeKind, ComposeStatus, ImageAssetRef, ImageStatus,
+    ModalButtonTarget, Model, Screen,
 };
 use crate::tui::screens::{draw_detail, draw_projects, draw_tasks, DetailParams};
 use crate::tui::theme;
 use crate::tui::widgets::modal::ModalContent;
 use ratatui::{
-    layout::{Alignment, Constraint, Direction, Layout},
-    widgets::Paragraph,
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    style::Modifier,
+    widgets::{Block, Borders, Clear, Paragraph},
     Frame,
 };
+
+/// Margin (cells) between the near-full image-viewer box and the detail
+/// content area it sits inside — distinguishes it from `render_modal`'s
+/// centered ~70% box (ADR 0065).
+const IMAGE_VIEWER_MARGIN: u16 = 1;
 
 const MIN_WIDTH: u16 = 24;
 const MIN_HEIGHT: u16 = 6;
@@ -161,6 +168,9 @@ pub fn view(
             if overlay.is_confirm() {
                 render_confirm_modal(frame, area, modal_btn_targets);
             }
+            if let Some((asset, status)) = overlay.image_viewer() {
+                render_image_viewer(frame, area, chunks[1], asset, status);
+            }
         }
     }
 
@@ -260,6 +270,111 @@ fn register_confirm_button_targets(
         row: hint_row,
         is_confirm: false,
     });
+}
+
+/// Render the image-viewer overlay.
+///
+/// Unlike `render_modal`'s centered ~70% box, this sizes the box to the
+/// near-full detail content area (`content_area` minus `IMAGE_VIEWER_MARGIN`)
+/// so a real image fills as much of the screen as possible once ratatui-image
+/// lands (slice 0059). `frame_area` (the whole frame) is what gets dimmed,
+/// matching the other Detail overlays.
+fn render_image_viewer(
+    frame: &mut Frame,
+    frame_area: Rect,
+    content_area: Rect,
+    asset: &ImageAssetRef,
+    status: &ImageStatus,
+) {
+    dim_frame(frame, frame_area);
+    let viewer_area = image_viewer_area(content_area);
+    frame.render_widget(Clear, viewer_area);
+    draw_image_viewer_box(frame, viewer_area, asset, status);
+}
+
+/// Apply `Modifier::DIM` plus the modal backdrop style to every cell in `area`.
+///
+/// Duplicates `widgets::modal::dim_backdrop` (private to that module) rather
+/// than exposing it — the same buffer-patch technique `draw_selection_highlight`
+/// already uses below.
+fn dim_frame(frame: &mut Frame, area: Rect) {
+    let backdrop_style = theme::modal_backdrop_style();
+    let buf = frame.buffer_mut();
+    for y in area.top()..area.bottom() {
+        for x in area.left()..area.right() {
+            if let Some(cell) = buf.cell_mut((x, y)) {
+                let patched = cell
+                    .style()
+                    .add_modifier(Modifier::DIM)
+                    .patch(backdrop_style);
+                cell.set_style(patched);
+            }
+        }
+    }
+}
+
+/// Shrink `content_area` by `IMAGE_VIEWER_MARGIN` on every side, clamped to
+/// stay non-degenerate on a tiny terminal.
+fn image_viewer_area(content_area: Rect) -> Rect {
+    let margin = IMAGE_VIEWER_MARGIN;
+    let w = content_area.width.saturating_sub(margin * 2).max(1);
+    let h = content_area.height.saturating_sub(margin * 2).max(1);
+    Rect::new(content_area.x + margin, content_area.y + margin, w, h)
+}
+
+fn draw_image_viewer_box(
+    frame: &mut Frame,
+    area: Rect,
+    asset: &ImageAssetRef,
+    status: &ImageStatus,
+) {
+    let title = format!(" {} ", asset.label);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(theme::modal_border_style())
+        .title(title)
+        .title_style(theme::modal_title_style());
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    draw_image_viewer_body(frame, inner, asset, status);
+}
+
+/// Draw the placeholder body text plus the "Esc/q fechar" hint on the bottom row.
+///
+/// Loading shows a status line + the filename; Error shows the failure message;
+/// Ready is a placeholder too in this slice — the real `ratatui-image` render
+/// replaces it in slice 0059.
+fn draw_image_viewer_body(
+    frame: &mut Frame,
+    inner: Rect,
+    asset: &ImageAssetRef,
+    status: &ImageStatus,
+) {
+    let hint_rows: u16 = 1;
+    let body_h = inner.height.saturating_sub(hint_rows);
+    let body_area = Rect::new(inner.x, inner.y, inner.width, body_h);
+    let body_text = image_viewer_body_text(status, &asset.label);
+    let paragraph = Paragraph::new(body_text)
+        .alignment(Alignment::Center)
+        .style(theme::modal_body_style());
+    frame.render_widget(paragraph, body_area);
+
+    if inner.height <= body_h {
+        return;
+    }
+    let hint_area = Rect::new(inner.x, inner.y + body_h, inner.width, 1);
+    let hint = Paragraph::new(t("Esc/q close"))
+        .alignment(Alignment::Center)
+        .style(theme::modal_hint_style());
+    frame.render_widget(hint, hint_area);
+}
+
+fn image_viewer_body_text(status: &ImageStatus, label: &str) -> String {
+    match status {
+        ImageStatus::Loading => format!("{}\n{}", t("Loading…"), label),
+        ImageStatus::Error(reason) => reason.clone(),
+        ImageStatus::Ready => label.to_owned(),
+    }
 }
 
 fn render_footer(
