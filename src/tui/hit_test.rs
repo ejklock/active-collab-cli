@@ -1,15 +1,20 @@
 use crate::render::AffordanceKind;
-use crate::tui::model::{Model, Screen};
+use crate::tui::model::{ImageAssetRef, Model, Screen};
 
 /// The result of resolving a Ctrl/Cmd+click in the Detail screen.
 ///
 /// Returned by `resolve_detail_click`; the caller maps each variant to the
 /// appropriate TEA effect without performing any coordinate math itself.
+///
+/// `ViewImage` is produced by `target_for` from an `AffordanceKind::ViewImage`
+/// span (ADR 0065 §1) and consumed by `apply_detail_click_target`, which opens
+/// the viewer overlay.
 pub enum DetailClickTarget {
     CommentEdit(i64),
     CommentDelete(i64),
     OpenUrl(String),
     OpenAsset(String),
+    ViewImage(ImageAssetRef),
 }
 
 /// Translate a viewport click coordinate to a scroll-aware `(line_idx, char_col)`
@@ -75,7 +80,7 @@ pub fn resolve_detail_click(
 /// Map an `AffordanceKind` to its typed `DetailClickTarget`.
 ///
 /// Returns `None` for any kind that does not produce a navigable target
-/// (currently all four kinds do produce one, but `None` keeps the contract
+/// (currently all five kinds do produce one, but `None` keeps the contract
 /// open without requiring an unreachable arm).
 ///
 /// Pure: no Model mutation, no Cmd construction.
@@ -85,5 +90,11 @@ fn target_for(kind: &AffordanceKind) -> Option<DetailClickTarget> {
         AffordanceKind::Delete(id) => Some(DetailClickTarget::CommentDelete(*id)),
         AffordanceKind::OpenUrl(url) => Some(DetailClickTarget::OpenUrl(url.clone())),
         AffordanceKind::OpenAsset(url) => Some(DetailClickTarget::OpenAsset(url.clone())),
+        AffordanceKind::ViewImage { url, label } => {
+            Some(DetailClickTarget::ViewImage(ImageAssetRef {
+                url: url.clone(),
+                label: label.clone(),
+            }))
+        }
     }
 }

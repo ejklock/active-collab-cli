@@ -5617,7 +5617,6 @@ fn asset_row_cells_carry_link_style_structural_not_url_detection() {
 
 mod compose_render {
     use crate::i18n::set_language;
-    use crate::render::compose_block_lines;
     use crate::tui::model::{
         Compose, ComposeKind, ComposeStatus, DetailOverlay, Header, Model, Screen,
     };
@@ -5626,24 +5625,25 @@ mod compose_render {
     use ratatui::{backend::TestBackend, Terminal};
     use serde_json::Value;
     use std::collections::HashMap;
+    use tui_textarea::TextArea;
 
     // Reuse the file-level LANG_MUTEX (not a module-local one) so language-mutating
     // tests in this module serialize with every other module's language-mutating
     // tests instead of racing on the shared global i18n state.
     use super::LANG_MUTEX;
 
-    fn compose_editing(buffer: &str) -> Compose {
+    fn compose_editing(text: &str) -> Compose {
         Compose {
             kind: ComposeKind::New,
-            buffer: buffer.into(),
+            editor: TextArea::from(text.lines()),
             status: ComposeStatus::Editing,
         }
     }
 
-    fn compose_edit_existing(comment_id: i64, buffer: &str) -> Compose {
+    fn compose_edit_existing(comment_id: i64, text: &str) -> Compose {
         Compose {
             kind: ComposeKind::Edit { comment_id },
-            buffer: buffer.into(),
+            editor: TextArea::from(text.lines()),
             status: ComposeStatus::Editing,
         }
     }
@@ -5808,16 +5808,44 @@ mod compose_render {
         );
     }
 
-    // AC3 (BDR 0026 Sc.3): compose body builder returns buffer lines (no label).
-    // compose_block_lines no longer prepends the '── Comment ──' label.
+    // AC2 (slice 0057b, BDR 0026): the compose body is painted by the tui_textarea
+    // `TextArea` widget, not a static `Paragraph` of its lines — so the widget's caret
+    // (Modifier::REVERSED cell) and current-line highlight (Modifier::UNDERLINED row)
+    // must be visible in the rendered buffer. No other style in this fixture (no
+    // selection, no comment body affordances) produces REVERSED/UNDERLINED cells, so
+    // their presence here is attributable only to `f.render_widget(&compose.editor, _)`.
     #[test]
-    fn compose_block_lines_returns_buffer_without_label() {
-        let cp = compose_editing("first\nsecond");
-        let (lines, _) = compose_block_lines(&cp);
-        assert_eq!(
-            lines,
-            vec!["first", "second"],
-            "compose_block_lines must return buffer lines only, no label: {lines:?}"
+    fn compose_editor_widget_renders_visible_caret_and_current_line_highlight() {
+        use ratatui::style::Modifier;
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let model = make_detail_model(DetailOverlay::Compose(compose_editing("hello")));
+        let buf = render_via_view(&model, 80, 24);
+        set_language("en");
+        let area = buf.area();
+
+        let has_caret_cell = (0..area.height).any(|y| {
+            (0..area.width).any(|x| {
+                buf.cell((x, y))
+                    .map(|c| c.modifier.contains(Modifier::REVERSED))
+                    .unwrap_or(false)
+            })
+        });
+        assert!(
+            has_caret_cell,
+            "compose modal must render the TextArea widget's caret (Modifier::REVERSED cell)"
+        );
+
+        let has_current_line_highlight = (0..area.height).any(|y| {
+            (0..area.width).any(|x| {
+                buf.cell((x, y))
+                    .map(|c| c.modifier.contains(Modifier::UNDERLINED))
+                    .unwrap_or(false)
+            })
+        });
+        assert!(
+            has_current_line_highlight,
+            "compose modal must render the TextArea widget's current-line highlight (Modifier::UNDERLINED)"
         );
     }
 
@@ -5937,6 +5965,71 @@ mod compose_render {
             "backdrop cell (0,0) must carry modal_backdrop_style's bg (surface_base token); got {:?}",
             cell.style().bg
         );
+    }
+}
+
+// AC B1 (slice 0057b): render_modal returns the inner content (body) Rect — the
+// area beneath the title border and above the hint row, not the outer bordered box.
+
+mod modal_render_inner_rect_contract {
+    use crate::tui::widgets::modal::{render_modal, ModalContent};
+    use ratatui::{backend::TestBackend, layout::Rect, Terminal};
+
+    fn cell_text(buf: &ratatui::buffer::Buffer, x: u16, y: u16) -> String {
+        buf.cell((x, y))
+            .map(|c| c.symbol().to_string())
+            .unwrap_or_default()
+    }
+
+    fn row_contains(buf: &ratatui::buffer::Buffer, y: u16, needle: &str) -> bool {
+        let width = buf.area().width;
+        let row: String = (0..width).map(|x| cell_text(buf, x, y)).collect();
+        row.contains(needle)
+    }
+
+    #[test]
+    fn render_modal_returns_body_rect_excluding_border_and_hint_row() {
+        let frame_area = Rect::new(0, 0, 40, 20);
+        let lines = vec!["one".to_string(), "two".to_string()];
+        let backend = TestBackend::new(40, 20);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut body_rect = Rect::default();
+        terminal
+            .draw(|frame| {
+                body_rect = render_modal(
+                    frame,
+                    frame_area,
+                    ModalContent {
+                        title: "Title",
+                        lines: &lines,
+                        hint: Some("the-hint"),
+                    },
+                );
+            })
+            .unwrap();
+        let buf = terminal.backend().buffer();
+
+        assert!(
+            body_rect.x > frame_area.x && body_rect.y > frame_area.y,
+            "body Rect must sit inside the border, not at the frame origin: {body_rect:?}"
+        );
+        assert!(
+            body_rect.height as usize >= lines.len(),
+            "body Rect must be tall enough to hold the body lines: {body_rect:?}"
+        );
+
+        // The hint row sits immediately below the returned body Rect, never inside it.
+        let hint_row = body_rect.y + body_rect.height;
+        assert!(
+            row_contains(buf, hint_row, "the-hint"),
+            "hint text must render on the row immediately below the returned body Rect"
+        );
+        for y in body_rect.y..(body_rect.y + body_rect.height) {
+            assert!(
+                !row_contains(buf, y, "the-hint"),
+                "the returned body Rect must not include the hint row (row {y})"
+            );
+        }
     }
 }
 
@@ -6880,6 +6973,7 @@ mod contextual_footer {
     use ratatui::{backend::TestBackend, Terminal};
     use serde_json::json;
     use std::collections::HashMap;
+    use tui_textarea::TextArea;
 
     fn buf_to_string(buf: &ratatui::buffer::Buffer) -> String {
         let area = buf.area();
@@ -6957,7 +7051,7 @@ mod contextual_footer {
     fn editing_compose() -> Compose {
         Compose {
             kind: ComposeKind::New,
-            buffer: String::new(),
+            editor: TextArea::default(),
             status: ComposeStatus::Editing,
         }
     }
@@ -6965,7 +7059,7 @@ mod contextual_footer {
     fn submitting_compose() -> Compose {
         Compose {
             kind: ComposeKind::New,
-            buffer: String::new(),
+            editor: TextArea::default(),
             status: ComposeStatus::Submitting,
         }
     }
@@ -6973,7 +7067,7 @@ mod contextual_footer {
     fn error_compose(msg: &str) -> Compose {
         Compose {
             kind: ComposeKind::New,
-            buffer: String::new(),
+            editor: TextArea::default(),
             status: ComposeStatus::Error(msg.to_string()),
         }
     }
@@ -7224,40 +7318,6 @@ mod contextual_footer {
                 && !last_row.contains("Copiado")
                 && !last_row.contains("Falha"),
             "idle Detail: last row must not contain any status text: {last_row}"
-        );
-    }
-
-    // AC3: compose_block_lines returns only the buffer body lines (no status, no label, no hint).
-    // Status and hint are rendered by the modal caller (view.rs), not by the body builder.
-    #[test]
-    fn compose_block_lines_does_not_contain_status_text() {
-        use crate::render::compose_block_lines;
-        let submitting = submitting_compose();
-        let (lines, _) = compose_block_lines(&submitting);
-        let joined = lines.join("\n");
-        assert!(
-            !joined.contains("Enviando"),
-            "compose_block_lines body must NOT contain 'Enviando' (status rendered by modal caller): {joined}"
-        );
-        assert!(
-            !joined.contains("Sending"),
-            "compose_block_lines body must NOT contain 'Sending…': {joined}"
-        );
-
-        let error = error_compose("oops");
-        let (lines_err, _) = compose_block_lines(&error);
-        let joined_err = lines_err.join("\n");
-        assert!(
-            !joined_err.contains("Failed"),
-            "compose_block_lines body must NOT contain error text: {joined_err}"
-        );
-
-        let editing = editing_compose();
-        let (lines_edit, _) = compose_block_lines(&editing);
-        let joined_edit = lines_edit.join("\n");
-        assert!(
-            !joined_edit.contains("Ctrl+S send"),
-            "compose_block_lines body must NOT contain hint text: {joined_edit}"
         );
     }
 
@@ -7884,6 +7944,7 @@ mod auth_error_render {
     use ratatui::{backend::TestBackend, Terminal};
     use serde_json::json;
     use std::collections::HashMap;
+    use tui_textarea::TextArea;
 
     const AUTH_ERR_EN: &str = "Token invalid or revoked — run `ac setup add` to re-authenticate.";
 
@@ -8008,14 +8069,14 @@ mod auth_error_render {
         );
     }
 
-    // AC2: Msg::AuthExpired sets auth_error and retains the compose buffer.
+    // AC2: Msg::AuthExpired sets auth_error and retains the compose editor content.
     #[test]
-    fn auth_expired_sets_auth_error_retains_compose_buffer() {
+    fn auth_expired_sets_auth_error_retains_compose_editor() {
         let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         set_language("en");
         let compose = Compose {
             kind: ComposeKind::New,
-            buffer: "my draft".into(),
+            editor: TextArea::from(["my draft"]),
             status: ComposeStatus::Editing,
         };
         let model = make_detail_model(false, DetailOverlay::Compose(compose));
@@ -8032,8 +8093,9 @@ mod auth_error_render {
                     .compose()
                     .expect("compose must be Some after AuthExpired");
                 assert_eq!(
-                    cp.buffer, "my draft",
-                    "compose buffer must be retained after AuthExpired"
+                    cp.editor.lines(),
+                    ["my draft"],
+                    "compose editor content must be retained after AuthExpired"
                 );
             }
             _ => panic!("expected Detail screen with compose"),
@@ -8188,12 +8250,15 @@ mod open_asset_affordance_emission {
         })
     }
 
-    // AC1-a: every asset content row carries an OpenAsset affordance with the asset's exact url.
+    // AC1-a: every NON-IMAGE asset content row carries an OpenAsset affordance with the
+    // asset's exact url. Both assets here are non-image extensions; image classification
+    // (which instead emits ViewImage) is covered by the image_affordance_classification
+    // module below.
     #[test]
     fn build_detail_content_emits_open_asset_affordance_for_each_asset() {
         let url_a = "https://example.com/report.pdf";
-        let url_b = "https://example.com/photo.png";
-        let task = task_with_attachments(&[("report.pdf", url_a), ("photo.png", url_b)]);
+        let url_b = "https://example.com/spreadsheet.xlsx";
+        let task = task_with_attachments(&[("report.pdf", url_a), ("spreadsheet.xlsx", url_b)]);
         let user_map: HashMap<i64, String> = HashMap::new();
         let inner_width = 80usize;
         let content = build_detail_content(&task, &[], &user_map, inner_width, None);
@@ -8514,6 +8579,543 @@ mod open_url_affordance_emission {
         assert!(
             url_affs.is_empty(),
             "a plain [note] token must produce no OpenUrl affordances; got: {url_affs:?}"
+        );
+    }
+}
+
+// ── Image viewer overlay render tests (ADR 0065 slice 0058a) ─────────────────
+//
+// Loading/Error draw a placeholder (real ratatui-image render lands in slice 0059).
+// Sized to the near-full detail content area, NOT render_modal's ~70% box.
+
+mod image_viewer_render {
+    use crate::i18n::set_language;
+    use crate::tui::model::{DetailOverlay, Header, ImageAssetRef, ImageStatus, Model, Screen};
+    use crate::tui::theme;
+    use crate::tui::view::view;
+    use ratatui::{backend::TestBackend, style::Modifier, Terminal};
+    use serde_json::Value;
+    use std::collections::HashMap;
+
+    // Reuse the file-level LANG_MUTEX (not a module-local one) so language-mutating
+    // tests in this module serialize with every other module's language-mutating
+    // tests instead of racing on the shared global i18n state.
+    use super::LANG_MUTEX;
+
+    fn make_detail_model(overlay: DetailOverlay) -> Model {
+        Model {
+            stack: vec![Screen::Detail {
+                instance: "inst".into(),
+                project_id: 1,
+                task_id: 42,
+                task: Value::Null,
+                comments: vec![],
+                user_map: HashMap::new(),
+                lines: vec![],
+                line_styles: vec![],
+                assets: vec![],
+                offset: 0,
+                loading: false,
+                rendered_width: usize::MAX,
+                overlay,
+                current_user_id: None,
+                affordances: vec![],
+                focused_comment: None,
+                auth_error: false,
+                comment_spans: vec![],
+            }],
+            should_quit: false,
+            header: Header::from_instances(&[], None),
+            viewport: (80, 24),
+            click_targets: vec![],
+            modal_button_targets: vec![],
+            last_loaded: None,
+            selection: None,
+            copied_feedback: false,
+        }
+    }
+
+    fn render_via_view(model: &Model, width: u16, height: u16) -> ratatui::buffer::Buffer {
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| view(model, frame, &mut vec![], &mut vec![]))
+            .unwrap();
+        terminal.backend().buffer().clone()
+    }
+
+    fn buf_text(buf: &ratatui::buffer::Buffer) -> String {
+        let area = buf.area();
+        let mut out = String::new();
+        for y in 0..area.height {
+            for x in 0..area.width {
+                out.push_str(buf.cell((x, y)).unwrap().symbol());
+            }
+            out.push('\n');
+        }
+        out
+    }
+
+    // A3: an open ImageViewer{Loading} draws the loading placeholder + the asset's
+    // filename over the backdrop.
+    #[test]
+    fn loading_viewer_shows_placeholder_and_filename() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let model = make_detail_model(DetailOverlay::ImageViewer {
+            asset: ImageAssetRef {
+                url: "https://example.test/photo.png".into(),
+                label: "photo.png".into(),
+            },
+            status: ImageStatus::Loading,
+        });
+        let buf = render_via_view(&model, 80, 24);
+        set_language("en");
+        let content = buf_text(&buf);
+        assert!(
+            content.contains("photo.png"),
+            "viewer must show the asset filename: {content}"
+        );
+        assert!(
+            content.contains("Loading"),
+            "viewer must show a loading placeholder while status is Loading: {content}"
+        );
+    }
+
+    // A3: Error(reason) renders the failure message instead of the loading placeholder.
+    #[test]
+    fn error_viewer_shows_failure_message() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let model = make_detail_model(DetailOverlay::ImageViewer {
+            asset: ImageAssetRef {
+                url: "https://example.test/photo.png".into(),
+                label: "photo.png".into(),
+            },
+            status: ImageStatus::Error("404 not found".into()),
+        });
+        let buf = render_via_view(&model, 80, 24);
+        set_language("en");
+        let content = buf_text(&buf);
+        assert!(
+            content.contains("404 not found"),
+            "viewer must show the error message on load failure: {content}"
+        );
+        assert!(
+            !content.contains("Loading"),
+            "an Error status must not also show the Loading placeholder: {content}"
+        );
+    }
+
+    // A3: the dim backdrop (Modifier::DIM, ADR 0039) is present while the viewer is open.
+    #[test]
+    fn open_viewer_backdrop_carries_dim_modifier() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let model = make_detail_model(DetailOverlay::ImageViewer {
+            asset: ImageAssetRef {
+                url: "u".into(),
+                label: "photo.png".into(),
+            },
+            status: ImageStatus::Loading,
+        });
+        let buf = render_via_view(&model, 80, 24);
+        set_language("en");
+        let area = buf.area();
+        let any_dim = (0..area.height).any(|y| {
+            (0..area.width).any(|x| {
+                buf.cell((x, y))
+                    .map(|c| c.modifier.contains(Modifier::DIM))
+                    .unwrap_or(false)
+            })
+        });
+        assert!(
+            any_dim,
+            "with the image viewer open, at least one backdrop cell must carry Modifier::DIM"
+        );
+    }
+
+    // A3/CX: the viewer box is sized to the near-full detail content area, not
+    // render_modal's ~70% box — on a 100×40 frame the compose/confirm modal box is
+    // bounded to width 64..=76 (see compose_modal_renders_at_70_percent_of_frame);
+    // the image viewer box must clear that ceiling by a wide margin.
+    #[test]
+    fn viewer_box_is_near_full_not_seventy_percent() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let model = make_detail_model(DetailOverlay::ImageViewer {
+            asset: ImageAssetRef {
+                url: "u".into(),
+                label: "photo.png".into(),
+            },
+            status: ImageStatus::Loading,
+        });
+        let backend = TestBackend::new(100, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| view(&model, frame, &mut vec![], &mut vec![]))
+            .unwrap();
+        set_language("en");
+        let buf = terminal.backend().buffer();
+        let area = buf.area();
+
+        let modal_border_fg = theme::modal_border_style().fg;
+        let border_chars = [
+            '\u{250C}', '\u{2510}', '\u{2514}', '\u{2518}', '\u{2502}', '\u{2500}',
+        ];
+        let is_modal_border = |x: u16, y: u16| -> bool {
+            buf.cell((x, y))
+                .map(|c| {
+                    let sym = c.symbol();
+                    let is_bc = border_chars.iter().any(|bc| sym.contains(*bc));
+                    is_bc && c.style().fg == modal_border_fg
+                })
+                .unwrap_or(false)
+        };
+
+        let modal_cols: Vec<u16> = (0..area.width)
+            .filter(|&x| (0..area.height).any(|y| is_modal_border(x, y)))
+            .collect();
+        let modal_rows: Vec<u16> = (0..area.height)
+            .filter(|&y| (0..area.width).any(|x| is_modal_border(x, y)))
+            .collect();
+
+        assert!(!modal_cols.is_empty(), "must find a viewer border column");
+        assert!(!modal_rows.is_empty(), "must find a viewer border row");
+
+        let modal_w = modal_cols.iter().max().unwrap() - modal_cols.iter().min().unwrap() + 1;
+        let modal_h = modal_rows.iter().max().unwrap() - modal_rows.iter().min().unwrap() + 1;
+
+        assert!(
+            modal_w > 76,
+            "viewer box width must clear the ~70% modal ceiling (76) on a 100-wide frame: got {modal_w}"
+        );
+        assert!(
+            modal_h > 32,
+            "viewer box height must clear the ~70% modal ceiling (32) on a 40-tall frame: got {modal_h}"
+        );
+    }
+}
+
+// --- ADR 0065 slice 0058b: image-asset classification, ViewImage affordance
+// emission, and hit-test resolve ---
+
+// B1: is_image_filename accepts the raster set (case-insensitive) and rejects
+// everything else, including extensionless names.
+mod image_filename_classification {
+    use crate::render::is_image_filename;
+
+    #[test]
+    fn accepts_raster_extensions_case_insensitively() {
+        let accepted = [
+            "photo.png",
+            "photo.PNG",
+            "picture.jpg",
+            "picture.JPG",
+            "snap.jpeg",
+            "snap.JpEg",
+            "anim.gif",
+            "anim.GIF",
+            "modern.webp",
+            "modern.WEBP",
+            "legacy.bmp",
+            "legacy.BMP",
+        ];
+        for name in accepted {
+            assert!(
+                is_image_filename(name),
+                "{name:?} must classify as an image filename"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_non_raster_extensions() {
+        let rejected = ["report.pdf", "notes.docx", "readme.txt", "archive.tar.gz"];
+        for name in rejected {
+            assert!(
+                !is_image_filename(name),
+                "{name:?} must NOT classify as an image filename"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_extensionless_and_empty_names() {
+        assert!(!is_image_filename("noextension"));
+        assert!(!is_image_filename(""));
+    }
+}
+
+// B2: an image asset row emits AffordanceKind::ViewImage; a non-image asset row
+// keeps its OpenAsset external-open affordance (ADR 0065 §1 default).
+mod view_image_affordance_emission {
+    use crate::render::{build_detail_content, AffordanceKind};
+    use serde_json::json;
+    use std::collections::HashMap;
+
+    fn task_with_attachments(urls: &[(&str, &str)]) -> serde_json::Value {
+        let attachments: Vec<serde_json::Value> = urls
+            .iter()
+            .map(|(name, url)| {
+                json!({
+                    "name": name,
+                    "url": url,
+                    "class": "Attachment",
+                    "permalink": url
+                })
+            })
+            .collect();
+        json!({
+            "name": "Test Task",
+            "id": 1,
+            "project_id": 1,
+            "is_completed": false,
+            "attachments": attachments
+        })
+    }
+
+    #[test]
+    fn image_asset_row_emits_view_image_affordance() {
+        let url = "https://example.com/photo.png";
+        let task = task_with_attachments(&[("photo.png", url)]);
+        let user_map: HashMap<i64, String> = HashMap::new();
+        let content = build_detail_content(&task, &[], &user_map, 80, None);
+
+        let view_image_affs: Vec<_> = content
+            .affordances
+            .iter()
+            .filter(|a| matches!(&a.kind, AffordanceKind::ViewImage { url: u, .. } if u == url))
+            .collect();
+
+        assert_eq!(
+            view_image_affs.len(),
+            1,
+            "an image asset row must emit exactly one ViewImage affordance carrying its url: {:?}",
+            content.affordances
+        );
+
+        let AffordanceKind::ViewImage { label, .. } = &view_image_affs[0].kind else {
+            unreachable!()
+        };
+        assert_eq!(
+            label, "photo.png",
+            "the ViewImage affordance must carry the derived filename as its label"
+        );
+
+        let has_open_asset = content
+            .affordances
+            .iter()
+            .any(|a| matches!(a.kind, AffordanceKind::OpenAsset(_)));
+        assert!(
+            !has_open_asset,
+            "an image asset row must NOT also carry OpenAsset: {:?}",
+            content.affordances
+        );
+    }
+
+    #[test]
+    fn non_image_asset_row_keeps_open_asset_affordance() {
+        let url = "https://example.com/report.pdf";
+        let task = task_with_attachments(&[("report.pdf", url)]);
+        let user_map: HashMap<i64, String> = HashMap::new();
+        let content = build_detail_content(&task, &[], &user_map, 80, None);
+
+        let has_open_asset = content
+            .affordances
+            .iter()
+            .any(|a| matches!(&a.kind, AffordanceKind::OpenAsset(u) if u == url));
+        assert!(
+            has_open_asset,
+            "a non-image asset row must keep its OpenAsset affordance: {:?}",
+            content.affordances
+        );
+
+        let has_view_image = content
+            .affordances
+            .iter()
+            .any(|a| matches!(a.kind, AffordanceKind::ViewImage { .. }));
+        assert!(
+            !has_view_image,
+            "a non-image asset row must NOT carry a ViewImage affordance: {:?}",
+            content.affordances
+        );
+    }
+
+    #[test]
+    fn mixed_asset_list_classifies_each_row_independently() {
+        let image_url = "https://example.com/diagram.webp";
+        let doc_url = "https://example.com/spec.docx";
+        let task = task_with_attachments(&[("diagram.webp", image_url), ("spec.docx", doc_url)]);
+        let user_map: HashMap<i64, String> = HashMap::new();
+        let content = build_detail_content(&task, &[], &user_map, 80, None);
+
+        let has_view_image_for_image = content
+            .affordances
+            .iter()
+            .any(|a| matches!(&a.kind, AffordanceKind::ViewImage { url, .. } if url == image_url));
+        let has_open_asset_for_doc = content
+            .affordances
+            .iter()
+            .any(|a| matches!(&a.kind, AffordanceKind::OpenAsset(u) if u == doc_url));
+
+        assert!(
+            has_view_image_for_image,
+            "the .webp row must carry ViewImage: {:?}",
+            content.affordances
+        );
+        assert!(
+            has_open_asset_for_doc,
+            "the .docx row must carry OpenAsset: {:?}",
+            content.affordances
+        );
+    }
+}
+
+// B3: hit_test resolves a ViewImage positional hit into DetailClickTarget::ViewImage,
+// and end-to-end an image-row activation opens the ImageViewer overlay (Loading).
+mod view_image_hit_test_resolve {
+    use crate::render::{AffordanceKind, LocalAffordance};
+    use crate::tui::hit_test::{resolve_detail_click, DetailClickTarget};
+    use crate::tui::model::{update, Header, ImageAssetRef, ImageStatus, Model, Msg, Screen};
+    use crossterm::event::KeyModifiers;
+    use serde_json::Value;
+    use std::collections::HashMap;
+
+    // A minimal Detail model with one ViewImage affordance on line 0, columns [2, 10).
+    // Viewport (80, 24) + offset 0 → DETAIL_TEXT_TOP (row 2) maps to line_idx 0.
+    fn detail_model_with_view_image_affordance(url: &str, label: &str) -> Model {
+        Model {
+            stack: vec![Screen::Detail {
+                instance: "inst".into(),
+                project_id: 1,
+                task_id: 42,
+                task: Value::Null,
+                comments: vec![],
+                user_map: HashMap::new(),
+                lines: vec!["[1] \u{2197} image row".to_string()],
+                line_styles: vec![vec![]],
+                assets: vec![],
+                offset: 0,
+                loading: false,
+                rendered_width: usize::MAX,
+                overlay: crate::tui::model::DetailOverlay::None,
+                current_user_id: None,
+                affordances: vec![LocalAffordance {
+                    line_idx: 0,
+                    col_start: 2,
+                    col_end: 10,
+                    kind: AffordanceKind::ViewImage {
+                        url: url.to_string(),
+                        label: label.to_string(),
+                    },
+                }],
+                focused_comment: None,
+                auth_error: false,
+                comment_spans: vec![],
+            }],
+            should_quit: false,
+            header: Header::from_instances(&[], None),
+            viewport: (80, 24),
+            click_targets: vec![],
+            modal_button_targets: vec![],
+            last_loaded: None,
+            selection: None,
+            copied_feedback: false,
+        }
+    }
+
+    #[test]
+    fn resolve_detail_click_view_image_returns_view_image_target() {
+        let url = "https://example.test/photo.png";
+        let label = "photo.png";
+        let model = detail_model_with_view_image_affordance(url, label);
+
+        let result = resolve_detail_click(&model, 5, 2, true);
+
+        match result {
+            Some(DetailClickTarget::ViewImage(asset)) => {
+                assert_eq!(asset.url, url, "resolved target must carry the asset url");
+                assert_eq!(
+                    asset.label, label,
+                    "resolved target must carry the derived label"
+                );
+            }
+            other => panic!(
+                "expected Some(DetailClickTarget::ViewImage(_)), got {:?}",
+                other.map(|_| "Some(_)")
+            ),
+        }
+    }
+
+    #[test]
+    fn resolve_detail_click_view_image_matches_whole_row() {
+        // ADR 0029 whole-row rule: a hit anywhere on the row (not just [2,10)) resolves.
+        let url = "https://example.test/photo.png";
+        let model = detail_model_with_view_image_affordance(url, "photo.png");
+
+        let result = resolve_detail_click(&model, 40, 2, true);
+
+        assert!(
+            matches!(result, Some(DetailClickTarget::ViewImage(ImageAssetRef { url: ref u, .. })) if u == url),
+            "a click outside the link span but on the same row must still resolve to ViewImage"
+        );
+    }
+
+    #[test]
+    fn plain_click_on_image_row_does_not_resolve() {
+        let model =
+            detail_model_with_view_image_affordance("https://example.test/photo.png", "photo.png");
+
+        let result = resolve_detail_click(&model, 5, 2, false);
+
+        assert!(
+            result.is_none(),
+            "a plain click (no modifier) must not resolve any target (reserved for selection)"
+        );
+    }
+
+    // End-to-end: activating an image-row affordance via the public update() entrypoint
+    // opens DetailOverlay::ImageViewer{Loading} with the resolved asset and emits
+    // Cmd::LoadImage — the full click → overlay pipeline, not just the pure resolver.
+    #[test]
+    fn clicking_image_row_opens_image_viewer_loading_end_to_end() {
+        let url = "https://example.test/photo.png";
+        let label = "photo.png";
+        let model = detail_model_with_view_image_affordance(url, label);
+
+        let (model_after, cmds) = update(
+            model,
+            Msg::Click {
+                column: 5,
+                row: 2,
+                modifiers: KeyModifiers::CONTROL,
+            },
+        );
+
+        match model_after.top() {
+            Some(Screen::Detail { overlay, .. }) => match overlay.image_viewer() {
+                Some((asset, ImageStatus::Loading)) => {
+                    assert_eq!(
+                        asset.url, url,
+                        "opened viewer must carry the clicked asset's url"
+                    );
+                    assert_eq!(
+                        asset.label, label,
+                        "opened viewer must carry the clicked asset's label"
+                    );
+                }
+                other => panic!("expected ImageViewer{{Loading}} overlay, got {other:?}"),
+            },
+            other => panic!("expected a Detail screen, got {other:?}"),
+        }
+
+        assert!(
+            cmds.iter().any(|c| matches!(
+                c,
+                crate::tui::model::Cmd::LoadImage { asset } if asset.url == url && asset.label == label
+            )),
+            "activating an image row must emit Cmd::LoadImage for the clicked asset: {cmds:?}"
         );
     }
 }

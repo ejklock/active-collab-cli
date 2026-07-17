@@ -1,6 +1,6 @@
 ---
 name: active-collab
-description: Read ActiveCollab task data — a task, your assignments, comments, or projects — as machine-readable JSON from the `ac` CLI, non-interactively without the TUI. Use when an agent or script needs to fetch a task by id or URL, list the logged-in user's open tasks, read the task for the current git branch, or browse projects, and wants structured JSON instead of the interactive terminal UI. Covers `ac get`, `ac current`, `ac mine`, and `ac browse` with `--json` — the curated minified schemas, the round-trippable `ref`, and the cache/`--no-comments` flags.
+description: Read ActiveCollab task data — a task, your assignments, comments, or projects — as machine-readable JSON from the `ac` CLI, non-interactively without the TUI. Use when an agent or script needs to fetch a task by id or URL, list the logged-in user's open tasks, read the task for the current git branch, or browse projects, and wants structured JSON instead of the interactive terminal UI. Covers `ac get`, `ac current`, `ac mine`, and `ac browse` with `--json` — the curated minified schemas, the round-trippable `ref`, and the cache/`--no-comments` flags. Also covers posting a comment with `ac comment`, whose body must be formatted as HTML (`<p>` per line, `<p>&nbsp;</p>` between sections) because ActiveCollab renders it as HTML and collapses plain newlines.
 ---
 
 # ac --json — agent read contract
@@ -84,6 +84,45 @@ ac get 665/75159 --json        # → the full task object for that ref
 
 The `get`/`current` JSON path is **cache-aware** and honours `--refresh` and
 `--no-comments`. The human (non-`--json`) output of every command is unchanged.
+
+## Writing a comment — `ac comment`
+
+`ac comment [TASK_REF] -m "<body>"` posts a comment to a task as the logged-in
+user. Omit `TASK_REF` to resolve the task from the current git branch; omit
+`-m/--message` to read the body from stdin. `--json` prints a curated minified
+write result; `--instance <name>` forces a configured instance.
+
+```bash
+ac comment 665/75159 -m "<p>Lorem ipsum dolor sit amet.</p>"   # explicit ref
+ac comment -m "<p>Lorem ipsum dolor sit amet.</p>"             # ref from git branch
+ac comment 665/75159 < body.html                               # body from stdin
+```
+
+### The body is HTML — format it as HTML
+
+ActiveCollab stores and renders the comment body as **HTML**, and `ac comment`
+sends whatever you pass **verbatim** — it does not convert newlines. A plain
+`\n` is not a line break in HTML: the renderer collapses runs of whitespace, so
+multi-line plain text arrives **glued into a single run-on paragraph**. Format
+every comment as HTML:
+
+- **One `<p>…</p>` per line.** Each line/paragraph is its own `<p>` element.
+- **Blank line between sections → an empty paragraph `<p>&nbsp;</p>`.** A bare
+  `<p></p>` can be collapsed; the `&nbsp;` forces the visible gap.
+- **No Markdown.** `**bold**`, `#` headings, ``` fences, and `-` bullets do not
+  render. Use HTML: `<strong>`, `<em>`, `<ul><li>…</li></ul>`, `<a href="…">`.
+- URLs can be bare text inside a `<p>` — ActiveCollab auto-links them.
+
+```html
+<p>📌 Section one</p>
+<p>Lorem ipsum dolor sit amet, consectetur adipiscing elit.</p>
+<p>&nbsp;</p>
+<p>🧪 Section two</p>
+<p>https://example.com/tasks/665/75159</p>
+```
+
+Without the `<p>` tags those lines render as one run-on paragraph; without the
+`<p>&nbsp;</p>` spacer the two sections touch with no blank line between them.
 
 ## Notes for agents
 
