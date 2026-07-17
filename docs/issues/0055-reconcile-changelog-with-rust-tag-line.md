@@ -2,7 +2,7 @@
 type: Issue
 title: "Reconcile CHANGELOG.md with the Rust crate tag line — retire/segregate the legacy Python history"
 description: CHANGELOG.md still carries the pre-cutover Python history ([0.1.0]–[1.0.0], curses / __version__ entries) and was never updated for the Rust crate's own version line (tags v0.1.0→v0.4.0). Its top entry is [1.0.0] (the Python→Rust cutover note) while Cargo.toml ships 0.4.0, so the changelog's latest version is both ahead of and unrelated to the shipped crate version, and the numbered entries collide with the Rust tags (a legacy Python [0.4.0] curses entry vs the Rust v0.4.0 release). Because of this, the v0.4.0 release notes were placed on the GitHub Release only, leaving CHANGELOG.md silently stale. Decide and apply a reconciliation so the changelog tracks the Rust crate again.
-status: open
+status: closed
 labels: [documentation, release, tech-debt, chore]
 blocked_by:
 tracker:
@@ -81,3 +81,15 @@ chosen option is recorded here before editing.
 - Surfaced during the `v0.4.0` release (PR #25): the release notes had to go on the
   GitHub Release because a Rust `[0.4.0]` header would collide with the legacy
   Python `[0.4.0]` entry.
+
+### Resolution — Option A (segregate), applied 2026-07-17
+
+Applied **Option A** during the `v0.5.0` release. `CHANGELOG.md` now opens with a
+fresh Rust-crate line — `[0.5.0]`, `[0.4.0]`, `[0.3.0]`, `[0.2.0]`, `[0.1.0]` at
+their tag dates (2026-07-03 … 2026-07-17), backfilled from the `v0.1.0` GitHub
+Release body and the annotated tag messages. The pre-cutover Python history is
+preserved verbatim under a single `## Pre-Rust (Python) history` section, with its
+version headers demoted to `###` (and inner sections to `####`) so no `##` header
+collides with a Rust version of the same number (AC1). Nothing was deleted (AC2);
+no source or behavior changed; the SemVer scheme and published GitHub Releases are
+untouched (out of scope).
