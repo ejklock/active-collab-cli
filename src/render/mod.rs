@@ -37,6 +37,11 @@ pub(crate) use detail_render::PANEL_VPAD;
 use detail_render::{build_body_lines, build_comment_lines, fit_panel_header, panel_title_run};
 #[cfg(test)]
 pub(crate) use detail_render::{build_header_lines, comment_box, panel_box, DetailContent};
+// is_image_filename has no non-test caller outside this module (splice_asset_section calls
+// it directly within detail_render.rs) but tests/unit/tui_render.rs needs it for the
+// classification table — same sibling-test-file re-export rationale as above.
+#[cfg(test)]
+pub(crate) use detail_render::is_image_filename;
 
 /// A contiguous segment of a rendered panel body line, tagged by whether it is a URL.
 #[derive(Debug, Clone, PartialEq)]
@@ -81,6 +86,15 @@ pub struct StyleRun {
 ///
 /// `OpenUrl(url)` carries an inline body-link url; populated by slice 0046. Defined here
 /// to keep the enum stable across the two slices.
+///
+/// `ViewImage { url, label }` is emitted instead of `OpenAsset` for an asset row whose
+/// derived filename ([ADR 0023]) is a raster image (png/jpg/jpeg/gif/webp/bmp,
+/// case-insensitive); non-image rows keep `OpenAsset` (ADR 0025 external open). Carries
+/// plain fields rather than `tui::model::ImageAssetRef` because `render` sits below `tui`
+/// in the module graph; `hit_test::target_for` rebuilds the typed ref from these fields
+/// (ADR 0065 §1).
+///
+/// [ADR 0023]: /adr/0023-asset-label-derivation.md
 #[derive(Debug, Clone, PartialEq)]
 pub enum AffordanceKind {
     Edit(i64),
@@ -90,16 +104,24 @@ pub enum AffordanceKind {
     /// wrapped fragment of an openable inline URL/email token.
     /// Resolved by `body_link_cmd_at` on Ctrl/Cmd+click.
     OpenUrl(String),
+    ViewImage {
+        url: String,
+        label: String,
+    },
 }
 
 impl AffordanceKind {
     /// Returns true when the whole row is the click target, not just the link span.
     ///
-    /// `OpenAsset` spans cover only the link text column range, but ADR 0029 specifies
-    /// that any Ctrl/Cmd+click anywhere on the asset row should open the asset.
-    /// All other kinds require the click to fall within `[col_start, col_end)`.
+    /// `OpenAsset` and `ViewImage` spans cover only the link text column range, but
+    /// ADR 0029 specifies that any Ctrl/Cmd+click anywhere on the asset row should
+    /// trigger the row's action. All other kinds require the click to fall within
+    /// `[col_start, col_end)`.
     pub fn is_row_target(&self) -> bool {
-        matches!(self, AffordanceKind::OpenAsset(_))
+        matches!(
+            self,
+            AffordanceKind::OpenAsset(_) | AffordanceKind::ViewImage { .. }
+        )
     }
 }
 

@@ -26,7 +26,7 @@ flowchart TD
     view --> screens["tui/screens/\nprojects.rs · tasks.rs · detail.rs\neach owns its draw_* fn\n(responsive Table · detail wraps text + assets panel)"]
     view --> drawer["tui/drawer.rs\nshared widget builders (render_table)"]
     view --> theme["tui/theme.rs\ncentralized Style / Color constants"]
-    view --> widgets["tui/widgets/modal.rs\nreusable centered modal overlay\n(DIM backdrop + Clear + bordered box)\ncompose · delete-confirm"]
+    view --> widgets["tui/widgets/modal.rs\nreusable centered modal overlay\n(DIM backdrop + Clear + bordered box)\ncompose · delete-confirm · image-viewer"]
     widgets --> theme
     screens --> asset_panel["tui/screens/asset_panel.rs\nAnexos/Artefatos composition source\nlayout → Vec&lt;PanelRow&gt; → inline content lines\n+ pure line→asset-index map"]
     detail_render --> asset_panel
@@ -304,11 +304,19 @@ sequenceDiagram
   `authed_get` ([ADR 0033](/adr/0033-authenticated-write-seam-comment-client.md)).
   Gate-checked by a negative test (no token off-host).
 - **`tui/model.update` stays pure** through the write path: it owns the Detail overlay state
-  as one typed `Screen::Detail.overlay: DetailOverlay { None, Compose(Compose), ConfirmDelete }`
-  — compose and delete-confirm are mutually exclusive by construction
-  ([ADR 0047](/adr/0047-detail-overlay-as-one-typed-state.md)) — and emits write `Cmd`s, but
-  never performs I/O. The shell owns the mode-aware key mapping (which keys are *text*) and the
-  spawned write ([ADR 0034](/adr/0034-comment-compose-mode-multiline.md)).
+  as one typed `Screen::Detail.overlay: DetailOverlay { None, Compose(Compose), ConfirmDelete,
+  ImageViewer { asset, status } }` — compose, delete-confirm, and the image viewer are mutually
+  exclusive by construction ([ADR 0047](/adr/0047-detail-overlay-as-one-typed-state.md)) — and
+  emits write `Cmd`s, but never performs I/O. The shell owns the mode-aware key mapping (which
+  keys are *text*) and the spawned write ([ADR 0034](/adr/0034-comment-compose-mode-multiline.md)).
+- **image attachments open in an in-TUI viewer overlay** ([ADR 0065](/adr/0065-image-attachment-viewer-modal-overlay.md)):
+  an asset whose derived filename ([ADR 0023](/adr/0023-asset-label-derivation.md)) is a raster
+  image (`png/jpg/jpeg/gif/webp/bmp`, case-insensitive) emits a structural
+  `AffordanceKind::ViewImage` span instead of the external-open `OpenAsset`; activating it sets
+  `overlay = ImageViewer { status: Loading }` and emits `Cmd::LoadImage`, with `Msg::ImageLoaded`
+  → `Ready`, `Msg::ImageLoadErr` → `Error`, and `Esc`/`q` → `None`. The pure Model tracks only
+  this lifecycle metadata; the byte fetch, decode, and `ratatui-image` render are the shell's
+  (slice 0059), so the viewer currently draws a centered placeholder over the dimmed backdrop.
 - **No optimistic mutation:** the mutation arms construct no synthetic comment; the
   thread is always re-derived from the server after a 2xx
   ([ADR 0035](/adr/0035-server-truth-refresh-after-comment-mutation.md)). Gate-checked by
