@@ -11,6 +11,21 @@ pre-cutover Python package's history is preserved verbatim under
 version numbers are a separate line and do not continue into the Rust crate
 (issue 0055).
 
+## [0.6.0] - 2026-07-22
+
+### Added
+
+- `ac get` and `ac current` gain an opt-in `--download-attachments` flag (with
+  an optional `--attachments-dir <DIR>`) that fetches a task's attachments and
+  inline images to a local temp dir for an agent/LLM to analyze. The set is
+  attachments + inline `<img>` only (never anchor hyperlinks), deduped by URL;
+  downloads are per-asset-resilient with filename sanitization, write-containment
+  against path traversal and symlink escape, a 25 MiB size cap, and on-disk
+  collision suffixing. The default destination is
+  `$TMPDIR/ac-attachments/{project_id}-{task_id}`. `--json` output gains an
+  additive `downloaded_attachments` field only when the flag is passed; behavior
+  is byte-for-byte unchanged when the flag is absent (issue 0061, ADR 0066).
+
 ## [0.5.0] - 2026-07-17
 
 ### Added

@@ -343,6 +343,8 @@ async fn dispatch_get(args: cli::GetArgs) -> i32 {
         short: args.display.short,
         refresh: args.display.refresh,
         no_comments: args.display.no_comments,
+        download_attachments: args.display.download_attachments,
+        attachments_dir: args.display.attachments_dir.clone(),
     };
     get_core(
         &args.ref_,
@@ -390,6 +392,8 @@ async fn dispatch_current(args: cli::DisplayArgs) -> i32 {
         short: args.short,
         refresh: args.refresh,
         no_comments: args.no_comments,
+        download_attachments: args.download_attachments,
+        attachments_dir: args.attachments_dir.clone(),
     };
     current_core(
         branch.as_deref(),

@@ -1177,6 +1177,8 @@ fn default_flags() -> DisplayFlags {
         short: false,
         refresh: false,
         no_comments: false,
+        download_attachments: false,
+        attachments_dir: None,
     }
 }
 
@@ -1372,6 +1374,289 @@ async fn do_get_task_load_failure_returns_1() {
     )
     .await;
     assert_eq!(code, 1);
+}
+
+fn task_with_attachment(tid: i64, name: &str, attachment_url: &str) -> serde_json::Value {
+    serde_json::json!({
+        "id": tid,
+        "name": name,
+        "is_completed": false,
+        "assignee_id": serde_json::Value::Null,
+        "estimate": 0,
+        "tracked_time": 0,
+        "body": "",
+        "attachments": [{"name": "note.txt", "url": attachment_url}],
+    })
+}
+
+#[tokio::test]
+async fn do_get_task_json_mode_includes_downloaded_attachments_when_flag_set() {
+    let server = MockServer::start().await;
+    let attachment_url = format!("{}/note.txt", server.uri());
+    Mock::given(method("GET"))
+        .and(path("/api/v1/projects/5/tasks/10"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "single": task_with_attachment(10, "Attachment task", &attachment_url),
+            "tracked_time": 0,
+            "comments": []
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/note.txt"))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(b"hello".to_vec()))
+        .mount(&server)
+        .await;
+
+    let (_dir, store) = make_store();
+    let cache = TaskCache::new(store.conn());
+    let inst = make_inst(&server.uri());
+    let client = ActiveCollabClient::new(inst.clone(), make_http());
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    let dest = TempDir::new().unwrap();
+    let flags = DisplayFlags {
+        json: true,
+        download_attachments: true,
+        attachments_dir: Some(dest.path().to_string_lossy().to_string()),
+        ..default_flags()
+    };
+
+    let code = do_get_task(&inst, &cache, &client, 5, 10, &flags, &mut out, &mut err).await;
+    assert_eq!(code, 0);
+    let obj: serde_json::Value = serde_json::from_str(output_str(&out).trim_end()).unwrap();
+    let downloaded = obj["downloaded_attachments"]
+        .as_array()
+        .expect("downloaded_attachments must be an array when the flag is set");
+    assert_eq!(downloaded.len(), 1);
+    assert_eq!(downloaded[0]["name"], "note.txt");
+    assert_eq!(downloaded[0]["url"], attachment_url);
+    assert!(
+        downloaded[0]["path"].as_str().is_some(),
+        "successful download must carry a path: {downloaded:?}"
+    );
+    assert!(downloaded[0]["error"].is_null());
+}
+
+#[tokio::test]
+async fn do_get_task_json_mode_omits_downloaded_attachments_when_flag_absent() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/projects/5/tasks/10"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "single": { "id": 10, "name": "No download", "is_completed": false, "estimate": 0, "tracked_time": 0, "body": "" },
+            "tracked_time": 0,
+            "comments": []
+        })))
+        .mount(&server)
+        .await;
+
+    let (_dir, store) = make_store();
+    let cache = TaskCache::new(store.conn());
+    let inst = make_inst(&server.uri());
+    let client = ActiveCollabClient::new(inst.clone(), make_http());
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    let flags = DisplayFlags {
+        json: true,
+        ..default_flags()
+    };
+
+    let code = do_get_task(&inst, &cache, &client, 5, 10, &flags, &mut out, &mut err).await;
+    assert_eq!(code, 0);
+    let obj: serde_json::Value = serde_json::from_str(output_str(&out).trim_end()).unwrap();
+    assert!(
+        obj.get("downloaded_attachments").is_none(),
+        "downloaded_attachments must be absent when --download-attachments was not passed: {obj}"
+    );
+}
+
+#[tokio::test]
+async fn do_get_task_normal_mode_prints_download_summary_line() {
+    let server = MockServer::start().await;
+    let attachment_url = format!("{}/note.txt", server.uri());
+    Mock::given(method("GET"))
+        .and(path("/api/v1/projects/5/tasks/10"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "single": task_with_attachment(10, "Attachment task", &attachment_url),
+            "tracked_time": 0,
+            "comments": []
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/note.txt"))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(b"hello".to_vec()))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/users"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+        .mount(&server)
+        .await;
+
+    let (_dir, store) = make_store();
+    let cache = TaskCache::new(store.conn());
+    let inst = make_inst(&server.uri());
+    let client = ActiveCollabClient::new(inst.clone(), make_http());
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    let dest = TempDir::new().unwrap();
+    let dest_path = dest.path().to_string_lossy().to_string();
+    let flags = DisplayFlags {
+        download_attachments: true,
+        attachments_dir: Some(dest_path.clone()),
+        ..default_flags()
+    };
+
+    let code = do_get_task(&inst, &cache, &client, 5, 10, &flags, &mut out, &mut err).await;
+    assert_eq!(code, 0);
+    let s = output_str(&out);
+    assert!(
+        s.contains("Downloaded 1 of 1 attachment(s)"),
+        "missing summary counts: {s}"
+    );
+    assert!(s.contains(&dest_path), "missing destination dir: {s}");
+}
+
+#[tokio::test]
+async fn do_get_task_normal_mode_download_summary_reports_failures() {
+    let server = MockServer::start().await;
+    let attachment_url = format!("{}/missing.txt", server.uri());
+    Mock::given(method("GET"))
+        .and(path("/api/v1/projects/5/tasks/10"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "single": task_with_attachment(10, "Attachment task", &attachment_url),
+            "tracked_time": 0,
+            "comments": []
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/missing.txt"))
+        .respond_with(ResponseTemplate::new(404).set_body_string("not found"))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/users"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+        .mount(&server)
+        .await;
+
+    let (_dir, store) = make_store();
+    let cache = TaskCache::new(store.conn());
+    let inst = make_inst(&server.uri());
+    let client = ActiveCollabClient::new(inst.clone(), make_http());
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    let dest = TempDir::new().unwrap();
+    let flags = DisplayFlags {
+        download_attachments: true,
+        attachments_dir: Some(dest.path().to_string_lossy().to_string()),
+        ..default_flags()
+    };
+
+    let code = do_get_task(&inst, &cache, &client, 5, 10, &flags, &mut out, &mut err).await;
+    assert_eq!(code, 0);
+    let s = output_str(&out);
+    assert!(
+        s.contains("Downloaded 0 of 1 attachment(s)"),
+        "missing failure counts: {s}"
+    );
+    assert!(s.contains("failed:"), "missing failure reason: {s}");
+    assert!(s.contains("note.txt"), "missing failed asset name: {s}");
+}
+
+#[tokio::test]
+async fn do_get_task_short_mode_runs_download_but_prints_only_the_short_line() {
+    let server = MockServer::start().await;
+    let attachment_url = format!("{}/note.txt", server.uri());
+    Mock::given(method("GET"))
+        .and(path("/api/v1/projects/5/tasks/10"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "single": task_with_attachment(10, "Short mode task", &attachment_url),
+            "tracked_time": 0,
+            "comments": []
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/note.txt"))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(b"hello".to_vec()))
+        .mount(&server)
+        .await;
+
+    let (_dir, store) = make_store();
+    let cache = TaskCache::new(store.conn());
+    let inst = make_inst(&server.uri());
+    let client = ActiveCollabClient::new(inst.clone(), make_http());
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    let dest = TempDir::new().unwrap();
+    let flags = DisplayFlags {
+        short: true,
+        download_attachments: true,
+        attachments_dir: Some(dest.path().to_string_lossy().to_string()),
+        ..default_flags()
+    };
+
+    let code = do_get_task(&inst, &cache, &client, 5, 10, &flags, &mut out, &mut err).await;
+    assert_eq!(code, 0);
+    let s = output_str(&out);
+    assert_eq!(
+        s, "5/10\tShort mode task\n",
+        "short output must stay byte-for-byte unchanged"
+    );
+    assert!(
+        dest.path().join("note.txt").exists(),
+        "download must still run as a side effect in short mode"
+    );
+}
+
+#[tokio::test]
+async fn do_get_task_download_attachments_defaults_to_controller_default_dir() {
+    let server = MockServer::start().await;
+    let pid = 900_555_i64;
+    let tid = 900_666_i64;
+    let attachment_url = format!("{}/note.txt", server.uri());
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v1/projects/{pid}/tasks/{tid}")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "single": task_with_attachment(tid, "Default dir task", &attachment_url),
+            "tracked_time": 0,
+            "comments": []
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/note.txt"))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(b"hello".to_vec()))
+        .mount(&server)
+        .await;
+
+    let (_dir, store) = make_store();
+    let cache = TaskCache::new(store.conn());
+    let inst = make_inst(&server.uri());
+    let client = ActiveCollabClient::new(inst.clone(), make_http());
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    let flags = DisplayFlags {
+        json: true,
+        download_attachments: true,
+        ..default_flags()
+    };
+
+    let expected_dir = crate::controller::default_attachments_dir(pid, tid);
+    std::fs::remove_dir_all(&expected_dir).ok();
+
+    let code = do_get_task(&inst, &cache, &client, pid, tid, &flags, &mut out, &mut err).await;
+    assert_eq!(code, 0);
+    assert!(
+        expected_dir.join("note.txt").exists(),
+        "file must be written under controller::default_attachments_dir when --attachments-dir is omitted"
+    );
+
+    std::fs::remove_dir_all(&expected_dir).ok();
 }
 
 #[tokio::test]
