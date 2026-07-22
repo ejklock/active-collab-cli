@@ -851,6 +851,72 @@ async fn delete_comment_attaches_token_header() {
 }
 
 #[tokio::test]
+async fn fetch_asset_bytes_same_host_attaches_token_and_returns_status_and_body() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/assets/photo.jpg"))
+        .and(header("x-angie-authapitoken", "test-token"))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(vec![1, 2, 3, 4]))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = make_client(&server.uri());
+    let url = format!("{}/assets/photo.jpg", server.uri());
+    let (status, body) = client.fetch_asset_bytes(&url).await.unwrap();
+    assert_eq!(status, 200);
+    assert_eq!(body.as_ref(), &[1, 2, 3, 4]);
+    server.verify().await;
+}
+
+#[tokio::test]
+async fn fetch_asset_bytes_foreign_host_omits_token() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/assets/photo.jpg"))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(vec![9]))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let instance = Instance {
+        name: "test-inst".to_string(),
+        base_url: "https://different-instance.example.com".to_string(),
+        email: "user@example.com".to_string(),
+        token: "test-token".to_string(),
+        user_id: Some(7),
+    };
+    let http = Http::new().unwrap();
+    let client = ActiveCollabClient::new(instance, http);
+    let url = format!("{}/assets/photo.jpg", server.uri());
+    let (status, _body) = client.fetch_asset_bytes(&url).await.unwrap();
+    assert_eq!(status, 200);
+
+    let reqs = server.received_requests().await.unwrap();
+    assert_eq!(reqs.len(), 1);
+    assert!(
+        reqs[0].headers.get("x-angie-authapitoken").is_none(),
+        "token must not be attached to a foreign-host asset fetch"
+    );
+}
+
+#[tokio::test]
+async fn fetch_asset_bytes_non_200_returns_status_not_err() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/assets/missing.jpg"))
+        .respond_with(ResponseTemplate::new(404).set_body_string("not found"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = make_client(&server.uri());
+    let url = format!("{}/assets/missing.jpg", server.uri());
+    let (status, _body) = client.fetch_asset_bytes(&url).await.unwrap();
+    assert_eq!(status, 404, "HTTP 404 must be Ok((404, body)), not Err");
+}
+
+#[tokio::test]
 async fn base_url_trailing_slash_is_trimmed() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))

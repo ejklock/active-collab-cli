@@ -2039,3 +2039,368 @@ fn attach_project_names_memoises_per_instance_read() {
     assert_eq!(result[0].project_name.as_deref(), Some("Project One"));
     assert_eq!(result[1].project_name.as_deref(), Some("Project Two"));
 }
+
+// --- ek-0061 S1 (ADR 0066): downloadable_assets ---
+
+#[test]
+fn downloadable_assets_includes_attachments_and_inline_images_only() {
+    let task = serde_json::json!({
+        "id": 1,
+        "body": r#"<img src="https://example.com/body.png"><a href="https://example.com/link.html">a link</a>"#,
+        "attachments": [
+            { "name": "report.pdf", "url": "https://example.com/report.pdf" }
+        ]
+    });
+    let comments = vec![serde_json::json!({
+        "body": r#"<img src="https://example.com/comment.png">"#
+    })];
+
+    let assets = downloadable_assets(&task, &comments);
+    let urls: Vec<&str> = assets.iter().map(|a| a.url.as_str()).collect();
+
+    assert_eq!(
+        urls,
+        vec![
+            "https://example.com/body.png",
+            "https://example.com/comment.png",
+            "https://example.com/report.pdf",
+        ],
+        "downloadable_assets must include only images + attachments, never hrefs: {urls:?}"
+    );
+}
+
+#[test]
+fn downloadable_assets_anchor_only_content_yields_empty_set() {
+    let task = serde_json::json!({
+        "id": 1,
+        "body": r#"<a href="https://example.com/doc">a doc link</a>"#
+    });
+    let assets = downloadable_assets(&task, &[]);
+    assert!(
+        assets.is_empty(),
+        "anchor-hyperlink-only content must yield an empty downloadable set: {assets:?}"
+    );
+}
+
+#[test]
+fn downloadable_assets_anchor_only_comment_yields_empty_set() {
+    let task = serde_json::json!({ "id": 1 });
+    let comments = vec![serde_json::json!({
+        "body": r#"<a href="https://example.com/doc">a doc link</a>"#
+    })];
+    let assets = downloadable_assets(&task, &comments);
+    assert!(
+        assets.is_empty(),
+        "anchor-hyperlink-only comment content must yield an empty downloadable set: {assets:?}"
+    );
+}
+
+#[test]
+fn downloadable_assets_dedupes_by_url() {
+    let task = serde_json::json!({
+        "id": 1,
+        "body": r#"<img src="https://example.com/dup.png">"#,
+        "attachments": [
+            { "name": "dup.png", "url": "https://example.com/dup.png" }
+        ]
+    });
+    let assets = downloadable_assets(&task, &[]);
+    assert_eq!(
+        assets.len(),
+        1,
+        "same URL surfacing as both an inline image and an attachment must dedupe: {assets:?}"
+    );
+}
+
+#[test]
+fn downloadable_assets_empty_task_yields_empty_set() {
+    let task = serde_json::json!({ "id": 1 });
+    let assets = downloadable_assets(&task, &[]);
+    assert!(assets.is_empty());
+}
+
+// --- sanitize_attachment_filename ---
+
+#[test]
+fn sanitize_attachment_filename_keeps_safe_name_unchanged() {
+    assert_eq!(sanitize_attachment_filename("report.pdf", 1), "report.pdf");
+}
+
+#[test]
+fn sanitize_attachment_filename_strips_unix_traversal_to_basename() {
+    assert_eq!(
+        sanitize_attachment_filename("../../etc/passwd", 1),
+        "passwd"
+    );
+}
+
+#[test]
+fn sanitize_attachment_filename_strips_windows_traversal_to_basename() {
+    assert_eq!(
+        sanitize_attachment_filename("..\\..\\windows\\win.ini", 1),
+        "win.ini"
+    );
+}
+
+#[test]
+fn sanitize_attachment_filename_traversal_only_falls_back() {
+    let result = sanitize_attachment_filename("../..", 3);
+    assert_eq!(
+        result, "asset_3",
+        "a traversal-only name must fall back to a generated name: {result:?}"
+    );
+}
+
+#[test]
+fn sanitize_attachment_filename_empty_name_falls_back() {
+    assert_eq!(sanitize_attachment_filename("", 2), "asset_2");
+}
+
+#[test]
+fn sanitize_attachment_filename_trailing_separator_falls_back() {
+    assert_eq!(sanitize_attachment_filename("/", 6), "asset_6");
+}
+
+#[test]
+fn sanitize_attachment_filename_dot_only_falls_back() {
+    assert_eq!(sanitize_attachment_filename("...", 4), "asset_4");
+}
+
+#[test]
+fn sanitize_attachment_filename_single_dot_falls_back() {
+    assert_eq!(sanitize_attachment_filename(".", 7), "asset_7");
+}
+
+#[test]
+fn sanitize_attachment_filename_double_dot_falls_back() {
+    assert_eq!(sanitize_attachment_filename("..", 9), "asset_9");
+}
+
+#[test]
+fn sanitize_attachment_filename_fallback_index_is_reflected_in_name() {
+    assert_eq!(sanitize_attachment_filename("", 1), "asset_1");
+    assert_eq!(sanitize_attachment_filename("", 8), "asset_8");
+}
+
+#[test]
+fn sanitize_attachment_filename_trailing_slash_collapses_to_basename() {
+    assert_eq!(sanitize_attachment_filename("report.pdf/", 1), "report.pdf");
+}
+
+// --- default_attachments_dir ---
+
+#[test]
+fn default_attachments_dir_matches_temp_dir_formula() {
+    let result = default_attachments_dir(42, 99);
+    let expected = std::env::temp_dir().join("ac-attachments").join("42-99");
+    assert_eq!(result, expected);
+}
+
+// --- contained_write_path (write-containment defense in depth) ---
+
+#[test]
+fn contained_write_path_rejects_embedded_separator() {
+    let dest = tempfile::TempDir::new().unwrap();
+    let result = contained_write_path(dest.path(), "../escape.txt");
+    assert!(
+        result.is_err(),
+        "a file name containing a separator must be rejected"
+    );
+}
+
+#[test]
+fn contained_write_path_accepts_safe_new_file() {
+    let dest = tempfile::TempDir::new().unwrap();
+    let result = contained_write_path(dest.path(), "new-file.txt");
+    assert!(result.is_ok());
+    let path = result.unwrap();
+    assert!(path.starts_with(dest.path().canonicalize().unwrap()));
+}
+
+#[cfg(unix)]
+#[test]
+fn contained_write_path_rejects_symlink_escape() {
+    let dest = tempfile::TempDir::new().unwrap();
+    let outside = tempfile::TempDir::new().unwrap();
+    let target = outside.path().join("secret.txt");
+    std::fs::write(&target, b"outside").unwrap();
+
+    let link_name = "escape.txt";
+    std::os::unix::fs::symlink(&target, dest.path().join(link_name)).unwrap();
+
+    let result = contained_write_path(dest.path(), link_name);
+    assert!(
+        result.is_err(),
+        "a pre-existing symlink escaping dest_dir must be rejected, not resolved outside it"
+    );
+}
+
+// --- download_task_attachments ---
+
+fn make_download_client(name: &str, base_url: &str) -> ActiveCollabClient {
+    ActiveCollabClient::new(make_instance(name, base_url, Some(1)), make_http())
+}
+
+#[tokio::test]
+async fn download_task_attachments_returns_one_outcome_per_asset_in_order() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/ok.png"))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(vec![1, 2, 3]))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/missing.png"))
+        .respond_with(ResponseTemplate::new(404).set_body_string("not found"))
+        .mount(&server)
+        .await;
+
+    let client = make_download_client("inst", &server.uri());
+    let dest = tempfile::TempDir::new().unwrap();
+    let assets = vec![
+        Asset {
+            name: "ok.png".into(),
+            url: format!("{}/ok.png", server.uri()),
+        },
+        Asset {
+            name: "missing.png".into(),
+            url: format!("{}/missing.png", server.uri()),
+        },
+    ];
+
+    let results = download_task_attachments(&client, &assets, dest.path()).await;
+
+    assert_eq!(results.len(), 2, "one outcome per input asset");
+    assert_eq!(results[0].url, assets[0].url);
+    assert!(
+        results[0].path.is_some(),
+        "successful asset must have a path"
+    );
+    assert!(results[0].error.is_none());
+
+    assert_eq!(results[1].url, assets[1].url);
+    assert!(results[1].path.is_none(), "failed asset must have no path");
+    assert!(
+        results[1].error.as_deref().unwrap_or("").contains("404"),
+        "failed asset error must mention the status: {:?}",
+        results[1].error
+    );
+}
+
+#[tokio::test]
+async fn download_task_attachments_oversized_body_errors_without_writing() {
+    let server = MockServer::start().await;
+    let oversized = vec![0u8; (MAX_ATTACHMENT_BYTES + 1) as usize];
+    Mock::given(method("GET"))
+        .and(path("/huge.bin"))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(oversized))
+        .mount(&server)
+        .await;
+
+    let client = make_download_client("inst", &server.uri());
+    let dest = tempfile::TempDir::new().unwrap();
+    let assets = vec![Asset {
+        name: "huge.bin".into(),
+        url: format!("{}/huge.bin", server.uri()),
+    }];
+
+    let results = download_task_attachments(&client, &assets, dest.path()).await;
+
+    assert_eq!(results.len(), 1);
+    assert!(
+        results[0].path.is_none(),
+        "oversized body must not be written"
+    );
+    assert!(
+        results[0]
+            .error
+            .as_deref()
+            .unwrap_or("")
+            .contains("max size"),
+        "oversized error must mention the size cap: {:?}",
+        results[0].error
+    );
+
+    let entries: Vec<_> = std::fs::read_dir(dest.path()).unwrap().collect();
+    assert!(
+        entries.is_empty(),
+        "dest_dir must contain no files after an oversized rejection"
+    );
+}
+
+#[tokio::test]
+async fn download_task_attachments_suffixes_colliding_names_within_batch() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/a"))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(b"first".to_vec()))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/b"))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(b"second".to_vec()))
+        .mount(&server)
+        .await;
+
+    let client = make_download_client("inst", &server.uri());
+    let dest = tempfile::TempDir::new().unwrap();
+    let assets = vec![
+        Asset {
+            name: "same.txt".into(),
+            url: format!("{}/a", server.uri()),
+        },
+        Asset {
+            name: "same.txt".into(),
+            url: format!("{}/b", server.uri()),
+        },
+    ];
+
+    let results = download_task_attachments(&client, &assets, dest.path()).await;
+
+    assert_eq!(results[0].name, "same.txt");
+    assert_eq!(
+        results[1].name, "same_2.txt",
+        "second collision within the batch must be suffixed: {:?}",
+        results[1].name
+    );
+    assert_ne!(results[0].path, results[1].path);
+
+    let first_contents = std::fs::read(results[0].path.as_ref().unwrap()).unwrap();
+    let second_contents = std::fs::read(results[1].path.as_ref().unwrap()).unwrap();
+    assert_eq!(first_contents, b"first");
+    assert_eq!(second_contents, b"second");
+}
+
+#[tokio::test]
+async fn download_task_attachments_dest_dir_creation_failure_errors_every_asset() {
+    let file_as_parent = tempfile::NamedTempFile::new().unwrap();
+    let dest_dir = file_as_parent.path().join("nested");
+
+    let client = make_download_client("inst", "http://localhost");
+    let assets = vec![
+        Asset {
+            name: "a.txt".into(),
+            url: "http://localhost/a.txt".into(),
+        },
+        Asset {
+            name: "b.txt".into(),
+            url: "http://localhost/b.txt".into(),
+        },
+    ];
+
+    let results = download_task_attachments(&client, &assets, &dest_dir).await;
+
+    assert_eq!(results.len(), 2, "every asset must still get an outcome");
+    for result in &results {
+        assert!(result.path.is_none());
+        assert!(
+            result
+                .error
+                .as_deref()
+                .unwrap_or("")
+                .contains("destination directory"),
+            "error must mention the destination directory failure: {:?}",
+            result.error
+        );
+    }
+}

@@ -282,13 +282,22 @@ pub(crate) fn derive_asset_label(url: &str, anchor_text: Option<&str>) -> String
     url_host(url).unwrap_or_default()
 }
 
+/// Extract inline `<img src>` assets from HTML — the shared regex walk behind
+/// both `assets_from_html` (all assets) and `downloadable_assets` (attachments
+/// + images only, never anchor hyperlinks; ADR 0066).
+fn image_assets_from_html(html: &str) -> Vec<Asset> {
+    img_src_re()
+        .captures_iter(html)
+        .map(|cap| {
+            let url = cap[1].to_string();
+            let name = derive_asset_label(&url, None);
+            Asset { name, url }
+        })
+        .collect()
+}
+
 fn assets_from_html(html: &str) -> Vec<Asset> {
-    let mut assets = vec![];
-    for cap in img_src_re().captures_iter(html) {
-        let url = cap[1].to_string();
-        let name = derive_asset_label(&url, None);
-        assets.push(Asset { name, url });
-    }
+    let mut assets = image_assets_from_html(html);
     for cap in href_with_text_re().captures_iter(html) {
         let url = cap[1].to_string();
         let raw_text = cap[2].to_string();
@@ -355,6 +364,249 @@ pub fn extract_assets(task: &Value, comments: &[Value]) -> Vec<Asset> {
     }
 
     result
+}
+
+/// Extract the narrower set of assets worth downloading as files: real
+/// `task.attachments` entries plus inline `<img src>` sources from the task
+/// body and comments. Never includes anchor-hyperlink assets — a comment
+/// author's link is not necessarily a file ActiveCollab is hosting (ADR 0066).
+///
+/// Deduplicates by URL, preserving first-seen order.
+pub fn downloadable_assets(task: &Value, comments: &[Value]) -> Vec<Asset> {
+    let mut seen = std::collections::HashSet::new();
+    let mut result = vec![];
+
+    let mut add = |asset: Asset| {
+        if seen.insert(asset.url.clone()) {
+            result.push(asset);
+        }
+    };
+
+    let body_html = task.get("body").and_then(|v| v.as_str()).unwrap_or("");
+    for asset in image_assets_from_html(body_html) {
+        add(asset);
+    }
+
+    for comment in comments {
+        let comment_html = comment.get("body").and_then(|v| v.as_str()).unwrap_or("");
+        for asset in image_assets_from_html(comment_html) {
+            add(asset);
+        }
+    }
+
+    if let Some(attachments) = task.get("attachments") {
+        for asset in assets_from_attachments(attachments) {
+            add(asset);
+        }
+    }
+
+    result
+}
+
+const FALLBACK_ASSET_PREFIX: &str = "asset_";
+
+/// Sanitize an untrusted attachment display name into a safe on-disk file
+/// name (ADR 0066): keeps only the final path component — splitting on `/`
+/// and `\\` and dropping empty segments so a trailing separator collapses
+/// like a real path — and falls back to `asset_{fallback_index}` when that
+/// component is empty, `.`, `..`, or made up only of dots. Those are the
+/// only ways sanitization can invalidate a name, and each is structurally a
+/// name with no extension to preserve.
+///
+/// Pure — performs no filesystem access. Collision suffixing across a batch
+/// and the write-containment check happen in `download_task_attachments`.
+pub fn sanitize_attachment_filename(name: &str, fallback_index: usize) -> String {
+    let candidate = final_path_component(name);
+    if is_safe_filename(&candidate) {
+        candidate
+    } else {
+        format!("{FALLBACK_ASSET_PREFIX}{fallback_index}")
+    }
+}
+
+fn final_path_component(name: &str) -> String {
+    name.split(['/', '\\'])
+        .rfind(|segment| !segment.is_empty())
+        .unwrap_or("")
+        .trim()
+        .to_string()
+}
+
+fn is_safe_filename(name: &str) -> bool {
+    !name.is_empty() && name != "." && name != ".." && !name.chars().all(|c| c == '.')
+}
+
+/// Default destination directory for `download_task_attachments`: a stable,
+/// per-task path under the OS temp dir so repeated runs land in the same
+/// place (ADR 0066).
+pub fn default_attachments_dir(project_id: i64, task_id: i64) -> PathBuf {
+    std::env::temp_dir()
+        .join("ac-attachments")
+        .join(format!("{project_id}-{task_id}"))
+}
+
+/// Per-asset outcome of `download_task_attachments`: `path` is set on
+/// success, `error` on failure — exactly one of the two is present.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DownloadedAsset {
+    pub name: String,
+    pub url: String,
+    pub path: Option<String>,
+    pub error: Option<String>,
+}
+
+/// Fixed per-asset body size cap (ADR 0066) — no streaming/Content-Length
+/// short-circuit, an oversized body is rejected after the full fetch.
+const MAX_ATTACHMENT_BYTES: u64 = 25 * 1024 * 1024;
+
+/// Download each of `assets` over `client`'s host-gated authenticated seam
+/// and write it under `dest_dir`, creating the directory once up front.
+///
+/// Each asset gets an independent outcome, in input order: a transport
+/// error, a non-200 response, an oversized body (`MAX_ATTACHMENT_BYTES`), an
+/// unsafe write path, or an I/O error produces an `error` entry for that
+/// asset only — no other asset is skipped or aborted (ADR 0066).
+pub async fn download_task_attachments(
+    client: &ActiveCollabClient,
+    assets: &[Asset],
+    dest_dir: &Path,
+) -> Vec<DownloadedAsset> {
+    if let Err(err) = std::fs::create_dir_all(dest_dir) {
+        return assets
+            .iter()
+            .enumerate()
+            .map(|(index, asset)| DownloadedAsset {
+                name: sanitize_attachment_filename(&asset.name, index + 1),
+                url: asset.url.clone(),
+                path: None,
+                error: Some(format!("failed to create destination directory: {err}")),
+            })
+            .collect();
+    }
+
+    let mut used_names = std::collections::HashSet::new();
+    let mut results = Vec::with_capacity(assets.len());
+    for (index, asset) in assets.iter().enumerate() {
+        let outcome = download_one_asset(client, asset, dest_dir, index + 1, &mut used_names).await;
+        results.push(outcome);
+    }
+    results
+}
+
+async fn download_one_asset(
+    client: &ActiveCollabClient,
+    asset: &Asset,
+    dest_dir: &Path,
+    fallback_index: usize,
+    used_names: &mut std::collections::HashSet<String>,
+) -> DownloadedAsset {
+    let base_name = sanitize_attachment_filename(&asset.name, fallback_index);
+    let unique_name = unique_filename(base_name, used_names);
+
+    match fetch_and_write_asset(client, asset, dest_dir, &unique_name).await {
+        Ok(written_path) => DownloadedAsset {
+            name: unique_name,
+            url: asset.url.clone(),
+            path: Some(written_path),
+            error: None,
+        },
+        Err(err) => DownloadedAsset {
+            name: unique_name,
+            url: asset.url.clone(),
+            path: None,
+            error: Some(err),
+        },
+    }
+}
+
+/// Resolve `base_name` to a name not yet used within this batch, suffixing
+/// `_2`, `_3`, … (preserving the extension) on collision.
+fn unique_filename(
+    base_name: String,
+    used_names: &mut std::collections::HashSet<String>,
+) -> String {
+    if used_names.insert(base_name.clone()) {
+        return base_name;
+    }
+    let (stem, ext) = split_stem_ext(&base_name);
+    let mut suffix = 2;
+    loop {
+        let candidate = match &ext {
+            Some(ext) => format!("{stem}_{suffix}.{ext}"),
+            None => format!("{stem}_{suffix}"),
+        };
+        if used_names.insert(candidate.clone()) {
+            return candidate;
+        }
+        suffix += 1;
+    }
+}
+
+fn split_stem_ext(name: &str) -> (String, Option<String>) {
+    match name.rsplit_once('.') {
+        Some((stem, ext)) if !stem.is_empty() && !ext.is_empty() => {
+            (stem.to_string(), Some(ext.to_string()))
+        }
+        _ => (name.to_string(), None),
+    }
+}
+
+async fn fetch_and_write_asset(
+    client: &ActiveCollabClient,
+    asset: &Asset,
+    dest_dir: &Path,
+    file_name: &str,
+) -> Result<String, String> {
+    let (status, body) = client
+        .fetch_asset_bytes(&asset.url)
+        .await
+        .map_err(|err| err.to_string())?;
+    if status != 200 {
+        return Err(format!("HTTP {status}"));
+    }
+    if body.len() as u64 > MAX_ATTACHMENT_BYTES {
+        return Err(format!(
+            "attachment exceeds max size of {MAX_ATTACHMENT_BYTES} bytes"
+        ));
+    }
+    let write_path = contained_write_path(dest_dir, file_name)?;
+    std::fs::write(&write_path, &body).map_err(|err| err.to_string())?;
+    Ok(write_path.to_string_lossy().to_string())
+}
+
+/// Join `dest_dir`/`file_name` and verify the result stays inside `dest_dir`
+/// once resolved — defense in depth against a sanitizer gap or a pre-existing
+/// symlink escape (ADR 0066). Never writes; only computes the target path.
+fn contained_write_path(dest_dir: &Path, file_name: &str) -> Result<PathBuf, String> {
+    if file_name.is_empty() || file_name.contains(['/', '\\']) {
+        return Err(format!("unsafe file name: {file_name}"));
+    }
+    let canonical_dest = dest_dir
+        .canonicalize()
+        .map_err(|err| format!("failed to resolve destination directory: {err}"))?;
+    let candidate = canonical_dest.join(file_name);
+    let resolved = resolve_existing_ancestor(&candidate);
+    if !resolved.starts_with(&canonical_dest) {
+        return Err(format!(
+            "write path escapes destination directory: {file_name}"
+        ));
+    }
+    Ok(candidate)
+}
+
+/// Canonicalize the nearest existing ancestor of `path` and re-append the
+/// non-existent tail, so a target that does not exist yet (the common case
+/// for a fresh download) can still be checked for symlink-based escape.
+fn resolve_existing_ancestor(path: &Path) -> PathBuf {
+    if let Ok(canonical) = path.canonicalize() {
+        return canonical;
+    }
+    match (path.parent(), path.file_name()) {
+        (Some(parent), Some(name)) if parent != path => {
+            resolve_existing_ancestor(parent).join(name)
+        }
+        _ => path.to_path_buf(),
+    }
 }
 
 /// Fetch or serve from cache task content — no user-directory request.

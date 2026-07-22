@@ -48,7 +48,8 @@ ac get 665/75159 --json        # → the full task object for that ref
  "url":"https://collab.example.com/projects/665/tasks/75159",
  "description":"plain text (HTML stripped)",
  "assets":[{"name":"spec.pdf","url":"https://..."}],
- "comments":[{"author":"John","author_id":7,"created_on":"2026-01-03 14:22","body":"plain text"}]}
+ "comments":[{"author":"John","author_id":7,"created_on":"2026-01-03 14:22","body":"plain text"}],
+ "downloaded_attachments":[{"name":"spec.pdf","url":"https://...","path":"/tmp/ac-attachments/665-75159/spec.pdf","error":null}]}
 ```
 
 - `status` is the literal `"open"` or `"completed"` (from `is_completed`), never a
@@ -57,6 +58,8 @@ ac get 665/75159 --json        # → the full task object for that ref
 - `start_on` / `due_on` are `null` when absent.
 - `description` and comment `body` are plain text (HTML stripped).
 - `comments` is `[]` when there are none or `--no-comments` is passed.
+- `downloaded_attachments` is **additive**: it only appears when `--download-attachments`
+  was passed. Each entry has exactly one of `path` (success) or `error` (failure) set.
 
 ### `mine` — assigned tasks
 
@@ -81,9 +84,28 @@ ac get 665/75159 --json        # → the full task object for that ref
 | `--no-comments` | omit the `comments` array (emits `[]`) | `get`, `current` |
 | `--refresh` | ignore the cache and re-fetch | `get`, `current` |
 | `--instance <name>` | limit to one configured instance | `mine`, `browse`, `get`, `current` |
+| `--download-attachments` | fetch every task attachment + inline image to a local directory | `get`, `current` |
+| `--attachments-dir <DIR>` | override the download destination (default: a per-task path under the OS temp dir) | `get`, `current` |
 
 The `get`/`current` JSON path is **cache-aware** and honours `--refresh` and
 `--no-comments`. The human (non-`--json`) output of every command is unchanged.
+
+### Downloading attachments for local analysis
+
+`--download-attachments` fetches every downloadable task asset (real file
+attachments plus inline `<img>` sources — never arbitrary body hyperlinks) over
+the CLI's own authenticated seam and writes each one to disk, so an agent can
+`Read` the file directly instead of only seeing a remote URL:
+
+```bash
+ac get 665/75159 --download-attachments --json   # adds "downloaded_attachments"
+ac get 665/75159 --download-attachments          # prints one summary line
+```
+
+Without `--attachments-dir`, files land in a stable, predictable per-task path:
+`$TMPDIR/ac-attachments/<project_id>-<task_id>/`. One failed asset never blocks
+the others — each gets its own `path` (success) or `error` (failure) outcome.
+See [ADR 0066](../../../docs/adr/0066-agent-attachment-download-to-local-temp-dir.md).
 
 ## Writing a comment — `ac comment`
 

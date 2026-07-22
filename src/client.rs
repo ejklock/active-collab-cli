@@ -303,6 +303,17 @@ impl ActiveCollabClient {
             .await?;
         Ok(classify_comment_write(status, None))
     }
+
+    /// GET a task asset (attachment or inline image) URL. Thin wrapper over
+    /// `Http::authed_get` reusing the existing host-gated token attach/omit
+    /// behavior — the token is attached only when `url`'s host matches the
+    /// instance host. Returns Ok((status, body)) for any HTTP response; only
+    /// transport failures are Err.
+    pub async fn fetch_asset_bytes(&self, url: &str) -> Result<(u16, bytes::Bytes)> {
+        self.http
+            .authed_get(url, &self.instance.base_url, &self.instance.token)
+            .await
+    }
 }
 
 fn resolve_display_name(user: &Value) -> String {

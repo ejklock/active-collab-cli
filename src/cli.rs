@@ -118,6 +118,12 @@ pub struct DisplayArgs {
     /// Ignore cache and re-fetch.
     #[arg(long)]
     pub refresh: bool,
+    /// Download task attachments and inline images to a local directory.
+    #[arg(long)]
+    pub download_attachments: bool,
+    /// Destination directory for --download-attachments (defaults to a per-task temp path).
+    #[arg(long, value_name = "DIR")]
+    pub attachments_dir: Option<String>,
 }
 
 #[derive(Args, Debug)]

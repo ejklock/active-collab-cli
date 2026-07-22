@@ -66,3 +66,4 @@ TUI/UX work (V/R/ARCH slices), tracing to
 | [0058](/issues/0058-image-viewer-overlay-lifecycle.md) | IMG1 | image viewer slice 1 — image-asset classification + `ViewImage` affordance + `DetailOverlay::ImageViewer` variant + pure load lifecycle (placeholder render) | open | — |
 | [0059](/issues/0059-image-viewer-shell-render.md) | IMG2 | image viewer slice 2 — `ratatui-image` shell protocol: fetch + decode + render, tmux half-block fallback, teardown redraw | open | 0058 |
 | [0060](/issues/0060-dockerfile-copy-claude-skill-build-context.md) | CI | Dockerfile builder stage omits `.claude/` from the build context — cold `docker compose run dev` fails on `skill.rs` `include_str!`; add `COPY .claude/skills` before `cargo build --release` | open | — |
+| [0061](/issues/0061-download-attachments-flag.md) | DL1 | `ac get`/`current --download-attachments` — fetch task assets to a local temp dir for agent/LLM analysis (ADR 0066) | open | — |

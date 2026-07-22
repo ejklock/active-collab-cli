@@ -141,5 +141,6 @@
   "Comment posted (comment_id={comment_id}, task {project_id}/{task_id}).": "Comentário publicado (comment_id={comment_id}, tarefa {project_id}/{task_id}).",
   "Error: no task ref given and not in a git repository or HEAD is detached.": "Erro: nenhuma referência de tarefa informada e não está em um repositório git ou HEAD está desanexado.",
   "Error: no task ref given and branch '{branch}' does not match expected pattern (feature|hotfix|fix)/PROJECT_ID-TASK_ID.": "Erro: nenhuma referência de tarefa informada e a branch '{branch}' não corresponde ao padrão esperado (feature|hotfix|fix)/PROJECT_ID-TASK_ID.",
-  "Token invalid or revoked — run `ac setup add` to re-authenticate.": "Token inválido ou revogado — rode `ac setup add` para reautenticar."
+  "Token invalid or revoked — run `ac setup add` to re-authenticate.": "Token inválido ou revogado — rode `ac setup add` para reautenticar.",
+  "Downloaded {ok} of {total} attachment(s) to {dir}{failures}": "Baixado(s) {ok} de {total} anexo(s) para {dir}{failures}"
 }
