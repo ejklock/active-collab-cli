@@ -1,13 +1,15 @@
 use super::{presenter, resolve};
 use crate::client::ActiveCollabClient;
+use crate::controller;
 use crate::http::HTTP_UNAUTHORIZED;
 use crate::i18n::t;
 use crate::render;
 use crate::store::cache::TaskCache;
 use crate::store::instances::Instance;
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::io::Write;
+use std::path::{Path, PathBuf};
 
 /// Flags threaded from the CLI into the get/current core.
 pub(crate) struct DisplayFlags {
@@ -15,6 +17,8 @@ pub(crate) struct DisplayFlags {
     pub short: bool,
     pub refresh: bool,
     pub no_comments: bool,
+    pub download_attachments: bool,
+    pub attachments_dir: Option<String>,
 }
 
 /// Parity: Python _load_task.
@@ -119,15 +123,20 @@ pub(crate) async fn do_get_task(
         None => return 1,
     };
 
+    let downloaded = maybe_download_attachments(client, &task, &comments, pid, tid, flags).await;
+
     if flags.json {
         let user_map: HashMap<i64, String> = client.fetch_user_map().await.unwrap_or_default();
-        let obj = crate::agent_json::task_object(
+        let mut obj = crate::agent_json::task_object(
             &task,
             &comments,
             &user_map,
             &inst.base_url,
             flags.no_comments,
         );
+        if let Some((_, downloaded)) = &downloaded {
+            splice_downloaded_attachments(&mut obj, downloaded);
+        }
         writeln!(out, "{}", serde_json::to_string(&obj).unwrap_or_default()).ok();
         return 0;
     }
@@ -140,7 +149,92 @@ pub(crate) async fn do_get_task(
 
     let user_map: HashMap<i64, String> = client.fetch_user_map().await.unwrap_or_default();
     render::render_task(&task, &comments, flags.no_comments, &user_map, out);
+    if let Some((dest_dir, downloaded)) = &downloaded {
+        writeln!(out, "{}", download_summary_line(dest_dir, downloaded)).ok();
+    }
     0
+}
+
+/// Run the ADR 0066 attachment download when `flags.download_attachments` is
+/// set: resolve the destination directory (`flags.attachments_dir` override,
+/// else `controller::default_attachments_dir`), then extract and fetch the
+/// downloadable asset set. Returns `None` (no-op, no side effect) otherwise.
+async fn maybe_download_attachments(
+    client: &ActiveCollabClient,
+    task: &Value,
+    comments: &[Value],
+    pid: i64,
+    tid: i64,
+    flags: &DisplayFlags,
+) -> Option<(PathBuf, Vec<controller::DownloadedAsset>)> {
+    if !flags.download_attachments {
+        return None;
+    }
+    let dest_dir = flags
+        .attachments_dir
+        .as_ref()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| controller::default_attachments_dir(pid, tid));
+    let assets = controller::downloadable_assets(task, comments);
+    let downloaded = controller::download_task_attachments(client, &assets, &dest_dir).await;
+    Some((dest_dir, downloaded))
+}
+
+/// Splice the ADR 0066 `downloaded_attachments` array into an already-built
+/// `task_object` `Value`. `task_object` itself stays pure and untouched.
+fn splice_downloaded_attachments(obj: &mut Value, downloaded: &[controller::DownloadedAsset]) {
+    let Value::Object(map) = obj else {
+        return;
+    };
+    map.insert(
+        "downloaded_attachments".to_owned(),
+        Value::Array(
+            downloaded
+                .iter()
+                .map(|d| {
+                    json!({
+                        "name": d.name,
+                        "url": d.url,
+                        "path": d.path,
+                        "error": d.error,
+                    })
+                })
+                .collect(),
+        ),
+    );
+}
+
+/// One human-readable summary line for a completed attachment download:
+/// success/total counts, the destination directory, and any per-asset
+/// failure reasons (ADR 0066).
+fn download_summary_line(dest_dir: &Path, downloaded: &[controller::DownloadedAsset]) -> String {
+    let total = downloaded.len();
+    let ok = downloaded.iter().filter(|d| d.error.is_none()).count();
+    t(&format!(
+        "Downloaded {ok} of {total} attachment(s) to {dir}{failures}",
+        ok = ok,
+        total = total,
+        dir = dest_dir.display(),
+        failures = download_failures_suffix(downloaded),
+    ))
+}
+
+/// Render `" (failed: name: reason, ...)"` for every asset with an `error`,
+/// or an empty string when every asset succeeded.
+fn download_failures_suffix(downloaded: &[controller::DownloadedAsset]) -> String {
+    let failed: Vec<String> = downloaded
+        .iter()
+        .filter_map(|d| {
+            d.error
+                .as_ref()
+                .map(|reason| format!("{name}: {reason}", name = d.name, reason = reason))
+        })
+        .collect();
+    if failed.is_empty() {
+        String::new()
+    } else {
+        format!(" (failed: {})", failed.join(", "))
+    }
 }
 
 /// Parity: Python cmd_get (testable core).

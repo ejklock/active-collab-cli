@@ -258,12 +258,68 @@ fn parse_get_with_ref_and_display_flags() {
 }
 
 #[test]
+fn parse_get_download_attachments_defaults_to_false_and_no_dir() {
+    let cli = parse(&["get", "665/75159"]).unwrap();
+    let Command::Get(g) = cli.command.unwrap() else {
+        panic!()
+    };
+    assert!(!g.display.download_attachments);
+    assert!(g.display.attachments_dir.is_none());
+}
+
+#[test]
+fn parse_get_with_download_attachments_and_dir() {
+    let cli = parse(&[
+        "get",
+        "665/75159",
+        "--download-attachments",
+        "--attachments-dir",
+        "/tmp/ac-attachments",
+    ])
+    .unwrap();
+    let Command::Get(g) = cli.command.unwrap() else {
+        panic!()
+    };
+    assert!(g.display.download_attachments);
+    assert_eq!(
+        g.display.attachments_dir.as_deref(),
+        Some("/tmp/ac-attachments")
+    );
+}
+
+#[test]
 fn parse_current_with_display_flags() {
     let cli = parse(&["current", "--instance", "work"]).unwrap();
     let Command::Current(d) = cli.command.unwrap() else {
         panic!()
     };
     assert_eq!(d.instance.as_deref(), Some("work"));
+}
+
+#[test]
+fn parse_current_download_attachments_defaults_to_false_and_no_dir() {
+    let cli = parse(&["current"]).unwrap();
+    let Command::Current(d) = cli.command.unwrap() else {
+        panic!()
+    };
+    assert!(!d.download_attachments);
+    assert!(d.attachments_dir.is_none());
+}
+
+#[test]
+fn parse_current_with_download_attachments_and_dir() {
+    let cli = parse(&[
+        "current",
+        "--download-attachments",
+        "--attachments-dir",
+        "/tmp/ac-attachments",
+    ])
+    .unwrap();
+    let Command::Current(d) = cli.command.unwrap() else {
+        panic!()
+    };
+    assert!(d.download_attachments);
+    assert_eq!(d.attachments_dir.as_deref(), Some("/tmp/ac-attachments"));
 }
 
 #[test]
