@@ -3,15 +3,15 @@ use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 #[test]
-fn host_gated_token_same_host_returns_header() {
-    let result = Http::host_gated_token_header(
+fn origin_gated_token_same_origin_returns_header() {
+    let result = Http::origin_gated_token_header(
         "https://acme.example.com/api/v1/tasks",
         "https://acme.example.com",
         "tok-123",
     );
     assert!(
         result.is_some(),
-        "same-host request should carry token header"
+        "same-origin request should carry token header"
     );
     let (name, value) = result.unwrap();
     assert_eq!(name.as_str(), TOKEN_HEADER);
@@ -19,8 +19,8 @@ fn host_gated_token_same_host_returns_header() {
 }
 
 #[test]
-fn host_gated_token_different_host_returns_none() {
-    let result = Http::host_gated_token_header(
+fn origin_gated_token_different_host_returns_none() {
+    let result = Http::origin_gated_token_header(
         "https://evil.other.com/steal",
         "https://acme.example.com",
         "tok-123",
@@ -32,13 +32,66 @@ fn host_gated_token_different_host_returns_none() {
 }
 
 #[test]
-fn host_gated_token_case_insensitive_host_match() {
-    let result = Http::host_gated_token_header(
+fn origin_gated_token_case_insensitive_host_match() {
+    let result = Http::origin_gated_token_header(
         "https://ACME.EXAMPLE.COM/api/v1/tasks",
         "https://acme.example.com",
         "tok",
     );
     assert!(result.is_some(), "host matching should be case-insensitive");
+}
+
+#[test]
+fn origin_gated_token_scheme_downgrade_returns_none() {
+    let result = Http::origin_gated_token_header(
+        "http://acme.example.com/x.png",
+        "https://acme.example.com",
+        "tok-123",
+    );
+    assert!(
+        result.is_none(),
+        "same-host cleartext request against an https instance must not carry the token \
+         (issue 0062 C2 scheme downgrade)"
+    );
+}
+
+#[test]
+fn origin_gated_token_explicit_port_mismatch_returns_none() {
+    let result = Http::origin_gated_token_header(
+        "https://acme.example.com:8443/x",
+        "https://acme.example.com",
+        "tok-123",
+    );
+    assert!(
+        result.is_none(),
+        "same-host, non-default-port request must not carry the token for a default-port instance"
+    );
+}
+
+#[test]
+fn origin_gated_token_default_port_normalization_returns_header() {
+    let result = Http::origin_gated_token_header(
+        "https://acme.example.com/x",
+        "https://acme.example.com:443",
+        "tok-123",
+    );
+    assert!(
+        result.is_some(),
+        "implicit default port and explicit default port must be treated as the same origin"
+    );
+}
+
+#[test]
+fn origin_gated_token_cleartext_instance_same_origin_returns_header() {
+    let result = Http::origin_gated_token_header(
+        "http://acme.example.com/x",
+        "http://acme.example.com",
+        "tok-123",
+    );
+    assert!(
+        result.is_some(),
+        "a self-hosted http:// instance must keep receiving the token for its own-origin assets"
+    );
 }
 
 #[tokio::test]
@@ -83,6 +136,32 @@ async fn authed_get_no_token_for_foreign_host() {
     assert!(
         reqs[0].headers.get("x-angie-authapitoken").is_none(),
         "token must not be attached to a foreign-host request"
+    );
+}
+
+#[tokio::test]
+async fn authed_get_no_token_for_cleartext_request_to_https_instance_same_host() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/x.png"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("ok"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let http = Http::new().unwrap();
+    let url = format!("{}/x.png", server.uri());
+    let https_instance_base_url = server.uri().replacen("http://", "https://", 1);
+    http.authed_get(&url, &https_instance_base_url, "secret-tok")
+        .await
+        .unwrap();
+
+    let reqs = server.received_requests().await.unwrap();
+    assert_eq!(reqs.len(), 1);
+    assert!(
+        reqs[0].headers.get(TOKEN_HEADER).is_none(),
+        "token must not reach a cleartext request whose instance base URL is https on the same host \
+         (issue 0062 C2 end-to-end)"
     );
 }
 
