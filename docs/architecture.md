@@ -65,6 +65,9 @@ flowchart TD
     wrap --> text_measure
     cli_render --> richtext["richtext\nHTML → structured rich text\n(TUI detail: lists · headings · emphasis · links)"]
     detail_render --> richtext
+    render_root["render/mod\nCLI stdout write seams"] --> sanitize["sanitize\nstrip_control_chars\n(untrusted text → terminal)"]
+    richtext --> sanitize
+    cmd_task --> sanitize
     commands --> i18n["i18n (en · pt-BR)"]
     client --> models["models (serde)"]
 ```
@@ -81,6 +84,15 @@ flowchart TD
   low-level helpers/types both use, plus the re-export surface. Fitness: `text_measure` imports
   no `richtext`; `cli_render`/`detail_render` do not reference each other; the split is
   behavior-preserving (the whole `cargo test` suite is green on the combined tree).
+- **untrusted text is stripped of control characters at the write seam**
+  ([ADR 0068](/adr/0068-control-characters-stripped-at-the-untrusted-text-render-boundary.md)):
+  `sanitize::strip_control_chars` (keeps newline and tab, drops every Unicode Cc character)
+  is called on the assembled string at each terminal-bound seam — `render::render_task`,
+  `render::render_mine_table`, the `--short` line in `commands/task.rs`, and the single
+  `decode_text` helper through which `richtext` decodes every HTML entity. The `--json`
+  path is deliberately excluded: `serde_json` already escapes control characters and the
+  agent contract is byte-stable. Fitness: negative tests assert no `0x1B` byte in the
+  output of the real render functions and the real parser.
 - **commands is a directory of deep modules, not a flat god-file** ([ADR 0055](/adr/0055-commands-split-three-masters.md)):
   the 1035-line `commands.rs` splits into `src/commands/` where each command core served three
   masters at once — input resolution, orchestration, presentation. Now `resolve.rs` (master 1)
@@ -299,10 +311,14 @@ sequenceDiagram
 **Write boundaries / fitness:**
 
 - **`client/http` stays the only outbound-network boundary**, and **token
-  host-isolation extends to writes**: `authed_post`/`authed_put`/`authed_delete` attach
-  `X-Angie-AuthApiToken` only via the same `host_gated_token_header` gate as
-  `authed_get` ([ADR 0033](/adr/0033-authenticated-write-seam-comment-client.md)).
-  Gate-checked by a negative test (no token off-host).
+  origin-isolation extends to writes**: `authed_post`/`authed_put`/`authed_delete` attach
+  `X-Angie-AuthApiToken` only via the same `origin_gated_token_header` gate as
+  `authed_get` ([ADR 0033](/adr/0033-authenticated-write-seam-comment-client.md)). The
+  gate compares the request URL's full origin — scheme, host, and port — against the
+  instance base URL, so a same-host `http://` asset URL gets no token
+  ([ADR 0067](/adr/0067-origin-gated-api-token-header-scheme-host-port.md); the
+  host-only predecessor was named `host_gated_token_header`). Gate-checked by negative
+  tests (no token off-host, no token on a scheme downgrade).
 - **`tui/model.update` stays pure** through the write path: it owns the Detail overlay state
   as one typed `Screen::Detail.overlay: DetailOverlay { None, Compose(Compose), ConfirmDelete,
   ImageViewer { asset, status } }` — compose, delete-confirm, and the image viewer are mutually

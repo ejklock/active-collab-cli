@@ -9,6 +9,7 @@ mod i18n;
 mod models;
 mod render;
 mod richtext;
+mod sanitize;
 mod store;
 mod timing;
 mod tui;

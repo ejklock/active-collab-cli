@@ -912,6 +912,17 @@ fn parse_task_ref_text_slash_text_returns_exit2() {
 }
 
 #[test]
+fn parse_task_ref_overflowing_digit_run_returns_exit2_without_panic() {
+    let mut err = Vec::new();
+    let overflowing_id = "9".repeat(30);
+    let ref_ = format!("https://example.com/projects/{overflowing_id}/tasks/{overflowing_id}");
+    let result = parse_task_ref(&ref_, &mut err);
+    assert_eq!(result, Err(2));
+    let e = output_str(&err);
+    assert!(e.contains("cannot parse task ref"), "err: {e}");
+}
+
+#[test]
 fn parse_task_ref_url_embedded_in_longer_text() {
     let mut err = Vec::new();
     let result = parse_task_ref(

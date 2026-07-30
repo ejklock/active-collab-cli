@@ -3088,3 +3088,67 @@ fn other_comment_has_no_affordance_style_runs_and_no_affordances() {
         "comment by another user must have no EditAffordance or DeleteAffordance StyleRuns"
     );
 }
+
+// ADR 0068 / issue 0062 C1 — render_task and render_mine_table must never write a raw
+// 0x1B (ESC) byte to stdout for server-supplied text, whether it arrives as an HTML
+// entity (decoded by html_to_text), a raw byte in a field that skips html_to_text
+// entirely (body_plain_text, name), or a table row name.
+
+#[test]
+fn render_task_html_entity_esc_in_body_produces_no_raw_esc_byte() {
+    let task = json!({ "id": 1, "name": "T", "body": "<p>&#27;[2Jwiped</p>" });
+    let mut out = Vec::new();
+    render_task(&task, &[], false, &HashMap::new(), &mut out);
+    let stdout = String::from_utf8(out).unwrap();
+    assert!(
+        !stdout.contains('\u{001b}'),
+        "raw ESC byte reached stdout via html entity: {stdout:?}"
+    );
+}
+
+#[test]
+fn render_task_raw_esc_in_comment_body_plain_text_produces_no_raw_esc_byte() {
+    let task = json!({ "id": 1, "name": "T" });
+    let comments = vec![json!({
+        "created_by_name": "Alice",
+        "created_on": 1614556800i64,
+        "body_plain_text": "hi\u{001b}[31mred"
+    })];
+    let mut out = Vec::new();
+    render_task(&task, &comments, false, &HashMap::new(), &mut out);
+    let stdout = String::from_utf8(out).unwrap();
+    assert!(
+        !stdout.contains('\u{001b}'),
+        "raw ESC byte reached stdout via body_plain_text: {stdout:?}"
+    );
+}
+
+#[test]
+fn render_task_raw_esc_in_task_name_produces_no_raw_esc_byte() {
+    let task = json!({ "id": 1, "name": "evil\u{001b}[2J" });
+    let mut out = Vec::new();
+    render_task(&task, &[], false, &HashMap::new(), &mut out);
+    let stdout = String::from_utf8(out).unwrap();
+    assert!(
+        !stdout.contains('\u{001b}'),
+        "raw ESC byte reached stdout via task name: {stdout:?}"
+    );
+}
+
+#[test]
+fn render_mine_table_raw_esc_in_row_name_produces_no_raw_esc_byte() {
+    let rows = [MineTableRow {
+        instance: "myinst".to_owned(),
+        project_id: 1,
+        task_number: 1,
+        task_id: 1,
+        name: "evil\u{001b}[2J".to_owned(),
+        due_on: None,
+        project_name: None,
+    }];
+    let s = render_mine_table(&rows);
+    assert!(
+        !s.contains('\u{001b}'),
+        "raw ESC byte reached the mine table via row name: {s:?}"
+    );
+}

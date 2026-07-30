@@ -34,3 +34,41 @@
 | [0030](/bdr/0030-detail-project-name-resolved-on-miss.md) | Detail `Projeto` row resolves an unknown project name over the network (one `GET /api/v1/projects/{id}`) and caches it; the `(desconhecido)` fallback appears only when the server yields no name (refines BDR 0016 Scenario 3) | Accepted |
 | [0031](/bdr/0031-ac-skill-command.md) | `ac skill <name>` prints the embedded agent-skill markdown (byte-for-byte the canonical `SKILL.md`), `ac skill list` enumerates the registry, a bare `ac skill` prints the single skill, an unknown name exits 2; needs no instance or network and is not rewritten to `get` | Accepted (amended by 0059) |
 | [0032](/bdr/0032-install-skill-scope.md) | `install-skill.sh --scope project\|global` selects per-project vs user-level install paths; global writes claude/pi/codex user-level dirs, opencode/copilot/cursor are unsupported (single exits 2, `all` skips them), `--dir`+global errors, invalid scope exits 2, and a TTY-only prompt defaults to project on a pipe | Accepted (amended by 0059) |
+
+## Active
+
+* [0001 — Task list navigation: mouse, scroll, and bounded selection](0001-task-list-navigation.md) - Accepted
+* [0002 — Token host-isolation: the instance token reaches only its own host](0002-token-host-isolation.md) - Accepted
+* [0003 — CLI command-output parity: messages, exit codes, and bare-invocation](0003-cli-command-output-parity.md) - Accepted
+* [0004 — Browse navigation: a screen stack with bounded selection across screens](0004-browse-navigation-screen-stack.md) - Accepted
+* [0005 — Loader and single-flight refresh: effects as Cmd, one in-flight load per screen](0005-loader-single-flight-refresh.md) - Accepted
+* [0007 — Bare invocation in a TTY defaults to mine](0007-bare-invocation-tty-default.md) - Accepted
+* [0008 — Browse-list refresh: open tasks always fetched, project directory served from cache](0008-browse-list-refresh-cached-directory.md) - Accepted
+* [0009 — Rich-text detail: comment/description HTML renders with bold, italic, code, headings, lists, quotes, links](0009-richtext-formatting-detail-view.md) - Accepted
+* [0010 — Agent JSON output: get/current/mine/browse emit one curated minified line, --json is non-interactive](0010-agent-json-output-contract.md) - Accepted
+* [0011 — Task-list first-paint SWR on entry: paint the cached list instantly, always revalidate](0011-task-list-first-paint-swr-entry.md) - Accepted
+* [0012 — Detail chrome responsiveness: header, task title, footer, and artifacts wrap on narrow widths](0012-detail-chrome-responsive-wrap.md) - Accepted
+* [0013 — Rich-text detail: tables, strikethrough, underline, and preformatted blocks render with structure](0013-richtext-full-tag-coverage.md) - Accepted
+* [0014 — Body links render inline as text + visible URL and activate from the visible region](0014-body-link-inline-url-activation.md) - Accepted
+* [0015 — App-managed text selection: drag highlights text and copies it to the clipboard with feedback](0015-app-managed-text-selection.md) - Accepted
+* [0016 — Detail view shows the title as a Título row and a populated Projeto row](0016-detail-title-row-project-name.md) - Accepted
+* [0017 — Anexos/Artefatos labels read as anchor text, a real filename, or the host](0017-asset-label-derivation.md) - Accepted
+* [0019 — Assets open on Ctrl/Cmd+click; the numeric 1-9 open and d+1-9 download shortcuts are removed](0019-asset-activation-ctrl-cmd-click.md) - Accepted
+* [0020 — The task list shows a bordered card per task with a relative, colored due date](0020-task-list-cards.md) - Accepted
+* [0022 — Assets are part of the scrollable detail content: every attachment is reachable by scrolling and opens on Ctrl/Cmd+click at any scroll position](0022-assets-inline-scrollable-detail-content.md) - Accepted
+* [0023 — Rich-text wrap: each wrapped word keeps its own source emphasis, even when the word repeats or is a substring of a styled token](0023-richtext-wrap-positional-style.md) - Accepted
+* [0024 — Comment authoring: create a multi-line comment, edit and delete your own, with a server-truth refresh after each mutation](0024-comment-authoring-create-edit-delete.md) - Accepted
+* [0025 — ](0025-comment-card-navigation-and-contextual-footer.md) - 
+* [0026 — Comment compose and delete-confirm open as a centered modal overlay over a dimmed thread, sharing one reusable modal primitive](0026-comment-modal-overlay.md) - Accepted
+* [0027 — A non-interactive `comment` command posts a comment to a task as the logged-in user, from a -m flag or stdin, with a --json write result](0027-non-interactive-comment-creation.md) - Accepted
+* [0028 — Comment edit/delete affordances read as colored underlined links (own comments only); the delete-confirm modal presents Sim/Não](0028-comment-affordance-links-and-yes-no-confirm.md) - Accepted
+* [0029 — A revoked API token (HTTP 401) produces actionable re-authentication guidance — CLI prints a clear message and exits non-zero; the TUI shows a status-line pointing to `ac setup add`](0029-token-invalidation-reauthentication.md) - Accepted
+* [0030 — Detail Projeto row resolves an unknown project name over the network and caches it](0030-detail-project-name-resolved-on-miss.md) - Accepted
+* [0031 — `ac skill` prints the embedded agent skill markdown; `ac skill list` enumerates the registry](0031-ac-skill-command.md) - Accepted
+* [0032 — `install-skill.sh --scope project|global` selects per-project vs user-level install paths](0032-install-skill-scope.md) - Accepted
+
+## Superseded
+
+* [0006 — Selection mode: a key toggles mouse capture off so the terminal can select text](0006-selection-mode-mouse-capture-toggle.md) - Superseded
+* [0018 — Anexos/Artefatos card has breathing room: a blank line between links and interior padding](0018-asset-card-breathing-room.md) - Superseded
+* [0021 — The asset-open hint lives inside the Anexos card in italic, not in the footer](0021-asset-open-hint-in-card.md) - Superseded

@@ -429,7 +429,7 @@ pub fn render_mine_table(rows: &[MineTableRow]) -> String {
             row.instance, row.project_id, row.task_number, row.task_id, row.name
         ));
     }
-    lines.join("\n")
+    crate::sanitize::strip_control_chars(&lines.join("\n"))
 }
 
 /// Parity: render.py fmt_ts.
@@ -529,7 +529,7 @@ pub fn render_task(
     out: &mut dyn Write,
 ) {
     let s = render_task_to_str(task, comments, no_comments, user_map);
-    writeln!(out, "{s}").ok();
+    writeln!(out, "{}", crate::sanitize::strip_control_chars(&s)).ok();
 }
 
 /// Write `msg` followed by a newline to stderr.

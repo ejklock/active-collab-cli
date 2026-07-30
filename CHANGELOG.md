@@ -11,6 +11,31 @@ pre-cutover Python package's history is preserved verbatim under
 version numbers are a separate line and do not continue into the Rust crate
 (issue 0055).
 
+## [0.7.0] - 2026-07-30
+
+### Security
+
+- The API token header is gated on the request URL's full **origin** — scheme,
+  host, and port — instead of the host alone. Asset URLs come verbatim from task
+  and comment payload, so a same-host `http://` asset made the CLI send
+  `x-angie-authapitoken` over cleartext HTTP to an on-path attacker.
+  `host_gated_token_header` is renamed `origin_gated_token_header`; an instance
+  configured with an `http://` base URL still receives the token for its
+  own-origin assets (issue 0062 C2, ADR 0067).
+- Control characters are stripped from untrusted text before it reaches a
+  terminal. A task or comment body containing `&#27;` (or a raw ESC byte) could
+  inject ANSI/OSC escape sequences into the terminal of anyone running
+  `ac get`/`ac current`/`ac mine` — output spoofing, and clipboard or
+  window-title sequences in emulators that honor them. `sanitize::strip_control_chars`
+  (keeps newline and tab) now runs at the CLI write seams and at the richtext
+  parser's single entity-decode helper. `--json` output is unchanged (issue 0062
+  C1, ADR 0068).
+
+### Fixed
+
+- `ac get <ref>` no longer panics on a task URL whose id is a digit run wider
+  than `i64`; it returns the existing parse error (issue 0062).
+
 ## [0.6.0] - 2026-07-22
 
 ### Added

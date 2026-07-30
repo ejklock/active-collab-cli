@@ -284,6 +284,92 @@ fn empty_html_returns_empty_string() {
     assert_eq!(out, "");
 }
 
+// --- ADR 0068 / issue 0062 C1: control chars stripped at decode ———————————
+
+#[test]
+fn entity_encoded_escape_byte_stripped_in_paragraph() {
+    let html = "<p>before &#27;[31m after</p>";
+    let out = rich_to_text(html);
+    assert!(
+        !out.contains('\u{1b}'),
+        "decoded entity must not leave an ESC byte in paragraph spans: {out:?}"
+    );
+    assert!(
+        out.contains("before") && out.contains("[31m") && out.contains("after"),
+        "surrounding text must survive the strip: {out:?}"
+    );
+}
+
+#[test]
+fn entity_encoded_escape_byte_stripped_inside_pre() {
+    use crate::richtext::structured_rich_with_links;
+    let html = "<pre>code &#27;[31m tail</pre>";
+    let lines = structured_rich_with_links(html);
+    let has_esc = lines
+        .iter()
+        .flat_map(|l| l.iter())
+        .any(|s| s.text.contains('\u{1b}'));
+    assert!(
+        !has_esc,
+        "decoded entity inside <pre> must not leave an ESC byte: {lines:?}"
+    );
+    let all_text: String = lines
+        .iter()
+        .flat_map(|l| l.iter().map(|s| s.text.as_str()))
+        .collect();
+    assert!(
+        all_text.contains("code") && all_text.contains("[31m") && all_text.contains("tail"),
+        "surrounding text inside <pre> must survive the strip: {all_text:?}"
+    );
+}
+
+#[test]
+fn entity_encoded_escape_byte_stripped_inside_table_cell() {
+    use crate::richtext::structured_rich_with_links;
+    let html = "<table><tr><td>cell &#27;[31m value</td></tr></table>";
+    let lines = structured_rich_with_links(html);
+    let has_esc = lines
+        .iter()
+        .flat_map(|l| l.iter())
+        .any(|s| s.text.contains('\u{1b}'));
+    assert!(
+        !has_esc,
+        "decoded entity inside a table cell must not leave an ESC byte: {lines:?}"
+    );
+    let all_text: String = lines
+        .iter()
+        .flat_map(|l| l.iter().map(|s| s.text.as_str()))
+        .collect();
+    assert!(
+        all_text.contains("cell") && all_text.contains("[31m") && all_text.contains("value"),
+        "surrounding text inside the table cell must survive the strip: {all_text:?}"
+    );
+}
+
+#[test]
+fn raw_escape_byte_stripped_in_paragraph() {
+    let html = "<p>before \u{1b}[31m after</p>";
+    let out = rich_to_text(html);
+    assert!(
+        !out.contains('\u{1b}'),
+        "a raw ESC byte (not an entity) must also be dropped from parsed spans: {out:?}"
+    );
+    assert!(
+        out.contains("before") && out.contains("[31m") && out.contains("after"),
+        "surrounding text must survive the strip: {out:?}"
+    );
+}
+
+#[test]
+fn normal_rendering_unchanged_accents_emoji_and_entity() {
+    let html = "<p>Caf\u{e9} \u{1f600} a &amp; b</p>";
+    let out = rich_to_text(html);
+    assert_eq!(
+        out, "Caf\u{e9} \u{1f600} a & b",
+        "accents, emoji, and &amp; must decode exactly as before the sanitizer was added: {out:?}"
+    );
+}
+
 // --- R3a-A4 / BDR 0003: CLI parity is verified in render tests ————————————
 
 // --- Mixed document ——————————————————————————————————————————————————————
