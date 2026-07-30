@@ -25,22 +25,29 @@ impl Http {
         Ok(Http { client })
     }
 
-    /// Returns Some((header_name, header_value)) when the request URL's host
-    /// matches the instance host — the token is never attached to a foreign host.
-    pub fn host_gated_token_header(
+    /// Returns Some((header_name, header_value)) when the request URL's origin
+    /// (scheme + host + port) matches the instance origin — the token is never
+    /// attached to a request whose scheme, host, or port differs from the
+    /// configured instance, even when the host alone matches.
+    pub fn origin_gated_token_header(
         url: &str,
         instance_base_url: &str,
         token: &str,
     ) -> Option<(HeaderName, HeaderValue)> {
-        let req_host = extract_host(url)?;
-        let inst_host = extract_host(instance_base_url)?;
-        if req_host.eq_ignore_ascii_case(&inst_host) {
-            let name = HeaderName::from_static(TOKEN_HEADER);
-            let value = HeaderValue::from_str(token).ok()?;
-            Some((name, value))
-        } else {
-            None
+        let req_origin = origin_of(url)?;
+        let inst_origin = origin_of(instance_base_url)?;
+        if !req_origin.0.eq_ignore_ascii_case(&inst_origin.0) {
+            return None;
         }
+        if !req_origin.1.eq_ignore_ascii_case(&inst_origin.1) {
+            return None;
+        }
+        if req_origin.2 != inst_origin.2 {
+            return None;
+        }
+        let name = HeaderName::from_static(TOKEN_HEADER);
+        let value = HeaderValue::from_str(token).ok()?;
+        Some((name, value))
     }
 
     /// Authenticated GET. Returns Ok((status, body)) for any HTTP response
@@ -53,7 +60,8 @@ impl Http {
     ) -> Result<(u16, bytes::Bytes)> {
         let mut builder = self.client.get(url).header(ACCEPT, ACCEPT_JSON);
 
-        if let Some((name, value)) = Self::host_gated_token_header(url, instance_base_url, token) {
+        if let Some((name, value)) = Self::origin_gated_token_header(url, instance_base_url, token)
+        {
             builder = builder.header(name, value);
         }
 
@@ -79,7 +87,8 @@ impl Http {
             .header(CONTENT_TYPE, "application/json")
             .json(body);
 
-        if let Some((name, value)) = Self::host_gated_token_header(url, instance_base_url, token) {
+        if let Some((name, value)) = Self::origin_gated_token_header(url, instance_base_url, token)
+        {
             builder = builder.header(name, value);
         }
 
@@ -105,7 +114,8 @@ impl Http {
             .header(CONTENT_TYPE, "application/json")
             .json(body);
 
-        if let Some((name, value)) = Self::host_gated_token_header(url, instance_base_url, token) {
+        if let Some((name, value)) = Self::origin_gated_token_header(url, instance_base_url, token)
+        {
             builder = builder.header(name, value);
         }
 
@@ -125,7 +135,8 @@ impl Http {
     ) -> Result<(u16, bytes::Bytes)> {
         let mut builder = self.client.delete(url).header(ACCEPT, ACCEPT_JSON);
 
-        if let Some((name, value)) = Self::host_gated_token_header(url, instance_base_url, token) {
+        if let Some((name, value)) = Self::origin_gated_token_header(url, instance_base_url, token)
+        {
             builder = builder.header(name, value);
         }
 
@@ -156,9 +167,12 @@ impl Http {
     }
 }
 
-fn extract_host(url: &str) -> Option<String> {
+fn origin_of(url: &str) -> Option<(String, String, Option<u16>)> {
     let parsed = url::Url::parse(url).ok()?;
-    parsed.host_str().map(|h| h.to_lowercase())
+    let host = parsed.host_str()?.to_lowercase();
+    let scheme = parsed.scheme().to_lowercase();
+    let port = parsed.port_or_known_default();
+    Some((scheme, host, port))
 }
 
 #[cfg(test)]
