@@ -84,9 +84,9 @@ fn branch_re() -> &'static Regex {
 /// Writes an error and returns Err(2) on bad input.
 pub(crate) fn parse_task_ref(ref_: &str, err: &mut dyn Write) -> Result<(i64, i64), i32> {
     if let Some(caps) = task_url_re().captures(ref_) {
-        let pid: i64 = caps[1].parse().unwrap();
-        let tid: i64 = caps[2].parse().unwrap();
-        return Ok((pid, tid));
+        if let (Ok(pid), Ok(tid)) = (caps[1].parse::<i64>(), caps[2].parse::<i64>()) {
+            return Ok((pid, tid));
+        }
     }
 
     let parts: Vec<&str> = ref_.split('/').collect();
