@@ -154,6 +154,16 @@ struct TableRow {
     cells: Vec<TableCell>,
 }
 
+/// Decodes HTML entities and strips control characters from untrusted body text.
+///
+/// Task and comment bodies come from the ActiveCollab server unsanitized, so an
+/// entity like `&#27;` must not survive decoding as a raw ESC byte reaching the
+/// terminal backend, independent of whatever the render layer also does with it
+/// (ADR 0068, issue 0062 C1).
+fn decode_text(raw: &str) -> String {
+    crate::sanitize::strip_control_chars(&html_escape::decode_html_entities(raw))
+}
+
 /// Mutable parse state for the rich parser.
 struct RichParseState {
     /// Completed rich lines (split on '\n').
@@ -274,13 +284,13 @@ impl RichParseState {
                 );
             }
             Context::Table => {
-                let decoded = html_escape::decode_html_entities(raw).into_owned();
+                let decoded = decode_text(raw);
                 if let Some(cell) = self.table_current_cell.as_mut() {
                     cell.text.push_str(&decoded);
                 }
             }
             _ => {
-                let decoded = html_escape::decode_html_entities(raw).into_owned();
+                let decoded = decode_text(raw);
                 let em = self.current_emphasis();
                 match ctx {
                     Context::Anchor => push_to_anchor_spans(&mut self.anchor_spans, &decoded, em),
@@ -612,7 +622,7 @@ fn accumulate_pre_text(
     } else {
         emphasis
     };
-    let decoded = html_escape::decode_html_entities(raw).into_owned();
+    let decoded = decode_text(raw);
     let mut parts = decoded.split('\n');
     if let Some(first) = parts.next() {
         if !first.is_empty() {

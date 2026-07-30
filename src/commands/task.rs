@@ -143,6 +143,7 @@ pub(crate) async fn do_get_task(
 
     if flags.short {
         let name = task.get("name").and_then(|v| v.as_str()).unwrap_or("");
+        let name = crate::sanitize::strip_control_chars(name);
         writeln!(out, "{pid}/{tid}\t{name}").ok();
         return 0;
     }
