@@ -78,12 +78,45 @@ chmod +x "${_dest}"
 echo "Installed to ${_dest}"
 
 _alias_dest="${_install_dir}/${ALIAS_NAME}"
+_alias_linked=0
+
+# The binary reports the name it was invoked as, so either name identifies it.
+_is_this_cli() {
+  _reported="$("$1" --version 2>/dev/null)" || return 1
+  case "${_reported}" in
+    "${BIN_NAME} "*|"${ALIAS_NAME} "*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# A plain file named `ac` is replaced only when it identifies itself as this CLI
+# (a copy left by an older install); anything else belongs to another program.
 if [ -e "${_alias_dest}" ] && [ ! -L "${_alias_dest}" ]; then
-  echo "Warning: ${_alias_dest} already exists and is not a symlink; leaving it alone." >&2
-  echo "  Run '${BIN_NAME}' instead of '${ALIAS_NAME}', or remove that file and re-run this installer." >&2
-else
+  if _is_this_cli "${_alias_dest}"; then
+    rm -f "${_alias_dest}"
+  else
+    echo "Warning: ${_alias_dest} already exists and is not this CLI; leaving it alone." >&2
+    if ! "${_alias_dest}" --version >/dev/null 2>&1; then
+      echo "  It does not run on this machine — a 'make install' build for another platform leaves exactly that." >&2
+    fi
+    echo "  Run '${BIN_NAME}', or remove ${_alias_dest} and re-run this installer." >&2
+  fi
+fi
+
+if [ ! -e "${_alias_dest}" ] || [ -L "${_alias_dest}" ]; then
   ln -sf "${BIN_NAME}" "${_alias_dest}"
   echo "Linked ${_alias_dest} -> ${BIN_NAME}"
+  _alias_linked=1
+fi
+
+# macOS ships /usr/sbin/ac (login accounting), so the alias is only usable when
+# the install dir wins the PATH lookup.
+if [ "${_alias_linked}" = "1" ]; then
+  _on_path="$(command -v "${ALIAS_NAME}" 2>/dev/null || true)"
+  if [ -n "${_on_path}" ] && [ "${_on_path}" != "${_alias_dest}" ]; then
+    echo "Warning: '${ALIAS_NAME}' still resolves to ${_on_path}, which comes earlier on your PATH." >&2
+    echo "  Put ${_install_dir} ahead of it, or run '${BIN_NAME}'." >&2
+  fi
 fi
 
 "${_dest}" --help

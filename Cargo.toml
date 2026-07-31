@@ -1,6 +1,6 @@
 [package]
 name = "ac"
-version = "0.7.1"
+version = "0.7.2"
 edition = "2021"
 
 [[bin]]
@@ -9,7 +9,8 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = "1"
-clap = { version = "4", features = ["derive"] }
+# "string" lets the command name be set at runtime from argv[0] (the ac alias).
+clap = { version = "4", features = ["derive", "string"] }
 bytes = "1"
 crossterm = { version = "0.28", features = ["event-stream"] }
 dirs = "5"
