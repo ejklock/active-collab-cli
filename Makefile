@@ -12,7 +12,7 @@ else
 NATIVE_TARGET := x86_64-apple-darwin
 endif
 
-.PHONY: binary build image run test comment-policy fmt clippy lint check clean install install-native uninstall help
+.PHONY: binary build image run test comment-policy fmt clippy lint check clean host-runs-docker-binary install install-native uninstall help
 
 binary:
 	docker compose run --rm dev cargo build --release
@@ -47,7 +47,17 @@ check: fmt clippy test comment-policy
 clean:
 	docker compose run --rm dev cargo clean
 
-install: binary
+# The Docker build emits a Linux ELF; installing it on a macOS host produces an
+# `ac` that dies with "exec format error". Refuse before spending a release build.
+host-runs-docker-binary:
+	@if [ "$$(uname -s)" != "Linux" ]; then \
+	  echo "make install copies the Docker (Linux) build, which cannot run on $$(uname -s)." >&2; \
+	  echo "Use 'make install-native' (needs a host Rust toolchain), or a release binary:" >&2; \
+	  echo "  curl -fsSL https://raw.githubusercontent.com/ejklock/active-collab-cli/main/install.sh | sh" >&2; \
+	  exit 1; \
+	fi
+
+install: host-runs-docker-binary binary
 	mkdir -p $(BINDIR)
 	install -m 0755 target/release/ac $(BINDIR)/ac
 	ln -sf ac $(BINDIR)/active-collab
@@ -81,7 +91,7 @@ help:
 	@echo "  lint            Run fmt + clippy"
 	@echo "  check           Run fmt + clippy + test + comment-policy (full local gate)"
 	@echo "  clean           Remove build artifacts"
-	@echo "  install         Install ac (+ the active-collab alias) to \$$(BINDIR) (default: ~/.local/bin); override with PREFIX=/usr/local"
+	@echo "  install         Install ac (+ the active-collab alias) to \$$(BINDIR) (default: ~/.local/bin); Linux hosts only"
 	@echo "  install-native  Native macOS build; requires a host Rust toolchain (bypasses Docker)"
 	@echo "  uninstall       Remove ac and active-collab from \$$(BINDIR)"
 	@echo "  help            Show this message"

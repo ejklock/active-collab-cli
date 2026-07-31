@@ -69,8 +69,10 @@ curl -fsSL https://raw.githubusercontent.com/ejklock/active-collab-cli/main/inst
 
 The script downloads the pre-built `active-collab` binary for your platform from
 the latest GitHub Release and places it on your PATH, next to an `ac` symlink —
-the short command used throughout this README and by the agent skill. If a
-regular file named `ac` already exists there, the installer keeps it and warns.
+the short command used throughout this README and by the agent skill. An `ac`
+left by an older install is replaced; an `ac` belonging to another program is
+kept, with a warning. macOS ships its own `/usr/sbin/ac` (login accounting), so
+the installer also warns when that one still wins your PATH lookup.
 
 ### Windows (PowerShell one-liner)
 
@@ -109,6 +111,10 @@ docker compose run --rm dev cargo build
 docker compose build
 docker compose run --rm build
 ```
+
+That binary is a Linux build. `make install` therefore only accepts a Linux host
+and refuses elsewhere; on macOS use `make install-native` (needs a host Rust
+toolchain) or the release installer above.
 
 ---
 
