@@ -11,6 +11,19 @@ pre-cutover Python package's history is preserved verbatim under
 version numbers are a separate line and do not continue into the Rust crate
 (issue 0055).
 
+## [0.7.1] - 2026-07-31
+
+### Fixed
+
+- The installers restore the short `ac` command. `install.sh` names the release
+  binary `active-collab`, which left users who follow the README (and agents
+  following the embedded skill, which invokes `ac get` / `ac mine`) with
+  `command not found: ac`. `install.sh` now creates an `ac` symlink beside the
+  binary — refusing to overwrite a pre-existing regular file with that name —
+  and `install.ps1` writes an `ac.cmd` forwarder next to `active-collab.exe`.
+  `make install` / `make install-native` expose the same two names, and
+  `make uninstall` removes both (issue 0064).
+
 ## [0.7.0] - 2026-07-30
 
 ### Security
