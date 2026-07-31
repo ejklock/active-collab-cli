@@ -68,7 +68,9 @@ curl -fsSL https://raw.githubusercontent.com/ejklock/active-collab-cli/main/inst
 ```
 
 The script downloads the pre-built `active-collab` binary for your platform from
-the latest GitHub Release and places it on your PATH.
+the latest GitHub Release and places it on your PATH, next to an `ac` symlink —
+the short command used throughout this README and by the agent skill. If a
+regular file named `ac` already exists there, the installer keeps it and warns.
 
 ### Windows (PowerShell one-liner)
 
@@ -76,11 +78,16 @@ the latest GitHub Release and places it on your PATH.
 irm https://raw.githubusercontent.com/ejklock/active-collab-cli/main/install.ps1 | iex
 ```
 
+Installs `active-collab.exe` plus an `ac.cmd` shim, so both `active-collab` and
+`ac` work from cmd and PowerShell.
+
 ### Manual download
 
 Download the pre-built binary for your platform from the
 [Releases page](https://github.com/ejklock/active-collab-cli/releases), place it on your
-PATH, and make it executable (`chmod +x active-collab` on Unix).
+PATH, and make it executable (`chmod +x active-collab` on Unix). Add the short
+alias yourself: `ln -s active-collab ac` (Unix), or an `ac.cmd` forwarder on
+Windows.
 
 | Platform | Asset |
 |---|---|
