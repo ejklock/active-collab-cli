@@ -11,6 +11,28 @@ pre-cutover Python package's history is preserved verbatim under
 version numbers are a separate line and do not continue into the Rust crate
 (issue 0055).
 
+## [0.7.2] - 2026-07-31
+
+### Changed
+
+- Help, usage, errors, and `--version` render under the name the binary was
+  invoked as: `ac --help` now prints `Usage: ac [COMMAND]` instead of
+  contradicting the docs and the agent skill with the long name. `argv[0]` is
+  reduced to its basename (the `.exe` suffix stripped), falling back to
+  `active-collab` (issue 0065).
+
+### Fixed
+
+- `make install` refuses to run on a non-Linux host instead of copying the
+  Docker (Linux) build to `$(BINDIR)/ac`, where it dies with `exec format
+  error`. It fails before the release build and points at `make install-native`
+  or the release installer (issue 0065).
+- `install.sh` replaces an existing plain `ac` when that file reports itself as
+  this CLI, so an upgrade from an older install actually lands. A foreign `ac`
+  is still left alone, now with an explicit note when the file cannot execute on
+  this machine. After linking, both installers warn when `ac` still resolves
+  elsewhere on PATH — macOS ships its own `/usr/sbin/ac` (issue 0065).
+
 ## [0.7.1] - 2026-07-31
 
 ### Fixed
