@@ -94,6 +94,44 @@ fn branch_pattern_rejects_missing_dash() {
     assert!(!branch_matches_task_pattern("feature/12345"));
 }
 
+#[test]
+fn invoked_name_uses_the_alias_the_user_typed() {
+    assert_eq!(invoked_name(Some("ac")), "ac");
+    assert_eq!(invoked_name(Some("/usr/local/bin/ac")), "ac");
+    assert_eq!(
+        invoked_name(Some("/home/me/.local/bin/active-collab")),
+        "active-collab"
+    );
+}
+
+// Path components are host-shaped, so the Windows separator is not exercised
+// here; the suffix is what the .exe/ac.cmd pair puts in front of the user.
+#[test]
+fn invoked_name_drops_the_windows_executable_suffix() {
+    assert_eq!(invoked_name(Some("active-collab.exe")), "active-collab");
+    assert_eq!(invoked_name(Some("ac.exe")), "ac");
+}
+
+#[test]
+fn invoked_name_falls_back_when_argv0_is_absent_or_empty() {
+    assert_eq!(invoked_name(None), DEFAULT_PROGRAM_NAME);
+    assert_eq!(invoked_name(Some("")), DEFAULT_PROGRAM_NAME);
+    assert_eq!(invoked_name(Some("/")), DEFAULT_PROGRAM_NAME);
+}
+
+#[test]
+fn help_and_usage_render_under_the_invoked_name() {
+    let rendered = command_as("ac").render_usage().to_string();
+    assert!(
+        rendered.contains("ac"),
+        "usage should name the alias: {rendered}"
+    );
+    assert!(
+        !rendered.contains("active-collab"),
+        "usage should not force the long name: {rendered}"
+    );
+}
+
 fn parse(args: &[&str]) -> Result<Cli, clap::Error> {
     // Insert program name at position 0 as clap expects.
     let mut all = vec!["active-collab"];

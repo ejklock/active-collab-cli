@@ -1,8 +1,30 @@
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, CommandFactory, Parser, Subcommand};
 
 pub const KNOWN_COMMANDS: [&str; 8] = [
     "setup", "get", "current", "mine", "list", "browse", "comment", "skill",
 ];
+
+/// Name used in help, usage, and version output when `argv[0]` is unavailable.
+pub const DEFAULT_PROGRAM_NAME: &str = "active-collab";
+
+/// The name the binary was invoked as, without directory or executable suffix.
+/// The installers expose the same binary as both `active-collab` and the short
+/// `ac` alias, so help and usage lines must echo whichever one the user typed.
+pub fn invoked_name(argv0: Option<&str>) -> String {
+    argv0
+        .map(std::path::Path::new)
+        .and_then(std::path::Path::file_stem)
+        .map(|stem| stem.to_string_lossy().into_owned())
+        .filter(|stem| !stem.is_empty())
+        .unwrap_or_else(|| DEFAULT_PROGRAM_NAME.to_owned())
+}
+
+/// The clap command tree, presented under the name the user invoked.
+pub fn command_as(program: &str) -> clap::Command {
+    Cli::command()
+        .name(program.to_owned())
+        .bin_name(program.to_owned())
+}
 
 /// Fetch ActiveCollab tasks from one or more configured instances.
 #[derive(Parser, Debug)]
