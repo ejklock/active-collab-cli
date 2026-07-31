@@ -19,6 +19,7 @@ $Repo   = "ejklock/active-collab-cli"
 $Asset  = "active-collab-windows-x86_64.exe"
 $BinDir = Join-Path $env:LOCALAPPDATA "Programs\active-collab"
 $Dest   = Join-Path $BinDir "active-collab.exe"
+$Shim   = Join-Path $BinDir "ac.cmd"
 
 if ($Version -eq "") {
     $apiUrl = "https://api.github.com/repos/$Repo/releases/latest"
@@ -45,6 +46,12 @@ try {
     exit 1
 }
 
+# Windows symlinks require elevation or Developer Mode, so the short `ac` command
+# the docs and the agent skill use is provided as a .cmd forwarder, which both
+# cmd.exe and PowerShell resolve from PATH.
+$shimBody = "@echo off`r`n`"%~dp0active-collab.exe`" %*`r`n"
+Set-Content -Path $Shim -Value $shimBody -Encoding ASCII -NoNewline
+
 $userPath = [Environment]::GetEnvironmentVariable("PATH", "User")
 if ($userPath -notlike "*$BinDir*") {
     [Environment]::SetEnvironmentVariable(
@@ -57,4 +64,5 @@ if ($userPath -notlike "*$BinDir*") {
 }
 
 Write-Host "Installed to $Dest"
+Write-Host "Short command available: ac (via $Shim)"
 & $Dest --help

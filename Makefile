@@ -50,7 +50,8 @@ clean:
 install: binary
 	mkdir -p $(BINDIR)
 	install -m 0755 target/release/ac $(BINDIR)/ac
-	@echo "Installed: $(BINDIR)/ac"
+	ln -sf ac $(BINDIR)/active-collab
+	@echo "Installed: $(BINDIR)/ac (also: $(BINDIR)/active-collab)"
 	@echo "Ensure $(BINDIR) is on your PATH. For a system-wide install: make install PREFIX=/usr/local (with sudo)"
 
 # Docker binary is Linux-only (ELF); install-native bypasses Docker and needs a host cargo.
@@ -58,12 +59,13 @@ install-native:
 	cargo build --release --target $(NATIVE_TARGET)
 	mkdir -p $(BINDIR)
 	install -m 0755 target/$(NATIVE_TARGET)/release/ac $(BINDIR)/ac
-	@echo "Installed (native): $(BINDIR)/ac"
+	ln -sf ac $(BINDIR)/active-collab
+	@echo "Installed (native): $(BINDIR)/ac (also: $(BINDIR)/active-collab)"
 	@echo "Ensure $(BINDIR) is on your PATH. For a system-wide install: make install-native PREFIX=/usr/local (with sudo)"
 
 uninstall:
-	rm -f $(BINDIR)/ac
-	@echo "Removed: $(BINDIR)/ac"
+	rm -f $(BINDIR)/ac $(BINDIR)/active-collab
+	@echo "Removed: $(BINDIR)/ac and $(BINDIR)/active-collab"
 
 help:
 	@echo "Usage: make <target>"
@@ -79,7 +81,7 @@ help:
 	@echo "  lint            Run fmt + clippy"
 	@echo "  check           Run fmt + clippy + test + comment-policy (full local gate)"
 	@echo "  clean           Remove build artifacts"
-	@echo "  install         Install ac to \$$(BINDIR) (default: ~/.local/bin); override with PREFIX=/usr/local"
+	@echo "  install         Install ac (+ the active-collab alias) to \$$(BINDIR) (default: ~/.local/bin); override with PREFIX=/usr/local"
 	@echo "  install-native  Native macOS build; requires a host Rust toolchain (bypasses Docker)"
-	@echo "  uninstall       Remove ac from \$$(BINDIR)"
+	@echo "  uninstall       Remove ac and active-collab from \$$(BINDIR)"
 	@echo "  help            Show this message"
