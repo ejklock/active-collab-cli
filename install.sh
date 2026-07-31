@@ -3,6 +3,7 @@ set -eu
 
 REPO="ejklock/active-collab-cli"
 BIN_NAME="active-collab"
+ALIAS_NAME="ac"
 
 _os="$(uname -s)"
 case "${_os}" in
@@ -75,4 +76,14 @@ mv "${_tmp}" "${_dest}"
 chmod +x "${_dest}"
 
 echo "Installed to ${_dest}"
+
+_alias_dest="${_install_dir}/${ALIAS_NAME}"
+if [ -e "${_alias_dest}" ] && [ ! -L "${_alias_dest}" ]; then
+  echo "Warning: ${_alias_dest} already exists and is not a symlink; leaving it alone." >&2
+  echo "  Run '${BIN_NAME}' instead of '${ALIAS_NAME}', or remove that file and re-run this installer." >&2
+else
+  ln -sf "${BIN_NAME}" "${_alias_dest}"
+  echo "Linked ${_alias_dest} -> ${BIN_NAME}"
+fi
+
 "${_dest}" --help
