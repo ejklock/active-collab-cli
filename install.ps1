@@ -65,4 +65,10 @@ if ($userPath -notlike "*$BinDir*") {
 
 Write-Host "Installed to $Dest"
 Write-Host "Short command available: ac (via $Shim)"
+
+$onPath = Get-Command ac -ErrorAction SilentlyContinue
+if ($onPath -and $onPath.Source -ne $Shim) {
+    Write-Warning "'ac' still resolves to $($onPath.Source), which comes earlier on your PATH."
+    Write-Warning "Put $BinDir ahead of it, or run 'active-collab'."
+}
 & $Dest --help

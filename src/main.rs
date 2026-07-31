@@ -14,7 +14,7 @@ mod store;
 mod timing;
 mod tui;
 
-use clap::{CommandFactory, Parser};
+use clap::FromArgMatches;
 use cli::{bare_no_command_action, BareNoCommandAction, Cli, Command};
 use commands::{
     comment_core, current_core, get_core, mine_core, pick_instance, setup_add, setup_language,
@@ -26,15 +26,18 @@ use std::process;
 
 #[tokio::main]
 async fn main() {
-    let code = run(std::env::args().skip(1).collect()).await;
+    let program = cli::invoked_name(std::env::args().next().as_deref());
+    let code = run(&program, std::env::args().skip(1).collect()).await;
     process::exit(code);
 }
 
-async fn run(raw_argv: Vec<String>) -> i32 {
+async fn run(program: &str, raw_argv: Vec<String>) -> i32 {
     let branch = current_git_branch();
     let argv = cli::normalize_argv(&raw_argv, branch.as_deref());
 
-    let cli_result = Cli::try_parse_from(std::iter::once("active-collab".to_owned()).chain(argv));
+    let cli_result = cli::command_as(program)
+        .try_get_matches_from(std::iter::once(program.to_owned()).chain(argv))
+        .and_then(|matches| Cli::from_arg_matches(&matches));
 
     let cli = match cli_result {
         Ok(c) => c,
@@ -59,8 +62,7 @@ async fn run(raw_argv: Vec<String>) -> i32 {
                 .await
             }
             BareNoCommandAction::HelpExit2 => {
-                let mut help_cli = Cli::command();
-                help_cli.print_help().ok();
+                cli::command_as(program).print_help().ok();
                 eprintln!();
                 2
             }
