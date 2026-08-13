@@ -14,6 +14,9 @@ jobs:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             asset-name: active-collab-linux-x86_64
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            asset-name: active-collab-linux-arm64
           - os: macos-latest
             target: x86_64-apple-darwin
             asset-name: active-collab-macos-x86_64
