@@ -320,11 +320,21 @@ sequenceDiagram
   host-only predecessor was named `host_gated_token_header`). Gate-checked by negative
   tests (no token off-host, no token on a scheme downgrade).
 - **`tui/model.update` stays pure** through the write path: it owns the Detail overlay state
-  as one typed `Screen::Detail.overlay: DetailOverlay { None, Compose(Compose), ConfirmDelete,
-  ImageViewer { asset, status } }` — compose, delete-confirm, and the image viewer are mutually
-  exclusive by construction ([ADR 0047](/adr/0047-detail-overlay-as-one-typed-state.md)) — and
-  emits write `Cmd`s, but never performs I/O. The shell owns the mode-aware key mapping (which
-  keys are *text*) and the spawned write ([ADR 0034](/adr/0034-comment-compose-mode-multiline.md)).
+  as one typed `Screen::Detail.overlay: DetailOverlay { None, Compose(Compose),
+  LogTime(LogTimeForm), ConfirmDelete, ImageViewer { asset, status } }` — compose, the log-time
+  form, delete-confirm, and the image viewer are mutually exclusive by construction
+  ([ADR 0047](/adr/0047-detail-overlay-as-one-typed-state.md)) — and emits write `Cmd`s, but
+  never performs I/O. The shell owns the mode-aware key mapping (which keys are *text*) and the
+  spawned write ([ADR 0034](/adr/0034-comment-compose-mode-multiline.md)).
+- **Logging time (issue 0067) reuses the comment write's server-truth refresh**: the `t` key
+  opens `LogTime(LogTimeForm)` with an Hours and an optional Summary field; `LogTimeSubmit`
+  parses hours (must be `> 0`) and emits `Cmd::SubmitTimeLog`, never touching the clock or the
+  network from the pure core. The shell (`spawn_time_write`) resolves the instance's default job
+  type (`pick_default_job_type`) and today's date (`commands::time::resolve_record_date`), then
+  calls the slice-1 `client.create_time_record` seam; `TimeMutationOk` clears the overlay and
+  emits the same `Cmd::LoadDetail { refresh: true }` as `CommentMutationOk` (both call the
+  shared `refresh_detail_after_write` helper). When no job type can be resolved the shell sends
+  `TimeMutationErr` without posting.
 - **image attachments open in an in-TUI viewer overlay** ([ADR 0065](/adr/0065-image-attachment-viewer-modal-overlay.md)):
   an asset whose derived filename ([ADR 0023](/adr/0023-asset-label-derivation.md)) is a raster
   image (`png/jpg/jpeg/gif/webp/bmp`, case-insensitive) emits a structural

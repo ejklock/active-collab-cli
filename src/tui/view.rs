@@ -3,8 +3,8 @@ use crate::render::{display_width, wrap_text};
 use crate::tui::detail_geometry::Selection;
 use crate::tui::footer::{self, FooterPlan};
 use crate::tui::model::{
-    ClickTarget, Compose, ComposeKind, ComposeStatus, ImageAssetRef, ImageStatus,
-    ModalButtonTarget, Model, Screen,
+    ClickTarget, Compose, ComposeKind, ComposeStatus, ImageAssetRef, ImageStatus, LogTimeField,
+    LogTimeForm, LogTimeStatus, ModalButtonTarget, Model, Screen,
 };
 use crate::tui::screens::{draw_detail, draw_projects, draw_tasks, DetailParams};
 use crate::tui::theme;
@@ -33,6 +33,18 @@ pub(crate) fn compose_modal_status(compose: &Compose) -> Option<String> {
         ComposeStatus::Submitting => Some(t("Sending…")),
         ComposeStatus::Error(_) => Some(t("Failed to post comment")),
         ComposeStatus::Editing => None,
+    }
+}
+
+/// Status text rendered inside the log-time modal's in-box hint line.
+///
+/// Returns `Some(status)` when the form has a transient state to display,
+/// `None` when editing normally (the hint text suffices).
+pub(crate) fn log_time_modal_status(form: &LogTimeForm) -> Option<String> {
+    match &form.status {
+        LogTimeStatus::Submitting => Some(t("Sending…")),
+        LogTimeStatus::Error(_) => Some(t("Failed to log time")),
+        LogTimeStatus::Editing => None,
     }
 }
 
@@ -165,6 +177,9 @@ pub fn view(
             if let Some(cp) = overlay.compose() {
                 render_compose_modal(frame, area, cp);
             }
+            if let Some(form) = overlay.log_time() {
+                render_log_time_modal(frame, area, form);
+            }
             if overlay.is_confirm() {
                 render_confirm_modal(frame, area, modal_btn_targets);
             }
@@ -210,6 +225,45 @@ fn render_compose_modal(frame: &mut Frame, frame_area: ratatui::layout::Rect, cp
         },
     );
     frame.render_widget(&cp.editor, body_rect);
+}
+
+fn log_time_modal_hint(form: &LogTimeForm) -> String {
+    match log_time_modal_status(form) {
+        Some(status) => status,
+        None => t("Ctrl+S send · Tab switch field · Esc cancel"),
+    }
+}
+
+/// Format one labeled field row, marking the currently focused field.
+fn log_time_field_line(label: &str, value: &str, is_focused: bool) -> String {
+    let marker = if is_focused { ">" } else { " " };
+    format!("{marker} {label}: {value}")
+}
+
+/// Render the log-time modal chrome via `render_modal`: the Hours and Summary
+/// fields as labeled rows, plus the hint/status line. Both fields are plain-text
+/// buffers (ADR 0064 does not apply — single-line, no caret/undo needs), so they
+/// render as static rows rather than a `TextArea` widget.
+fn render_log_time_modal(frame: &mut Frame, frame_area: ratatui::layout::Rect, form: &LogTimeForm) {
+    use crate::tui::widgets::modal::render_modal;
+    let hint = log_time_modal_hint(form);
+    let hours_line =
+        log_time_field_line(&t("Hours"), &form.hours, form.field == LogTimeField::Hours);
+    let summary_line = log_time_field_line(
+        &t("Summary"),
+        &form.summary,
+        form.field == LogTimeField::Summary,
+    );
+    let lines = [hours_line, summary_line];
+    render_modal(
+        frame,
+        frame_area,
+        ModalContent {
+            title: &t("Log time"),
+            lines: &lines,
+            hint: Some(&hint),
+        },
+    );
 }
 
 /// Render the delete-confirm modal overlay and register the two button click targets.

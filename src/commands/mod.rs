@@ -5,7 +5,7 @@ mod resolve;
 mod setup;
 mod skill;
 mod task;
-mod time;
+pub(crate) mod time;
 
 pub(crate) use comment::comment_core;
 pub(crate) use mine::{collect_mine_rows, mine_core, MineOutcome};

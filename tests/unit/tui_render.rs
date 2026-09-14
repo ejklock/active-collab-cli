@@ -5968,6 +5968,157 @@ mod compose_render {
     }
 }
 
+// AC4 (issue 0067 TUI slice): the log-time modal renders its two labeled fields
+// and hint via the shared modal primitive.
+
+mod log_time_render {
+    use crate::i18n::set_language;
+    use crate::tui::model::{
+        DetailOverlay, Header, LogTimeField, LogTimeForm, LogTimeStatus, Model, Screen,
+    };
+    use crate::tui::view::view;
+    use ratatui::{backend::TestBackend, Terminal};
+    use serde_json::Value;
+    use std::collections::HashMap;
+
+    use super::LANG_MUTEX;
+
+    fn editing_form(hours: &str, summary: &str, field: LogTimeField) -> LogTimeForm {
+        LogTimeForm {
+            hours: hours.to_string(),
+            summary: summary.to_string(),
+            field,
+            status: LogTimeStatus::Editing,
+        }
+    }
+
+    fn make_detail_model(overlay: DetailOverlay) -> Model {
+        Model {
+            stack: vec![Screen::Detail {
+                instance: "inst".into(),
+                project_id: 1,
+                task_id: 42,
+                task: Value::Null,
+                comments: vec![],
+                user_map: HashMap::new(),
+                lines: vec![],
+                line_styles: vec![],
+                assets: vec![],
+                offset: 0,
+                loading: false,
+                rendered_width: usize::MAX,
+                overlay,
+                current_user_id: None,
+                affordances: vec![],
+                focused_comment: None,
+                auth_error: false,
+                comment_spans: vec![],
+            }],
+            should_quit: false,
+            header: Header::from_instances(&[], None),
+            viewport: (80, 24),
+            click_targets: vec![],
+            modal_button_targets: vec![],
+            last_loaded: None,
+            selection: None,
+            copied_feedback: false,
+        }
+    }
+
+    fn render_via_view(model: &Model, width: u16, height: u16) -> ratatui::buffer::Buffer {
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| view(model, frame, &mut vec![], &mut vec![]))
+            .unwrap();
+        terminal.backend().buffer().clone()
+    }
+
+    fn buf_text(buf: &ratatui::buffer::Buffer) -> String {
+        let area = buf.area();
+        let mut out = String::new();
+        for y in 0..area.height {
+            for x in 0..area.width {
+                out.push_str(buf.cell((x, y)).unwrap().symbol());
+            }
+            out.push('\n');
+        }
+        out
+    }
+
+    // AC4: the modal shows the title, both labeled fields with their buffers, and
+    // the editing hint.
+    #[test]
+    fn log_time_active_shows_title_fields_and_hint() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let model = make_detail_model(DetailOverlay::LogTime(editing_form(
+            "1.5",
+            "fixed the bug",
+            LogTimeField::Hours,
+        )));
+        let buf = render_via_view(&model, 80, 24);
+        set_language("en");
+        let content = buf_text(&buf);
+        assert!(
+            content.contains("Log time"),
+            "modal must show 'Log time' title: {content}"
+        );
+        assert!(
+            content.contains("Hours"),
+            "modal must show the 'Hours' label: {content}"
+        );
+        assert!(
+            content.contains("1.5"),
+            "modal must show the typed hours buffer: {content}"
+        );
+        assert!(
+            content.contains("Summary"),
+            "modal must show the 'Summary' label: {content}"
+        );
+        assert!(
+            content.contains("fixed the bug"),
+            "modal must show the typed summary buffer: {content}"
+        );
+        assert!(
+            content.contains("Ctrl+S send"),
+            "in-box hint must contain 'Ctrl+S send': {content}"
+        );
+    }
+
+    // AC4: the modal shows the Submitting status text while the form is submitting.
+    #[test]
+    fn log_time_submitting_shows_sending_status() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let mut form = editing_form("1", "", LogTimeField::Hours);
+        form.status = LogTimeStatus::Submitting;
+        let model = make_detail_model(DetailOverlay::LogTime(form));
+        let buf = render_via_view(&model, 80, 24);
+        set_language("en");
+        let content = buf_text(&buf);
+        assert!(
+            content.contains("Sending…"),
+            "modal must show the submitting status: {content}"
+        );
+    }
+
+    // AC2/AC4: log-time inactive — no log-time content leaks into the render.
+    #[test]
+    fn log_time_inactive_shows_no_log_time_content() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let model = make_detail_model(DetailOverlay::None);
+        let buf = render_via_view(&model, 80, 24);
+        set_language("en");
+        let content = buf_text(&buf);
+        assert!(
+            !content.contains("Log time"),
+            "modal title must NOT appear when log-time overlay is None: {content}"
+        );
+    }
+}
+
 // AC B1 (slice 0057b): render_modal returns the inner content (body) Rect — the
 // area beneath the title border and above the hint row, not the outer bordered box.
 
@@ -6424,8 +6575,8 @@ mod yes_no_confirm_labels {
         );
     }
 
-    // AC2: the first registered button target (is_confirm: true) maps to the [Sim] columns;
-    // the second (is_confirm: false) maps to the [Não] columns in pt-BR.
+    // AC2: the first registered button target (is_confirm: true) maps to the [Sim] columns.
+    // The second (is_confirm: false) maps to the [Não] columns in pt-BR.
     // Swapping the targets would break this test (mutation floor).
     #[test]
     fn sim_target_is_confirm_and_nao_target_is_cancel() {
@@ -6967,7 +7118,8 @@ mod contextual_footer {
     use crate::i18n::set_language;
     use crate::render::build_detail_content;
     use crate::tui::model::{
-        Compose, ComposeKind, ComposeStatus, DetailOverlay, Header, Model, Screen,
+        Compose, ComposeKind, ComposeStatus, DetailOverlay, Header, LogTimeField, LogTimeForm,
+        LogTimeStatus, Model, Screen,
     };
     use crate::tui::view::view;
     use ratatui::{backend::TestBackend, Terminal};
@@ -7090,6 +7242,15 @@ mod contextual_footer {
         })
     }
 
+    fn editing_log_time() -> LogTimeForm {
+        LogTimeForm {
+            hours: String::new(),
+            summary: String::new(),
+            field: LogTimeField::Hours,
+            status: LogTimeStatus::Editing,
+        }
+    }
+
     // AC1/Scenario 7: browsing mode shows the browse hint.
     #[test]
     fn detail_footer_browsing_mode_shows_browse_hint() {
@@ -7107,8 +7268,37 @@ mod contextual_footer {
             "browsing hint must contain 'c comment': {content}"
         );
         assert!(
+            content.contains("t log time"),
+            "browsing hint must contain 't log time': {content}"
+        );
+        assert!(
             content.contains("r refresh"),
             "browsing hint must contain 'r refresh': {content}"
+        );
+    }
+
+    // AC4 (issue 0067 TUI slice): while the log-time modal is open, the footer shows
+    // the browse hint — the modal owns its own hint (one-home rule, mirrors compose).
+    #[test]
+    fn detail_footer_logging_time_mode_shows_browse_hint() {
+        let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let buf = render_detail_model(
+            DetailOverlay::LogTime(editing_log_time()),
+            None,
+            vec![],
+            None,
+            false,
+        );
+        set_language("en");
+        let content = buf_to_string(&buf);
+        assert!(
+            content.contains("j/k move"),
+            "footer must show browse hint when the log-time modal is open: {content}"
+        );
+        assert!(
+            content.contains("t log time"),
+            "footer must show the 't log time' affordance when the log-time modal is open: {content}"
         );
     }
 
@@ -7211,8 +7401,8 @@ mod contextual_footer {
         );
     }
 
-    // AC6 (ADR 0039 §5): modal open vs browse produce different render output;
-    // browse shows j/k move, modal frame adds the compose overlay (Ctrl+S in modal).
+    // AC6 (ADR 0039 §5): modal open vs browse produce different render output.
+    // Browse shows j/k move, modal frame adds the compose overlay (Ctrl+S in modal).
     #[test]
     fn detail_footer_hint_switches_when_mode_changes() {
         let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -8737,8 +8927,8 @@ mod image_viewer_render {
 
     // A3/CX: the viewer box is sized to the near-full detail content area, not
     // render_modal's ~70% box — on a 100×40 frame the compose/confirm modal box is
-    // bounded to width 64..=76 (see compose_modal_renders_at_70_percent_of_frame);
-    // the image viewer box must clear that ceiling by a wide margin.
+    // bounded to width 64..=76 (see compose_modal_renders_at_70_percent_of_frame).
+    // The image viewer box must clear that ceiling by a wide margin.
     #[test]
     fn viewer_box_is_near_full_not_seventy_percent() {
         let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
