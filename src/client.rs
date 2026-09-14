@@ -43,6 +43,35 @@ fn classify_comment_write(status: u16, body: Option<Value>) -> CommentWriteOutco
     CommentWriteOutcome::Failed(status)
 }
 
+/// Encodes a plain-text comment body as the HTML ActiveCollab expects: text is
+/// escaped, blank-line-separated paragraphs become `<p>...</p>` blocks, and a
+/// single in-paragraph newline becomes `<br>` — newlines carry no meaning in
+/// the rendered HTML, so without this the server flattens every paragraph
+/// break the user typed (issue 0066).
+fn encode_comment_body(body: &str) -> String {
+    let escaped = html_escape::encode_text(body).into_owned();
+    let mut paragraphs: Vec<String> = Vec::new();
+    let mut current_lines: Vec<&str> = Vec::new();
+    for line in escaped.split('\n') {
+        if line.trim().is_empty() {
+            if !current_lines.is_empty() {
+                paragraphs.push(current_lines.join("<br>"));
+                current_lines.clear();
+            }
+        } else {
+            current_lines.push(line);
+        }
+    }
+    if !current_lines.is_empty() {
+        paragraphs.push(current_lines.join("<br>"));
+    }
+    paragraphs
+        .into_iter()
+        .map(|paragraph| format!("<p>{}</p>", paragraph))
+        .collect::<Vec<_>>()
+        .join("")
+}
+
 pub struct ActiveCollabClient {
     instance: Instance,
     http: Http,
@@ -249,7 +278,7 @@ impl ActiveCollabClient {
     pub async fn create_comment(&self, task_id: i64, body: &str) -> Result<CommentWriteOutcome> {
         let base = self.instance.base_url.trim_end_matches('/');
         let url = format!("{}/api/v1/comments/task/{}", base, task_id);
-        let payload = serde_json::json!({ "body": body });
+        let payload = serde_json::json!({ "body": encode_comment_body(body) });
         let (status, raw) = self
             .http
             .authed_post(
@@ -273,7 +302,7 @@ impl ActiveCollabClient {
     pub async fn update_comment(&self, comment_id: i64, body: &str) -> Result<CommentWriteOutcome> {
         let base = self.instance.base_url.trim_end_matches('/');
         let url = format!("{}/api/v1/comments/{}", base, comment_id);
-        let payload = serde_json::json!({ "body": body });
+        let payload = serde_json::json!({ "body": encode_comment_body(body) });
         let (status, raw) = self
             .http
             .authed_put(
