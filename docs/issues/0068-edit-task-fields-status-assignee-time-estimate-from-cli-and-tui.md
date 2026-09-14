@@ -2,7 +2,7 @@
 type: Issue
 title: Edit task fields — status, assignee, time estimate from CLI and TUI
 description: "Add task-field edits — status, assignee, and time estimate — from CLI and TUI, reusing the ADR 0033 host-gated write seam with per-field vertical slices. Shares issue 0067's scope gate: a constitution amendment plus a product ADR making active-collab-cli a limited write client."
-status: open
+status: closed
 timestamp: 2026-09-14T14:26:32Z
 ---
 
