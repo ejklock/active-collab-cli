@@ -153,5 +153,11 @@
   "Failed to log time": "Falha ao registrar tempo",
   "No job type available for this instance": "Nenhum tipo de trabalho disponível para esta instância",
   "Enter a positive number of hours": "Informe um número positivo de horas",
-  "↑/↓ · j/k move · c comment · t log time · r refresh · Esc/b back · q quit": "↑/↓ · j/k mover · c comentar · t registrar tempo · r atualizar · Esc/b voltar · q sair"
+  "↑/↓ · j/k move · c comment · t log time · r refresh · Esc/b back · q quit": "↑/↓ · j/k mover · c comentar · t registrar tempo · r atualizar · Esc/b voltar · q sair",
+  "Error: at least one of --status, --assignee, or --estimate is required.": "Erro: pelo menos um de --status, --assignee ou --estimate é obrigatório.",
+  "Error: estimate must be zero or a positive number.": "Erro: a estimativa deve ser zero ou um número positivo.",
+  "Error: unrecognized --status value '{status}'. Use complete, completed, done, closed, open, reopen, or todo.": "Erro: valor de --status não reconhecido '{status}'. Use complete, completed, done, closed, open, reopen ou todo.",
+  "Error: no user matches assignee '{assignee}'.": "Erro: nenhum usuário corresponde ao responsável '{assignee}'.",
+  "Error: assignee '{assignee}' matches more than one user; use the numeric id instead.": "Erro: o responsável '{assignee}' corresponde a mais de um usuário; use o id numérico.",
+  "Task updated (task {project_id}/{task_id}){changes}.": "Tarefa atualizada (tarefa {project_id}/{task_id}){changes}."
 }
