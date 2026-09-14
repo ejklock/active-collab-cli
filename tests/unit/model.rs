@@ -4146,6 +4146,357 @@ fn map_browse_key_event_plain_t_yields_log_time_open() {
     );
 }
 
+// ── Estimate-edit modal tests (issue 0068 TUI slice) ──────────────────────────
+
+fn detail_model_with_task(
+    instance: &str,
+    project_id: i64,
+    task_id: i64,
+    task: serde_json::Value,
+) -> Model {
+    Model {
+        stack: vec![Screen::Detail {
+            instance: instance.into(),
+            project_id,
+            task_id,
+            task,
+            comments: vec![],
+            user_map: HashMap::new(),
+            lines: vec![],
+            line_styles: vec![],
+            assets: vec![],
+            offset: 0,
+            loading: false,
+            rendered_width: usize::MAX,
+            overlay: DetailOverlay::None,
+            current_user_id: None,
+            affordances: vec![],
+            focused_comment: None,
+            auth_error: false,
+            comment_spans: vec![],
+        }],
+        should_quit: false,
+        header: empty_header(),
+        viewport: (80, 24),
+        click_targets: vec![],
+        modal_button_targets: vec![],
+        last_loaded: None,
+        selection: None,
+        copied_feedback: false,
+    }
+}
+
+fn extract_estimate(model: &Model) -> Option<&EstimateForm> {
+    match model.top() {
+        Some(Screen::Detail { overlay, .. }) => overlay.estimate_edit(),
+        _ => None,
+    }
+}
+
+fn type_estimate_chars(mut model: Model, s: &str) -> Model {
+    for c in s.chars() {
+        model = update(model, Msg::EstimateChar(c)).0;
+    }
+    model
+}
+
+// AC1: EstimateOpen on a task with no estimate sets the form to Editing with an empty value.
+#[test]
+fn estimate_open_on_detail_with_no_estimate_sets_editing_state_with_empty_value() {
+    let m = detail_model_for_compose("inst", 10, 42);
+    let (m, cmds) = update(m, Msg::EstimateOpen);
+    assert!(cmds.is_empty(), "EstimateOpen must emit no Cmd");
+    let form = extract_estimate(&m).expect("estimate form must be Some after EstimateOpen");
+    assert_eq!(form.value, "");
+    assert_eq!(form.status, EditStatus::Editing);
+}
+
+// AC1: EstimateOpen prefills the value from the task's current estimate when present.
+#[test]
+fn estimate_open_prefills_value_from_existing_task_estimate() {
+    let m = detail_model_with_task("inst", 10, 42, serde_json::json!({ "estimate": 8 }));
+    let (m, _) = update(m, Msg::EstimateOpen);
+    let form = extract_estimate(&m).expect("estimate form must be Some after EstimateOpen");
+    assert_eq!(
+        form.value, "8",
+        "a whole-number estimate must prefill without a decimal"
+    );
+}
+
+// AC1: a fractional task estimate prefills with its decimal value intact.
+#[test]
+fn estimate_open_prefills_fractional_task_estimate() {
+    let m = detail_model_with_task("inst", 10, 42, serde_json::json!({ "estimate": 4.5 }));
+    let (m, _) = update(m, Msg::EstimateOpen);
+    let form = extract_estimate(&m).expect("estimate form must be Some after EstimateOpen");
+    assert_eq!(form.value, "4.5");
+}
+
+// AC1: EstimateOpen on a screen that already has the estimate modal active is a no-op.
+#[test]
+fn estimate_open_when_already_active_is_noop() {
+    let mut m = detail_model_for_compose("inst", 10, 42);
+    if let Some(Screen::Detail {
+        ref mut overlay, ..
+    }) = m.stack.last_mut()
+    {
+        *overlay = DetailOverlay::EstimateEdit(EstimateForm {
+            value: "3".into(),
+            status: EditStatus::Editing,
+        });
+    }
+    let (m, _) = update(m, Msg::EstimateOpen);
+    let form = extract_estimate(&m).expect("estimate form must still be Some");
+    assert_eq!(form.value, "3", "existing value buffer must be preserved");
+}
+
+// AC1: EstimateChar appends to the value buffer while Editing.
+#[test]
+fn estimate_char_appends_to_value_buffer() {
+    let m = detail_model_for_compose("inst", 10, 42);
+    let (m, _) = update(m, Msg::EstimateOpen);
+    let (m, cmds) = update(m, Msg::EstimateChar('4'));
+    assert!(cmds.is_empty());
+    let (m, _) = update(m, Msg::EstimateChar('.'));
+    let (m, _) = update(m, Msg::EstimateChar('5'));
+    let form = extract_estimate(&m).expect("estimate form must be Some");
+    assert_eq!(form.value, "4.5");
+}
+
+// AC1: EstimateBackspace removes the last character of the value buffer.
+#[test]
+fn estimate_backspace_removes_last_character() {
+    let m = detail_model_for_compose("inst", 10, 42);
+    let m = type_estimate_chars(update(m, Msg::EstimateOpen).0, "24");
+    let (m, cmds) = update(m, Msg::EstimateBackspace);
+    assert!(cmds.is_empty());
+    let form = extract_estimate(&m).expect("estimate form must be Some");
+    assert_eq!(form.value, "2");
+}
+
+// AC1: EstimateCancel clears the overlay and emits no Cmd.
+#[test]
+fn estimate_cancel_clears_overlay_and_emits_no_cmd() {
+    let m = detail_model_for_compose("inst", 10, 42);
+    let m = type_estimate_chars(update(m, Msg::EstimateOpen).0, "1");
+    let (m, cmds) = update(m, Msg::EstimateCancel);
+    assert!(cmds.is_empty(), "EstimateCancel must emit no Cmd");
+    assert!(
+        extract_estimate(&m).is_none(),
+        "estimate form must be None after EstimateCancel"
+    );
+}
+
+// AC2: a valid non-negative value emits exactly one Cmd::SubmitTaskEdit carrying
+// estimate: Some(value), completion: None, assignee_id: None, and sets Submitting.
+#[test]
+fn estimate_submit_valid_value_emits_submit_task_edit_cmd() {
+    let m = detail_model_for_compose("myinst", 5, 99);
+    let m = type_estimate_chars(update(m, Msg::EstimateOpen).0, "4.5");
+    let (m, cmds) = update(m, Msg::EstimateSubmit);
+
+    assert_eq!(cmds.len(), 1, "must emit exactly one Cmd::SubmitTaskEdit");
+    match &cmds[0] {
+        Cmd::SubmitTaskEdit {
+            instance,
+            project_id,
+            task_id,
+            completion,
+            assignee_id,
+            estimate,
+        } => {
+            assert_eq!(instance, "myinst");
+            assert_eq!(*project_id, 5);
+            assert_eq!(*task_id, 99);
+            assert_eq!(*completion, None);
+            assert_eq!(*assignee_id, None);
+            assert!((estimate.expect("estimate must be Some") - 4.5).abs() < f64::EPSILON);
+        }
+        other => panic!("expected Cmd::SubmitTaskEdit, got {other:?}"),
+    }
+    let form = extract_estimate(&m).expect("estimate form must be Some after submit");
+    assert_eq!(form.status, EditStatus::Submitting);
+}
+
+// AC2: zero is a valid estimate (>= 0) and emits Cmd::SubmitTaskEdit with estimate: Some(0.0).
+#[test]
+fn estimate_submit_zero_is_accepted() {
+    let m = detail_model_for_compose("inst", 1, 1);
+    let m = type_estimate_chars(update(m, Msg::EstimateOpen).0, "0");
+    let (_m, cmds) = update(m, Msg::EstimateSubmit);
+    assert_eq!(cmds.len(), 1, "zero hours must emit Cmd::SubmitTaskEdit");
+    match &cmds[0] {
+        Cmd::SubmitTaskEdit { estimate, .. } => {
+            assert_eq!(*estimate, Some(0.0));
+        }
+        other => panic!("expected Cmd::SubmitTaskEdit, got {other:?}"),
+    }
+}
+
+// AC2: an empty value buffer sets Error and emits no Cmd.
+#[test]
+fn estimate_submit_empty_value_sets_error_and_emits_no_cmd() {
+    let m = detail_model_for_compose("inst", 1, 1);
+    let (m, _) = update(m, Msg::EstimateOpen);
+    let (m, cmds) = update(m, Msg::EstimateSubmit);
+    assert!(cmds.is_empty(), "empty value must emit no Cmd");
+    let form = extract_estimate(&m).expect("estimate form must still be Some");
+    assert!(matches!(form.status, EditStatus::Error(_)));
+}
+
+// AC2: a negative value sets Error and emits no Cmd.
+#[test]
+fn estimate_submit_negative_value_sets_error_and_emits_no_cmd() {
+    let m = detail_model_for_compose("inst", 1, 1);
+    let m = type_estimate_chars(update(m, Msg::EstimateOpen).0, "-2");
+    let (m, cmds) = update(m, Msg::EstimateSubmit);
+    assert!(cmds.is_empty(), "negative value must emit no Cmd");
+    let form = extract_estimate(&m).expect("estimate form must still be Some");
+    assert!(matches!(form.status, EditStatus::Error(_)));
+}
+
+// AC2: a non-numeric value sets Error and emits no Cmd.
+#[test]
+fn estimate_submit_non_numeric_value_sets_error_and_emits_no_cmd() {
+    let m = detail_model_for_compose("inst", 1, 1);
+    let m = type_estimate_chars(update(m, Msg::EstimateOpen).0, "abc");
+    let (m, cmds) = update(m, Msg::EstimateSubmit);
+    assert!(cmds.is_empty(), "non-numeric value must emit no Cmd");
+    let form = extract_estimate(&m).expect("estimate form must still be Some");
+    assert!(matches!(form.status, EditStatus::Error(_)));
+}
+
+// AC3: TaskEditOk clears the overlay AND emits exactly one Cmd::LoadDetail{refresh:true},
+// the same server-truth refresh as the comment and time-log write paths.
+#[test]
+fn task_edit_ok_clears_overlay_and_emits_load_detail_refresh() {
+    let m = detail_model_for_compose("inst", 7, 13);
+    let m = type_estimate_chars(update(m, Msg::EstimateOpen).0, "4");
+    let (m, cmds) = update(m, Msg::TaskEditOk);
+
+    assert!(
+        extract_estimate(&m).is_none(),
+        "estimate form must be None after TaskEditOk"
+    );
+    assert_eq!(cmds.len(), 1, "must emit exactly one Cmd::LoadDetail");
+    match &cmds[0] {
+        Cmd::LoadDetail {
+            instance,
+            project_id,
+            task_id,
+            refresh,
+        } => {
+            assert_eq!(instance, "inst");
+            assert_eq!(*project_id, 7);
+            assert_eq!(*task_id, 13);
+            assert!(*refresh, "refresh must be true");
+        }
+        other => panic!("expected Cmd::LoadDetail, got {other:?}"),
+    }
+}
+
+// AC3: TaskEditErr keeps the value buffer intact and sets status=Error(msg), emits no Cmd.
+#[test]
+fn task_edit_err_preserves_value_and_sets_error_status() {
+    let m = detail_model_for_compose("inst", 1, 1);
+    let m = type_estimate_chars(update(m, Msg::EstimateOpen).0, "3");
+    let (m, cmds) = update(m, Msg::TaskEditErr("Network error".into()));
+
+    assert!(cmds.is_empty(), "TaskEditErr must emit no Cmd");
+    let form = extract_estimate(&m).expect("estimate form must still be Some after error");
+    assert_eq!(form.value, "3", "value buffer must be preserved");
+    assert_eq!(
+        form.status,
+        EditStatus::Error("Network error".into()),
+        "status must be Error(msg)"
+    );
+}
+
+// AC1/AC3: map_estimate_key_event maps Ctrl+S -> EstimateSubmit.
+#[test]
+fn map_estimate_key_event_ctrl_s_yields_estimate_submit() {
+    use crate::tui::events::map_estimate_key_event;
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState};
+    let key = KeyEvent {
+        code: KeyCode::Char('s'),
+        modifiers: KeyModifiers::CONTROL,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+    assert!(
+        matches!(map_estimate_key_event(key), Some(Msg::EstimateSubmit)),
+        "Ctrl+S must map to EstimateSubmit"
+    );
+}
+
+// AC1: map_estimate_key_event maps Esc -> EstimateCancel.
+#[test]
+fn map_estimate_key_event_esc_yields_estimate_cancel() {
+    use crate::tui::events::map_estimate_key_event;
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState};
+    let key = KeyEvent {
+        code: KeyCode::Esc,
+        modifiers: KeyModifiers::NONE,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+    assert!(
+        matches!(map_estimate_key_event(key), Some(Msg::EstimateCancel)),
+        "Esc must map to EstimateCancel"
+    );
+}
+
+// AC1: map_estimate_key_event maps Backspace -> EstimateBackspace.
+#[test]
+fn map_estimate_key_event_backspace_yields_estimate_backspace() {
+    use crate::tui::events::map_estimate_key_event;
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState};
+    let key = KeyEvent {
+        code: KeyCode::Backspace,
+        modifiers: KeyModifiers::NONE,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+    assert!(
+        matches!(map_estimate_key_event(key), Some(Msg::EstimateBackspace)),
+        "Backspace must map to EstimateBackspace"
+    );
+}
+
+// AC1: map_estimate_key_event maps a printable char -> EstimateChar(c).
+#[test]
+fn map_estimate_key_event_printable_char_yields_estimate_char() {
+    use crate::tui::events::map_estimate_key_event;
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState};
+    let key = KeyEvent {
+        code: KeyCode::Char('5'),
+        modifiers: KeyModifiers::NONE,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+    assert!(
+        matches!(map_estimate_key_event(key), Some(Msg::EstimateChar('5'))),
+        "printable char must map to EstimateChar(c)"
+    );
+}
+
+// AC1: map_browse_key_event maps plain 'e' -> EstimateOpen (not a selection or nav action).
+#[test]
+fn map_browse_key_event_plain_e_yields_estimate_open() {
+    use crate::tui::events::map_browse_key_event;
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState};
+    let key = KeyEvent {
+        code: KeyCode::Char('e'),
+        modifiers: KeyModifiers::NONE,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+    assert!(
+        matches!(map_browse_key_event(key), Some(Msg::EstimateOpen)),
+        "plain 'e' must map to EstimateOpen"
+    );
+}
+
 // ── Comment-edit-ui tests (BDR 0024 Sc.4-5 / ADR 0036) ───────────────────────
 
 /// Build a Detail model that has one owned comment (created_by_id == current_user_id)

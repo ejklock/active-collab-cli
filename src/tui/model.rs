@@ -169,6 +169,18 @@ pub enum Cmd {
         hours: f64,
         summary: Option<String>,
     },
+    /// PUT one or more task-field writes (completion and/or assignee/estimate) for
+    /// the current Detail task. Each field is optional so this single shared effect
+    /// covers every task-edit affordance (estimate now; status and assignee once
+    /// their own overlays land) without a per-field `Cmd` variant.
+    SubmitTaskEdit {
+        instance: String,
+        project_id: i64,
+        task_id: i64,
+        completion: Option<bool>,
+        assignee_id: Option<i64>,
+        estimate: Option<f64>,
+    },
     /// Fetch and decode the image bytes for an opened image-viewer asset.
     /// Handled entirely by the shell (ADR 0065); the pure Model never sees bytes.
     LoadImage {
@@ -265,12 +277,32 @@ impl LogTimeForm {
     }
 }
 
+/// Current lifecycle phase of a task-field edit modal (the estimate form and any
+/// future status/assignee affordances that share the same `Cmd::SubmitTaskEdit`
+/// effect).
+#[derive(Debug, Clone, PartialEq)]
+pub enum EditStatus {
+    Editing,
+    Submitting,
+    Error(String),
+}
+
+/// Transient state for the in-progress estimate-edit modal.
+///
+/// A plain `String` buffer (not a `TextArea`) since the field is a single line with
+/// no caret/undo needs, so the whole form stays `PartialEq` unlike `Compose`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EstimateForm {
+    pub value: String,
+    pub status: EditStatus,
+}
+
 /// The active modal overlay on the Detail read view.
 ///
-/// Compose, the log-time form, the delete prompt, and the image viewer are mutually
-/// exclusive by construction — only one overlay at a time. The combined state (more
-/// than one active) cannot be constructed with this enum, replacing the previous
-/// independent `Option` fields (ADR 0047).
+/// Compose, the log-time form, the estimate-edit form, the delete prompt, and the
+/// image viewer are mutually exclusive by construction — only one overlay at a
+/// time. The combined state (more than one active) cannot be constructed with this
+/// enum, replacing the previous independent `Option` fields (ADR 0047).
 ///
 /// `Compose` is intentionally larger than the other variants: it carries a `TextArea`
 /// with caret/selection/undo history (ADR 0064). Construction happens only on
@@ -282,6 +314,7 @@ pub enum DetailOverlay {
     None,
     Compose(Compose),
     LogTime(LogTimeForm),
+    EstimateEdit(EstimateForm),
     ConfirmDelete {
         comment_id: i64,
     },
@@ -320,6 +353,20 @@ impl DetailOverlay {
         }
     }
 
+    pub fn estimate_edit(&self) -> Option<&EstimateForm> {
+        match self {
+            DetailOverlay::EstimateEdit(f) => Some(f),
+            _ => Option::None,
+        }
+    }
+
+    pub fn estimate_edit_mut(&mut self) -> Option<&mut EstimateForm> {
+        match self {
+            DetailOverlay::EstimateEdit(f) => Some(f),
+            _ => Option::None,
+        }
+    }
+
     pub fn confirm_delete_id(&self) -> Option<i64> {
         match self {
             DetailOverlay::ConfirmDelete { comment_id } => Some(*comment_id),
@@ -347,6 +394,10 @@ impl DetailOverlay {
 
     pub fn is_log_time(&self) -> bool {
         matches!(self, DetailOverlay::LogTime(_))
+    }
+
+    pub fn is_estimate_edit(&self) -> bool {
+        matches!(self, DetailOverlay::EstimateEdit(_))
     }
 
     pub fn is_confirm(&self) -> bool {
@@ -681,6 +732,21 @@ pub enum Msg {
     TimeMutationOk,
     /// The time-record POST failed; preserve the buffers and show an error.
     TimeMutationErr(String),
+    /// Open the estimate-edit modal on the current Detail screen.
+    EstimateOpen,
+    /// Append a printable character to the estimate value buffer.
+    EstimateChar(char),
+    /// Remove the last character from the estimate value buffer.
+    EstimateBackspace,
+    /// Submit the current estimate buffer as a task-field write.
+    EstimateSubmit,
+    /// Cancel the estimate-edit modal, discarding the buffer.
+    EstimateCancel,
+    /// A task-field write (completion and/or assignee/estimate) succeeded; refresh
+    /// the detail view.
+    TaskEditOk,
+    /// A task-field write failed; preserve the open form's buffer and show an error.
+    TaskEditErr(String),
     /// Move the comment-card focus cursor forward by one card (j / Down in Detail browse mode).
     FocusNextComment,
     /// Move the comment-card focus cursor backward by one card (k / Up in Detail browse mode).
@@ -880,6 +946,13 @@ pub fn update(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
         | Msg::LogTimeCancel
         | Msg::TimeMutationOk
         | Msg::TimeMutationErr(_)) => update_log_time(model, m),
+        m @ (Msg::EstimateOpen
+        | Msg::EstimateChar(_)
+        | Msg::EstimateBackspace
+        | Msg::EstimateSubmit
+        | Msg::EstimateCancel
+        | Msg::TaskEditOk
+        | Msg::TaskEditErr(_)) => update_task_edit(model, m),
         Msg::FocusNextComment => (handle_focus_next(model), vec![]),
         Msg::FocusPrevComment => (handle_focus_prev(model), vec![]),
         Msg::ConfirmDeleteComment => handle_confirm_delete(model),
@@ -994,6 +1067,19 @@ fn update_log_time(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
         Msg::LogTimeCancel => (handle_log_time_cancel(model), vec![]),
         Msg::TimeMutationOk => handle_time_mutation_ok(model),
         Msg::TimeMutationErr(msg) => (handle_time_mutation_err(model, msg), vec![]),
+        _ => (model, vec![]),
+    }
+}
+
+fn update_task_edit(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
+    match msg {
+        Msg::EstimateOpen => (handle_estimate_open(model), vec![]),
+        Msg::EstimateChar(c) => (handle_estimate_char(model, c), vec![]),
+        Msg::EstimateBackspace => (handle_estimate_backspace(model), vec![]),
+        Msg::EstimateSubmit => handle_estimate_submit(model),
+        Msg::EstimateCancel => (handle_estimate_cancel(model), vec![]),
+        Msg::TaskEditOk => handle_task_edit_ok(model),
+        Msg::TaskEditErr(msg) => (handle_task_edit_err(model, msg), vec![]),
         _ => (model, vec![]),
     }
 }
@@ -2153,6 +2239,184 @@ fn handle_time_mutation_ok(model: Model) -> (Model, Vec<Cmd>) {
 
 fn handle_time_mutation_err(mut model: Model, msg: String) -> Model {
     set_log_time_error(&mut model, msg);
+    model
+}
+
+/// Read the task's current `estimate` field as a plain decimal string, or an empty
+/// string when the field is absent or not numeric.
+fn estimate_prefill(task: &Value) -> String {
+    match task.get("estimate").and_then(|v| v.as_f64()) {
+        Some(hours) if hours == hours.trunc() => (hours as i64).to_string(),
+        Some(hours) => hours.to_string(),
+        None => String::new(),
+    }
+}
+
+/// Open the estimate-edit modal on the current Detail screen, prefilled from the
+/// task's current estimate when present.
+///
+/// No-op when the estimate-edit modal is already open — mirrors `handle_log_time_open`.
+fn handle_estimate_open(mut model: Model) -> Model {
+    let prefill = match model.top() {
+        Some(Screen::Detail { task, .. }) => estimate_prefill(task),
+        _ => String::new(),
+    };
+    if let Some(Screen::Detail {
+        ref mut overlay,
+        ref mut rendered_width,
+        ..
+    }) = model.top_mut()
+    {
+        if !overlay.is_estimate_edit() {
+            *overlay = DetailOverlay::EstimateEdit(EstimateForm {
+                value: prefill,
+                status: EditStatus::Editing,
+            });
+            *rendered_width = usize::MAX;
+        }
+    }
+    model
+}
+
+/// Append `c` to the estimate value buffer while the form is `Editing`.
+fn handle_estimate_char(mut model: Model, c: char) -> Model {
+    if let Some(Screen::Detail {
+        ref mut overlay,
+        ref mut rendered_width,
+        ..
+    }) = model.top_mut()
+    {
+        if let Some(form) = overlay.estimate_edit_mut() {
+            if form.status == EditStatus::Editing {
+                form.value.push(c);
+                *rendered_width = usize::MAX;
+            }
+        }
+    }
+    model
+}
+
+/// Remove the last character from the estimate value buffer while the form is `Editing`.
+fn handle_estimate_backspace(mut model: Model) -> Model {
+    if let Some(Screen::Detail {
+        ref mut overlay,
+        ref mut rendered_width,
+        ..
+    }) = model.top_mut()
+    {
+        if let Some(form) = overlay.estimate_edit_mut() {
+            if form.status == EditStatus::Editing {
+                form.value.pop();
+                *rendered_width = usize::MAX;
+            }
+        }
+    }
+    model
+}
+
+/// Dismiss the estimate-edit modal without submitting.
+fn handle_estimate_cancel(mut model: Model) -> Model {
+    if let Some(Screen::Detail {
+        ref mut overlay,
+        ref mut rendered_width,
+        ..
+    }) = model.top_mut()
+    {
+        *overlay = DetailOverlay::None;
+        *rendered_width = usize::MAX;
+    }
+    model
+}
+
+/// Extract the fields needed to submit the estimate form, or None when the guard fails.
+///
+/// Guard: overlay must be `EstimateEdit` and its status must be `Editing`.
+fn extract_estimate_submit_info(model: &Model) -> Option<(String, i64, i64, String)> {
+    match model.top() {
+        Some(Screen::Detail {
+            instance,
+            project_id,
+            task_id,
+            overlay,
+            ..
+        }) => {
+            let form = overlay.estimate_edit()?;
+            if form.status != EditStatus::Editing {
+                return None;
+            }
+            Some((instance.clone(), *project_id, *task_id, form.value.clone()))
+        }
+        _ => None,
+    }
+}
+
+/// Set the estimate-edit overlay's status to `Error(message)`, when the overlay is active.
+fn set_estimate_error(model: &mut Model, message: String) {
+    if let Some(Screen::Detail {
+        ref mut overlay,
+        ref mut rendered_width,
+        ..
+    }) = model.top_mut()
+    {
+        if let Some(form) = overlay.estimate_edit_mut() {
+            form.status = EditStatus::Error(message);
+            *rendered_width = usize::MAX;
+        }
+    }
+}
+
+/// Parse the estimate value buffer and, when it is a number >= 0, set the form to
+/// `Submitting` and emit `Cmd::SubmitTaskEdit` carrying `estimate: Some(value)` with
+/// `completion` and `assignee_id` both `None`. An empty, negative, or non-numeric
+/// buffer sets `Error` instead and emits no `Cmd`.
+fn handle_estimate_submit(mut model: Model) -> (Model, Vec<Cmd>) {
+    let Some((instance, project_id, task_id, value_input)) = extract_estimate_submit_info(&model)
+    else {
+        return (model, vec![]);
+    };
+
+    let parsed_estimate = value_input
+        .trim()
+        .parse::<f64>()
+        .ok()
+        .filter(|value| *value >= 0.0);
+
+    let Some(estimate) = parsed_estimate else {
+        set_estimate_error(&mut model, t("Enter a non-negative number of hours"));
+        return (model, vec![]);
+    };
+
+    if let Some(Screen::Detail {
+        ref mut overlay,
+        ref mut rendered_width,
+        ..
+    }) = model.top_mut()
+    {
+        if let Some(form) = overlay.estimate_edit_mut() {
+            form.status = EditStatus::Submitting;
+            *rendered_width = usize::MAX;
+        }
+    }
+
+    (
+        model,
+        vec![Cmd::SubmitTaskEdit {
+            instance,
+            project_id,
+            task_id,
+            completion: None,
+            assignee_id: None,
+            estimate: Some(estimate),
+        }],
+    )
+}
+
+fn handle_task_edit_ok(model: Model) -> (Model, Vec<Cmd>) {
+    refresh_detail_after_write(model)
+}
+
+fn handle_task_edit_err(mut model: Model, msg: String) -> Model {
+    set_estimate_error(&mut model, msg);
     model
 }
 
