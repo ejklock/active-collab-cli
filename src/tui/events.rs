@@ -114,17 +114,20 @@ pub fn map_status_confirm_key_event(key: crossterm::event::KeyEvent) -> Option<M
 
 /// Map a key event when the assignee-picker modal is active.
 ///
-/// j/Down and k/Up move the selection; Enter or Ctrl+S confirms the highlighted
-/// candidate; Esc cancels. There is no text entry — candidates come from the cached
-/// user directory, not typed.
+/// ↑/↓ move the selection within the filtered candidate list; Enter or Ctrl+S
+/// confirms the highlighted candidate; Esc cancels; Backspace deletes the last
+/// filter character. Every other printable char — including j/k, which no longer
+/// navigate here — appends to the filter buffer instead.
 pub fn map_assignee_picker_key_event(key: crossterm::event::KeyEvent) -> Option<Msg> {
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
     match key.code {
-        KeyCode::Down | KeyCode::Char('j') => Some(Msg::AssigneePickerDown),
-        KeyCode::Up | KeyCode::Char('k') => Some(Msg::AssigneePickerUp),
         KeyCode::Enter => Some(Msg::AssigneePickerSubmit),
         KeyCode::Char('s') if ctrl => Some(Msg::AssigneePickerSubmit),
         KeyCode::Esc => Some(Msg::AssigneePickerCancel),
+        KeyCode::Down => Some(Msg::AssigneePickerDown),
+        KeyCode::Up => Some(Msg::AssigneePickerUp),
+        KeyCode::Backspace => Some(Msg::AssigneePickerBackspace),
+        KeyCode::Char(c) => Some(Msg::AssigneePickerChar(c)),
         _ => None,
     }
 }

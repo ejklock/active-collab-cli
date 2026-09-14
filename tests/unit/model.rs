@@ -4818,13 +4818,14 @@ fn assignee_picker_open_builds_sorted_candidates_with_no_assignee_selects_zero()
     let m = detail_model_with_task_and_users("inst", 10, 42, serde_json::json!({}), users_two());
     let (m, cmds) = update(m, Msg::AssigneePickerOpen);
     assert!(cmds.is_empty(), "AssigneePickerOpen must emit no Cmd");
-    let (candidates, selected, status) =
+    let (candidates, filter, selected, status) =
         extract_assignee_picker(&m).expect("assignee-picker overlay must be Some after open");
     assert_eq!(
         candidates,
         &[(1i64, "Alice".to_string()), (2i64, "Bob".to_string())],
         "candidates must be sorted case-insensitively by name"
     );
+    assert_eq!(filter, "", "filter must start empty");
     assert_eq!(selected, 0, "no current assignee must select index 0");
     assert_eq!(*status, EditStatus::Editing);
 }
@@ -4840,7 +4841,7 @@ fn assignee_picker_open_preselects_current_assignee_index() {
         users_two(),
     );
     let (m, _) = update(m, Msg::AssigneePickerOpen);
-    let (candidates, selected, _) =
+    let (candidates, _, selected, _) =
         extract_assignee_picker(&m).expect("assignee-picker overlay must be Some after open");
     assert_eq!(
         candidates[selected].0, 2,
@@ -4853,7 +4854,7 @@ fn assignee_picker_open_preselects_current_assignee_index() {
 fn assignee_picker_open_with_empty_directory_yields_empty_candidates() {
     let m = detail_model_with_task_and_users("inst", 10, 42, serde_json::json!({}), HashMap::new());
     let (m, _) = update(m, Msg::AssigneePickerOpen);
-    let (candidates, selected, _) =
+    let (candidates, _, selected, _) =
         extract_assignee_picker(&m).expect("assignee-picker overlay must be Some after open");
     assert!(candidates.is_empty(), "candidates must be empty");
     assert_eq!(selected, 0);
@@ -4870,12 +4871,13 @@ fn assignee_picker_open_when_already_active_is_noop() {
     {
         *overlay = DetailOverlay::AssigneePicker {
             candidates: vec![(9i64, "Zed".to_string())],
+            filter: String::new(),
             selected: 0,
             status: EditStatus::Editing,
         };
     }
     let (m, _) = update(m, Msg::AssigneePickerOpen);
-    let (candidates, _, _) =
+    let (candidates, _, _, _) =
         extract_assignee_picker(&m).expect("assignee-picker overlay must still be Some");
     assert_eq!(
         candidates,
@@ -4891,10 +4893,10 @@ fn assignee_picker_down_moves_selection_and_saturates_at_end() {
     let m = update(m, Msg::AssigneePickerOpen).0;
     let (m, cmds) = update(m, Msg::AssigneePickerDown);
     assert!(cmds.is_empty());
-    let (_, selected, _) = extract_assignee_picker(&m).expect("overlay must be Some");
+    let (_, _, selected, _) = extract_assignee_picker(&m).expect("overlay must be Some");
     assert_eq!(selected, 1);
     let (m, _) = update(m, Msg::AssigneePickerDown);
-    let (_, selected, _) = extract_assignee_picker(&m).expect("overlay must be Some");
+    let (_, _, selected, _) = extract_assignee_picker(&m).expect("overlay must be Some");
     assert_eq!(selected, 1, "must saturate at the last candidate index");
 }
 
@@ -4906,10 +4908,10 @@ fn assignee_picker_up_moves_selection_and_saturates_at_start() {
     let m = update(m, Msg::AssigneePickerDown).0;
     let (m, cmds) = update(m, Msg::AssigneePickerUp);
     assert!(cmds.is_empty());
-    let (_, selected, _) = extract_assignee_picker(&m).expect("overlay must be Some");
+    let (_, _, selected, _) = extract_assignee_picker(&m).expect("overlay must be Some");
     assert_eq!(selected, 0);
     let (m, _) = update(m, Msg::AssigneePickerUp);
-    let (_, selected, _) = extract_assignee_picker(&m).expect("overlay must be Some");
+    let (_, _, selected, _) = extract_assignee_picker(&m).expect("overlay must be Some");
     assert_eq!(selected, 0, "must saturate at the first candidate index");
 }
 
@@ -4955,7 +4957,7 @@ fn assignee_picker_submit_emits_submit_task_edit_cmd() {
         }
         other => panic!("expected Cmd::SubmitTaskEdit, got {other:?}"),
     }
-    let (_, _, status) = extract_assignee_picker(&m).expect("overlay must be Some");
+    let (_, _, _, status) = extract_assignee_picker(&m).expect("overlay must be Some");
     assert_eq!(*status, EditStatus::Submitting);
 }
 
@@ -4981,6 +4983,7 @@ fn assignee_picker_submit_while_submitting_emits_no_cmd() {
     {
         *overlay = DetailOverlay::AssigneePicker {
             candidates: vec![(1i64, "Alice".to_string())],
+            filter: String::new(),
             selected: 0,
             status: EditStatus::Submitting,
         };
@@ -5041,7 +5044,7 @@ fn assignee_picker_task_edit_err_sets_error_status() {
     let (m, cmds) = update(m, Msg::TaskEditErr("Network error".into()));
 
     assert!(cmds.is_empty(), "TaskEditErr must emit no Cmd");
-    let (_, _, status) = extract_assignee_picker(&m)
+    let (_, _, _, status) = extract_assignee_picker(&m)
         .expect("assignee-picker overlay must still be Some after error");
     assert_eq!(
         *status,
@@ -5050,14 +5053,191 @@ fn assignee_picker_task_edit_err_sets_error_status() {
     );
 }
 
-// AC1/AC2: map_assignee_picker_key_event maps j/Down -> AssigneePickerDown.
+// AC1: typed characters filter the candidate list to names containing the filter
+// text, case-insensitive substring match on name only.
 #[test]
-fn map_assignee_picker_key_event_j_and_down_yield_assignee_picker_down() {
+fn assignee_picker_char_filters_candidates_by_name_case_insensitive() {
+    let m = detail_model_with_task_and_users("inst", 10, 42, serde_json::json!({}), users_two());
+    let m = update(m, Msg::AssigneePickerOpen).0;
+    let (m, cmds) = update(m, Msg::AssigneePickerChar('b'));
+    assert!(cmds.is_empty(), "AssigneePickerChar must emit no Cmd");
+    let (candidates, filter, _, _) = extract_assignee_picker(&m).expect("overlay must be Some");
+    assert_eq!(filter, "b");
+    let filtered = filter_assignee_candidates(candidates, filter);
+    assert_eq!(
+        filtered,
+        vec![(2i64, "Bob".to_string())],
+        "filter must match case-insensitively on the name substring only"
+    );
+}
+
+// AC2: a filter change resets the highlighted row to the first match, and Up/Down
+// move only within the filtered list, saturating at its first/last row.
+#[test]
+fn assignee_picker_filter_resets_selection_and_nav_clamps_to_filtered_list() {
+    let mut users = users_two();
+    users.insert(3i64, "Barb".to_string());
+    let m = detail_model_with_task_and_users("inst", 10, 42, serde_json::json!({}), users);
+    let m = update(m, Msg::AssigneePickerOpen).0;
+    let m = update(m, Msg::AssigneePickerDown).0;
+    let m = update(m, Msg::AssigneePickerDown).0;
+    let (_, _, selected, _) = extract_assignee_picker(&m).expect("overlay must be Some");
+    assert_eq!(
+        selected, 2,
+        "sanity: selection is on the last unfiltered row"
+    );
+
+    let m = update(m, Msg::AssigneePickerChar('b')).0;
+    let (candidates, filter, selected, _) =
+        extract_assignee_picker(&m).expect("overlay must be Some");
+    assert_eq!(
+        selected, 0,
+        "typing must reset selection to the first match"
+    );
+    let filtered = filter_assignee_candidates(candidates, filter);
+    assert_eq!(filtered.len(), 2, "Barb and Bob both match \"b\"");
+
+    let (m, _) = update(m, Msg::AssigneePickerDown);
+    let (_, _, selected, _) = extract_assignee_picker(&m).expect("overlay must be Some");
+    assert_eq!(selected, 1);
+    let (m, _) = update(m, Msg::AssigneePickerDown);
+    let (_, _, selected, _) = extract_assignee_picker(&m).expect("overlay must be Some");
+    assert_eq!(selected, 1, "Down must saturate at the last filtered row");
+
+    let (m, _) = update(m, Msg::AssigneePickerUp);
+    let (_, _, selected, _) = extract_assignee_picker(&m).expect("overlay must be Some");
+    assert_eq!(selected, 0);
+    let (m, _) = update(m, Msg::AssigneePickerUp);
+    let (_, _, selected, _) = extract_assignee_picker(&m).expect("overlay must be Some");
+    assert_eq!(selected, 0, "Up must saturate at the first filtered row");
+}
+
+// AC3: Submit with a non-empty filtered list emits Cmd::SubmitTaskEdit carrying the
+// highlighted FILTERED candidate's id, not an index into the full candidate list.
+#[test]
+fn assignee_picker_submit_uses_filtered_candidate_id() {
+    let m = detail_model_with_task_and_users("inst", 5, 99, serde_json::json!({}), users_two());
+    let m = update(m, Msg::AssigneePickerOpen).0;
+    let m = update(m, Msg::AssigneePickerChar('b')).0;
+    let (_, cmds) = update(m, Msg::AssigneePickerSubmit);
+    assert_eq!(cmds.len(), 1, "must emit exactly one Cmd::SubmitTaskEdit");
+    match &cmds[0] {
+        Cmd::SubmitTaskEdit { assignee_id, .. } => {
+            assert_eq!(
+                *assignee_id,
+                Some(2),
+                "must submit Bob, the only candidate matching \"b\""
+            );
+        }
+        other => panic!("expected Cmd::SubmitTaskEdit, got {other:?}"),
+    }
+}
+
+// AC3: Submit is a no-op (no Cmd) when the current filter matches no candidate.
+#[test]
+fn assignee_picker_submit_with_no_filter_matches_emits_no_cmd() {
+    let m = detail_model_with_task_and_users("inst", 5, 99, serde_json::json!({}), users_two());
+    let m = update(m, Msg::AssigneePickerOpen).0;
+    let m = update(m, Msg::AssigneePickerChar('z')).0;
+    let (_, cmds) = update(m, Msg::AssigneePickerSubmit);
+    assert!(
+        cmds.is_empty(),
+        "AssigneePickerSubmit with no filter matches must emit no Cmd"
+    );
+}
+
+// AC5: Backspace removes the last character from the filter buffer.
+#[test]
+fn assignee_picker_backspace_removes_last_filter_char() {
+    let m = detail_model_with_task_and_users("inst", 10, 42, serde_json::json!({}), users_two());
+    let m = update(m, Msg::AssigneePickerOpen).0;
+    let m = update(m, Msg::AssigneePickerChar('b')).0;
+    let m = update(m, Msg::AssigneePickerChar('o')).0;
+    let (_, filter, _, _) = extract_assignee_picker(&m).expect("overlay must be Some");
+    assert_eq!(filter, "bo");
+    let (m, cmds) = update(m, Msg::AssigneePickerBackspace);
+    assert!(cmds.is_empty(), "AssigneePickerBackspace must emit no Cmd");
+    let (_, filter, _, _) = extract_assignee_picker(&m).expect("overlay must be Some");
+    assert_eq!(filter, "b");
+}
+
+// AC5: Backspace on an already-empty filter is a no-op.
+#[test]
+fn assignee_picker_backspace_on_empty_filter_is_noop() {
+    let m = detail_model_with_task_and_users("inst", 10, 42, serde_json::json!({}), users_two());
+    let m = update(m, Msg::AssigneePickerOpen).0;
+    let (m, cmds) = update(m, Msg::AssigneePickerBackspace);
+    assert!(cmds.is_empty(), "AssigneePickerBackspace must emit no Cmd");
+    let (_, filter, selected, _) = extract_assignee_picker(&m).expect("overlay must be Some");
+    assert_eq!(filter, "", "filter must remain empty");
+    assert_eq!(selected, 0);
+}
+
+// AssigneePickerChar while the picker is not Editing (e.g. already Submitting) is a
+// no-op — mirrors the guard on every other assignee-picker handler.
+#[test]
+fn assignee_picker_char_while_submitting_is_noop() {
+    let mut m = detail_model_with_task_and_users("inst", 5, 99, serde_json::json!({}), users_two());
+    if let Some(Screen::Detail {
+        ref mut overlay, ..
+    }) = m.stack.last_mut()
+    {
+        *overlay = DetailOverlay::AssigneePicker {
+            candidates: vec![(1i64, "Alice".to_string())],
+            filter: String::new(),
+            selected: 0,
+            status: EditStatus::Submitting,
+        };
+    }
+    let (m, cmds) = update(m, Msg::AssigneePickerChar('a'));
+    assert!(cmds.is_empty());
+    let (_, filter, _, _) = extract_assignee_picker(&m).expect("overlay must be Some");
+    assert_eq!(filter, "", "filter must not change while Submitting");
+}
+
+// AC4: map_assignee_picker_key_event maps Down -> AssigneePickerDown.
+#[test]
+fn map_assignee_picker_key_event_down_yields_assignee_picker_down() {
     use crate::tui::events::map_assignee_picker_key_event;
     use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState};
-    for code in [KeyCode::Char('j'), KeyCode::Down] {
+    let key = KeyEvent {
+        code: KeyCode::Down,
+        modifiers: KeyModifiers::NONE,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+    assert!(matches!(
+        map_assignee_picker_key_event(key),
+        Some(Msg::AssigneePickerDown)
+    ));
+}
+
+// AC4: map_assignee_picker_key_event maps Up -> AssigneePickerUp.
+#[test]
+fn map_assignee_picker_key_event_up_yields_assignee_picker_up() {
+    use crate::tui::events::map_assignee_picker_key_event;
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState};
+    let key = KeyEvent {
+        code: KeyCode::Up,
+        modifiers: KeyModifiers::NONE,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+    assert!(matches!(
+        map_assignee_picker_key_event(key),
+        Some(Msg::AssigneePickerUp)
+    ));
+}
+
+// AC4: map_assignee_picker_key_event maps j/k and every other printable char to
+// AssigneePickerChar — j/k no longer navigate, they type into the filter.
+#[test]
+fn map_assignee_picker_key_event_printable_chars_yield_assignee_picker_char() {
+    use crate::tui::events::map_assignee_picker_key_event;
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState};
+    for c in ['j', 'k', 'a', 'Z', '1'] {
         let key = KeyEvent {
-            code,
+            code: KeyCode::Char(c),
             modifiers: KeyModifiers::NONE,
             kind: KeyEventKind::Press,
             state: KeyEventState::NONE,
@@ -5065,33 +5245,28 @@ fn map_assignee_picker_key_event_j_and_down_yield_assignee_picker_down() {
         assert!(
             matches!(
                 map_assignee_picker_key_event(key),
-                Some(Msg::AssigneePickerDown)
+                Some(Msg::AssigneePickerChar(got)) if got == c
             ),
-            "{code:?} must map to AssigneePickerDown"
+            "{c:?} must map to AssigneePickerChar({c:?})"
         );
     }
 }
 
-// AC1/AC2: map_assignee_picker_key_event maps k/Up -> AssigneePickerUp.
+// AC4: map_assignee_picker_key_event maps Backspace -> AssigneePickerBackspace.
 #[test]
-fn map_assignee_picker_key_event_k_and_up_yield_assignee_picker_up() {
+fn map_assignee_picker_key_event_backspace_yields_assignee_picker_backspace() {
     use crate::tui::events::map_assignee_picker_key_event;
     use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState};
-    for code in [KeyCode::Char('k'), KeyCode::Up] {
-        let key = KeyEvent {
-            code,
-            modifiers: KeyModifiers::NONE,
-            kind: KeyEventKind::Press,
-            state: KeyEventState::NONE,
-        };
-        assert!(
-            matches!(
-                map_assignee_picker_key_event(key),
-                Some(Msg::AssigneePickerUp)
-            ),
-            "{code:?} must map to AssigneePickerUp"
-        );
-    }
+    let key = KeyEvent {
+        code: KeyCode::Backspace,
+        modifiers: KeyModifiers::NONE,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+    assert!(matches!(
+        map_assignee_picker_key_event(key),
+        Some(Msg::AssigneePickerBackspace)
+    ));
 }
 
 // AC1/AC2: map_assignee_picker_key_event maps Enter and Ctrl+S -> AssigneePickerSubmit.

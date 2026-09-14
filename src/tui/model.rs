@@ -324,9 +324,12 @@ pub enum DetailOverlay {
     },
     /// The assignee-picker modal. `candidates` holds id/name pairs built from the
     /// Detail screen's cached user directory, sorted case-insensitively by name.
-    /// `selected` is the index of the highlighted row within `candidates`.
+    /// `filter` is the typed search buffer, applied as a case-insensitive substring
+    /// match on the name only. `selected` is the index of the highlighted row within
+    /// the FILTERED candidate list, not `candidates` itself.
     AssigneePicker {
         candidates: Vec<(i64, String)>,
+        filter: String,
         selected: usize,
         status: EditStatus,
     },
@@ -339,13 +342,15 @@ pub enum DetailOverlay {
     },
 }
 
-/// Borrowed view into an active `AssigneePicker` overlay: its candidate list, the
-/// highlighted index, and its lifecycle status.
-pub type AssigneePickerView<'a> = (&'a [(i64, String)], usize, &'a EditStatus);
+/// Borrowed view into an active `AssigneePicker` overlay: its full candidate list,
+/// the filter buffer, the highlighted index (within the FILTERED list), and its
+/// lifecycle status.
+pub type AssigneePickerView<'a> = (&'a [(i64, String)], &'a str, usize, &'a EditStatus);
 
 /// Mutable counterpart of [`AssigneePickerView`].
 pub type AssigneePickerViewMut<'a> = (
     &'a mut Vec<(i64, String)>,
+    &'a mut String,
     &'a mut usize,
     &'a mut EditStatus,
 );
@@ -417,9 +422,10 @@ impl DetailOverlay {
         match self {
             DetailOverlay::AssigneePicker {
                 candidates,
+                filter,
                 selected,
                 status,
-            } => Some((candidates.as_slice(), *selected, status)),
+            } => Some((candidates.as_slice(), filter.as_str(), *selected, status)),
             _ => Option::None,
         }
     }
@@ -428,9 +434,10 @@ impl DetailOverlay {
         match self {
             DetailOverlay::AssigneePicker {
                 candidates,
+                filter,
                 selected,
                 status,
-            } => Some((candidates, selected, status)),
+            } => Some((candidates, filter, selected, status)),
             _ => Option::None,
         }
     }
@@ -837,6 +844,10 @@ pub enum Msg {
     AssigneePickerUp,
     /// Move the assignee-picker selection down by one row.
     AssigneePickerDown,
+    /// Append a printable character to the assignee-picker filter buffer.
+    AssigneePickerChar(char),
+    /// Remove the last character from the assignee-picker filter buffer.
+    AssigneePickerBackspace,
     /// Confirm the highlighted candidate and submit it as a task-field write.
     AssigneePickerSubmit,
     /// Cancel the assignee-picker modal without submitting.
@@ -1053,6 +1064,8 @@ pub fn update(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
         m @ (Msg::AssigneePickerOpen
         | Msg::AssigneePickerUp
         | Msg::AssigneePickerDown
+        | Msg::AssigneePickerChar(_)
+        | Msg::AssigneePickerBackspace
         | Msg::AssigneePickerSubmit
         | Msg::AssigneePickerCancel) => update_assignee_picker(model, m),
         Msg::FocusNextComment => (handle_focus_next(model), vec![]),
@@ -1200,6 +1213,8 @@ fn update_assignee_picker(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
         Msg::AssigneePickerOpen => (handle_assignee_picker_open(model), vec![]),
         Msg::AssigneePickerUp => (handle_assignee_picker_up(model), vec![]),
         Msg::AssigneePickerDown => (handle_assignee_picker_down(model), vec![]),
+        Msg::AssigneePickerChar(c) => (handle_assignee_picker_char(model, c), vec![]),
+        Msg::AssigneePickerBackspace => (handle_assignee_picker_backspace(model), vec![]),
         Msg::AssigneePickerSubmit => handle_assignee_picker_submit(model),
         Msg::AssigneePickerCancel => (handle_assignee_picker_cancel(model), vec![]),
         _ => (model, vec![]),
@@ -2487,7 +2502,7 @@ fn set_task_edit_error(model: &mut Model, message: String) {
         } else if let Some((_, status)) = overlay.status_confirm_mut() {
             *status = EditStatus::Error(message);
             *rendered_width = usize::MAX;
-        } else if let Some((_, _, status)) = overlay.assignee_picker_mut() {
+        } else if let Some((_, _, _, status)) = overlay.assignee_picker_mut() {
             *status = EditStatus::Error(message);
             *rendered_width = usize::MAX;
         }
@@ -2678,6 +2693,24 @@ fn assignee_candidate_index(candidates: &[(i64, String)], assignee_id: Option<i6
         .unwrap_or(0)
 }
 
+/// Filter `candidates` to those whose name contains `filter` as a case-insensitive
+/// substring. Matches on the name only, never the id. An empty filter returns every
+/// candidate unchanged.
+pub(crate) fn filter_assignee_candidates(
+    candidates: &[(i64, String)],
+    filter: &str,
+) -> Vec<(i64, String)> {
+    if filter.is_empty() {
+        return candidates.to_vec();
+    }
+    let needle = filter.to_lowercase();
+    candidates
+        .iter()
+        .filter(|(_, name)| name.to_lowercase().contains(&needle))
+        .cloned()
+        .collect()
+}
+
 /// Open the assignee-picker modal on the current Detail screen, with candidates built
 /// from the already-loaded user directory and the task's current assignee pre-selected.
 ///
@@ -2702,6 +2735,7 @@ fn handle_assignee_picker_open(mut model: Model) -> Model {
             if let Some((candidates, selected)) = built {
                 *overlay = DetailOverlay::AssigneePicker {
                     candidates,
+                    filter: String::new(),
                     selected,
                     status: EditStatus::Editing,
                 };
@@ -2712,8 +2746,9 @@ fn handle_assignee_picker_open(mut model: Model) -> Model {
     model
 }
 
-/// Move the assignee-picker selection up by one row, saturating at the top. No-op
-/// while not `Editing` or when there are no candidates.
+/// Move the assignee-picker selection up by one row within the FILTERED candidate
+/// list, saturating at the top. No-op while not `Editing` or when no candidate
+/// matches the current filter.
 fn handle_assignee_picker_up(mut model: Model) -> Model {
     if let Some(Screen::Detail {
         ref mut overlay,
@@ -2721,8 +2756,10 @@ fn handle_assignee_picker_up(mut model: Model) -> Model {
         ..
     }) = model.top_mut()
     {
-        if let Some((candidates, selected, status)) = overlay.assignee_picker_mut() {
-            if *status == EditStatus::Editing && !candidates.is_empty() {
+        if let Some((candidates, filter, selected, status)) = overlay.assignee_picker_mut() {
+            if *status == EditStatus::Editing
+                && !filter_assignee_candidates(candidates, filter).is_empty()
+            {
                 *selected = selected.saturating_sub(1);
                 *rendered_width = usize::MAX;
             }
@@ -2731,8 +2768,9 @@ fn handle_assignee_picker_up(mut model: Model) -> Model {
     model
 }
 
-/// Move the assignee-picker selection down by one row, saturating at the bottom.
-/// No-op while not `Editing` or when there are no candidates.
+/// Move the assignee-picker selection down by one row within the FILTERED candidate
+/// list, saturating at the bottom. No-op while not `Editing` or when no candidate
+/// matches the current filter.
 fn handle_assignee_picker_down(mut model: Model) -> Model {
     if let Some(Screen::Detail {
         ref mut overlay,
@@ -2740,10 +2778,52 @@ fn handle_assignee_picker_down(mut model: Model) -> Model {
         ..
     }) = model.top_mut()
     {
-        if let Some((candidates, selected, status)) = overlay.assignee_picker_mut() {
-            if *status == EditStatus::Editing && !candidates.is_empty() {
-                let max = candidates.len() - 1;
+        if let Some((candidates, filter, selected, status)) = overlay.assignee_picker_mut() {
+            let filtered_len = filter_assignee_candidates(candidates, filter).len();
+            if *status == EditStatus::Editing && filtered_len > 0 {
+                let max = filtered_len - 1;
                 *selected = (*selected + 1).min(max);
+                *rendered_width = usize::MAX;
+            }
+        }
+    }
+    model
+}
+
+/// Append `c` to the assignee-picker filter buffer while `Editing`, and reset the
+/// highlighted row to the first match of the new filter.
+fn handle_assignee_picker_char(mut model: Model, c: char) -> Model {
+    if let Some(Screen::Detail {
+        ref mut overlay,
+        ref mut rendered_width,
+        ..
+    }) = model.top_mut()
+    {
+        if let Some((_, filter, selected, status)) = overlay.assignee_picker_mut() {
+            if *status == EditStatus::Editing {
+                filter.push(c);
+                *selected = 0;
+                *rendered_width = usize::MAX;
+            }
+        }
+    }
+    model
+}
+
+/// Remove the last character from the assignee-picker filter buffer while `Editing`,
+/// and reset the highlighted row to the first match of the new filter. No-op on an
+/// already-empty filter.
+fn handle_assignee_picker_backspace(mut model: Model) -> Model {
+    if let Some(Screen::Detail {
+        ref mut overlay,
+        ref mut rendered_width,
+        ..
+    }) = model.top_mut()
+    {
+        if let Some((_, filter, selected, status)) = overlay.assignee_picker_mut() {
+            if *status == EditStatus::Editing && !filter.is_empty() {
+                filter.pop();
+                *selected = 0;
                 *rendered_width = usize::MAX;
             }
         }
@@ -2768,8 +2848,8 @@ fn handle_assignee_picker_cancel(mut model: Model) -> Model {
 /// Extract the fields needed to submit the assignee-picker's highlighted candidate,
 /// or None when the guard fails.
 ///
-/// Guard: overlay must be `AssigneePicker`, its status must be `Editing`, and its
-/// candidate list must be non-empty.
+/// Guard: overlay must be `AssigneePicker`, its status must be `Editing`, and the
+/// FILTERED candidate list must be non-empty.
 fn extract_assignee_picker_submit_info(model: &Model) -> Option<(String, i64, i64, i64)> {
     match model.top() {
         Some(Screen::Detail {
@@ -2779,11 +2859,15 @@ fn extract_assignee_picker_submit_info(model: &Model) -> Option<(String, i64, i6
             overlay,
             ..
         }) => {
-            let (candidates, selected, status) = overlay.assignee_picker()?;
-            if *status != EditStatus::Editing || candidates.is_empty() {
+            let (candidates, filter, selected, status) = overlay.assignee_picker()?;
+            if *status != EditStatus::Editing {
                 return None;
             }
-            let (assignee_id, _) = candidates.get(selected)?;
+            let filtered = filter_assignee_candidates(candidates, filter);
+            if filtered.is_empty() {
+                return None;
+            }
+            let (assignee_id, _) = filtered.get(selected)?;
             Some((instance.clone(), *project_id, *task_id, *assignee_id))
         }
         _ => None,
@@ -2807,7 +2891,7 @@ fn handle_assignee_picker_submit(mut model: Model) -> (Model, Vec<Cmd>) {
         ..
     }) = model.top_mut()
     {
-        if let Some((_, _, status)) = overlay.assignee_picker_mut() {
+        if let Some((_, _, _, status)) = overlay.assignee_picker_mut() {
             *status = EditStatus::Submitting;
             *rendered_width = usize::MAX;
         }
