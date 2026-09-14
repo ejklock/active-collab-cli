@@ -18,8 +18,8 @@ use clap::FromArgMatches;
 use cli::{bare_no_command_action, BareNoCommandAction, Cli, Command};
 use commands::{
     comment_core, current_core, get_core, mine_core, pick_instance, setup_add, setup_language,
-    setup_list, setup_remove, setup_test, setup_theme, skill_output, DisplayFlags, MineOutcome,
-    SetupAddFields,
+    setup_list, setup_remove, setup_test, setup_theme, skill_output, time_log_core, DisplayFlags,
+    MineOutcome, SetupAddFields,
 };
 use std::io::IsTerminal;
 use std::process;
@@ -123,6 +123,7 @@ async fn dispatch(command: Command) -> i32 {
         Command::Mine(args) => dispatch_mine(args).await,
         Command::Browse(args) => dispatch_browse(args).await,
         Command::Comment(args) => dispatch_comment(args).await,
+        Command::Time(opts) => dispatch_time(opts.subcommand).await,
         Command::Skill(args) => dispatch_skill(args),
     }
 }
@@ -155,6 +156,37 @@ fn open_store() -> Option<store::Store> {
             None
         }
     }
+}
+
+/// Shared instance+client bootstrap for get/current/comment/time: opens the
+/// store, builds the HTTP client, loads instances, resolves the target
+/// instance via `--instance`/`pick_instance`, and constructs the API client.
+/// Returns `Err(exit_code)` after writing any user-facing error to stderr.
+fn setup_instance_client(
+    instance_name: Option<&str>,
+) -> Result<
+    (
+        store::Store,
+        store::instances::Instance,
+        client::ActiveCollabClient,
+    ),
+    i32,
+> {
+    let store = open_store().ok_or(1)?;
+    let http = http::Http::new().map_err(|e| {
+        render::print_error(&format!("Error building HTTP client: {e}"));
+        1
+    })?;
+    let repo = store::instances::InstanceRepository::new(store.conn());
+    let instances = repo.load_all().map_err(|e| {
+        render::print_error(&format!("Error loading instances: {e}"));
+        1
+    })?;
+    let mut err_buf = std::io::stderr();
+    let idx = pick_instance(&instances, instance_name, &mut err_buf)?;
+    let inst = instances[idx].clone();
+    let ac_client = client::ActiveCollabClient::new(inst.clone(), http);
+    Ok((store, inst, ac_client))
 }
 
 fn dispatch_setup_list() -> i32 {
@@ -314,32 +346,10 @@ fn stdin_is_tty() -> bool {
 }
 
 async fn dispatch_get(args: cli::GetArgs) -> i32 {
-    let store = match open_store() {
-        Some(s) => s,
-        None => return 1,
-    };
-    let http = match http::Http::new() {
-        Ok(h) => h,
-        Err(e) => {
-            render::print_error(&format!("Error building HTTP client: {e}"));
-            return 1;
-        }
-    };
-    let repo = store::instances::InstanceRepository::new(store.conn());
-    let instances = match repo.load_all() {
+    let (store, inst, ac_client) = match setup_instance_client(args.display.instance.as_deref()) {
         Ok(v) => v,
-        Err(e) => {
-            render::print_error(&format!("Error loading instances: {e}"));
-            return 1;
-        }
-    };
-    let mut err_buf = std::io::stderr();
-    let idx = match pick_instance(&instances, args.display.instance.as_deref(), &mut err_buf) {
-        Ok(i) => i,
         Err(code) => return code,
     };
-    let inst = instances[idx].clone();
-    let ac_client = client::ActiveCollabClient::new(inst.clone(), http);
     let cache = store::cache::TaskCache::new(store.conn());
     let flags = DisplayFlags {
         json: args.display.json,
@@ -363,32 +373,10 @@ async fn dispatch_get(args: cli::GetArgs) -> i32 {
 
 async fn dispatch_current(args: cli::DisplayArgs) -> i32 {
     let branch = current_git_branch();
-    let store = match open_store() {
-        Some(s) => s,
-        None => return 1,
-    };
-    let http = match http::Http::new() {
-        Ok(h) => h,
-        Err(e) => {
-            render::print_error(&format!("Error building HTTP client: {e}"));
-            return 1;
-        }
-    };
-    let repo = store::instances::InstanceRepository::new(store.conn());
-    let instances = match repo.load_all() {
+    let (store, inst, ac_client) = match setup_instance_client(args.instance.as_deref()) {
         Ok(v) => v,
-        Err(e) => {
-            render::print_error(&format!("Error loading instances: {e}"));
-            return 1;
-        }
-    };
-    let mut err_buf = std::io::stderr();
-    let idx = match pick_instance(&instances, args.instance.as_deref(), &mut err_buf) {
-        Ok(i) => i,
         Err(code) => return code,
     };
-    let inst = instances[idx].clone();
-    let ac_client = client::ActiveCollabClient::new(inst.clone(), http);
     let cache = store::cache::TaskCache::new(store.conn());
     let flags = DisplayFlags {
         json: args.json,
@@ -504,32 +492,10 @@ async fn dispatch_browse(args: cli::BrowseArgs) -> i32 {
 }
 
 async fn dispatch_comment(args: cli::CommentArgs) -> i32 {
-    let store = match open_store() {
-        Some(s) => s,
-        None => return 1,
-    };
-    let http = match http::Http::new() {
-        Ok(h) => h,
-        Err(e) => {
-            render::print_error(&format!("Error building HTTP client: {e}"));
-            return 1;
-        }
-    };
-    let repo = store::instances::InstanceRepository::new(store.conn());
-    let instances = match repo.load_all() {
+    let (_store, inst, ac_client) = match setup_instance_client(args.instance.as_deref()) {
         Ok(v) => v,
-        Err(e) => {
-            render::print_error(&format!("Error loading instances: {e}"));
-            return 1;
-        }
-    };
-    let mut err_buf = std::io::stderr();
-    let idx = match pick_instance(&instances, args.instance.as_deref(), &mut err_buf) {
-        Ok(i) => i,
         Err(code) => return code,
     };
-    let inst = instances[idx].clone();
-    let ac_client = client::ActiveCollabClient::new(inst.clone(), http);
 
     let body = if let Some(msg) = args.message {
         msg
@@ -548,6 +514,34 @@ async fn dispatch_comment(args: cli::CommentArgs) -> i32 {
         branch.as_deref(),
         &body,
         &inst,
+        &ac_client,
+        args.json,
+        &mut std::io::stdout(),
+        &mut std::io::stderr(),
+    )
+    .await
+}
+
+async fn dispatch_time(cmd: cli::TimeCmd) -> i32 {
+    match cmd {
+        cli::TimeCmd::Log(args) => dispatch_time_log(args).await,
+    }
+}
+
+async fn dispatch_time_log(args: cli::TimeLogArgs) -> i32 {
+    let (_store, _inst, ac_client) = match setup_instance_client(args.instance.as_deref()) {
+        Ok(v) => v,
+        Err(code) => return code,
+    };
+
+    let branch = current_git_branch();
+    time_log_core(
+        args.task_ref.as_deref(),
+        branch.as_deref(),
+        args.hours,
+        args.date.as_deref(),
+        args.summary.as_deref(),
+        args.job_type.as_deref(),
         &ac_client,
         args.json,
         &mut std::io::stdout(),

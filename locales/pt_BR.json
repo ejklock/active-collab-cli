@@ -142,5 +142,8 @@
   "Error: no task ref given and not in a git repository or HEAD is detached.": "Erro: nenhuma referência de tarefa informada e não está em um repositório git ou HEAD está desanexado.",
   "Error: no task ref given and branch '{branch}' does not match expected pattern (feature|hotfix|fix)/PROJECT_ID-TASK_ID.": "Erro: nenhuma referência de tarefa informada e a branch '{branch}' não corresponde ao padrão esperado (feature|hotfix|fix)/PROJECT_ID-TASK_ID.",
   "Token invalid or revoked — run `ac setup add` to re-authenticate.": "Token inválido ou revogado — rode `ac setup add` para reautenticar.",
-  "Downloaded {ok} of {total} attachment(s) to {dir}{failures}": "Baixado(s) {ok} de {total} anexo(s) para {dir}{failures}"
+  "Downloaded {ok} of {total} attachment(s) to {dir}{failures}": "Baixado(s) {ok} de {total} anexo(s) para {dir}{failures}",
+  "hours must be a positive number": "as horas devem ser um número positivo",
+  "no job type available; configure job types on this instance or pass --job-type": "nenhum tipo de trabalho disponível; configure tipos de trabalho nesta instância ou informe --job-type",
+  "Time logged (time_record_id={time_record_id}, {hours} hours, task {project_id}/{task_id}).": "Tempo registrado (time_record_id={time_record_id}, {hours} horas, tarefa {project_id}/{task_id})."
 }

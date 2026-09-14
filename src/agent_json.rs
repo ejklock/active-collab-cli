@@ -143,6 +143,20 @@ pub fn comment_error(reason: &str) -> String {
     format!(r#"{{"ok":false,"error":{escaped}}}"#, escaped = escaped)
 }
 
+/// Build the write-result for a newly posted time record.
+///
+/// Returns a minified single-line JSON string on success:
+/// `{"ok":true,"time_record_id":N,"task_id":N,"project_id":N,"hours":H}`
+pub fn time_result(time_record_id: i64, task_id: i64, project_id: i64, hours: f64) -> String {
+    format!(
+        r#"{{"ok":true,"time_record_id":{time_record_id},"task_id":{task_id},"project_id":{project_id},"hours":{hours}}}"#,
+        time_record_id = time_record_id,
+        task_id = task_id,
+        project_id = project_id,
+        hours = hours,
+    )
+}
+
 /// Build the ADR 0011 browse schema for agent/LLM consumption.
 ///
 /// Pure: no network, no I/O. Accepts the same `ProjectGroup` slice the TUI
