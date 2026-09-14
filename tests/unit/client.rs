@@ -244,6 +244,92 @@ async fn fetch_user_map_non_200_returns_empty() {
 }
 
 #[tokio::test]
+async fn fetch_job_types_parses_list() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/job-types"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            { "id": 1, "name": "Design", "is_default": false },
+            { "id": 2, "name": "Development", "is_default": true }
+        ])))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = make_client(&server.uri());
+    let job_types = client.fetch_job_types().await.unwrap();
+    assert_eq!(
+        job_types,
+        vec![
+            JobType {
+                id: 1,
+                name: "Design".to_string(),
+                is_default: false
+            },
+            JobType {
+                id: 2,
+                name: "Development".to_string(),
+                is_default: true
+            },
+        ]
+    );
+}
+
+#[tokio::test]
+async fn fetch_job_types_non_200_returns_empty() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/job-types"))
+        .respond_with(ResponseTemplate::new(500).set_body_string("error"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = make_client(&server.uri());
+    let job_types = client.fetch_job_types().await.unwrap();
+    assert!(job_types.is_empty());
+}
+
+#[test]
+fn pick_default_job_type_returns_default_entry_id() {
+    let job_types = vec![
+        JobType {
+            id: 1,
+            name: "Design".to_string(),
+            is_default: false,
+        },
+        JobType {
+            id: 2,
+            name: "Development".to_string(),
+            is_default: true,
+        },
+    ];
+    assert_eq!(pick_default_job_type(&job_types), Some(2));
+}
+
+#[test]
+fn pick_default_job_type_falls_back_to_first_entry() {
+    let job_types = vec![
+        JobType {
+            id: 1,
+            name: "Design".to_string(),
+            is_default: false,
+        },
+        JobType {
+            id: 2,
+            name: "Development".to_string(),
+            is_default: false,
+        },
+    ];
+    assert_eq!(pick_default_job_type(&job_types), Some(1));
+}
+
+#[test]
+fn pick_default_job_type_returns_none_for_empty_list() {
+    assert_eq!(pick_default_job_type(&[]), None);
+}
+
+#[tokio::test]
 async fn fetch_user_map_non_list_response_returns_empty() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
@@ -633,10 +719,10 @@ async fn redirect_to_second_host_is_not_followed() {
 #[tokio::test]
 async fn create_comment_posts_to_correct_path_with_body() {
     let server = MockServer::start().await;
-    let comment = serde_json::json!({ "id": 10, "body": "hello" });
+    let comment = serde_json::json!({ "id": 10, "body": "<p>hello</p>" });
     Mock::given(method("POST"))
         .and(path("/api/v1/comments/task/42"))
-        .and(body_json(serde_json::json!({ "body": "hello" })))
+        .and(body_json(serde_json::json!({ "body": "<p>hello</p>" })))
         .respond_with(ResponseTemplate::new(200).set_body_json(comment.clone()))
         .expect(1)
         .mount(&server)
@@ -705,12 +791,243 @@ async fn create_comment_attaches_token_header() {
 }
 
 #[tokio::test]
+async fn create_time_record_posts_to_correct_path_with_body() {
+    let server = MockServer::start().await;
+    let record = serde_json::json!({ "id": 7, "value": 2.5 });
+    Mock::given(method("POST"))
+        .and(path("/api/v1/projects/3/time-records"))
+        .and(body_json(serde_json::json!({
+            "task_id": 42,
+            "value": 2.5,
+            "record_date": "2026-09-14",
+            "job_type_id": 2,
+            "summary": "worked on it"
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(record.clone()))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = make_client(&server.uri());
+    let outcome = client
+        .create_time_record(3, 42, 2.5, "2026-09-14", 2, Some("worked on it"))
+        .await
+        .unwrap();
+    match outcome {
+        TimeWriteOutcome::Ok(payload) => assert_eq!(payload.unwrap(), record),
+        other => panic!("expected Ok outcome, got {other:?}"),
+    }
+    server.verify().await;
+}
+
+#[tokio::test]
+async fn create_time_record_omits_summary_when_none() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/projects/3/time-records"))
+        .and(body_json(serde_json::json!({
+            "task_id": 42,
+            "value": 1.0,
+            "record_date": "2026-09-14",
+            "job_type_id": 2
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({ "id": 8 })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = make_client(&server.uri());
+    let outcome = client
+        .create_time_record(3, 42, 1.0, "2026-09-14", 2, None)
+        .await
+        .unwrap();
+    assert!(matches!(outcome, TimeWriteOutcome::Ok(_)));
+    server.verify().await;
+}
+
+#[tokio::test]
+async fn create_time_record_401_returns_unauthorized() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/projects/3/time-records"))
+        .respond_with(ResponseTemplate::new(401).set_body_string("unauthorized"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = make_client(&server.uri());
+    let outcome = client
+        .create_time_record(3, 42, 1.0, "2026-09-14", 2, None)
+        .await
+        .unwrap();
+    assert!(
+        matches!(outcome, TimeWriteOutcome::Unauthorized),
+        "expected Unauthorized, got {outcome:?}"
+    );
+}
+
+#[tokio::test]
+async fn create_time_record_non_2xx_returns_failed_with_status() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/projects/3/time-records"))
+        .respond_with(ResponseTemplate::new(422).set_body_string("invalid"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = make_client(&server.uri());
+    let outcome = client
+        .create_time_record(3, 42, 1.0, "2026-09-14", 2, None)
+        .await
+        .unwrap();
+    match outcome {
+        TimeWriteOutcome::Failed(status) => assert_eq!(status, 422),
+        other => panic!("expected Failed(422), got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn set_task_completion_true_puts_to_complete_endpoint() {
+    let server = MockServer::start().await;
+    let task = serde_json::json!({ "id": 42, "is_completed": true });
+    Mock::given(method("PUT"))
+        .and(path("/api/v1/complete/task/42"))
+        .and(body_json(serde_json::json!({})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(task.clone()))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = make_client(&server.uri());
+    let outcome = client.set_task_completion(42, true).await.unwrap();
+    match outcome {
+        TaskWriteOutcome::Ok(payload) => assert_eq!(payload.unwrap(), task),
+        other => panic!("expected Ok outcome, got {other:?}"),
+    }
+    server.verify().await;
+}
+
+#[tokio::test]
+async fn set_task_completion_false_puts_to_open_endpoint() {
+    let server = MockServer::start().await;
+    Mock::given(method("PUT"))
+        .and(path("/api/v1/open/task/42"))
+        .and(body_json(serde_json::json!({})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({ "id": 42 })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = make_client(&server.uri());
+    let outcome = client.set_task_completion(42, false).await.unwrap();
+    assert!(matches!(outcome, TaskWriteOutcome::Ok(_)));
+    server.verify().await;
+}
+
+#[tokio::test]
+async fn set_task_completion_401_returns_unauthorized() {
+    let server = MockServer::start().await;
+    Mock::given(method("PUT"))
+        .and(path("/api/v1/complete/task/42"))
+        .respond_with(ResponseTemplate::new(401).set_body_string("unauthorized"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = make_client(&server.uri());
+    let outcome = client.set_task_completion(42, true).await.unwrap();
+    assert!(
+        matches!(outcome, TaskWriteOutcome::Unauthorized),
+        "expected Unauthorized, got {outcome:?}"
+    );
+}
+
+#[tokio::test]
+async fn update_task_puts_assignee_only_body() {
+    let server = MockServer::start().await;
+    Mock::given(method("PUT"))
+        .and(path("/api/v1/projects/3/tasks/42"))
+        .and(body_json(serde_json::json!({ "assignee_id": 9 })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({ "id": 42 })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = make_client(&server.uri());
+    let outcome = client.update_task(3, 42, Some(9), None).await.unwrap();
+    assert!(matches!(outcome, TaskWriteOutcome::Ok(_)));
+    server.verify().await;
+}
+
+#[tokio::test]
+async fn update_task_puts_estimate_only_body() {
+    let server = MockServer::start().await;
+    Mock::given(method("PUT"))
+        .and(path("/api/v1/projects/3/tasks/42"))
+        .and(body_json(serde_json::json!({ "estimate": 4.5 })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({ "id": 42 })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = make_client(&server.uri());
+    let outcome = client.update_task(3, 42, None, Some(4.5)).await.unwrap();
+    assert!(matches!(outcome, TaskWriteOutcome::Ok(_)));
+    server.verify().await;
+}
+
+#[tokio::test]
+async fn update_task_puts_both_fields() {
+    let server = MockServer::start().await;
+    let task = serde_json::json!({ "id": 42, "assignee_id": 9, "estimate": 4.5 });
+    Mock::given(method("PUT"))
+        .and(path("/api/v1/projects/3/tasks/42"))
+        .and(body_json(serde_json::json!({
+            "assignee_id": 9,
+            "estimate": 4.5
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(task.clone()))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = make_client(&server.uri());
+    let outcome = client.update_task(3, 42, Some(9), Some(4.5)).await.unwrap();
+    match outcome {
+        TaskWriteOutcome::Ok(payload) => assert_eq!(payload.unwrap(), task),
+        other => panic!("expected Ok outcome, got {other:?}"),
+    }
+    server.verify().await;
+}
+
+#[tokio::test]
+async fn update_task_non_2xx_returns_failed_with_status() {
+    let server = MockServer::start().await;
+    Mock::given(method("PUT"))
+        .and(path("/api/v1/projects/3/tasks/42"))
+        .respond_with(ResponseTemplate::new(422).set_body_string("invalid"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = make_client(&server.uri());
+    let outcome = client.update_task(3, 42, Some(9), None).await.unwrap();
+    match outcome {
+        TaskWriteOutcome::Failed(status) => assert_eq!(status, 422),
+        other => panic!("expected Failed(422), got {other:?}"),
+    }
+}
+
+#[tokio::test]
 async fn update_comment_puts_to_correct_path_with_body() {
     let server = MockServer::start().await;
-    let comment = serde_json::json!({ "id": 99, "body": "updated text" });
+    let comment = serde_json::json!({ "id": 99, "body": "<p>updated text</p>" });
     Mock::given(method("PUT"))
         .and(path("/api/v1/comments/99"))
-        .and(body_json(serde_json::json!({ "body": "updated text" })))
+        .and(body_json(
+            serde_json::json!({ "body": "<p>updated text</p>" }),
+        ))
         .respond_with(ResponseTemplate::new(200).set_body_json(comment.clone()))
         .expect(1)
         .mount(&server)
@@ -939,4 +1256,28 @@ async fn base_url_trailing_slash_is_trimmed() {
     let (status, _) = client.list_projects().await.unwrap();
     assert_eq!(status, 200);
     server.verify().await;
+}
+
+#[test]
+fn encode_comment_body_wraps_blank_line_separated_paragraphs() {
+    let encoded = encode_comment_body("first paragraph\n\nsecond paragraph");
+    assert_eq!(encoded, "<p>first paragraph</p><p>second paragraph</p>");
+}
+
+#[test]
+fn encode_comment_body_encodes_single_newline_as_br() {
+    let encoded = encode_comment_body("line one\nline two");
+    assert_eq!(encoded, "<p>line one<br>line two</p>");
+}
+
+#[test]
+fn encode_comment_body_escapes_html_special_characters() {
+    let encoded = encode_comment_body("a < b & c > d");
+    assert_eq!(encoded, "<p>a &lt; b &amp; c &gt; d</p>");
+}
+
+#[test]
+fn encode_comment_body_wraps_single_line_in_one_paragraph() {
+    let encoded = encode_comment_body("hello");
+    assert_eq!(encoded, "<p>hello</p>");
 }

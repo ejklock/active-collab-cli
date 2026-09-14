@@ -2800,7 +2800,7 @@ fn detail_max_offset_empty_assets_no_inline_section() {
 // AC2 (BDR 0022 Sc.2): last asset row is reachable at max scroll offset.
 // With 1 body line + blank + 6 section rows = 8 total lines, viewport_rows=24,
 // text_vh=20, max=8-20=0 (all fits), so the asset section is always visible at offset=0.
-// For the long list scenario: 25 body lines + blank + 6 section = 32 lines;
+// For the long list scenario: 25 body lines + blank + 6 section = 32 lines.
 // max=32-20=12; at offset=12 the visible range is [12..31] inclusive (rows 2..21),
 // which covers the last section rows at lines[31]=section_row5 (visible).
 #[test]
@@ -3033,8 +3033,8 @@ fn is_in_body_area_includes_asset_rows_no_panel_height_subtracted() {
 // emits Cmd::OpenAsset with that asset's url; a plain (unmodified) click on the SAME row
 // does NOT emit OpenAsset (reserved for text selection). Pins the Ctrl/Cmd gate end-to-end.
 //
-// This is the regression guard for ADR 0032: the hit-test (asset_panel_cmd_at) is intact;
-// what was broken was only the VISUAL affordance (no link style). Both are now tested together.
+// This is the regression guard for ADR 0032: the hit-test (asset_panel_cmd_at) is intact.
+// What was broken was only the VISUAL affordance (no link style). Both are now tested together.
 //
 // Layout math for viewport (80, 24), 3 body lines + blank + section:
 //   inner_width = 78, content_width = inline_content_width(78)
@@ -3265,7 +3265,9 @@ fn plain_click_on_wrapped_asset_continuation_emits_no_open_asset() {
 
 // ── Compose mode tests (BDR 0024 / ADR 0034 / ADR 0035) ──────────────────────
 
-use crate::tui::model::{Compose, ComposeKind, ComposeStatus, DetailOverlay};
+use crate::tui::model::{
+    Compose, ComposeKind, ComposeStatus, DetailOverlay, LogTimeField, LogTimeForm, LogTimeStatus,
+};
 
 fn detail_model_for_compose(instance: &str, project_id: i64, task_id: i64) -> Model {
     Model {
@@ -3785,6 +3787,1374 @@ fn compose_multiline_editor_produces_two_lines() {
         cp.editor.lines(),
         ["line1", "l2"],
         "Enter must split the editor into two lines"
+    );
+}
+
+// ── Log-time modal tests (issue 0067 TUI slice) ───────────────────────────────
+
+fn extract_log_time(model: &Model) -> Option<&LogTimeForm> {
+    match model.top() {
+        Some(Screen::Detail { overlay, .. }) => overlay.log_time(),
+        _ => None,
+    }
+}
+
+// AC1-part1: LogTimeOpen on a Detail screen sets the form to Editing/Hours/empty buffers.
+#[test]
+fn log_time_open_on_detail_sets_editing_state_with_empty_buffers() {
+    let m = detail_model_for_compose("inst", 10, 42);
+    let (m, cmds) = update(m, Msg::LogTimeOpen);
+    assert!(cmds.is_empty(), "LogTimeOpen must emit no Cmd");
+    let form = extract_log_time(&m).expect("log-time form must be Some after LogTimeOpen");
+    assert_eq!(form.hours, "");
+    assert_eq!(form.summary, "");
+    assert_eq!(form.field, LogTimeField::Hours);
+    assert_eq!(form.status, LogTimeStatus::Editing);
+}
+
+// AC1-part2: LogTimeOpen on a screen that already has the log-time modal active is a no-op.
+#[test]
+fn log_time_open_when_already_active_is_noop() {
+    let mut m = detail_model_for_compose("inst", 10, 42);
+    if let Some(Screen::Detail {
+        ref mut overlay, ..
+    }) = m.stack.last_mut()
+    {
+        *overlay = DetailOverlay::LogTime(LogTimeForm {
+            hours: "3".into(),
+            summary: String::new(),
+            field: LogTimeField::Hours,
+            status: LogTimeStatus::Editing,
+        });
+    }
+    let (m, _) = update(m, Msg::LogTimeOpen);
+    let form = extract_log_time(&m).expect("log-time form must still be Some");
+    assert_eq!(form.hours, "3", "existing hours buffer must be preserved");
+}
+
+// AC1-part3: LogTimeChar appends to the focused (Hours) field only.
+#[test]
+fn log_time_char_appends_to_focused_hours_field() {
+    let m = detail_model_for_compose("inst", 10, 42);
+    let (m, _) = update(m, Msg::LogTimeOpen);
+    let (m, cmds) = update(m, Msg::LogTimeChar('1'));
+    assert!(cmds.is_empty());
+    let (m, _) = update(m, Msg::LogTimeChar('.'));
+    let (m, _) = update(m, Msg::LogTimeChar('5'));
+    let form = extract_log_time(&m).expect("log-time form must be Some");
+    assert_eq!(form.hours, "1.5");
+    assert_eq!(form.summary, "", "summary must stay untouched");
+}
+
+// AC1-part3: LogTimeToggleField switches focus so LogTimeChar edits Summary instead.
+#[test]
+fn log_time_char_edits_summary_after_toggle_field() {
+    let m = detail_model_for_compose("inst", 10, 42);
+    let (m, _) = update(m, Msg::LogTimeOpen);
+    let (m, _) = update(m, Msg::LogTimeToggleField);
+    let (m, _) = update(m, Msg::LogTimeChar('a'));
+    let (m, _) = update(m, Msg::LogTimeChar('b'));
+    let form = extract_log_time(&m).expect("log-time form must be Some");
+    assert_eq!(form.field, LogTimeField::Summary);
+    assert_eq!(form.summary, "ab");
+    assert_eq!(form.hours, "", "hours must stay untouched");
+}
+
+// AC1: LogTimeToggleField is symmetric — a second toggle returns focus to Hours.
+#[test]
+fn log_time_toggle_field_twice_returns_to_hours() {
+    let m = detail_model_for_compose("inst", 10, 42);
+    let (m, _) = update(m, Msg::LogTimeOpen);
+    let (m, _) = update(m, Msg::LogTimeToggleField);
+    let (m, _) = update(m, Msg::LogTimeToggleField);
+    let form = extract_log_time(&m).expect("log-time form must be Some");
+    assert_eq!(form.field, LogTimeField::Hours);
+}
+
+// AC1-part5: LogTimeBackspace removes the last character of the focused field.
+#[test]
+fn log_time_backspace_removes_last_character() {
+    let m = detail_model_for_compose("inst", 10, 42);
+    let (m, _) = update(m, Msg::LogTimeOpen);
+    let (m, _) = update(m, Msg::LogTimeChar('2'));
+    let (m, _) = update(m, Msg::LogTimeChar('4'));
+    let (m, cmds) = update(m, Msg::LogTimeBackspace);
+    assert!(cmds.is_empty());
+    let form = extract_log_time(&m).expect("log-time form must be Some");
+    assert_eq!(form.hours, "2");
+}
+
+// AC1-part6: LogTimeCancel clears the overlay and emits no Cmd.
+#[test]
+fn log_time_cancel_clears_overlay_and_emits_no_cmd() {
+    let m = detail_model_for_compose("inst", 10, 42);
+    let (m, _) = update(m, Msg::LogTimeOpen);
+    let (m, _) = update(m, Msg::LogTimeChar('1'));
+    let (m, cmds) = update(m, Msg::LogTimeCancel);
+    assert!(cmds.is_empty(), "LogTimeCancel must emit no Cmd");
+    assert!(
+        extract_log_time(&m).is_none(),
+        "log-time form must be None after LogTimeCancel"
+    );
+}
+
+// AC2-part1: LogTimeSubmit with a valid hours buffer and no summary emits exactly one
+// Cmd::SubmitTimeLog with summary=None and sets status=Submitting.
+#[test]
+fn log_time_submit_valid_hours_emits_submit_time_log_cmd_with_no_summary() {
+    let m = detail_model_for_compose("myinst", 5, 99);
+    let m = type_log_time_chars(update(m, Msg::LogTimeOpen).0, "1.5");
+    let (m, cmds) = update(m, Msg::LogTimeSubmit);
+
+    assert_eq!(cmds.len(), 1, "must emit exactly one Cmd::SubmitTimeLog");
+    match &cmds[0] {
+        Cmd::SubmitTimeLog {
+            instance,
+            project_id,
+            task_id,
+            hours,
+            summary,
+        } => {
+            assert_eq!(instance, "myinst");
+            assert_eq!(*project_id, 5);
+            assert_eq!(*task_id, 99);
+            assert!((*hours - 1.5).abs() < f64::EPSILON);
+            assert_eq!(*summary, None);
+        }
+        other => panic!("expected Cmd::SubmitTimeLog, got {other:?}"),
+    }
+    let form = extract_log_time(&m).expect("log-time form must be Some after submit");
+    assert_eq!(form.status, LogTimeStatus::Submitting);
+}
+
+// AC2-part1: a non-empty summary buffer flows into Cmd::SubmitTimeLog as Some(trimmed).
+#[test]
+fn log_time_submit_with_summary_includes_some_summary() {
+    let m = detail_model_for_compose("inst", 1, 1);
+    let m = type_log_time_chars(update(m, Msg::LogTimeOpen).0, "2");
+    let (m, _) = update(m, Msg::LogTimeToggleField);
+    let m = type_log_time_chars(m, "  worked on the fix  ");
+    let (_m, cmds) = update(m, Msg::LogTimeSubmit);
+
+    match &cmds[0] {
+        Cmd::SubmitTimeLog { summary, .. } => {
+            assert_eq!(summary.as_deref(), Some("worked on the fix"));
+        }
+        other => panic!("expected Cmd::SubmitTimeLog, got {other:?}"),
+    }
+}
+
+// AC2-part2: an empty hours buffer sets Error and emits no Cmd.
+#[test]
+fn log_time_submit_empty_hours_sets_error_and_emits_no_cmd() {
+    let m = detail_model_for_compose("inst", 1, 1);
+    let (m, _) = update(m, Msg::LogTimeOpen);
+    let (m, cmds) = update(m, Msg::LogTimeSubmit);
+    assert!(cmds.is_empty(), "empty hours must emit no Cmd");
+    let form = extract_log_time(&m).expect("log-time form must still be Some");
+    assert!(matches!(form.status, LogTimeStatus::Error(_)));
+}
+
+// AC2-part2: a zero hours buffer sets Error and emits no Cmd.
+#[test]
+fn log_time_submit_zero_hours_sets_error_and_emits_no_cmd() {
+    let m = detail_model_for_compose("inst", 1, 1);
+    let m = type_log_time_chars(update(m, Msg::LogTimeOpen).0, "0");
+    let (m, cmds) = update(m, Msg::LogTimeSubmit);
+    assert!(cmds.is_empty(), "zero hours must emit no Cmd");
+    let form = extract_log_time(&m).expect("log-time form must still be Some");
+    assert!(matches!(form.status, LogTimeStatus::Error(_)));
+}
+
+// AC2-part2: a negative hours buffer sets Error and emits no Cmd.
+#[test]
+fn log_time_submit_negative_hours_sets_error_and_emits_no_cmd() {
+    let m = detail_model_for_compose("inst", 1, 1);
+    let m = type_log_time_chars(update(m, Msg::LogTimeOpen).0, "-2");
+    let (m, cmds) = update(m, Msg::LogTimeSubmit);
+    assert!(cmds.is_empty(), "negative hours must emit no Cmd");
+    let form = extract_log_time(&m).expect("log-time form must still be Some");
+    assert!(matches!(form.status, LogTimeStatus::Error(_)));
+}
+
+// AC2-part2: a non-numeric hours buffer sets Error and emits no Cmd.
+#[test]
+fn log_time_submit_non_numeric_hours_sets_error_and_emits_no_cmd() {
+    let m = detail_model_for_compose("inst", 1, 1);
+    let m = type_log_time_chars(update(m, Msg::LogTimeOpen).0, "abc");
+    let (m, cmds) = update(m, Msg::LogTimeSubmit);
+    assert!(cmds.is_empty(), "non-numeric hours must emit no Cmd");
+    let form = extract_log_time(&m).expect("log-time form must still be Some");
+    assert!(matches!(form.status, LogTimeStatus::Error(_)));
+}
+
+// AC3-part1: TimeMutationOk clears the overlay AND emits exactly one
+// Cmd::LoadDetail{refresh:true}, the same server-truth refresh as the comment path.
+#[test]
+fn time_mutation_ok_clears_overlay_and_emits_load_detail_refresh() {
+    let m = detail_model_for_compose("inst", 7, 13);
+    let m = type_log_time_chars(update(m, Msg::LogTimeOpen).0, "4");
+    let (m, cmds) = update(m, Msg::TimeMutationOk);
+
+    assert!(
+        extract_log_time(&m).is_none(),
+        "log-time form must be None after TimeMutationOk"
+    );
+    assert_eq!(cmds.len(), 1, "must emit exactly one Cmd::LoadDetail");
+    match &cmds[0] {
+        Cmd::LoadDetail {
+            instance,
+            project_id,
+            task_id,
+            refresh,
+        } => {
+            assert_eq!(instance, "inst");
+            assert_eq!(*project_id, 7);
+            assert_eq!(*task_id, 13);
+            assert!(*refresh, "refresh must be true");
+        }
+        other => panic!("expected Cmd::LoadDetail, got {other:?}"),
+    }
+}
+
+// AC3-part2: TimeMutationErr keeps the buffers intact and sets status=Error(msg), emits no Cmd.
+#[test]
+fn time_mutation_err_preserves_buffers_and_sets_error_status() {
+    let m = detail_model_for_compose("inst", 1, 1);
+    let m = type_log_time_chars(update(m, Msg::LogTimeOpen).0, "3");
+    let (m, cmds) = update(m, Msg::TimeMutationErr("Network error".into()));
+
+    assert!(cmds.is_empty(), "TimeMutationErr must emit no Cmd");
+    let form = extract_log_time(&m).expect("log-time form must still be Some after error");
+    assert_eq!(form.hours, "3", "hours buffer must be preserved");
+    assert_eq!(
+        form.status,
+        LogTimeStatus::Error("Network error".into()),
+        "status must be Error(msg)"
+    );
+}
+
+/// Drive `LogTimeChar` through `update()` for every char in `s`, in order. Types
+/// into whichever field currently has focus (Hours by default, or Summary after
+/// a `LogTimeToggleField`).
+fn type_log_time_chars(mut model: Model, s: &str) -> Model {
+    for c in s.chars() {
+        model = update(model, Msg::LogTimeChar(c)).0;
+    }
+    model
+}
+
+// AC4: map_log_time_key_event maps Ctrl+S -> LogTimeSubmit.
+#[test]
+fn map_log_time_key_event_ctrl_s_yields_log_time_submit() {
+    use crate::tui::events::map_log_time_key_event;
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState};
+    let key = KeyEvent {
+        code: KeyCode::Char('s'),
+        modifiers: KeyModifiers::CONTROL,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+    assert!(
+        matches!(map_log_time_key_event(key), Some(Msg::LogTimeSubmit)),
+        "Ctrl+S must map to LogTimeSubmit"
+    );
+}
+
+// AC4: map_log_time_key_event maps Esc -> LogTimeCancel.
+#[test]
+fn map_log_time_key_event_esc_yields_log_time_cancel() {
+    use crate::tui::events::map_log_time_key_event;
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState};
+    let key = KeyEvent {
+        code: KeyCode::Esc,
+        modifiers: KeyModifiers::NONE,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+    assert!(
+        matches!(map_log_time_key_event(key), Some(Msg::LogTimeCancel)),
+        "Esc must map to LogTimeCancel"
+    );
+}
+
+// AC4: map_log_time_key_event maps Tab -> LogTimeToggleField.
+#[test]
+fn map_log_time_key_event_tab_yields_log_time_toggle_field() {
+    use crate::tui::events::map_log_time_key_event;
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState};
+    let key = KeyEvent {
+        code: KeyCode::Tab,
+        modifiers: KeyModifiers::NONE,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+    assert!(
+        matches!(map_log_time_key_event(key), Some(Msg::LogTimeToggleField)),
+        "Tab must map to LogTimeToggleField"
+    );
+}
+
+// AC4: map_log_time_key_event maps Backspace -> LogTimeBackspace.
+#[test]
+fn map_log_time_key_event_backspace_yields_log_time_backspace() {
+    use crate::tui::events::map_log_time_key_event;
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState};
+    let key = KeyEvent {
+        code: KeyCode::Backspace,
+        modifiers: KeyModifiers::NONE,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+    assert!(
+        matches!(map_log_time_key_event(key), Some(Msg::LogTimeBackspace)),
+        "Backspace must map to LogTimeBackspace"
+    );
+}
+
+// AC4: map_log_time_key_event maps a printable char -> LogTimeChar(c).
+#[test]
+fn map_log_time_key_event_printable_char_yields_log_time_char() {
+    use crate::tui::events::map_log_time_key_event;
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState};
+    let key = KeyEvent {
+        code: KeyCode::Char('5'),
+        modifiers: KeyModifiers::NONE,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+    assert!(
+        matches!(map_log_time_key_event(key), Some(Msg::LogTimeChar('5'))),
+        "printable char must map to LogTimeChar(c)"
+    );
+}
+
+// AC4: map_browse_key_event maps plain 't' -> LogTimeOpen (not a selection or nav action).
+#[test]
+fn map_browse_key_event_plain_t_yields_log_time_open() {
+    use crate::tui::events::map_browse_key_event;
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState};
+    let key = KeyEvent {
+        code: KeyCode::Char('t'),
+        modifiers: KeyModifiers::NONE,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+    assert!(
+        matches!(map_browse_key_event(key), Some(Msg::LogTimeOpen)),
+        "plain 't' must map to LogTimeOpen"
+    );
+}
+
+// ── Estimate-edit modal tests (issue 0068 TUI slice) ──────────────────────────
+
+fn detail_model_with_task(
+    instance: &str,
+    project_id: i64,
+    task_id: i64,
+    task: serde_json::Value,
+) -> Model {
+    Model {
+        stack: vec![Screen::Detail {
+            instance: instance.into(),
+            project_id,
+            task_id,
+            task,
+            comments: vec![],
+            user_map: HashMap::new(),
+            lines: vec![],
+            line_styles: vec![],
+            assets: vec![],
+            offset: 0,
+            loading: false,
+            rendered_width: usize::MAX,
+            overlay: DetailOverlay::None,
+            current_user_id: None,
+            affordances: vec![],
+            focused_comment: None,
+            auth_error: false,
+            comment_spans: vec![],
+        }],
+        should_quit: false,
+        header: empty_header(),
+        viewport: (80, 24),
+        click_targets: vec![],
+        modal_button_targets: vec![],
+        last_loaded: None,
+        selection: None,
+        copied_feedback: false,
+    }
+}
+
+fn extract_estimate(model: &Model) -> Option<&EstimateForm> {
+    match model.top() {
+        Some(Screen::Detail { overlay, .. }) => overlay.estimate_edit(),
+        _ => None,
+    }
+}
+
+fn type_estimate_chars(mut model: Model, s: &str) -> Model {
+    for c in s.chars() {
+        model = update(model, Msg::EstimateChar(c)).0;
+    }
+    model
+}
+
+// AC1: EstimateOpen on a task with no estimate sets the form to Editing with an empty value.
+#[test]
+fn estimate_open_on_detail_with_no_estimate_sets_editing_state_with_empty_value() {
+    let m = detail_model_for_compose("inst", 10, 42);
+    let (m, cmds) = update(m, Msg::EstimateOpen);
+    assert!(cmds.is_empty(), "EstimateOpen must emit no Cmd");
+    let form = extract_estimate(&m).expect("estimate form must be Some after EstimateOpen");
+    assert_eq!(form.value, "");
+    assert_eq!(form.status, EditStatus::Editing);
+}
+
+// AC1: EstimateOpen prefills the value from the task's current estimate when present.
+#[test]
+fn estimate_open_prefills_value_from_existing_task_estimate() {
+    let m = detail_model_with_task("inst", 10, 42, serde_json::json!({ "estimate": 8 }));
+    let (m, _) = update(m, Msg::EstimateOpen);
+    let form = extract_estimate(&m).expect("estimate form must be Some after EstimateOpen");
+    assert_eq!(
+        form.value, "8",
+        "a whole-number estimate must prefill without a decimal"
+    );
+}
+
+// AC1: a fractional task estimate prefills with its decimal value intact.
+#[test]
+fn estimate_open_prefills_fractional_task_estimate() {
+    let m = detail_model_with_task("inst", 10, 42, serde_json::json!({ "estimate": 4.5 }));
+    let (m, _) = update(m, Msg::EstimateOpen);
+    let form = extract_estimate(&m).expect("estimate form must be Some after EstimateOpen");
+    assert_eq!(form.value, "4.5");
+}
+
+// AC1: EstimateOpen on a screen that already has the estimate modal active is a no-op.
+#[test]
+fn estimate_open_when_already_active_is_noop() {
+    let mut m = detail_model_for_compose("inst", 10, 42);
+    if let Some(Screen::Detail {
+        ref mut overlay, ..
+    }) = m.stack.last_mut()
+    {
+        *overlay = DetailOverlay::EstimateEdit(EstimateForm {
+            value: "3".into(),
+            status: EditStatus::Editing,
+        });
+    }
+    let (m, _) = update(m, Msg::EstimateOpen);
+    let form = extract_estimate(&m).expect("estimate form must still be Some");
+    assert_eq!(form.value, "3", "existing value buffer must be preserved");
+}
+
+// AC1: EstimateChar appends to the value buffer while Editing.
+#[test]
+fn estimate_char_appends_to_value_buffer() {
+    let m = detail_model_for_compose("inst", 10, 42);
+    let (m, _) = update(m, Msg::EstimateOpen);
+    let (m, cmds) = update(m, Msg::EstimateChar('4'));
+    assert!(cmds.is_empty());
+    let (m, _) = update(m, Msg::EstimateChar('.'));
+    let (m, _) = update(m, Msg::EstimateChar('5'));
+    let form = extract_estimate(&m).expect("estimate form must be Some");
+    assert_eq!(form.value, "4.5");
+}
+
+// AC1: EstimateBackspace removes the last character of the value buffer.
+#[test]
+fn estimate_backspace_removes_last_character() {
+    let m = detail_model_for_compose("inst", 10, 42);
+    let m = type_estimate_chars(update(m, Msg::EstimateOpen).0, "24");
+    let (m, cmds) = update(m, Msg::EstimateBackspace);
+    assert!(cmds.is_empty());
+    let form = extract_estimate(&m).expect("estimate form must be Some");
+    assert_eq!(form.value, "2");
+}
+
+// AC1: EstimateCancel clears the overlay and emits no Cmd.
+#[test]
+fn estimate_cancel_clears_overlay_and_emits_no_cmd() {
+    let m = detail_model_for_compose("inst", 10, 42);
+    let m = type_estimate_chars(update(m, Msg::EstimateOpen).0, "1");
+    let (m, cmds) = update(m, Msg::EstimateCancel);
+    assert!(cmds.is_empty(), "EstimateCancel must emit no Cmd");
+    assert!(
+        extract_estimate(&m).is_none(),
+        "estimate form must be None after EstimateCancel"
+    );
+}
+
+// AC2: a valid non-negative value emits exactly one Cmd::SubmitTaskEdit carrying
+// estimate: Some(value), completion: None, assignee_id: None, and sets Submitting.
+#[test]
+fn estimate_submit_valid_value_emits_submit_task_edit_cmd() {
+    let m = detail_model_for_compose("myinst", 5, 99);
+    let m = type_estimate_chars(update(m, Msg::EstimateOpen).0, "4.5");
+    let (m, cmds) = update(m, Msg::EstimateSubmit);
+
+    assert_eq!(cmds.len(), 1, "must emit exactly one Cmd::SubmitTaskEdit");
+    match &cmds[0] {
+        Cmd::SubmitTaskEdit {
+            instance,
+            project_id,
+            task_id,
+            completion,
+            assignee_id,
+            estimate,
+        } => {
+            assert_eq!(instance, "myinst");
+            assert_eq!(*project_id, 5);
+            assert_eq!(*task_id, 99);
+            assert_eq!(*completion, None);
+            assert_eq!(*assignee_id, None);
+            assert!((estimate.expect("estimate must be Some") - 4.5).abs() < f64::EPSILON);
+        }
+        other => panic!("expected Cmd::SubmitTaskEdit, got {other:?}"),
+    }
+    let form = extract_estimate(&m).expect("estimate form must be Some after submit");
+    assert_eq!(form.status, EditStatus::Submitting);
+}
+
+// AC2: zero is a valid estimate (>= 0) and emits Cmd::SubmitTaskEdit with estimate: Some(0.0).
+#[test]
+fn estimate_submit_zero_is_accepted() {
+    let m = detail_model_for_compose("inst", 1, 1);
+    let m = type_estimate_chars(update(m, Msg::EstimateOpen).0, "0");
+    let (_m, cmds) = update(m, Msg::EstimateSubmit);
+    assert_eq!(cmds.len(), 1, "zero hours must emit Cmd::SubmitTaskEdit");
+    match &cmds[0] {
+        Cmd::SubmitTaskEdit { estimate, .. } => {
+            assert_eq!(*estimate, Some(0.0));
+        }
+        other => panic!("expected Cmd::SubmitTaskEdit, got {other:?}"),
+    }
+}
+
+// AC2: an empty value buffer sets Error and emits no Cmd.
+#[test]
+fn estimate_submit_empty_value_sets_error_and_emits_no_cmd() {
+    let m = detail_model_for_compose("inst", 1, 1);
+    let (m, _) = update(m, Msg::EstimateOpen);
+    let (m, cmds) = update(m, Msg::EstimateSubmit);
+    assert!(cmds.is_empty(), "empty value must emit no Cmd");
+    let form = extract_estimate(&m).expect("estimate form must still be Some");
+    assert!(matches!(form.status, EditStatus::Error(_)));
+}
+
+// AC2: a negative value sets Error and emits no Cmd.
+#[test]
+fn estimate_submit_negative_value_sets_error_and_emits_no_cmd() {
+    let m = detail_model_for_compose("inst", 1, 1);
+    let m = type_estimate_chars(update(m, Msg::EstimateOpen).0, "-2");
+    let (m, cmds) = update(m, Msg::EstimateSubmit);
+    assert!(cmds.is_empty(), "negative value must emit no Cmd");
+    let form = extract_estimate(&m).expect("estimate form must still be Some");
+    assert!(matches!(form.status, EditStatus::Error(_)));
+}
+
+// AC2: a non-numeric value sets Error and emits no Cmd.
+#[test]
+fn estimate_submit_non_numeric_value_sets_error_and_emits_no_cmd() {
+    let m = detail_model_for_compose("inst", 1, 1);
+    let m = type_estimate_chars(update(m, Msg::EstimateOpen).0, "abc");
+    let (m, cmds) = update(m, Msg::EstimateSubmit);
+    assert!(cmds.is_empty(), "non-numeric value must emit no Cmd");
+    let form = extract_estimate(&m).expect("estimate form must still be Some");
+    assert!(matches!(form.status, EditStatus::Error(_)));
+}
+
+// AC3: TaskEditOk clears the overlay AND emits exactly one Cmd::LoadDetail{refresh:true},
+// the same server-truth refresh as the comment and time-log write paths.
+#[test]
+fn task_edit_ok_clears_overlay_and_emits_load_detail_refresh() {
+    let m = detail_model_for_compose("inst", 7, 13);
+    let m = type_estimate_chars(update(m, Msg::EstimateOpen).0, "4");
+    let (m, cmds) = update(m, Msg::TaskEditOk);
+
+    assert!(
+        extract_estimate(&m).is_none(),
+        "estimate form must be None after TaskEditOk"
+    );
+    assert_eq!(cmds.len(), 1, "must emit exactly one Cmd::LoadDetail");
+    match &cmds[0] {
+        Cmd::LoadDetail {
+            instance,
+            project_id,
+            task_id,
+            refresh,
+        } => {
+            assert_eq!(instance, "inst");
+            assert_eq!(*project_id, 7);
+            assert_eq!(*task_id, 13);
+            assert!(*refresh, "refresh must be true");
+        }
+        other => panic!("expected Cmd::LoadDetail, got {other:?}"),
+    }
+}
+
+// AC3: TaskEditErr keeps the value buffer intact and sets status=Error(msg), emits no Cmd.
+#[test]
+fn task_edit_err_preserves_value_and_sets_error_status() {
+    let m = detail_model_for_compose("inst", 1, 1);
+    let m = type_estimate_chars(update(m, Msg::EstimateOpen).0, "3");
+    let (m, cmds) = update(m, Msg::TaskEditErr("Network error".into()));
+
+    assert!(cmds.is_empty(), "TaskEditErr must emit no Cmd");
+    let form = extract_estimate(&m).expect("estimate form must still be Some after error");
+    assert_eq!(form.value, "3", "value buffer must be preserved");
+    assert_eq!(
+        form.status,
+        EditStatus::Error("Network error".into()),
+        "status must be Error(msg)"
+    );
+}
+
+// AC1/AC3: map_estimate_key_event maps Ctrl+S -> EstimateSubmit.
+#[test]
+fn map_estimate_key_event_ctrl_s_yields_estimate_submit() {
+    use crate::tui::events::map_estimate_key_event;
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState};
+    let key = KeyEvent {
+        code: KeyCode::Char('s'),
+        modifiers: KeyModifiers::CONTROL,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+    assert!(
+        matches!(map_estimate_key_event(key), Some(Msg::EstimateSubmit)),
+        "Ctrl+S must map to EstimateSubmit"
+    );
+}
+
+// AC1: map_estimate_key_event maps Esc -> EstimateCancel.
+#[test]
+fn map_estimate_key_event_esc_yields_estimate_cancel() {
+    use crate::tui::events::map_estimate_key_event;
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState};
+    let key = KeyEvent {
+        code: KeyCode::Esc,
+        modifiers: KeyModifiers::NONE,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+    assert!(
+        matches!(map_estimate_key_event(key), Some(Msg::EstimateCancel)),
+        "Esc must map to EstimateCancel"
+    );
+}
+
+// AC1: map_estimate_key_event maps Backspace -> EstimateBackspace.
+#[test]
+fn map_estimate_key_event_backspace_yields_estimate_backspace() {
+    use crate::tui::events::map_estimate_key_event;
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState};
+    let key = KeyEvent {
+        code: KeyCode::Backspace,
+        modifiers: KeyModifiers::NONE,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+    assert!(
+        matches!(map_estimate_key_event(key), Some(Msg::EstimateBackspace)),
+        "Backspace must map to EstimateBackspace"
+    );
+}
+
+// AC1: map_estimate_key_event maps a printable char -> EstimateChar(c).
+#[test]
+fn map_estimate_key_event_printable_char_yields_estimate_char() {
+    use crate::tui::events::map_estimate_key_event;
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState};
+    let key = KeyEvent {
+        code: KeyCode::Char('5'),
+        modifiers: KeyModifiers::NONE,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+    assert!(
+        matches!(map_estimate_key_event(key), Some(Msg::EstimateChar('5'))),
+        "printable char must map to EstimateChar(c)"
+    );
+}
+
+// AC1: map_browse_key_event maps plain 'e' -> EstimateOpen (not a selection or nav action).
+#[test]
+fn map_browse_key_event_plain_e_yields_estimate_open() {
+    use crate::tui::events::map_browse_key_event;
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState};
+    let key = KeyEvent {
+        code: KeyCode::Char('e'),
+        modifiers: KeyModifiers::NONE,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+    assert!(
+        matches!(map_browse_key_event(key), Some(Msg::EstimateOpen)),
+        "plain 'e' must map to EstimateOpen"
+    );
+}
+
+// ── Status-confirm modal tests (issue 0068 TUI slice) ─────────────────────────
+
+fn extract_status_confirm(model: &Model) -> Option<(bool, &EditStatus)> {
+    match model.top() {
+        Some(Screen::Detail { overlay, .. }) => overlay.status_confirm(),
+        _ => None,
+    }
+}
+
+// AC1: StatusToggleOpen on an OPEN task sets completed_target=true with status Editing.
+#[test]
+fn status_toggle_open_on_open_task_targets_completed() {
+    let m = detail_model_with_task("inst", 10, 42, serde_json::json!({ "is_completed": false }));
+    let (m, cmds) = update(m, Msg::StatusToggleOpen);
+    assert!(cmds.is_empty(), "StatusToggleOpen must emit no Cmd");
+    let (completed_target, status) =
+        extract_status_confirm(&m).expect("status-confirm overlay must be Some after open");
+    assert!(completed_target, "an open task must target completion");
+    assert_eq!(*status, EditStatus::Editing);
+}
+
+// AC1: StatusToggleOpen on a COMPLETED task sets completed_target=false.
+#[test]
+fn status_toggle_open_on_completed_task_targets_reopen() {
+    let m = detail_model_with_task("inst", 10, 42, serde_json::json!({ "is_completed": true }));
+    let (m, _) = update(m, Msg::StatusToggleOpen);
+    let (completed_target, _) =
+        extract_status_confirm(&m).expect("status-confirm overlay must be Some after open");
+    assert!(!completed_target, "a completed task must target reopen");
+}
+
+// AC1: StatusToggleOpen on a screen that already has the modal active is a no-op.
+#[test]
+fn status_toggle_open_when_already_active_is_noop() {
+    let mut m =
+        detail_model_with_task("inst", 10, 42, serde_json::json!({ "is_completed": false }));
+    if let Some(Screen::Detail {
+        ref mut overlay, ..
+    }) = m.stack.last_mut()
+    {
+        *overlay = DetailOverlay::StatusConfirm {
+            completed_target: false,
+            status: EditStatus::Editing,
+        };
+    }
+    let (m, _) = update(m, Msg::StatusToggleOpen);
+    let (completed_target, _) =
+        extract_status_confirm(&m).expect("status-confirm overlay must still be Some");
+    assert!(
+        !completed_target,
+        "the existing completed_target must be preserved, not recomputed"
+    );
+}
+
+// AC1: StatusToggleCancel clears the overlay and emits no Cmd.
+#[test]
+fn status_toggle_cancel_clears_overlay_and_emits_no_cmd() {
+    let m = detail_model_with_task("inst", 10, 42, serde_json::json!({ "is_completed": false }));
+    let (m, _) = update(m, Msg::StatusToggleOpen);
+    let (m, cmds) = update(m, Msg::StatusToggleCancel);
+    assert!(cmds.is_empty(), "StatusToggleCancel must emit no Cmd");
+    assert!(
+        extract_status_confirm(&m).is_none(),
+        "status-confirm overlay must be None after StatusToggleCancel"
+    );
+}
+
+// AC2: StatusToggleConfirm while Editing emits exactly one Cmd::SubmitTaskEdit
+// carrying completion: Some(completed_target), assignee_id: None, estimate: None,
+// and sets status Submitting.
+#[test]
+fn status_toggle_confirm_emits_submit_task_edit_cmd() {
+    let m = detail_model_with_task(
+        "myinst",
+        5,
+        99,
+        serde_json::json!({ "is_completed": false }),
+    );
+    let m = update(m, Msg::StatusToggleOpen).0;
+    let (m, cmds) = update(m, Msg::StatusToggleConfirm);
+
+    assert_eq!(cmds.len(), 1, "must emit exactly one Cmd::SubmitTaskEdit");
+    match &cmds[0] {
+        Cmd::SubmitTaskEdit {
+            instance,
+            project_id,
+            task_id,
+            completion,
+            assignee_id,
+            estimate,
+        } => {
+            assert_eq!(instance, "myinst");
+            assert_eq!(*project_id, 5);
+            assert_eq!(*task_id, 99);
+            assert_eq!(*completion, Some(true));
+            assert_eq!(*assignee_id, None);
+            assert_eq!(*estimate, None);
+        }
+        other => panic!("expected Cmd::SubmitTaskEdit, got {other:?}"),
+    }
+    let (_, status) = extract_status_confirm(&m).expect("status-confirm overlay must be Some");
+    assert_eq!(*status, EditStatus::Submitting);
+}
+
+// AC2: StatusToggleConfirm is a no-op (no Cmd) when the overlay's status is not Editing.
+#[test]
+fn status_toggle_confirm_while_submitting_emits_no_cmd() {
+    let mut m = detail_model_with_task("inst", 5, 99, serde_json::json!({ "is_completed": false }));
+    if let Some(Screen::Detail {
+        ref mut overlay, ..
+    }) = m.stack.last_mut()
+    {
+        *overlay = DetailOverlay::StatusConfirm {
+            completed_target: true,
+            status: EditStatus::Submitting,
+        };
+    }
+    let (_, cmds) = update(m, Msg::StatusToggleConfirm);
+    assert!(
+        cmds.is_empty(),
+        "StatusToggleConfirm while Submitting must emit no Cmd"
+    );
+}
+
+// AC2: StatusToggleConfirm is a no-op (no Cmd) when no status-confirm overlay is active.
+#[test]
+fn status_toggle_confirm_without_overlay_emits_no_cmd() {
+    let m = detail_model_with_task("inst", 5, 99, serde_json::json!({ "is_completed": false }));
+    let (_, cmds) = update(m, Msg::StatusToggleConfirm);
+    assert!(
+        cmds.is_empty(),
+        "StatusToggleConfirm with no overlay must emit no Cmd"
+    );
+}
+
+// AC3: TaskEditOk clears the status-confirm overlay AND emits exactly one
+// Cmd::LoadDetail{refresh:true}, the same shared refresh path as the estimate write.
+#[test]
+fn status_task_edit_ok_clears_overlay_and_emits_load_detail_refresh() {
+    let m = detail_model_with_task("inst", 7, 13, serde_json::json!({ "is_completed": false }));
+    let m = update(m, Msg::StatusToggleOpen).0;
+    let (m, cmds) = update(m, Msg::TaskEditOk);
+
+    assert!(
+        extract_status_confirm(&m).is_none(),
+        "status-confirm overlay must be None after TaskEditOk"
+    );
+    assert_eq!(cmds.len(), 1, "must emit exactly one Cmd::LoadDetail");
+    match &cmds[0] {
+        Cmd::LoadDetail {
+            instance,
+            project_id,
+            task_id,
+            refresh,
+        } => {
+            assert_eq!(instance, "inst");
+            assert_eq!(*project_id, 7);
+            assert_eq!(*task_id, 13);
+            assert!(*refresh, "refresh must be true");
+        }
+        other => panic!("expected Cmd::LoadDetail, got {other:?}"),
+    }
+}
+
+// AC3: TaskEditErr sets the status-confirm overlay's status to Error(msg), proving the
+// generalized task-edit error setter reaches this overlay too.
+#[test]
+fn status_task_edit_err_sets_error_status() {
+    let m = detail_model_with_task("inst", 1, 1, serde_json::json!({ "is_completed": false }));
+    let m = update(m, Msg::StatusToggleOpen).0;
+    let (m, cmds) = update(m, Msg::TaskEditErr("Network error".into()));
+
+    assert!(cmds.is_empty(), "TaskEditErr must emit no Cmd");
+    let (completed_target, status) =
+        extract_status_confirm(&m).expect("status-confirm overlay must still be Some after error");
+    assert!(
+        completed_target,
+        "completed_target must be preserved on error"
+    );
+    assert_eq!(
+        *status,
+        EditStatus::Error("Network error".into()),
+        "status must be Error(msg)"
+    );
+}
+
+// AC1/AC2: map_status_confirm_key_event maps Enter -> StatusToggleConfirm.
+#[test]
+fn map_status_confirm_key_event_enter_yields_status_toggle_confirm() {
+    use crate::tui::events::map_status_confirm_key_event;
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState};
+    let key = KeyEvent {
+        code: KeyCode::Enter,
+        modifiers: KeyModifiers::NONE,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+    assert!(
+        matches!(
+            map_status_confirm_key_event(key),
+            Some(Msg::StatusToggleConfirm)
+        ),
+        "Enter must map to StatusToggleConfirm"
+    );
+}
+
+// AC1/AC2: map_status_confirm_key_event maps Ctrl+S -> StatusToggleConfirm.
+#[test]
+fn map_status_confirm_key_event_ctrl_s_yields_status_toggle_confirm() {
+    use crate::tui::events::map_status_confirm_key_event;
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState};
+    let key = KeyEvent {
+        code: KeyCode::Char('s'),
+        modifiers: KeyModifiers::CONTROL,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+    assert!(
+        matches!(
+            map_status_confirm_key_event(key),
+            Some(Msg::StatusToggleConfirm)
+        ),
+        "Ctrl+S must map to StatusToggleConfirm"
+    );
+}
+
+// AC1: map_status_confirm_key_event maps Esc -> StatusToggleCancel.
+#[test]
+fn map_status_confirm_key_event_esc_yields_status_toggle_cancel() {
+    use crate::tui::events::map_status_confirm_key_event;
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState};
+    let key = KeyEvent {
+        code: KeyCode::Esc,
+        modifiers: KeyModifiers::NONE,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+    assert!(
+        matches!(
+            map_status_confirm_key_event(key),
+            Some(Msg::StatusToggleCancel)
+        ),
+        "Esc must map to StatusToggleCancel"
+    );
+}
+
+// AC1: map_status_confirm_key_event ignores a plain printable char — no text entry.
+#[test]
+fn map_status_confirm_key_event_printable_char_yields_none() {
+    use crate::tui::events::map_status_confirm_key_event;
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState};
+    let key = KeyEvent {
+        code: KeyCode::Char('x'),
+        modifiers: KeyModifiers::NONE,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+    assert!(
+        map_status_confirm_key_event(key).is_none(),
+        "a plain printable char must not map to any Msg"
+    );
+}
+
+// AC1: map_browse_key_event maps plain 's' -> StatusToggleOpen (not a selection or nav action).
+#[test]
+fn map_browse_key_event_plain_s_yields_status_toggle_open() {
+    use crate::tui::events::map_browse_key_event;
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState};
+    let key = KeyEvent {
+        code: KeyCode::Char('s'),
+        modifiers: KeyModifiers::NONE,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+    assert!(
+        matches!(map_browse_key_event(key), Some(Msg::StatusToggleOpen)),
+        "plain 's' must map to StatusToggleOpen"
+    );
+}
+
+// Assignee-picker modal tests (issue 0068 TUI slice)
+
+fn detail_model_with_task_and_users(
+    instance: &str,
+    project_id: i64,
+    task_id: i64,
+    task: serde_json::Value,
+    user_map: HashMap<i64, String>,
+) -> Model {
+    let mut m = detail_model_with_task(instance, project_id, task_id, task);
+    if let Some(Screen::Detail {
+        user_map: ref mut m_user_map,
+        ..
+    }) = m.stack.last_mut()
+    {
+        *m_user_map = user_map;
+    }
+    m
+}
+
+fn extract_assignee_picker(model: &Model) -> Option<AssigneePickerView<'_>> {
+    match model.top() {
+        Some(Screen::Detail { overlay, .. }) => overlay.assignee_picker(),
+        _ => None,
+    }
+}
+
+fn users_two() -> HashMap<i64, String> {
+    let mut map = HashMap::new();
+    map.insert(2i64, "Bob".to_string());
+    map.insert(1i64, "Alice".to_string());
+    map
+}
+
+// AC1: AssigneePickerOpen builds candidates sorted case-insensitively by name and
+// pre-selects index 0 when the task has no current assignee.
+#[test]
+fn assignee_picker_open_builds_sorted_candidates_with_no_assignee_selects_zero() {
+    let m = detail_model_with_task_and_users("inst", 10, 42, serde_json::json!({}), users_two());
+    let (m, cmds) = update(m, Msg::AssigneePickerOpen);
+    assert!(cmds.is_empty(), "AssigneePickerOpen must emit no Cmd");
+    let (candidates, selected, status) =
+        extract_assignee_picker(&m).expect("assignee-picker overlay must be Some after open");
+    assert_eq!(
+        candidates,
+        &[(1i64, "Alice".to_string()), (2i64, "Bob".to_string())],
+        "candidates must be sorted case-insensitively by name"
+    );
+    assert_eq!(selected, 0, "no current assignee must select index 0");
+    assert_eq!(*status, EditStatus::Editing);
+}
+
+// AC1: AssigneePickerOpen pre-selects the index of the task's current assignee_id.
+#[test]
+fn assignee_picker_open_preselects_current_assignee_index() {
+    let m = detail_model_with_task_and_users(
+        "inst",
+        10,
+        42,
+        serde_json::json!({ "assignee_id": 2 }),
+        users_two(),
+    );
+    let (m, _) = update(m, Msg::AssigneePickerOpen);
+    let (candidates, selected, _) =
+        extract_assignee_picker(&m).expect("assignee-picker overlay must be Some after open");
+    assert_eq!(
+        candidates[selected].0, 2,
+        "must select the current assignee's id"
+    );
+}
+
+// AC1: an empty user directory produces an empty candidate list and selected 0.
+#[test]
+fn assignee_picker_open_with_empty_directory_yields_empty_candidates() {
+    let m = detail_model_with_task_and_users("inst", 10, 42, serde_json::json!({}), HashMap::new());
+    let (m, _) = update(m, Msg::AssigneePickerOpen);
+    let (candidates, selected, _) =
+        extract_assignee_picker(&m).expect("assignee-picker overlay must be Some after open");
+    assert!(candidates.is_empty(), "candidates must be empty");
+    assert_eq!(selected, 0);
+}
+
+// AC1: AssigneePickerOpen on a screen that already has the picker active is a no-op.
+#[test]
+fn assignee_picker_open_when_already_active_is_noop() {
+    let mut m =
+        detail_model_with_task_and_users("inst", 10, 42, serde_json::json!({}), users_two());
+    if let Some(Screen::Detail {
+        ref mut overlay, ..
+    }) = m.stack.last_mut()
+    {
+        *overlay = DetailOverlay::AssigneePicker {
+            candidates: vec![(9i64, "Zed".to_string())],
+            selected: 0,
+            status: EditStatus::Editing,
+        };
+    }
+    let (m, _) = update(m, Msg::AssigneePickerOpen);
+    let (candidates, _, _) =
+        extract_assignee_picker(&m).expect("assignee-picker overlay must still be Some");
+    assert_eq!(
+        candidates,
+        &[(9i64, "Zed".to_string())],
+        "existing candidate list must be preserved, not rebuilt"
+    );
+}
+
+// AC1: AssigneePickerDown moves the selection forward and saturates at the last row.
+#[test]
+fn assignee_picker_down_moves_selection_and_saturates_at_end() {
+    let m = detail_model_with_task_and_users("inst", 10, 42, serde_json::json!({}), users_two());
+    let m = update(m, Msg::AssigneePickerOpen).0;
+    let (m, cmds) = update(m, Msg::AssigneePickerDown);
+    assert!(cmds.is_empty());
+    let (_, selected, _) = extract_assignee_picker(&m).expect("overlay must be Some");
+    assert_eq!(selected, 1);
+    let (m, _) = update(m, Msg::AssigneePickerDown);
+    let (_, selected, _) = extract_assignee_picker(&m).expect("overlay must be Some");
+    assert_eq!(selected, 1, "must saturate at the last candidate index");
+}
+
+// AC1: AssigneePickerUp moves the selection backward and saturates at the first row.
+#[test]
+fn assignee_picker_up_moves_selection_and_saturates_at_start() {
+    let m = detail_model_with_task_and_users("inst", 10, 42, serde_json::json!({}), users_two());
+    let m = update(m, Msg::AssigneePickerOpen).0;
+    let m = update(m, Msg::AssigneePickerDown).0;
+    let (m, cmds) = update(m, Msg::AssigneePickerUp);
+    assert!(cmds.is_empty());
+    let (_, selected, _) = extract_assignee_picker(&m).expect("overlay must be Some");
+    assert_eq!(selected, 0);
+    let (m, _) = update(m, Msg::AssigneePickerUp);
+    let (_, selected, _) = extract_assignee_picker(&m).expect("overlay must be Some");
+    assert_eq!(selected, 0, "must saturate at the first candidate index");
+}
+
+// AC1: AssigneePickerCancel clears the overlay and emits no Cmd.
+#[test]
+fn assignee_picker_cancel_clears_overlay_and_emits_no_cmd() {
+    let m = detail_model_with_task_and_users("inst", 10, 42, serde_json::json!({}), users_two());
+    let m = update(m, Msg::AssigneePickerOpen).0;
+    let (m, cmds) = update(m, Msg::AssigneePickerCancel);
+    assert!(cmds.is_empty(), "AssigneePickerCancel must emit no Cmd");
+    assert!(
+        extract_assignee_picker(&m).is_none(),
+        "assignee-picker overlay must be None after AssigneePickerCancel"
+    );
+}
+
+// AC2: AssigneePickerSubmit while Editing emits exactly one Cmd::SubmitTaskEdit
+// carrying assignee_id: Some(selected id), completion: None, estimate: None,
+// and sets status Submitting.
+#[test]
+fn assignee_picker_submit_emits_submit_task_edit_cmd() {
+    let m = detail_model_with_task_and_users("myinst", 5, 99, serde_json::json!({}), users_two());
+    let m = update(m, Msg::AssigneePickerOpen).0;
+    let m = update(m, Msg::AssigneePickerDown).0;
+    let (m, cmds) = update(m, Msg::AssigneePickerSubmit);
+
+    assert_eq!(cmds.len(), 1, "must emit exactly one Cmd::SubmitTaskEdit");
+    match &cmds[0] {
+        Cmd::SubmitTaskEdit {
+            instance,
+            project_id,
+            task_id,
+            completion,
+            assignee_id,
+            estimate,
+        } => {
+            assert_eq!(instance, "myinst");
+            assert_eq!(*project_id, 5);
+            assert_eq!(*task_id, 99);
+            assert_eq!(*completion, None);
+            assert_eq!(*assignee_id, Some(2));
+            assert_eq!(*estimate, None);
+        }
+        other => panic!("expected Cmd::SubmitTaskEdit, got {other:?}"),
+    }
+    let (_, _, status) = extract_assignee_picker(&m).expect("overlay must be Some");
+    assert_eq!(*status, EditStatus::Submitting);
+}
+
+// AC2: AssigneePickerSubmit is a no-op (no Cmd) when candidates is empty.
+#[test]
+fn assignee_picker_submit_with_empty_candidates_emits_no_cmd() {
+    let m = detail_model_with_task_and_users("inst", 5, 99, serde_json::json!({}), HashMap::new());
+    let m = update(m, Msg::AssigneePickerOpen).0;
+    let (_, cmds) = update(m, Msg::AssigneePickerSubmit);
+    assert!(
+        cmds.is_empty(),
+        "AssigneePickerSubmit with no candidates must emit no Cmd"
+    );
+}
+
+// AC2: AssigneePickerSubmit is a no-op (no Cmd) when the overlay's status is not Editing.
+#[test]
+fn assignee_picker_submit_while_submitting_emits_no_cmd() {
+    let mut m = detail_model_with_task_and_users("inst", 5, 99, serde_json::json!({}), users_two());
+    if let Some(Screen::Detail {
+        ref mut overlay, ..
+    }) = m.stack.last_mut()
+    {
+        *overlay = DetailOverlay::AssigneePicker {
+            candidates: vec![(1i64, "Alice".to_string())],
+            selected: 0,
+            status: EditStatus::Submitting,
+        };
+    }
+    let (_, cmds) = update(m, Msg::AssigneePickerSubmit);
+    assert!(
+        cmds.is_empty(),
+        "AssigneePickerSubmit while Submitting must emit no Cmd"
+    );
+}
+
+// AC2: AssigneePickerSubmit is a no-op (no Cmd) when no assignee-picker overlay is active.
+#[test]
+fn assignee_picker_submit_without_overlay_emits_no_cmd() {
+    let m = detail_model_with_task_and_users("inst", 5, 99, serde_json::json!({}), users_two());
+    let (_, cmds) = update(m, Msg::AssigneePickerSubmit);
+    assert!(
+        cmds.is_empty(),
+        "AssigneePickerSubmit with no overlay must emit no Cmd"
+    );
+}
+
+// AC3: TaskEditOk clears the assignee-picker overlay AND emits exactly one
+// Cmd::LoadDetail{refresh:true}, the same shared refresh path as the other task-edit writes.
+#[test]
+fn assignee_picker_task_edit_ok_clears_overlay_and_emits_load_detail_refresh() {
+    let m = detail_model_with_task_and_users("inst", 7, 13, serde_json::json!({}), users_two());
+    let m = update(m, Msg::AssigneePickerOpen).0;
+    let (m, cmds) = update(m, Msg::TaskEditOk);
+
+    assert!(
+        extract_assignee_picker(&m).is_none(),
+        "assignee-picker overlay must be None after TaskEditOk"
+    );
+    assert_eq!(cmds.len(), 1, "must emit exactly one Cmd::LoadDetail");
+    match &cmds[0] {
+        Cmd::LoadDetail {
+            instance,
+            project_id,
+            task_id,
+            refresh,
+        } => {
+            assert_eq!(instance, "inst");
+            assert_eq!(*project_id, 7);
+            assert_eq!(*task_id, 13);
+            assert!(*refresh, "refresh must be true");
+        }
+        other => panic!("expected Cmd::LoadDetail, got {other:?}"),
+    }
+}
+
+// AC3: TaskEditErr sets the assignee-picker overlay's status to Error(msg), proving
+// the generalized task-edit error setter reaches this overlay too.
+#[test]
+fn assignee_picker_task_edit_err_sets_error_status() {
+    let m = detail_model_with_task_and_users("inst", 1, 1, serde_json::json!({}), users_two());
+    let m = update(m, Msg::AssigneePickerOpen).0;
+    let (m, cmds) = update(m, Msg::TaskEditErr("Network error".into()));
+
+    assert!(cmds.is_empty(), "TaskEditErr must emit no Cmd");
+    let (_, _, status) = extract_assignee_picker(&m)
+        .expect("assignee-picker overlay must still be Some after error");
+    assert_eq!(
+        *status,
+        EditStatus::Error("Network error".into()),
+        "status must be Error(msg)"
+    );
+}
+
+// AC1/AC2: map_assignee_picker_key_event maps j/Down -> AssigneePickerDown.
+#[test]
+fn map_assignee_picker_key_event_j_and_down_yield_assignee_picker_down() {
+    use crate::tui::events::map_assignee_picker_key_event;
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState};
+    for code in [KeyCode::Char('j'), KeyCode::Down] {
+        let key = KeyEvent {
+            code,
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::NONE,
+        };
+        assert!(
+            matches!(
+                map_assignee_picker_key_event(key),
+                Some(Msg::AssigneePickerDown)
+            ),
+            "{code:?} must map to AssigneePickerDown"
+        );
+    }
+}
+
+// AC1/AC2: map_assignee_picker_key_event maps k/Up -> AssigneePickerUp.
+#[test]
+fn map_assignee_picker_key_event_k_and_up_yield_assignee_picker_up() {
+    use crate::tui::events::map_assignee_picker_key_event;
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState};
+    for code in [KeyCode::Char('k'), KeyCode::Up] {
+        let key = KeyEvent {
+            code,
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::NONE,
+        };
+        assert!(
+            matches!(
+                map_assignee_picker_key_event(key),
+                Some(Msg::AssigneePickerUp)
+            ),
+            "{code:?} must map to AssigneePickerUp"
+        );
+    }
+}
+
+// AC1/AC2: map_assignee_picker_key_event maps Enter and Ctrl+S -> AssigneePickerSubmit.
+#[test]
+fn map_assignee_picker_key_event_enter_and_ctrl_s_yield_assignee_picker_submit() {
+    use crate::tui::events::map_assignee_picker_key_event;
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState};
+    let enter = KeyEvent {
+        code: KeyCode::Enter,
+        modifiers: KeyModifiers::NONE,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+    assert!(matches!(
+        map_assignee_picker_key_event(enter),
+        Some(Msg::AssigneePickerSubmit)
+    ));
+    let ctrl_s = KeyEvent {
+        code: KeyCode::Char('s'),
+        modifiers: KeyModifiers::CONTROL,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+    assert!(matches!(
+        map_assignee_picker_key_event(ctrl_s),
+        Some(Msg::AssigneePickerSubmit)
+    ));
+}
+
+// AC1: map_assignee_picker_key_event maps Esc -> AssigneePickerCancel.
+#[test]
+fn map_assignee_picker_key_event_esc_yields_assignee_picker_cancel() {
+    use crate::tui::events::map_assignee_picker_key_event;
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState};
+    let key = KeyEvent {
+        code: KeyCode::Esc,
+        modifiers: KeyModifiers::NONE,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+    assert!(
+        matches!(
+            map_assignee_picker_key_event(key),
+            Some(Msg::AssigneePickerCancel)
+        ),
+        "Esc must map to AssigneePickerCancel"
+    );
+}
+
+// AC1: map_browse_key_event maps plain 'a' -> AssigneePickerOpen (not a selection or nav action).
+#[test]
+fn map_browse_key_event_plain_a_yields_assignee_picker_open() {
+    use crate::tui::events::map_browse_key_event;
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState};
+    let key = KeyEvent {
+        code: KeyCode::Char('a'),
+        modifiers: KeyModifiers::NONE,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+    assert!(
+        matches!(map_browse_key_event(key), Some(Msg::AssigneePickerOpen)),
+        "plain 'a' must map to AssigneePickerOpen"
     );
 }
 
@@ -5482,7 +6852,7 @@ fn comment_mutation_ok_after_delete_triggers_load_detail_refresh_regression() {
 
 // AC3: plain left click on the [confirmar] button target emits Cmd::DeleteComment.
 // Button targets are set on the model (mirroring the shell's render-then-set flow).
-// For an 80×24 frame: modal at x=12,y=4,w=56,h=16; inner_x=13; hint_row=18;
+// For an 80×24 frame: modal at x=12,y=4,w=56,h=16, inner_x=13, hint_row=18.
 // [confirmar] → x_start=13, x_end=24.
 #[test]
 fn plain_click_on_confirm_button_emits_delete_comment() {

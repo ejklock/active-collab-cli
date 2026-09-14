@@ -15,7 +15,7 @@ pub use model::{
 };
 pub use view::view;
 
-use crate::client::CommentWriteOutcome;
+use crate::client::{CommentWriteOutcome, TaskWriteOutcome, TimeWriteOutcome};
 use crate::controller;
 use crate::http::Http;
 use crate::render::MineTableRow;
@@ -27,7 +27,9 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use events::{
-    map_browse_key_event, map_browse_mouse_event, map_compose_key_event, map_confirm_key_event,
+    map_assignee_picker_key_event, map_browse_key_event, map_browse_mouse_event,
+    map_compose_key_event, map_confirm_key_event, map_estimate_key_event, map_log_time_key_event,
+    map_status_confirm_key_event,
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
 use std::io;
@@ -99,12 +101,48 @@ fn confirm_active(model: &Model) -> bool {
     )
 }
 
+/// Return true when the log-time modal is active on the top screen.
+fn log_time_active(model: &Model) -> bool {
+    matches!(
+        model.top(),
+        Some(model::Screen::Detail { overlay, .. }) if overlay.is_log_time()
+    )
+}
+
+/// Return true when the estimate-edit modal is active on the top screen.
+fn estimate_active(model: &Model) -> bool {
+    matches!(
+        model.top(),
+        Some(model::Screen::Detail { overlay, .. }) if overlay.is_estimate_edit()
+    )
+}
+
+/// Return true when the status-confirm modal is active on the top screen.
+fn status_confirm_active(model: &Model) -> bool {
+    matches!(
+        model.top(),
+        Some(model::Screen::Detail { overlay, .. }) if overlay.is_status_confirm()
+    )
+}
+
+/// Return true when the assignee-picker modal is active on the top screen.
+fn assignee_picker_active(model: &Model) -> bool {
+    matches!(
+        model.top(),
+        Some(model::Screen::Detail { overlay, .. }) if overlay.is_assignee_picker()
+    )
+}
+
 /// Handle a crossterm input event: map to a Msg, run update, and dispatch commands.
 ///
 /// Key routing priority (highest first):
 ///   1. confirm sub-mode (delete-confirm modal open) — Enter/Esc only
 ///   2. compose sub-mode (comment compose open) — typed chars + Ctrl+S/Esc
-///   3. browse mode — navigation, shortcuts
+///   3. log-time sub-mode (log-time modal open) — typed chars + Ctrl+S/Tab/Esc
+///   4. estimate-edit sub-mode (estimate modal open) — typed chars + Ctrl+S/Esc
+///   5. status-confirm sub-mode (status-confirm modal open) — Enter/Ctrl+S/Esc only
+///   6. assignee-picker sub-mode (assignee-picker modal open) — j/k/Enter/Ctrl+S/Esc only
+///   7. browse mode — navigation, shortcuts
 fn handle_input_event(
     ev: Event,
     model: Model,
@@ -119,6 +157,14 @@ fn handle_input_event(
                 map_confirm_key_event(key)
             } else if compose_active(&model) {
                 map_compose_key_event(key)
+            } else if log_time_active(&model) {
+                map_log_time_key_event(key)
+            } else if estimate_active(&model) {
+                map_estimate_key_event(key)
+            } else if status_confirm_active(&model) {
+                map_status_confirm_key_event(key)
+            } else if assignee_picker_active(&model) {
+                map_assignee_picker_key_event(key)
             } else {
                 map_browse_key_event(key)
             }
@@ -533,6 +579,37 @@ fn dispatch_cmds(
             | Cmd::DeleteComment { .. }) => {
                 dispatch_comment_write(cmd, targets, http, &tx);
             }
+            Cmd::SubmitTimeLog {
+                instance,
+                project_id,
+                task_id,
+                hours,
+                summary,
+            } => {
+                spawn_time_write(
+                    targets, http, &tx, instance, project_id, task_id, hours, summary,
+                );
+            }
+            Cmd::SubmitTaskEdit {
+                instance,
+                project_id,
+                task_id,
+                completion,
+                assignee_id,
+                estimate,
+            } => {
+                spawn_task_edit(
+                    targets,
+                    http,
+                    &tx,
+                    instance,
+                    project_id,
+                    task_id,
+                    completion,
+                    assignee_id,
+                    estimate,
+                );
+            }
             // The fetch/decode/StatefulProtocol handling for the image viewer is
             // slice 0059 (ADR 0065); this slice only wires the pure overlay lifecycle,
             // so the viewer stays on its Loading placeholder until that slice lands.
@@ -697,6 +774,132 @@ fn spawn_comment_write(
                 )));
             }
         }
+    });
+}
+
+/// Spawn the log-time write: fetch the instance's job types, resolve the default one,
+/// then POST the time record and map the outcome to a `Msg`.
+///
+/// Errors out with `Msg::TimeMutationErr` WITHOUT calling `create_time_record` when no
+/// job type can be resolved (empty or failed job-types fetch) — mirroring the CLI's
+/// `time_log_core` guard so the TUI never posts a record with a missing job type.
+#[allow(clippy::too_many_arguments)]
+fn spawn_time_write(
+    targets: &[Instance],
+    http: &Http,
+    tx: &mpsc::UnboundedSender<Msg>,
+    instance: String,
+    project_id: i64,
+    task_id: i64,
+    hours: f64,
+    summary: Option<String>,
+) {
+    let inst = targets.iter().find(|t| t.name == instance).cloned();
+    let http = http.clone();
+    let tx = tx.clone();
+    tokio::spawn(async move {
+        let Some(inst) = inst else {
+            let _ = tx.send(Msg::TimeMutationErr(crate::i18n::t("Failed to log time")));
+            return;
+        };
+        let client = crate::client::ActiveCollabClient::new(inst, http);
+        let job_types = client.fetch_job_types().await.unwrap_or_default();
+        let Some(job_type_id) = crate::client::pick_default_job_type(&job_types) else {
+            let _ = tx.send(Msg::TimeMutationErr(crate::i18n::t(
+                "No job type available for this instance",
+            )));
+            return;
+        };
+        let record_date = crate::commands::time::resolve_record_date(None);
+        let outcome = client
+            .create_time_record(
+                project_id,
+                task_id,
+                hours,
+                &record_date,
+                job_type_id,
+                summary.as_deref(),
+            )
+            .await;
+        match outcome {
+            Ok(TimeWriteOutcome::Ok(_)) => {
+                let _ = tx.send(Msg::TimeMutationOk);
+            }
+            Ok(TimeWriteOutcome::Unauthorized) => {
+                let _ = tx.send(Msg::AuthExpired);
+            }
+            Ok(TimeWriteOutcome::Failed(_)) | Err(_) => {
+                let _ = tx.send(Msg::TimeMutationErr(crate::i18n::t("Failed to log time")));
+            }
+        }
+    });
+}
+
+/// Whether a task-write step succeeded (continue on to the next step) or must stop
+/// the pipeline, and with which `Msg` to report the stop.
+enum TaskEditStep {
+    Continue,
+    Stop(Msg),
+}
+
+/// Classify one `TaskWriteOutcome` into a `TaskEditStep`, shared by every write
+/// step in `spawn_task_edit` so the 2xx/401/else mapping lives in one place.
+fn classify_task_edit_outcome(outcome: anyhow::Result<TaskWriteOutcome>) -> TaskEditStep {
+    match outcome {
+        Ok(TaskWriteOutcome::Ok(_)) => TaskEditStep::Continue,
+        Ok(TaskWriteOutcome::Unauthorized) => TaskEditStep::Stop(Msg::AuthExpired),
+        Ok(TaskWriteOutcome::Failed(_)) | Err(_) => {
+            TaskEditStep::Stop(Msg::TaskEditErr(crate::i18n::t("Failed to update task")))
+        }
+    }
+}
+
+/// Spawn the task-field write: apply `set_task_completion` when `completion` is
+/// given, then `update_task` when `assignee_id` and/or `estimate` are given,
+/// stopping at the first non-Ok outcome. Written generally enough that a future
+/// status toggle or assignee picker reuses it unchanged (only their
+/// `Cmd::SubmitTaskEdit` fields differ).
+#[allow(clippy::too_many_arguments)]
+fn spawn_task_edit(
+    targets: &[Instance],
+    http: &Http,
+    tx: &mpsc::UnboundedSender<Msg>,
+    instance: String,
+    project_id: i64,
+    task_id: i64,
+    completion: Option<bool>,
+    assignee_id: Option<i64>,
+    estimate: Option<f64>,
+) {
+    let inst = targets.iter().find(|t| t.name == instance).cloned();
+    let http = http.clone();
+    let tx = tx.clone();
+    tokio::spawn(async move {
+        let Some(inst) = inst else {
+            let _ = tx.send(Msg::TaskEditErr(crate::i18n::t("Failed to update task")));
+            return;
+        };
+        let client = crate::client::ActiveCollabClient::new(inst, http);
+
+        if let Some(completed) = completion {
+            let outcome = client.set_task_completion(task_id, completed).await;
+            if let TaskEditStep::Stop(msg) = classify_task_edit_outcome(outcome) {
+                let _ = tx.send(msg);
+                return;
+            }
+        }
+
+        if assignee_id.is_some() || estimate.is_some() {
+            let outcome = client
+                .update_task(project_id, task_id, assignee_id, estimate)
+                .await;
+            if let TaskEditStep::Stop(msg) = classify_task_edit_outcome(outcome) {
+                let _ = tx.send(msg);
+                return;
+            }
+        }
+
+        let _ = tx.send(Msg::TaskEditOk);
     });
 }
 

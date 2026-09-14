@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use crate::http::{Http, HTTP_UNAUTHORIZED};
-use crate::models::MineTask;
+use crate::models::{JobType, MineTask};
 use crate::store::instances::Instance;
 use anyhow::Result;
 use serde_json::Value;
@@ -31,16 +31,118 @@ pub enum CommentWriteOutcome {
     Failed(u16),
 }
 
+/// Typed outcome of a time-record write call, classified the same way as
+/// `CommentWriteOutcome` (ADR 0054).
+#[derive(Debug)]
+pub enum TimeWriteOutcome {
+    /// 2xx — carries the response body when present.
+    Ok(Option<Value>),
+    /// HTTP 401.
+    Unauthorized,
+    /// Any other status.
+    Failed(u16),
+}
+
+/// The three buckets every write response falls into, shared by every
+/// per-endpoint `classify_*_write` function so the (200..=299)/401/else
+/// logic lives in one place.
+enum WriteStatus {
+    Ok,
+    Unauthorized,
+    Failed(u16),
+}
+
+fn classify_write_status(status: u16) -> WriteStatus {
+    if (200..=299).contains(&status) {
+        return WriteStatus::Ok;
+    }
+    if status == HTTP_UNAUTHORIZED {
+        return WriteStatus::Unauthorized;
+    }
+    WriteStatus::Failed(status)
+}
+
 /// Classify a comment-write response status/body into a `CommentWriteOutcome`:
 /// (200..=299) -> Ok(body), HTTP_UNAUTHORIZED -> Unauthorized, else -> Failed(status).
 fn classify_comment_write(status: u16, body: Option<Value>) -> CommentWriteOutcome {
-    if (200..=299).contains(&status) {
-        return CommentWriteOutcome::Ok(body);
+    match classify_write_status(status) {
+        WriteStatus::Ok => CommentWriteOutcome::Ok(body),
+        WriteStatus::Unauthorized => CommentWriteOutcome::Unauthorized,
+        WriteStatus::Failed(status) => CommentWriteOutcome::Failed(status),
     }
-    if status == HTTP_UNAUTHORIZED {
-        return CommentWriteOutcome::Unauthorized;
+}
+
+/// Classify a time-record-write response status/body into a `TimeWriteOutcome`:
+/// (200..=299) -> Ok(body), HTTP_UNAUTHORIZED -> Unauthorized, else -> Failed(status).
+fn classify_time_write(status: u16, body: Option<Value>) -> TimeWriteOutcome {
+    match classify_write_status(status) {
+        WriteStatus::Ok => TimeWriteOutcome::Ok(body),
+        WriteStatus::Unauthorized => TimeWriteOutcome::Unauthorized,
+        WriteStatus::Failed(status) => TimeWriteOutcome::Failed(status),
     }
-    CommentWriteOutcome::Failed(status)
+}
+
+/// Typed outcome of a task-field write call (completion or field update),
+/// classified the same way as `CommentWriteOutcome` (ADR 0054).
+#[derive(Debug)]
+pub enum TaskWriteOutcome {
+    /// 2xx — carries the response body when present.
+    Ok(Option<Value>),
+    /// HTTP 401.
+    Unauthorized,
+    /// Any other status.
+    Failed(u16),
+}
+
+/// Classify a task-write response status/body into a `TaskWriteOutcome`:
+/// (200..=299) -> Ok(body), HTTP_UNAUTHORIZED -> Unauthorized, else -> Failed(status).
+fn classify_task_write(status: u16, body: Option<Value>) -> TaskWriteOutcome {
+    match classify_write_status(status) {
+        WriteStatus::Ok => TaskWriteOutcome::Ok(body),
+        WriteStatus::Unauthorized => TaskWriteOutcome::Unauthorized,
+        WriteStatus::Failed(status) => TaskWriteOutcome::Failed(status),
+    }
+}
+
+/// Return the id of the instance's default job type, falling back to the
+/// first entry when none is flagged default. ActiveCollab requires a
+/// `job_type_id` on every time record, so a caller with no explicit
+/// preference needs one resolved from the instance's job-types list.
+pub fn pick_default_job_type(job_types: &[JobType]) -> Option<i64> {
+    job_types
+        .iter()
+        .find(|job_type| job_type.is_default)
+        .or_else(|| job_types.first())
+        .map(|job_type| job_type.id)
+}
+
+/// Encodes a plain-text comment body as the HTML ActiveCollab expects: text is
+/// escaped, blank-line-separated paragraphs become `<p>...</p>` blocks, and a
+/// single in-paragraph newline becomes `<br>` — newlines carry no meaning in
+/// the rendered HTML, so without this the server flattens every paragraph
+/// break the user typed (issue 0066).
+fn encode_comment_body(body: &str) -> String {
+    let escaped = html_escape::encode_text(body).into_owned();
+    let mut paragraphs: Vec<String> = Vec::new();
+    let mut current_lines: Vec<&str> = Vec::new();
+    for line in escaped.split('\n') {
+        if line.trim().is_empty() {
+            if !current_lines.is_empty() {
+                paragraphs.push(current_lines.join("<br>"));
+                current_lines.clear();
+            }
+        } else {
+            current_lines.push(line);
+        }
+    }
+    if !current_lines.is_empty() {
+        paragraphs.push(current_lines.join("<br>"));
+    }
+    paragraphs
+        .into_iter()
+        .map(|paragraph| format!("<p>{}</p>", paragraph))
+        .collect::<Vec<_>>()
+        .join("")
 }
 
 pub struct ActiveCollabClient {
@@ -144,6 +246,20 @@ impl ActiveCollabClient {
         Ok(result)
     }
 
+    /// GET /api/v1/job-types. Returns an empty list on any non-200 response.
+    pub async fn fetch_job_types(&self) -> Result<Vec<JobType>> {
+        let base = self.instance.base_url.trim_end_matches('/');
+        let url = format!("{}/api/v1/job-types", base);
+        let (status, body) = self
+            .http
+            .authed_get(&url, &self.instance.base_url, &self.instance.token)
+            .await?;
+        if status != 200 {
+            return Ok(vec![]);
+        }
+        Ok(serde_json::from_slice(&body).unwrap_or_default())
+    }
+
     /// GET /api/v1/projects/{pid}/tasks/{tid}.
     /// Returns (200, Some(payload)) on 200, (status, None) otherwise.
     pub async fn fetch_task(&self, project_id: i64, task_id: i64) -> Result<(u16, Option<Value>)> {
@@ -243,28 +359,117 @@ impl ActiveCollabClient {
         self.list_projects().await
     }
 
-    /// POST /api/v1/comments/task/{task_id}. Classifies the response into a
-    /// `CommentWriteOutcome`: (200..=299) -> Ok(Some(comment)), 401 ->
-    /// Unauthorized, else -> Failed(status).
-    pub async fn create_comment(&self, task_id: i64, body: &str) -> Result<CommentWriteOutcome> {
-        let base = self.instance.base_url.trim_end_matches('/');
-        let url = format!("{}/api/v1/comments/task/{}", base, task_id);
-        let payload = serde_json::json!({ "body": body });
+    /// POST `payload` as JSON over the authenticated instance seam and parse
+    /// the body as JSON when the status is 2xx. Shared tail for every
+    /// POST-based write (create_comment, create_time_record) so the
+    /// authed_post + status-gated parse logic lives in one place.
+    async fn post_json_write(&self, url: &str, payload: &Value) -> Result<(u16, Option<Value>)> {
         let (status, raw) = self
             .http
-            .authed_post(
-                &url,
-                &self.instance.base_url,
-                &self.instance.token,
-                &payload,
-            )
+            .authed_post(url, &self.instance.base_url, &self.instance.token, payload)
             .await?;
         let body = if (200..=299).contains(&status) {
             serde_json::from_slice(&raw).ok()
         } else {
             None
         };
+        Ok((status, body))
+    }
+
+    /// PUT `payload` as JSON over the authenticated instance seam and parse
+    /// the body as JSON when the status is 2xx. Shared tail for every
+    /// PUT-based write (update_comment).
+    async fn put_json_write(&self, url: &str, payload: &Value) -> Result<(u16, Option<Value>)> {
+        let (status, raw) = self
+            .http
+            .authed_put(url, &self.instance.base_url, &self.instance.token, payload)
+            .await?;
+        let body = if (200..=299).contains(&status) {
+            serde_json::from_slice(&raw).ok()
+        } else {
+            None
+        };
+        Ok((status, body))
+    }
+
+    /// POST /api/v1/comments/task/{task_id}. Classifies the response into a
+    /// `CommentWriteOutcome`: (200..=299) -> Ok(Some(comment)), 401 ->
+    /// Unauthorized, else -> Failed(status).
+    pub async fn create_comment(&self, task_id: i64, body: &str) -> Result<CommentWriteOutcome> {
+        let base = self.instance.base_url.trim_end_matches('/');
+        let url = format!("{}/api/v1/comments/task/{}", base, task_id);
+        let payload = serde_json::json!({ "body": encode_comment_body(body) });
+        let (status, body) = self.post_json_write(&url, &payload).await?;
         Ok(classify_comment_write(status, body))
+    }
+
+    /// POST /api/v1/projects/{project_id}/time-records. Classifies the
+    /// response into a `TimeWriteOutcome`: (200..=299) -> Ok(Some(record)),
+    /// 401 -> Unauthorized, else -> Failed(status). `summary` is included
+    /// in the body only when `Some`.
+    pub async fn create_time_record(
+        &self,
+        project_id: i64,
+        task_id: i64,
+        value_hours: f64,
+        record_date: &str,
+        job_type_id: i64,
+        summary: Option<&str>,
+    ) -> Result<TimeWriteOutcome> {
+        let base = self.instance.base_url.trim_end_matches('/');
+        let url = format!("{}/api/v1/projects/{}/time-records", base, project_id);
+        let mut payload = serde_json::json!({
+            "task_id": task_id,
+            "value": value_hours,
+            "record_date": record_date,
+            "job_type_id": job_type_id,
+        });
+        if let Some(summary) = summary {
+            payload["summary"] = Value::String(summary.to_string());
+        }
+        let (status, body) = self.post_json_write(&url, &payload).await?;
+        Ok(classify_time_write(status, body))
+    }
+
+    /// PUT /api/v1/complete/task/{task_id} when `completed`, else
+    /// /api/v1/open/task/{task_id}. Classifies the response into a
+    /// `TaskWriteOutcome`: (200..=299) -> Ok(Some(task)), 401 ->
+    /// Unauthorized, else -> Failed(status).
+    pub async fn set_task_completion(
+        &self,
+        task_id: i64,
+        completed: bool,
+    ) -> Result<TaskWriteOutcome> {
+        let base = self.instance.base_url.trim_end_matches('/');
+        let action = if completed { "complete" } else { "open" };
+        let url = format!("{}/api/v1/{}/task/{}", base, action, task_id);
+        let payload = serde_json::json!({});
+        let (status, body) = self.put_json_write(&url, &payload).await?;
+        Ok(classify_task_write(status, body))
+    }
+
+    /// PUT /api/v1/projects/{project_id}/tasks/{task_id}. Serializes only the
+    /// provided fields: `assignee_id` and/or `estimate`, each omitted when
+    /// `None`. Classifies the response into a `TaskWriteOutcome`: (200..=299)
+    /// -> Ok(Some(task)), 401 -> Unauthorized, else -> Failed(status).
+    pub async fn update_task(
+        &self,
+        project_id: i64,
+        task_id: i64,
+        assignee_id: Option<i64>,
+        estimate: Option<f64>,
+    ) -> Result<TaskWriteOutcome> {
+        let base = self.instance.base_url.trim_end_matches('/');
+        let url = format!("{}/api/v1/projects/{}/tasks/{}", base, project_id, task_id);
+        let mut payload = serde_json::Map::new();
+        if let Some(assignee_id) = assignee_id {
+            payload.insert("assignee_id".to_string(), Value::from(assignee_id));
+        }
+        if let Some(estimate) = estimate {
+            payload.insert("estimate".to_string(), Value::from(estimate));
+        }
+        let (status, body) = self.put_json_write(&url, &Value::Object(payload)).await?;
+        Ok(classify_task_write(status, body))
     }
 
     /// PUT /api/v1/comments/{comment_id}. Classifies the response into a
@@ -273,21 +478,8 @@ impl ActiveCollabClient {
     pub async fn update_comment(&self, comment_id: i64, body: &str) -> Result<CommentWriteOutcome> {
         let base = self.instance.base_url.trim_end_matches('/');
         let url = format!("{}/api/v1/comments/{}", base, comment_id);
-        let payload = serde_json::json!({ "body": body });
-        let (status, raw) = self
-            .http
-            .authed_put(
-                &url,
-                &self.instance.base_url,
-                &self.instance.token,
-                &payload,
-            )
-            .await?;
-        let body = if (200..=299).contains(&status) {
-            serde_json::from_slice(&raw).ok()
-        } else {
-            None
-        };
+        let payload = serde_json::json!({ "body": encode_comment_body(body) });
+        let (status, body) = self.put_json_write(&url, &payload).await?;
         Ok(classify_comment_write(status, body))
     }
 

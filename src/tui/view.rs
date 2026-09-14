@@ -3,8 +3,8 @@ use crate::render::{display_width, wrap_text};
 use crate::tui::detail_geometry::Selection;
 use crate::tui::footer::{self, FooterPlan};
 use crate::tui::model::{
-    ClickTarget, Compose, ComposeKind, ComposeStatus, ImageAssetRef, ImageStatus,
-    ModalButtonTarget, Model, Screen,
+    ClickTarget, Compose, ComposeKind, ComposeStatus, EditStatus, EstimateForm, ImageAssetRef,
+    ImageStatus, LogTimeField, LogTimeForm, LogTimeStatus, ModalButtonTarget, Model, Screen,
 };
 use crate::tui::screens::{draw_detail, draw_projects, draw_tasks, DetailParams};
 use crate::tui::theme;
@@ -33,6 +33,54 @@ pub(crate) fn compose_modal_status(compose: &Compose) -> Option<String> {
         ComposeStatus::Submitting => Some(t("Sending…")),
         ComposeStatus::Error(_) => Some(t("Failed to post comment")),
         ComposeStatus::Editing => None,
+    }
+}
+
+/// Status text rendered inside the log-time modal's in-box hint line.
+///
+/// Returns `Some(status)` when the form has a transient state to display,
+/// `None` when editing normally (the hint text suffices).
+pub(crate) fn log_time_modal_status(form: &LogTimeForm) -> Option<String> {
+    match &form.status {
+        LogTimeStatus::Submitting => Some(t("Sending…")),
+        LogTimeStatus::Error(_) => Some(t("Failed to log time")),
+        LogTimeStatus::Editing => None,
+    }
+}
+
+/// Status text rendered inside the estimate-edit modal's in-box hint line.
+///
+/// Returns `Some(status)` when the form has a transient state to display,
+/// `None` when editing normally (the hint text suffices).
+pub(crate) fn estimate_modal_status(form: &EstimateForm) -> Option<String> {
+    match &form.status {
+        EditStatus::Submitting => Some(t("Sending…")),
+        EditStatus::Error(_) => Some(t("Failed to update task")),
+        EditStatus::Editing => None,
+    }
+}
+
+/// Status text rendered inside the status-confirm modal's in-box hint line.
+///
+/// Returns `Some(status)` when the overlay has a transient state to display,
+/// `None` when awaiting confirmation normally (the hint text suffices).
+pub(crate) fn status_confirm_modal_status(status: &EditStatus) -> Option<String> {
+    match status {
+        EditStatus::Submitting => Some(t("Sending…")),
+        EditStatus::Error(_) => Some(t("Failed to update task")),
+        EditStatus::Editing => None,
+    }
+}
+
+/// Status text rendered inside the assignee-picker modal's in-box hint line.
+///
+/// Returns `Some(status)` when the picker has a transient state to display,
+/// `None` when awaiting selection normally (the hint text suffices).
+pub(crate) fn assignee_picker_modal_status(status: &EditStatus) -> Option<String> {
+    match status {
+        EditStatus::Submitting => Some(t("Sending…")),
+        EditStatus::Error(_) => Some(t("Failed to update task")),
+        EditStatus::Editing => None,
     }
 }
 
@@ -165,6 +213,18 @@ pub fn view(
             if let Some(cp) = overlay.compose() {
                 render_compose_modal(frame, area, cp);
             }
+            if let Some(form) = overlay.log_time() {
+                render_log_time_modal(frame, area, form);
+            }
+            if let Some(form) = overlay.estimate_edit() {
+                render_estimate_modal(frame, area, form);
+            }
+            if let Some((completed_target, status)) = overlay.status_confirm() {
+                render_status_confirm_modal(frame, area, completed_target, status);
+            }
+            if let Some((candidates, selected, status)) = overlay.assignee_picker() {
+                render_assignee_picker_modal(frame, area, candidates, selected, status);
+            }
             if overlay.is_confirm() {
                 render_confirm_modal(frame, area, modal_btn_targets);
             }
@@ -210,6 +270,161 @@ fn render_compose_modal(frame: &mut Frame, frame_area: ratatui::layout::Rect, cp
         },
     );
     frame.render_widget(&cp.editor, body_rect);
+}
+
+fn log_time_modal_hint(form: &LogTimeForm) -> String {
+    match log_time_modal_status(form) {
+        Some(status) => status,
+        None => t("Ctrl+S send · Tab switch field · Esc cancel"),
+    }
+}
+
+/// Format one labeled field row, marking the currently focused field.
+fn log_time_field_line(label: &str, value: &str, is_focused: bool) -> String {
+    let marker = if is_focused { ">" } else { " " };
+    format!("{marker} {label}: {value}")
+}
+
+/// Render the log-time modal chrome via `render_modal`: the Hours and Summary
+/// fields as labeled rows, plus the hint/status line. Both fields are plain-text
+/// buffers (ADR 0064 does not apply — single-line, no caret/undo needs), so they
+/// render as static rows rather than a `TextArea` widget.
+fn render_log_time_modal(frame: &mut Frame, frame_area: ratatui::layout::Rect, form: &LogTimeForm) {
+    use crate::tui::widgets::modal::render_modal;
+    let hint = log_time_modal_hint(form);
+    let hours_line =
+        log_time_field_line(&t("Hours"), &form.hours, form.field == LogTimeField::Hours);
+    let summary_line = log_time_field_line(
+        &t("Summary"),
+        &form.summary,
+        form.field == LogTimeField::Summary,
+    );
+    let lines = [hours_line, summary_line];
+    render_modal(
+        frame,
+        frame_area,
+        ModalContent {
+            title: &t("Log time"),
+            lines: &lines,
+            hint: Some(&hint),
+        },
+    );
+}
+
+fn estimate_modal_hint(form: &EstimateForm) -> String {
+    match estimate_modal_status(form) {
+        Some(status) => status,
+        None => t("Ctrl+S send · Esc cancel"),
+    }
+}
+
+/// Render the estimate-edit modal chrome via `render_modal`: the estimate field as
+/// a single labeled row, plus the hint/status line. Single line, plain-text buffer
+/// (ADR 0064 does not apply — no caret/undo needs), so it renders as a static row
+/// rather than a `TextArea` widget.
+fn render_estimate_modal(
+    frame: &mut Frame,
+    frame_area: ratatui::layout::Rect,
+    form: &EstimateForm,
+) {
+    use crate::tui::widgets::modal::render_modal;
+    let hint = estimate_modal_hint(form);
+    let value_line = format!("{}: {}", t("Estimate (hours)"), form.value);
+    let lines = [value_line];
+    render_modal(
+        frame,
+        frame_area,
+        ModalContent {
+            title: &t("Edit estimate"),
+            lines: &lines,
+            hint: Some(&hint),
+        },
+    );
+}
+
+fn status_confirm_modal_hint(status: &EditStatus) -> String {
+    match status_confirm_modal_status(status) {
+        Some(status) => status,
+        None => t("Enter/Ctrl+S confirm · Esc cancel"),
+    }
+}
+
+/// The complete-vs-reopen prompt line, chosen from the pending `completed_target`.
+fn status_confirm_prompt(completed_target: bool) -> String {
+    if completed_target {
+        t("Mark task as completed?")
+    } else {
+        t("Reopen task?")
+    }
+}
+
+/// Render the status-confirm modal chrome via `render_modal`: the complete-vs-reopen
+/// prompt as a single line, plus the hint/status line. No text entry — the target is
+/// fixed by `completed_target`, not typed.
+fn render_status_confirm_modal(
+    frame: &mut Frame,
+    frame_area: ratatui::layout::Rect,
+    completed_target: bool,
+    status: &EditStatus,
+) {
+    use crate::tui::widgets::modal::render_modal;
+    let hint = status_confirm_modal_hint(status);
+    let lines = [status_confirm_prompt(completed_target)];
+    render_modal(
+        frame,
+        frame_area,
+        ModalContent {
+            title: &t("Change status"),
+            lines: &lines,
+            hint: Some(&hint),
+        },
+    );
+}
+
+fn assignee_picker_modal_hint(status: &EditStatus) -> String {
+    match assignee_picker_modal_status(status) {
+        Some(status) => status,
+        None => t("↑/↓ · j/k move · Enter/Ctrl+S confirm · Esc cancel"),
+    }
+}
+
+/// Mark the highlighted candidate row with a leading indicator, mirroring the
+/// focused-field marker convention used by the log-time modal.
+fn assignee_candidate_line(name: &str, is_selected: bool) -> String {
+    let marker = if is_selected { ">" } else { " " };
+    format!("{marker} {name}")
+}
+
+/// Render the assignee-picker modal chrome via `render_modal`: the candidate list as
+/// labeled rows with the highlighted row marked, an empty-directory line when the
+/// user directory has no candidates, plus the hint/status line.
+fn render_assignee_picker_modal(
+    frame: &mut Frame,
+    frame_area: ratatui::layout::Rect,
+    candidates: &[(i64, String)],
+    selected: usize,
+    status: &EditStatus,
+) {
+    use crate::tui::widgets::modal::render_modal;
+    let hint = assignee_picker_modal_hint(status);
+    let lines: Vec<String> = if candidates.is_empty() {
+        vec![t("No assignable users")]
+    } else {
+        candidates
+            .iter()
+            .enumerate()
+            .map(|(i, (_, name))| assignee_candidate_line(name, i == selected))
+            .collect()
+    };
+    render_modal(
+        frame,
+        frame_area,
+        ModalContent {
+            title: &t("Assign task"),
+            lines: &lines,
+            hint: Some(&hint),
+        },
+    );
 }
 
 /// Render the delete-confirm modal overlay and register the two button click targets.
