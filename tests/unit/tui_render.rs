@@ -6478,6 +6478,7 @@ mod assignee_picker_render {
         set_language("en");
         let model = make_detail_model(DetailOverlay::AssigneePicker {
             candidates: two_candidates(),
+            filter: String::new(),
             selected: 0,
             status: EditStatus::Editing,
         });
@@ -6509,6 +6510,7 @@ mod assignee_picker_render {
         set_language("en");
         let model = make_detail_model(DetailOverlay::AssigneePicker {
             candidates: two_candidates(),
+            filter: String::new(),
             selected: 1,
             status: EditStatus::Editing,
         });
@@ -6532,6 +6534,7 @@ mod assignee_picker_render {
         set_language("en");
         let model = make_detail_model(DetailOverlay::AssigneePicker {
             candidates: vec![],
+            filter: String::new(),
             selected: 0,
             status: EditStatus::Editing,
         });
@@ -6551,6 +6554,7 @@ mod assignee_picker_render {
         set_language("en");
         let model = make_detail_model(DetailOverlay::AssigneePicker {
             candidates: two_candidates(),
+            filter: String::new(),
             selected: 0,
             status: EditStatus::Submitting,
         });
@@ -6560,6 +6564,102 @@ mod assignee_picker_render {
         assert!(
             content.contains("Sending…"),
             "modal must show the submitting status: {content}"
+        );
+    }
+
+    // AC6: a non-empty filter renders the search line with the typed text.
+    #[test]
+    fn assignee_picker_shows_search_line_with_filter_text() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let model = make_detail_model(DetailOverlay::AssigneePicker {
+            candidates: two_candidates(),
+            filter: "ali".to_string(),
+            selected: 0,
+            status: EditStatus::Editing,
+        });
+        let buf = render_via_view(&model, 80, 24);
+        set_language("en");
+        let content = buf_text(&buf);
+        assert!(
+            content.contains("Search") && content.contains("ali"),
+            "modal must show the search line with the typed filter text: {content}"
+        );
+    }
+
+    // AC6: the list shows only the filtered rows, with the selected one marked.
+    #[test]
+    fn assignee_picker_filters_candidates_and_marks_selection() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let model = make_detail_model(DetailOverlay::AssigneePicker {
+            candidates: two_candidates(),
+            filter: "ali".to_string(),
+            selected: 0,
+            status: EditStatus::Editing,
+        });
+        let buf = render_via_view(&model, 80, 24);
+        set_language("en");
+        let content = buf_text(&buf);
+        assert!(
+            content.contains("> Alice"),
+            "the matching, selected candidate must carry the selection marker: {content}"
+        );
+        assert!(
+            !content.contains("Bob"),
+            "a candidate excluded by the filter must not render: {content}"
+        );
+    }
+
+    // AC6: a filter that matches nothing shows the empty-match line.
+    #[test]
+    fn assignee_picker_with_no_filter_matches_shows_empty_match_state() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let model = make_detail_model(DetailOverlay::AssigneePicker {
+            candidates: two_candidates(),
+            filter: "zzz".to_string(),
+            selected: 0,
+            status: EditStatus::Editing,
+        });
+        let buf = render_via_view(&model, 80, 24);
+        set_language("en");
+        let content = buf_text(&buf);
+        assert!(
+            content.contains("No matching users"),
+            "modal must show the empty-match state when the filter excludes every candidate: {content}"
+        );
+        assert!(
+            !content.contains("No assignable users"),
+            "the empty-match line must be distinct from the empty-directory line: {content}"
+        );
+    }
+
+    // AC6: the in-modal hint describes the new keys — move, type to filter, confirm, cancel.
+    #[test]
+    fn assignee_picker_hint_describes_filter_keys() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let model = make_detail_model(DetailOverlay::AssigneePicker {
+            candidates: two_candidates(),
+            filter: String::new(),
+            selected: 0,
+            status: EditStatus::Editing,
+        });
+        let buf = render_via_view(&model, 80, 24);
+        set_language("en");
+        let content = buf_text(&buf);
+        assert!(
+            content.contains("type to filter"),
+            "in-modal hint must describe the type-to-filter key: {content}"
+        );
+        assert!(
+            content.contains("Enter/Ctrl+S confirm"),
+            "in-modal hint must describe the confirm key: {content}"
+        );
+        assert!(
+            content.contains("Esc cancel"),
+            "in-modal hint must describe the cancel key: {content}"
         );
     }
 
@@ -7874,6 +7974,7 @@ mod contextual_footer {
         let buf = render_detail_model(
             DetailOverlay::AssigneePicker {
                 candidates: vec![],
+                filter: String::new(),
                 selected: 0,
                 status: EditStatus::Editing,
             },

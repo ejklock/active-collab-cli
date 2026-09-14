@@ -24,6 +24,7 @@ TUI/UX work (V/R/ARCH slices), tracing to
 * [0064 — Installers drop the short ac command — restore it as an alias next to active-collab](0064-installers-drop-the-short-ac-command-restore-it-as-an-alias-next-to-active-collab.md) - Proposed
 * [0065 — The ac alias only half works: help says active-collab, make install ships a Linux binary, and a stale ac wins the PATH](0065-the-ac-alias-only-half-works-help-says-active-collab-make-install-ships-a-linux-binary-and-a-stale-ac-wins-the-path.md) - Proposed
 * [0066 — Comment writes preserve paragraph breaks — encode newlines as HTML before POST/PUT](0066-comment-writes-preserve-paragraph-breaks-encode-newlines-as-html-before-post-put.md) - open
+* [0070 — TUI assignee-picker gains a live search/filter field](0070-assignee-picker-search-filter.md) - open
 
 ## Closed
 
