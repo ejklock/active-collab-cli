@@ -654,6 +654,75 @@ fn time_result_is_valid_json_with_ok_true() {
     assert_eq!(obj["hours"], 4.0);
 }
 
+// --- task_result shape (issue 0068 slice 2) ---
+
+#[test]
+fn task_result_status_only_carries_only_status() {
+    let line = task_result(75346, 524, Some(true), None, None);
+    assert_eq!(
+        line, r#"{"ok":true,"task_id":75346,"project_id":524,"status":"completed"}"#,
+        "task_result must carry only the applied status field"
+    );
+}
+
+#[test]
+fn task_result_open_status_renders_open_literal() {
+    let line = task_result(75346, 524, Some(false), None, None);
+    assert_eq!(
+        line,
+        r#"{"ok":true,"task_id":75346,"project_id":524,"status":"open"}"#,
+    );
+}
+
+#[test]
+fn task_result_assignee_only_carries_only_assignee_id() {
+    let line = task_result(75346, 524, None, Some(9), None);
+    assert_eq!(
+        line,
+        r#"{"ok":true,"task_id":75346,"project_id":524,"assignee_id":9}"#,
+    );
+}
+
+#[test]
+fn task_result_estimate_only_carries_only_estimate() {
+    let line = task_result(75346, 524, None, None, Some(8.5));
+    assert_eq!(
+        line,
+        r#"{"ok":true,"task_id":75346,"project_id":524,"estimate":8.5}"#,
+    );
+}
+
+#[test]
+fn task_result_all_fields_present_when_all_applied() {
+    let line = task_result(75346, 524, Some(true), Some(9), Some(8.0));
+    let obj: serde_json::Value = serde_json::from_str(&line).expect("must be valid JSON");
+    assert_eq!(obj["ok"], true);
+    assert_eq!(obj["task_id"], 75346);
+    assert_eq!(obj["project_id"], 524);
+    assert_eq!(obj["status"], "completed");
+    assert_eq!(obj["assignee_id"], 9);
+    assert_eq!(obj["estimate"], 8.0);
+}
+
+#[test]
+fn task_result_no_fields_applied_omits_every_optional_key() {
+    let line = task_result(75346, 524, None, None, None);
+    assert_eq!(line, r#"{"ok":true,"task_id":75346,"project_id":524}"#,);
+}
+
+#[test]
+fn task_result_is_single_minified_line() {
+    let line = task_result(75346, 524, Some(true), Some(9), Some(8.0));
+    assert!(
+        !line.contains('\n'),
+        "task_result must not contain newlines: {line:?}"
+    );
+    assert!(
+        !line.contains("  "),
+        "task_result must not contain 2-space indent: {line:?}"
+    );
+}
+
 #[test]
 fn time_result_is_single_minified_line() {
     let line = time_result(100, 200, 300, 0.5);

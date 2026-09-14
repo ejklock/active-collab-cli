@@ -1,11 +1,12 @@
 use super::{presenter, resolve};
-use crate::client::ActiveCollabClient;
+use crate::client::{ActiveCollabClient, TaskWriteOutcome};
 use crate::controller;
 use crate::http::HTTP_UNAUTHORIZED;
 use crate::i18n::t;
 use crate::render;
 use crate::store::cache::TaskCache;
 use crate::store::instances::Instance;
+use anyhow::Result;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::io::Write;
@@ -300,4 +301,215 @@ pub(crate) async fn current_core(
     };
 
     do_get_task(inst, cache, client, pid, tid, flags, out, err).await
+}
+
+/// Outcome of matching an `--assignee` argument against a user directory.
+enum AssigneeResolution {
+    /// A single user id, either passed directly or matched by name.
+    Id(i64),
+    /// No user in the directory matched the given name.
+    NotFound,
+    /// More than one user in the directory matched the given name.
+    Ambiguous,
+}
+
+/// Parse a `--status` value into the `set_task_completion` boolean.
+///
+/// Accepts `complete`/`completed`/`done`/`closed` for `true` and
+/// `open`/`reopen`/`todo` for `false`, case-insensitively. Returns `None`
+/// for any other value.
+fn parse_completion(value: &str) -> Option<bool> {
+    match value.to_ascii_lowercase().as_str() {
+        "complete" | "completed" | "done" | "closed" => Some(true),
+        "open" | "reopen" | "todo" => Some(false),
+        _ => None,
+    }
+}
+
+/// Match `arg` against a `{user_id: display_name}` directory: exact
+/// case-insensitive name match. Pure so the id/not-found/ambiguous branches
+/// are unit-testable without a directory fetch.
+fn match_assignee_name(arg: &str, directory: &HashMap<i64, String>) -> AssigneeResolution {
+    let matches: Vec<i64> = directory
+        .iter()
+        .filter(|(_, name)| name.eq_ignore_ascii_case(arg))
+        .map(|(id, _)| *id)
+        .collect();
+    match matches.as_slice() {
+        [single] => AssigneeResolution::Id(*single),
+        [] => AssigneeResolution::NotFound,
+        _ => AssigneeResolution::Ambiguous,
+    }
+}
+
+/// Resolve `--assignee` to a user id: an all-digits argument parses
+/// directly, with no directory fetch. Otherwise fetch the instance's user
+/// directory and match the argument as a display name.
+async fn resolve_assignee_id(arg: &str, client: &ActiveCollabClient) -> AssigneeResolution {
+    if !arg.is_empty() && arg.chars().all(|c| c.is_ascii_digit()) {
+        if let Ok(id) = arg.parse::<i64>() {
+            return AssigneeResolution::Id(id);
+        }
+    }
+    let directory = client.fetch_user_map().await.unwrap_or_default();
+    match_assignee_name(arg, &directory)
+}
+
+/// Route a `TaskWriteOutcome` (or transport error) to the shared failure
+/// presenter, returning `Err(exit_code)` on anything but success. Shared by
+/// every write `task_set_core` issues so the outcome-mapping logic lives in
+/// one place.
+fn handle_task_outcome(
+    outcome: Result<TaskWriteOutcome>,
+    project_id: i64,
+    task_id: i64,
+    json: bool,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> std::result::Result<(), i32> {
+    match outcome {
+        Err(e) => {
+            presenter::write_comment_failure(&e.to_string(), json, out, err);
+            Err(1)
+        }
+        Ok(TaskWriteOutcome::Ok(_)) => Ok(()),
+        Ok(TaskWriteOutcome::Unauthorized) => {
+            presenter::write_comment_failure(&presenter::reauth_message(), json, out, err);
+            Err(1)
+        }
+        Ok(TaskWriteOutcome::Failed(status)) => {
+            let reason = format!(
+                "HTTP {status} updating task {project_id}/{task_id}",
+                status = status,
+                project_id = project_id,
+                task_id = task_id
+            );
+            presenter::write_comment_failure(&reason, json, out, err);
+            Err(1)
+        }
+    }
+}
+
+/// Non-interactive task field edit (issue 0068 slice 2).
+///
+/// Requires at least one of `status`/`assignee`/`estimate`; resolves the
+/// task ref, validates and resolves each given field, applies the writes
+/// (`set_task_completion` then `update_task`, stopping on the first
+/// failure), and writes the result to the injected writers. Returns an exit
+/// code: 0 success, 2 usage error, non-zero runtime failure.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn task_set_core(
+    task_ref: Option<&str>,
+    branch: Option<&str>,
+    status: Option<&str>,
+    assignee: Option<&str>,
+    estimate: Option<f64>,
+    client: &ActiveCollabClient,
+    json: bool,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    if status.is_none() && assignee.is_none() && estimate.is_none() {
+        writeln!(
+            err,
+            "{}",
+            t("Error: at least one of --status, --assignee, or --estimate is required.")
+        )
+        .ok();
+        return 2;
+    }
+
+    if estimate.is_some_and(|value| value < 0.0) {
+        writeln!(
+            err,
+            "{}",
+            t("Error: estimate must be zero or a positive number.")
+        )
+        .ok();
+        return 2;
+    }
+
+    let (project_id, task_id) = match resolve::resolve_task_ref_for_comment(task_ref, branch, err) {
+        Ok(ids) => ids,
+        Err(code) => return code,
+    };
+
+    let completed = match status {
+        Some(value) => match parse_completion(value) {
+            Some(completed) => Some(completed),
+            None => {
+                writeln!(
+                    err,
+                    "{}",
+                    t(&format!(
+                        "Error: unrecognized --status value '{status}'. Use complete, \
+                         completed, done, closed, open, reopen, or todo.",
+                        status = value
+                    ))
+                )
+                .ok();
+                return 2;
+            }
+        },
+        None => None,
+    };
+
+    let assignee_id = match assignee {
+        Some(arg) => match resolve_assignee_id(arg, client).await {
+            AssigneeResolution::Id(id) => Some(id),
+            AssigneeResolution::NotFound => {
+                writeln!(
+                    err,
+                    "{}",
+                    t(&format!(
+                        "Error: no user matches assignee '{assignee}'.",
+                        assignee = arg
+                    ))
+                )
+                .ok();
+                return 2;
+            }
+            AssigneeResolution::Ambiguous => {
+                writeln!(
+                    err,
+                    "{}",
+                    t(&format!(
+                        "Error: assignee '{assignee}' matches more than one user; \
+                         use the numeric id instead.",
+                        assignee = arg
+                    ))
+                )
+                .ok();
+                return 2;
+            }
+        },
+        None => None,
+    };
+
+    if let Some(completed) = completed {
+        let outcome = client.set_task_completion(task_id, completed).await;
+        if let Err(code) = handle_task_outcome(outcome, project_id, task_id, json, out, err) {
+            return code;
+        }
+    }
+
+    if assignee_id.is_some() || estimate.is_some() {
+        let outcome = client
+            .update_task(project_id, task_id, assignee_id, estimate)
+            .await;
+        if let Err(code) = handle_task_outcome(outcome, project_id, task_id, json, out, err) {
+            return code;
+        }
+    }
+
+    presenter::write_task_success(
+        task_id,
+        project_id,
+        completed,
+        assignee_id,
+        estimate,
+        json,
+        out,
+    );
+    0
 }

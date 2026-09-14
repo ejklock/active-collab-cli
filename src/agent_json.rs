@@ -157,6 +157,40 @@ pub fn time_result(time_record_id: i64, task_id: i64, project_id: i64, hours: f6
     )
 }
 
+/// Build the write-result for an applied task field edit (issue 0068 slice 2).
+///
+/// Returns a minified single-line JSON string on success, carrying only the
+/// fields the caller actually applied:
+/// `{"ok":true,"task_id":N,"project_id":N[,"status":"completed"|"open"][,"assignee_id":N][,"estimate":H]}`
+pub fn task_result(
+    task_id: i64,
+    project_id: i64,
+    completed: Option<bool>,
+    assignee_id: Option<i64>,
+    estimate: Option<f64>,
+) -> String {
+    let mut line = format!(
+        r#"{{"ok":true,"task_id":{task_id},"project_id":{project_id}"#,
+        task_id = task_id,
+        project_id = project_id,
+    );
+    if let Some(completed) = completed {
+        let status = if completed { "completed" } else { "open" };
+        line.push_str(&format!(r#","status":"{status}""#, status = status));
+    }
+    if let Some(assignee_id) = assignee_id {
+        line.push_str(&format!(
+            r#","assignee_id":{assignee_id}"#,
+            assignee_id = assignee_id
+        ));
+    }
+    if let Some(estimate) = estimate {
+        line.push_str(&format!(r#","estimate":{estimate}"#, estimate = estimate));
+    }
+    line.push('}');
+    line
+}
+
 /// Build the ADR 0011 browse schema for agent/LLM consumption.
 ///
 /// Pure: no network, no I/O. Accepts the same `ProjectGroup` slice the TUI

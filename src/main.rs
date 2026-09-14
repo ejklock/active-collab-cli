@@ -18,8 +18,8 @@ use clap::FromArgMatches;
 use cli::{bare_no_command_action, BareNoCommandAction, Cli, Command};
 use commands::{
     comment_core, current_core, get_core, mine_core, pick_instance, setup_add, setup_language,
-    setup_list, setup_remove, setup_test, setup_theme, skill_output, time_log_core, DisplayFlags,
-    MineOutcome, SetupAddFields,
+    setup_list, setup_remove, setup_test, setup_theme, skill_output, task_set_core, time_log_core,
+    DisplayFlags, MineOutcome, SetupAddFields,
 };
 use std::io::IsTerminal;
 use std::process;
@@ -124,6 +124,7 @@ async fn dispatch(command: Command) -> i32 {
         Command::Browse(args) => dispatch_browse(args).await,
         Command::Comment(args) => dispatch_comment(args).await,
         Command::Time(opts) => dispatch_time(opts.subcommand).await,
+        Command::Task(opts) => dispatch_task(opts.subcommand).await,
         Command::Skill(args) => dispatch_skill(args),
     }
 }
@@ -542,6 +543,33 @@ async fn dispatch_time_log(args: cli::TimeLogArgs) -> i32 {
         args.date.as_deref(),
         args.summary.as_deref(),
         args.job_type.as_deref(),
+        &ac_client,
+        args.json,
+        &mut std::io::stdout(),
+        &mut std::io::stderr(),
+    )
+    .await
+}
+
+async fn dispatch_task(cmd: cli::TaskCmd) -> i32 {
+    match cmd {
+        cli::TaskCmd::Set(args) => dispatch_task_set(args).await,
+    }
+}
+
+async fn dispatch_task_set(args: cli::TaskSetArgs) -> i32 {
+    let (_store, _inst, ac_client) = match setup_instance_client(args.instance.as_deref()) {
+        Ok(v) => v,
+        Err(code) => return code,
+    };
+
+    let branch = current_git_branch();
+    task_set_core(
+        args.task_ref.as_deref(),
+        branch.as_deref(),
+        args.status.as_deref(),
+        args.assignee.as_deref(),
+        args.estimate,
         &ac_client,
         args.json,
         &mut std::io::stdout(),

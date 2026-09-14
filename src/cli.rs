@@ -1,7 +1,7 @@
 use clap::{Args, CommandFactory, Parser, Subcommand};
 
-pub const KNOWN_COMMANDS: [&str; 9] = [
-    "setup", "get", "current", "mine", "list", "browse", "comment", "skill", "time",
+pub const KNOWN_COMMANDS: [&str; 10] = [
+    "setup", "get", "current", "mine", "list", "browse", "comment", "skill", "time", "task",
 ];
 
 /// Name used in help, usage, and version output when `argv[0]` is unavailable.
@@ -51,6 +51,8 @@ pub enum Command {
     Comment(CommentArgs),
     /// Manage time tracking entries.
     Time(TimeOpts),
+    /// Edit task fields (status, assignee, estimate).
+    Task(TaskOpts),
     /// Print an embedded agent skill (ac skill list | ac skill <name>).
     Skill(SkillArgs),
 }
@@ -214,6 +216,40 @@ pub struct TimeLogArgs {
     /// Job type id or name. Defaults to the instance's default job type.
     #[arg(long = "job-type")]
     pub job_type: Option<String>,
+    /// Print curated minified JSON write result for agent/LLM consumption.
+    #[arg(long)]
+    pub json: bool,
+    /// Force a named instance.
+    #[arg(long)]
+    pub instance: Option<String>,
+}
+
+/// Wrapper that holds the task subcommand.
+#[derive(Args, Debug)]
+pub struct TaskOpts {
+    #[command(subcommand)]
+    pub subcommand: TaskCmd,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum TaskCmd {
+    /// Set the status, assignee, and/or time estimate on a task.
+    Set(TaskSetArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct TaskSetArgs {
+    /// Task URL or PROJECT_ID/TASK_ID. When omitted, resolved from the current git branch.
+    pub task_ref: Option<String>,
+    /// New status: open or completed (also accepts complete/done/closed/reopen/todo).
+    #[arg(long)]
+    pub status: Option<String>,
+    /// New assignee: a numeric user id, or a name matched against the instance's users.
+    #[arg(long)]
+    pub assignee: Option<String>,
+    /// New time estimate, in hours (zero or positive).
+    #[arg(long)]
+    pub estimate: Option<f64>,
     /// Print curated minified JSON write result for agent/LLM consumption.
     #[arg(long)]
     pub json: bool,
