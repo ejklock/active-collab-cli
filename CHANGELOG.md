@@ -11,6 +11,21 @@ pre-cutover Python package's history is preserved verbatim under
 version numbers are a separate line and do not continue into the Rust crate
 (issue 0055).
 
+## [0.9.0] - 2026-09-14
+
+### Added
+
+- The TUI assignee-picker modal has a live search/filter field. Typing narrows
+  the candidate list by name (case-insensitive substring); arrow keys navigate
+  the filtered list; Enter/Ctrl+S assigns the highlighted candidate; Esc
+  cancels. Because the field takes text input, `j`/`k` now type into the filter
+  instead of moving the selection (issue 0070).
+
+### Fixed
+
+- Modal boxes size their width to fit the hint line, so a long in-modal hint is
+  no longer clipped (issue 0070).
+
 ## [0.7.2] - 2026-07-31
 
 ### Changed
