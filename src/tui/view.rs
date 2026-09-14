@@ -3,8 +3,8 @@ use crate::render::{display_width, wrap_text};
 use crate::tui::detail_geometry::Selection;
 use crate::tui::footer::{self, FooterPlan};
 use crate::tui::model::{
-    ClickTarget, Compose, ComposeKind, ComposeStatus, ImageAssetRef, ImageStatus, LogTimeField,
-    LogTimeForm, LogTimeStatus, ModalButtonTarget, Model, Screen,
+    ClickTarget, Compose, ComposeKind, ComposeStatus, EditStatus, EstimateForm, ImageAssetRef,
+    ImageStatus, LogTimeField, LogTimeForm, LogTimeStatus, ModalButtonTarget, Model, Screen,
 };
 use crate::tui::screens::{draw_detail, draw_projects, draw_tasks, DetailParams};
 use crate::tui::theme;
@@ -45,6 +45,18 @@ pub(crate) fn log_time_modal_status(form: &LogTimeForm) -> Option<String> {
         LogTimeStatus::Submitting => Some(t("Sending…")),
         LogTimeStatus::Error(_) => Some(t("Failed to log time")),
         LogTimeStatus::Editing => None,
+    }
+}
+
+/// Status text rendered inside the estimate-edit modal's in-box hint line.
+///
+/// Returns `Some(status)` when the form has a transient state to display,
+/// `None` when editing normally (the hint text suffices).
+pub(crate) fn estimate_modal_status(form: &EstimateForm) -> Option<String> {
+    match &form.status {
+        EditStatus::Submitting => Some(t("Sending…")),
+        EditStatus::Error(_) => Some(t("Failed to update task")),
+        EditStatus::Editing => None,
     }
 }
 
@@ -180,6 +192,9 @@ pub fn view(
             if let Some(form) = overlay.log_time() {
                 render_log_time_modal(frame, area, form);
             }
+            if let Some(form) = overlay.estimate_edit() {
+                render_estimate_modal(frame, area, form);
+            }
             if overlay.is_confirm() {
                 render_confirm_modal(frame, area, modal_btn_targets);
             }
@@ -260,6 +275,37 @@ fn render_log_time_modal(frame: &mut Frame, frame_area: ratatui::layout::Rect, f
         frame_area,
         ModalContent {
             title: &t("Log time"),
+            lines: &lines,
+            hint: Some(&hint),
+        },
+    );
+}
+
+fn estimate_modal_hint(form: &EstimateForm) -> String {
+    match estimate_modal_status(form) {
+        Some(status) => status,
+        None => t("Ctrl+S send · Esc cancel"),
+    }
+}
+
+/// Render the estimate-edit modal chrome via `render_modal`: the estimate field as
+/// a single labeled row, plus the hint/status line. Single line, plain-text buffer
+/// (ADR 0064 does not apply — no caret/undo needs), so it renders as a static row
+/// rather than a `TextArea` widget.
+fn render_estimate_modal(
+    frame: &mut Frame,
+    frame_area: ratatui::layout::Rect,
+    form: &EstimateForm,
+) {
+    use crate::tui::widgets::modal::render_modal;
+    let hint = estimate_modal_hint(form);
+    let value_line = format!("{}: {}", t("Estimate (hours)"), form.value);
+    let lines = [value_line];
+    render_modal(
+        frame,
+        frame_area,
+        ModalContent {
+            title: &t("Edit estimate"),
             lines: &lines,
             hint: Some(&hint),
         },

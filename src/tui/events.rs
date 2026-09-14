@@ -38,6 +38,7 @@ pub fn map_browse_key_event(key: crossterm::event::KeyEvent) -> Option<Msg> {
         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => Some(Msg::Quit),
         KeyCode::Char('c') => Some(Msg::ComposeOpen),
         KeyCode::Char('t') => Some(Msg::LogTimeOpen),
+        KeyCode::Char('e') => Some(Msg::EstimateOpen),
         KeyCode::Char('r') => Some(Msg::Refresh),
         KeyCode::Enter => Some(Msg::Select),
         _ => None,
@@ -75,6 +76,22 @@ pub fn map_log_time_key_event(key: crossterm::event::KeyEvent) -> Option<Msg> {
         KeyCode::Tab => Some(Msg::LogTimeToggleField),
         KeyCode::Backspace => Some(Msg::LogTimeBackspace),
         KeyCode::Char(c) => Some(Msg::LogTimeChar(c)),
+        _ => None,
+    }
+}
+
+/// Map a key event when the estimate-edit modal is active.
+///
+/// Ctrl+S submits and Esc cancels — the same shell-intercepted shortcuts as the
+/// log-time modal. There is no Tab here: a single field has nothing to switch
+/// between, unlike log time's Hours/Summary pair.
+pub fn map_estimate_key_event(key: crossterm::event::KeyEvent) -> Option<Msg> {
+    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    match key.code {
+        KeyCode::Char('s') if ctrl => Some(Msg::EstimateSubmit),
+        KeyCode::Esc => Some(Msg::EstimateCancel),
+        KeyCode::Backspace => Some(Msg::EstimateBackspace),
+        KeyCode::Char(c) => Some(Msg::EstimateChar(c)),
         _ => None,
     }
 }

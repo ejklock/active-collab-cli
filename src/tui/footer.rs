@@ -7,7 +7,7 @@
 
 use crate::i18n::t;
 use crate::render::{display_width, wrap_text};
-use crate::tui::model::{Compose, LogTimeForm, Screen};
+use crate::tui::model::{Compose, EstimateForm, LogTimeForm, Screen};
 
 /// Reformat a BRT timestamp `YYYY-MM-DDTHH:MM:SS` into `DD/MM/YYYY HH:MM`.
 /// Returns None when the input is too short or cannot be sliced at the expected offsets.
@@ -51,6 +51,13 @@ pub(crate) fn hint_for_screen(screen: &Screen) -> String {
             } else {
                 overlay.log_time()
             };
+            // The estimate-edit modal owns its hint when active; pass None to
+            // footer, same one-home rule as compose and log time.
+            let estimate_for_footer = if overlay.is_estimate_edit() {
+                None
+            } else {
+                overlay.estimate_edit()
+            };
             // The confirm modal owns its hint; pass None so the footer does not
             // duplicate it (ADR 0039 §5 one-home suppression).
             let confirm_for_footer = if overlay.is_confirm() {
@@ -61,6 +68,7 @@ pub(crate) fn hint_for_screen(screen: &Screen) -> String {
             detail_hint(
                 compose_for_footer,
                 log_time_for_footer,
+                estimate_for_footer,
                 confirm_for_footer,
                 *focused_comment,
                 comments,
@@ -73,11 +81,12 @@ pub(crate) fn hint_for_screen(screen: &Screen) -> String {
 
 /// Derive the context-aware instruction hint for the Detail screen.
 ///
-/// Priority order matches ADR 0038 §1: composing/logging-time beats
-/// confirming-delete beats own-comment-focused beats the browsing default.
+/// Priority order matches ADR 0038 §1: composing/logging-time/editing-estimate
+/// beats confirming-delete beats own-comment-focused beats the browsing default.
 pub(crate) fn detail_hint(
     compose: Option<&Compose>,
     log_time: Option<&LogTimeForm>,
+    estimate: Option<&EstimateForm>,
     confirm_delete: Option<i64>,
     focused_comment: Option<usize>,
     comments: &[serde_json::Value],
@@ -89,13 +98,16 @@ pub(crate) fn detail_hint(
     if log_time.is_some() {
         return t("Ctrl+S send · Tab switch field · Esc cancel");
     }
+    if estimate.is_some() {
+        return t("Ctrl+S send · Esc cancel");
+    }
     if confirm_delete.is_some() {
         return t("Enter/click confirm · Esc cancel");
     }
     if is_own_comment_focused(focused_comment, comments, current_user_id) {
         return t("↑/↓ · j/k move · Ctrl+click edit/delete · c new");
     }
-    t("↑/↓ · j/k move · c comment · t log time · r refresh · Esc/b back · q quit")
+    t("↑/↓ · j/k move · c comment · t log time · e estimate · r refresh · Esc/b back · q quit")
 }
 
 pub(crate) fn is_own_comment_focused(
