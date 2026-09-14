@@ -27,8 +27,9 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use events::{
-    map_browse_key_event, map_browse_mouse_event, map_compose_key_event, map_confirm_key_event,
-    map_estimate_key_event, map_log_time_key_event, map_status_confirm_key_event,
+    map_assignee_picker_key_event, map_browse_key_event, map_browse_mouse_event,
+    map_compose_key_event, map_confirm_key_event, map_estimate_key_event, map_log_time_key_event,
+    map_status_confirm_key_event,
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
 use std::io;
@@ -124,6 +125,14 @@ fn status_confirm_active(model: &Model) -> bool {
     )
 }
 
+/// Return true when the assignee-picker modal is active on the top screen.
+fn assignee_picker_active(model: &Model) -> bool {
+    matches!(
+        model.top(),
+        Some(model::Screen::Detail { overlay, .. }) if overlay.is_assignee_picker()
+    )
+}
+
 /// Handle a crossterm input event: map to a Msg, run update, and dispatch commands.
 ///
 /// Key routing priority (highest first):
@@ -132,7 +141,8 @@ fn status_confirm_active(model: &Model) -> bool {
 ///   3. log-time sub-mode (log-time modal open) — typed chars + Ctrl+S/Tab/Esc
 ///   4. estimate-edit sub-mode (estimate modal open) — typed chars + Ctrl+S/Esc
 ///   5. status-confirm sub-mode (status-confirm modal open) — Enter/Ctrl+S/Esc only
-///   6. browse mode — navigation, shortcuts
+///   6. assignee-picker sub-mode (assignee-picker modal open) — j/k/Enter/Ctrl+S/Esc only
+///   7. browse mode — navigation, shortcuts
 fn handle_input_event(
     ev: Event,
     model: Model,
@@ -153,6 +163,8 @@ fn handle_input_event(
                 map_estimate_key_event(key)
             } else if status_confirm_active(&model) {
                 map_status_confirm_key_event(key)
+            } else if assignee_picker_active(&model) {
+                map_assignee_picker_key_event(key)
             } else {
                 map_browse_key_event(key)
             }

@@ -322,6 +322,14 @@ pub enum DetailOverlay {
         completed_target: bool,
         status: EditStatus,
     },
+    /// The assignee-picker modal. `candidates` holds id/name pairs built from the
+    /// Detail screen's cached user directory, sorted case-insensitively by name.
+    /// `selected` is the index of the highlighted row within `candidates`.
+    AssigneePicker {
+        candidates: Vec<(i64, String)>,
+        selected: usize,
+        status: EditStatus,
+    },
     ConfirmDelete {
         comment_id: i64,
     },
@@ -330,6 +338,17 @@ pub enum DetailOverlay {
         status: ImageStatus,
     },
 }
+
+/// Borrowed view into an active `AssigneePicker` overlay: its candidate list, the
+/// highlighted index, and its lifecycle status.
+pub type AssigneePickerView<'a> = (&'a [(i64, String)], usize, &'a EditStatus);
+
+/// Mutable counterpart of [`AssigneePickerView`].
+pub type AssigneePickerViewMut<'a> = (
+    &'a mut Vec<(i64, String)>,
+    &'a mut usize,
+    &'a mut EditStatus,
+);
 
 impl DetailOverlay {
     pub fn compose(&self) -> Option<&Compose> {
@@ -394,6 +413,28 @@ impl DetailOverlay {
         }
     }
 
+    pub fn assignee_picker(&self) -> Option<AssigneePickerView<'_>> {
+        match self {
+            DetailOverlay::AssigneePicker {
+                candidates,
+                selected,
+                status,
+            } => Some((candidates.as_slice(), *selected, status)),
+            _ => Option::None,
+        }
+    }
+
+    pub fn assignee_picker_mut(&mut self) -> Option<AssigneePickerViewMut<'_>> {
+        match self {
+            DetailOverlay::AssigneePicker {
+                candidates,
+                selected,
+                status,
+            } => Some((candidates, selected, status)),
+            _ => Option::None,
+        }
+    }
+
     pub fn confirm_delete_id(&self) -> Option<i64> {
         match self {
             DetailOverlay::ConfirmDelete { comment_id } => Some(*comment_id),
@@ -429,6 +470,10 @@ impl DetailOverlay {
 
     pub fn is_status_confirm(&self) -> bool {
         matches!(self, DetailOverlay::StatusConfirm { .. })
+    }
+
+    pub fn is_assignee_picker(&self) -> bool {
+        matches!(self, DetailOverlay::AssigneePicker { .. })
     }
 
     pub fn is_confirm(&self) -> bool {
@@ -785,6 +830,17 @@ pub enum Msg {
     StatusToggleConfirm,
     /// Cancel the status-confirm modal without submitting.
     StatusToggleCancel,
+    /// Open the assignee-picker modal on the current Detail screen, built from the
+    /// already-loaded user directory.
+    AssigneePickerOpen,
+    /// Move the assignee-picker selection up by one row.
+    AssigneePickerUp,
+    /// Move the assignee-picker selection down by one row.
+    AssigneePickerDown,
+    /// Confirm the highlighted candidate and submit it as a task-field write.
+    AssigneePickerSubmit,
+    /// Cancel the assignee-picker modal without submitting.
+    AssigneePickerCancel,
     /// Move the comment-card focus cursor forward by one card (j / Down in Detail browse mode).
     FocusNextComment,
     /// Move the comment-card focus cursor backward by one card (k / Up in Detail browse mode).
@@ -994,6 +1050,11 @@ pub fn update(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
         m @ (Msg::StatusToggleOpen | Msg::StatusToggleConfirm | Msg::StatusToggleCancel) => {
             update_status_toggle(model, m)
         }
+        m @ (Msg::AssigneePickerOpen
+        | Msg::AssigneePickerUp
+        | Msg::AssigneePickerDown
+        | Msg::AssigneePickerSubmit
+        | Msg::AssigneePickerCancel) => update_assignee_picker(model, m),
         Msg::FocusNextComment => (handle_focus_next(model), vec![]),
         Msg::FocusPrevComment => (handle_focus_prev(model), vec![]),
         Msg::ConfirmDeleteComment => handle_confirm_delete(model),
@@ -1130,6 +1191,17 @@ fn update_status_toggle(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
         Msg::StatusToggleOpen => (handle_status_toggle_open(model), vec![]),
         Msg::StatusToggleConfirm => handle_status_toggle_confirm(model),
         Msg::StatusToggleCancel => (handle_status_toggle_cancel(model), vec![]),
+        _ => (model, vec![]),
+    }
+}
+
+fn update_assignee_picker(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
+    match msg {
+        Msg::AssigneePickerOpen => (handle_assignee_picker_open(model), vec![]),
+        Msg::AssigneePickerUp => (handle_assignee_picker_up(model), vec![]),
+        Msg::AssigneePickerDown => (handle_assignee_picker_down(model), vec![]),
+        Msg::AssigneePickerSubmit => handle_assignee_picker_submit(model),
+        Msg::AssigneePickerCancel => (handle_assignee_picker_cancel(model), vec![]),
         _ => (model, vec![]),
     }
 }
@@ -2415,6 +2487,9 @@ fn set_task_edit_error(model: &mut Model, message: String) {
         } else if let Some((_, status)) = overlay.status_confirm_mut() {
             *status = EditStatus::Error(message);
             *rendered_width = usize::MAX;
+        } else if let Some((_, _, status)) = overlay.assignee_picker_mut() {
+            *status = EditStatus::Error(message);
+            *rendered_width = usize::MAX;
         }
     }
 }
@@ -2575,6 +2650,177 @@ fn handle_status_toggle_confirm(mut model: Model) -> (Model, Vec<Cmd>) {
             task_id,
             completion: Some(completed_target),
             assignee_id: None,
+            estimate: None,
+        }],
+    )
+}
+
+/// Build the assignee-picker candidate list from the Detail screen's cached user
+/// directory, sorted case-insensitively by name with the user id as a tiebreaker so
+/// the order is deterministic regardless of the map's iteration order.
+fn assignee_candidates(user_map: &HashMap<i64, String>) -> Vec<(i64, String)> {
+    let mut candidates: Vec<(i64, String)> = user_map
+        .iter()
+        .map(|(id, name)| (*id, name.clone()))
+        .collect();
+    candidates.sort_by(|a, b| {
+        a.1.to_lowercase()
+            .cmp(&b.1.to_lowercase())
+            .then(a.0.cmp(&b.0))
+    });
+    candidates
+}
+
+/// Index of `assignee_id` within `candidates`, or 0 when absent or not found.
+fn assignee_candidate_index(candidates: &[(i64, String)], assignee_id: Option<i64>) -> usize {
+    assignee_id
+        .and_then(|id| candidates.iter().position(|(cid, _)| *cid == id))
+        .unwrap_or(0)
+}
+
+/// Open the assignee-picker modal on the current Detail screen, with candidates built
+/// from the already-loaded user directory and the task's current assignee pre-selected.
+///
+/// No-op when the assignee-picker modal is already open — mirrors `handle_estimate_open`.
+fn handle_assignee_picker_open(mut model: Model) -> Model {
+    let built = match model.top() {
+        Some(Screen::Detail { user_map, task, .. }) => {
+            let candidates = assignee_candidates(user_map);
+            let assignee_id = task.get("assignee_id").and_then(|v| v.as_i64());
+            let selected = assignee_candidate_index(&candidates, assignee_id);
+            Some((candidates, selected))
+        }
+        _ => None,
+    };
+    if let Some(Screen::Detail {
+        ref mut overlay,
+        ref mut rendered_width,
+        ..
+    }) = model.top_mut()
+    {
+        if !overlay.is_assignee_picker() {
+            if let Some((candidates, selected)) = built {
+                *overlay = DetailOverlay::AssigneePicker {
+                    candidates,
+                    selected,
+                    status: EditStatus::Editing,
+                };
+                *rendered_width = usize::MAX;
+            }
+        }
+    }
+    model
+}
+
+/// Move the assignee-picker selection up by one row, saturating at the top. No-op
+/// while not `Editing` or when there are no candidates.
+fn handle_assignee_picker_up(mut model: Model) -> Model {
+    if let Some(Screen::Detail {
+        ref mut overlay,
+        ref mut rendered_width,
+        ..
+    }) = model.top_mut()
+    {
+        if let Some((candidates, selected, status)) = overlay.assignee_picker_mut() {
+            if *status == EditStatus::Editing && !candidates.is_empty() {
+                *selected = selected.saturating_sub(1);
+                *rendered_width = usize::MAX;
+            }
+        }
+    }
+    model
+}
+
+/// Move the assignee-picker selection down by one row, saturating at the bottom.
+/// No-op while not `Editing` or when there are no candidates.
+fn handle_assignee_picker_down(mut model: Model) -> Model {
+    if let Some(Screen::Detail {
+        ref mut overlay,
+        ref mut rendered_width,
+        ..
+    }) = model.top_mut()
+    {
+        if let Some((candidates, selected, status)) = overlay.assignee_picker_mut() {
+            if *status == EditStatus::Editing && !candidates.is_empty() {
+                let max = candidates.len() - 1;
+                *selected = (*selected + 1).min(max);
+                *rendered_width = usize::MAX;
+            }
+        }
+    }
+    model
+}
+
+/// Dismiss the assignee-picker modal without submitting.
+fn handle_assignee_picker_cancel(mut model: Model) -> Model {
+    if let Some(Screen::Detail {
+        ref mut overlay,
+        ref mut rendered_width,
+        ..
+    }) = model.top_mut()
+    {
+        *overlay = DetailOverlay::None;
+        *rendered_width = usize::MAX;
+    }
+    model
+}
+
+/// Extract the fields needed to submit the assignee-picker's highlighted candidate,
+/// or None when the guard fails.
+///
+/// Guard: overlay must be `AssigneePicker`, its status must be `Editing`, and its
+/// candidate list must be non-empty.
+fn extract_assignee_picker_submit_info(model: &Model) -> Option<(String, i64, i64, i64)> {
+    match model.top() {
+        Some(Screen::Detail {
+            instance,
+            project_id,
+            task_id,
+            overlay,
+            ..
+        }) => {
+            let (candidates, selected, status) = overlay.assignee_picker()?;
+            if *status != EditStatus::Editing || candidates.is_empty() {
+                return None;
+            }
+            let (assignee_id, _) = candidates.get(selected)?;
+            Some((instance.clone(), *project_id, *task_id, *assignee_id))
+        }
+        _ => None,
+    }
+}
+
+/// Set the assignee-picker overlay to `Submitting` and emit `Cmd::SubmitTaskEdit`
+/// carrying `assignee_id: Some(the highlighted candidate id)` with `completion` and
+/// `estimate` both `None`. A no-op (no Cmd) when the overlay is absent, not `Editing`,
+/// or the candidate list is empty.
+fn handle_assignee_picker_submit(mut model: Model) -> (Model, Vec<Cmd>) {
+    let Some((instance, project_id, task_id, assignee_id)) =
+        extract_assignee_picker_submit_info(&model)
+    else {
+        return (model, vec![]);
+    };
+
+    if let Some(Screen::Detail {
+        ref mut overlay,
+        ref mut rendered_width,
+        ..
+    }) = model.top_mut()
+    {
+        if let Some((_, _, status)) = overlay.assignee_picker_mut() {
+            *status = EditStatus::Submitting;
+            *rendered_width = usize::MAX;
+        }
+    }
+
+    (
+        model,
+        vec![Cmd::SubmitTaskEdit {
+            instance,
+            project_id,
+            task_id,
+            completion: None,
+            assignee_id: Some(assignee_id),
             estimate: None,
         }],
     )

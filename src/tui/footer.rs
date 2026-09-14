@@ -7,7 +7,9 @@
 
 use crate::i18n::t;
 use crate::render::{display_width, wrap_text};
-use crate::tui::model::{Compose, EditStatus, EstimateForm, LogTimeForm, Screen};
+use crate::tui::model::{
+    AssigneePickerView, Compose, EditStatus, EstimateForm, LogTimeForm, Screen,
+};
 
 /// Reformat a BRT timestamp `YYYY-MM-DDTHH:MM:SS` into `DD/MM/YYYY HH:MM`.
 /// Returns None when the input is too short or cannot be sliced at the expected offsets.
@@ -32,6 +34,7 @@ pub(crate) struct DetailHintOverlays<'a> {
     pub(crate) log_time: Option<&'a LogTimeForm>,
     pub(crate) estimate: Option<&'a EstimateForm>,
     pub(crate) status_confirm: Option<(bool, &'a EditStatus)>,
+    pub(crate) assignee_picker: Option<AssigneePickerView<'a>>,
     pub(crate) confirm_delete: Option<i64>,
 }
 
@@ -77,6 +80,13 @@ pub(crate) fn hint_for_screen(screen: &Screen) -> String {
                 } else {
                     overlay.status_confirm()
                 },
+                // The assignee-picker modal owns its hint when active; pass None
+                // to footer, same one-home rule as status confirm.
+                assignee_picker: if overlay.is_assignee_picker() {
+                    None
+                } else {
+                    overlay.assignee_picker()
+                },
                 // The confirm modal owns its hint; pass None so the footer does
                 // not duplicate it (ADR 0039 §5 one-home suppression).
                 confirm_delete: if overlay.is_confirm() {
@@ -113,13 +123,16 @@ pub(crate) fn detail_hint(
     if overlays.status_confirm.is_some() {
         return t("Enter/Ctrl+S confirm · Esc cancel");
     }
+    if overlays.assignee_picker.is_some() {
+        return t("↑/↓ · j/k move · Enter/Ctrl+S confirm · Esc cancel");
+    }
     if overlays.confirm_delete.is_some() {
         return t("Enter/click confirm · Esc cancel");
     }
     if is_own_comment_focused(focused_comment, comments, current_user_id) {
         return t("↑/↓ · j/k move · Ctrl+click edit/delete · c new");
     }
-    t("↑/↓ · j/k move · c comment · t log time · e estimate · s status · r refresh · Esc/b back · q quit")
+    t("↑/↓ · j/k move · c comment · t log time · e estimate · s status · r refresh · a assignee · Esc/b back · q quit")
 }
 
 pub(crate) fn is_own_comment_focused(
