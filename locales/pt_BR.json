@@ -170,5 +170,8 @@
   "↑/↓ · j/k move · c comment · t log time · e estimate · s status · r refresh · a assignee · Esc/b back · q quit": "↑/↓ · j/k mover · c comentar · t registrar tempo · e estimativa · s status · r atualizar · a responsável · Esc/b voltar · q sair",
   "↑/↓ · j/k move · Enter/Ctrl+S confirm · Esc cancel": "↑/↓ · j/k mover · Enter/Ctrl+S confirmar · Esc cancelar",
   "Assign task": "Atribuir tarefa",
-  "No assignable users": "Nenhum usuário disponível para atribuição"
+  "No assignable users": "Nenhum usuário disponível para atribuição",
+  "No matching users": "Nenhum usuário corresponde ao filtro",
+  "Search": "Buscar",
+  "↑/↓ move · type to filter · Enter/Ctrl+S confirm · Esc cancel": "↑/↓ mover · digite para filtrar · Enter/Ctrl+S confirmar · Esc cancelar"
 }
