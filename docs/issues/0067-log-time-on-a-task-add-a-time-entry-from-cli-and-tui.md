@@ -24,16 +24,12 @@ A developer who lives in the terminal still has to open the ActiveCollab web UI 
 entry against the task behind their branch. This issue adds "log time on a task" from both the
 CLI and the TUI.
 
-### Scope gate — read before implementing
+### Scope gate — CLEARED
 
-This is a **write beyond comments**. The
-[constitution](/constitution.md) still lists "Writing to ActiveCollab
-(creating/editing/commenting on tasks)" as explicitly out of scope, and comment authoring
-(PRD 0002) already crossed that line without a recorded amendment. Adding time-tracking and
-task-field writes (issue 0068) widens the product from "comment on tasks" to "mutate tasks".
-Before implementation: settle the product direction with the maintainer — a **constitution
-amendment** plus a product-direction **ADR** ("active-collab-cli becomes a limited write
-client"). Do not implement this issue until that decision is recorded.
+This is a **write beyond comments**. The product-direction decision is now recorded:
+[ADR 0069](/adr/0069-active-collab-cli-becomes-a-limited-write-client.md) (Accepted) and
+constitution Amendment 1 make active-collab-cli a limited write client, with time records
+explicitly in scope. This issue is now implementable.
 
 ### Scope
 

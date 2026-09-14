@@ -120,3 +120,16 @@ database keeps working.
 
 <!-- Append amendments here; do not edit sections above once ratified.
      Format: ## Amendment N — YYYY-MM-DD: <summary> -->
+
+## Amendment 1 — 2026-09-14: active-collab-cli becomes a limited write client
+
+Per [ADR 0069](/adr/0069-active-collab-cli-becomes-a-limited-write-client.md), the scope boundary
+above is amended. "Writing to ActiveCollab" is no longer wholly out of scope. In scope now: creating
+comments (already shipped via [PRD 0002](/prd/0002-task-comment-authoring.md)), logging time records,
+and editing a bounded set of task fields (status, assignee, time estimate). Each write reuses the
+authenticated, host-gated write seam ([ADR 0033](/adr/0033-authenticated-write-seam-comment-client.md))
+with a typed outcome ([ADR 0054](/adr/0054-comment-write-outcome-typed-classification.md)) and a
+server-truth refresh ([ADR 0035](/adr/0035-server-truth-refresh-after-comment-mutation.md)). Still
+explicitly out of scope: creating or deleting tasks, bulk edits, and full web-UI parity — each awaits
+its own recorded decision. The token-host-isolation and local-first non-negotiables are unchanged;
+local-first governs reads, and every write path must honor token host isolation.
