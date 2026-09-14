@@ -132,6 +132,17 @@ impl MineTask {
     }
 }
 
+/// A time-tracking job type, used to classify a time record on creation.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct JobType {
+    #[serde(default)]
+    pub id: i64,
+    #[serde(default, deserialize_with = "deserialize_nullable_string")]
+    pub name: String,
+    #[serde(default)]
+    pub is_default: bool,
+}
+
 #[cfg(test)]
 #[path = "../tests/unit/models.rs"]
 mod tests;
