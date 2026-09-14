@@ -244,6 +244,92 @@ async fn fetch_user_map_non_200_returns_empty() {
 }
 
 #[tokio::test]
+async fn fetch_job_types_parses_list() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/job-types"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            { "id": 1, "name": "Design", "is_default": false },
+            { "id": 2, "name": "Development", "is_default": true }
+        ])))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = make_client(&server.uri());
+    let job_types = client.fetch_job_types().await.unwrap();
+    assert_eq!(
+        job_types,
+        vec![
+            JobType {
+                id: 1,
+                name: "Design".to_string(),
+                is_default: false
+            },
+            JobType {
+                id: 2,
+                name: "Development".to_string(),
+                is_default: true
+            },
+        ]
+    );
+}
+
+#[tokio::test]
+async fn fetch_job_types_non_200_returns_empty() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/job-types"))
+        .respond_with(ResponseTemplate::new(500).set_body_string("error"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = make_client(&server.uri());
+    let job_types = client.fetch_job_types().await.unwrap();
+    assert!(job_types.is_empty());
+}
+
+#[test]
+fn pick_default_job_type_returns_default_entry_id() {
+    let job_types = vec![
+        JobType {
+            id: 1,
+            name: "Design".to_string(),
+            is_default: false,
+        },
+        JobType {
+            id: 2,
+            name: "Development".to_string(),
+            is_default: true,
+        },
+    ];
+    assert_eq!(pick_default_job_type(&job_types), Some(2));
+}
+
+#[test]
+fn pick_default_job_type_falls_back_to_first_entry() {
+    let job_types = vec![
+        JobType {
+            id: 1,
+            name: "Design".to_string(),
+            is_default: false,
+        },
+        JobType {
+            id: 2,
+            name: "Development".to_string(),
+            is_default: false,
+        },
+    ];
+    assert_eq!(pick_default_job_type(&job_types), Some(1));
+}
+
+#[test]
+fn pick_default_job_type_returns_none_for_empty_list() {
+    assert_eq!(pick_default_job_type(&[]), None);
+}
+
+#[tokio::test]
 async fn fetch_user_map_non_list_response_returns_empty() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
@@ -702,6 +788,103 @@ async fn create_comment_attaches_token_header() {
     let outcome = client.create_comment(5, "text").await.unwrap();
     assert!(matches!(outcome, CommentWriteOutcome::Ok(_)));
     server.verify().await;
+}
+
+#[tokio::test]
+async fn create_time_record_posts_to_correct_path_with_body() {
+    let server = MockServer::start().await;
+    let record = serde_json::json!({ "id": 7, "value": 2.5 });
+    Mock::given(method("POST"))
+        .and(path("/api/v1/projects/3/time-records"))
+        .and(body_json(serde_json::json!({
+            "task_id": 42,
+            "value": 2.5,
+            "record_date": "2026-09-14",
+            "job_type_id": 2,
+            "summary": "worked on it"
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(record.clone()))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = make_client(&server.uri());
+    let outcome = client
+        .create_time_record(3, 42, 2.5, "2026-09-14", 2, Some("worked on it"))
+        .await
+        .unwrap();
+    match outcome {
+        TimeWriteOutcome::Ok(payload) => assert_eq!(payload.unwrap(), record),
+        other => panic!("expected Ok outcome, got {other:?}"),
+    }
+    server.verify().await;
+}
+
+#[tokio::test]
+async fn create_time_record_omits_summary_when_none() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/projects/3/time-records"))
+        .and(body_json(serde_json::json!({
+            "task_id": 42,
+            "value": 1.0,
+            "record_date": "2026-09-14",
+            "job_type_id": 2
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({ "id": 8 })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = make_client(&server.uri());
+    let outcome = client
+        .create_time_record(3, 42, 1.0, "2026-09-14", 2, None)
+        .await
+        .unwrap();
+    assert!(matches!(outcome, TimeWriteOutcome::Ok(_)));
+    server.verify().await;
+}
+
+#[tokio::test]
+async fn create_time_record_401_returns_unauthorized() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/projects/3/time-records"))
+        .respond_with(ResponseTemplate::new(401).set_body_string("unauthorized"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = make_client(&server.uri());
+    let outcome = client
+        .create_time_record(3, 42, 1.0, "2026-09-14", 2, None)
+        .await
+        .unwrap();
+    assert!(
+        matches!(outcome, TimeWriteOutcome::Unauthorized),
+        "expected Unauthorized, got {outcome:?}"
+    );
+}
+
+#[tokio::test]
+async fn create_time_record_non_2xx_returns_failed_with_status() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/projects/3/time-records"))
+        .respond_with(ResponseTemplate::new(422).set_body_string("invalid"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = make_client(&server.uri());
+    let outcome = client
+        .create_time_record(3, 42, 1.0, "2026-09-14", 2, None)
+        .await
+        .unwrap();
+    match outcome {
+        TimeWriteOutcome::Failed(status) => assert_eq!(status, 422),
+        other => panic!("expected Failed(422), got {other:?}"),
+    }
 }
 
 #[tokio::test]
