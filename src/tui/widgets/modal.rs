@@ -45,6 +45,7 @@ pub fn modal_target_size(frame_area: Rect, content: &ModalContent<'_>) -> (u16, 
         .lines
         .iter()
         .map(|l| l.chars().count() as u16)
+        .chain(content.hint.map(|h| h.chars().count() as u16))
         .max()
         .unwrap_or(0)
         .saturating_add(4)
