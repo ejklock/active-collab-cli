@@ -400,7 +400,11 @@ fn assignee_candidate_line(name: &str, is_selected: bool) -> String {
 /// filter, then either the filtered candidate rows (highlighted row marked), an
 /// empty-directory line when the user directory has no candidates at all, or a
 /// distinct empty-match line when the filter excludes every candidate.
-fn assignee_picker_modal_lines(candidates: &[(i64, String)], filter: &str, selected: usize) -> Vec<String> {
+fn assignee_picker_modal_lines(
+    candidates: &[(i64, String)],
+    filter: &str,
+    selected: usize,
+) -> Vec<String> {
     let search_line = format!("{}: {}", t("Search"), filter);
     let mut lines = vec![search_line];
     if candidates.is_empty() {
