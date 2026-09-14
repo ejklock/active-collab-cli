@@ -4497,6 +4497,286 @@ fn map_browse_key_event_plain_e_yields_estimate_open() {
     );
 }
 
+// ── Status-confirm modal tests (issue 0068 TUI slice) ─────────────────────────
+
+fn extract_status_confirm(model: &Model) -> Option<(bool, &EditStatus)> {
+    match model.top() {
+        Some(Screen::Detail { overlay, .. }) => overlay.status_confirm(),
+        _ => None,
+    }
+}
+
+// AC1: StatusToggleOpen on an OPEN task sets completed_target=true with status Editing.
+#[test]
+fn status_toggle_open_on_open_task_targets_completed() {
+    let m = detail_model_with_task("inst", 10, 42, serde_json::json!({ "is_completed": false }));
+    let (m, cmds) = update(m, Msg::StatusToggleOpen);
+    assert!(cmds.is_empty(), "StatusToggleOpen must emit no Cmd");
+    let (completed_target, status) =
+        extract_status_confirm(&m).expect("status-confirm overlay must be Some after open");
+    assert!(completed_target, "an open task must target completion");
+    assert_eq!(*status, EditStatus::Editing);
+}
+
+// AC1: StatusToggleOpen on a COMPLETED task sets completed_target=false.
+#[test]
+fn status_toggle_open_on_completed_task_targets_reopen() {
+    let m = detail_model_with_task("inst", 10, 42, serde_json::json!({ "is_completed": true }));
+    let (m, _) = update(m, Msg::StatusToggleOpen);
+    let (completed_target, _) =
+        extract_status_confirm(&m).expect("status-confirm overlay must be Some after open");
+    assert!(!completed_target, "a completed task must target reopen");
+}
+
+// AC1: StatusToggleOpen on a screen that already has the modal active is a no-op.
+#[test]
+fn status_toggle_open_when_already_active_is_noop() {
+    let mut m =
+        detail_model_with_task("inst", 10, 42, serde_json::json!({ "is_completed": false }));
+    if let Some(Screen::Detail {
+        ref mut overlay, ..
+    }) = m.stack.last_mut()
+    {
+        *overlay = DetailOverlay::StatusConfirm {
+            completed_target: false,
+            status: EditStatus::Editing,
+        };
+    }
+    let (m, _) = update(m, Msg::StatusToggleOpen);
+    let (completed_target, _) =
+        extract_status_confirm(&m).expect("status-confirm overlay must still be Some");
+    assert!(
+        !completed_target,
+        "the existing completed_target must be preserved, not recomputed"
+    );
+}
+
+// AC1: StatusToggleCancel clears the overlay and emits no Cmd.
+#[test]
+fn status_toggle_cancel_clears_overlay_and_emits_no_cmd() {
+    let m = detail_model_with_task("inst", 10, 42, serde_json::json!({ "is_completed": false }));
+    let (m, _) = update(m, Msg::StatusToggleOpen);
+    let (m, cmds) = update(m, Msg::StatusToggleCancel);
+    assert!(cmds.is_empty(), "StatusToggleCancel must emit no Cmd");
+    assert!(
+        extract_status_confirm(&m).is_none(),
+        "status-confirm overlay must be None after StatusToggleCancel"
+    );
+}
+
+// AC2: StatusToggleConfirm while Editing emits exactly one Cmd::SubmitTaskEdit
+// carrying completion: Some(completed_target), assignee_id: None, estimate: None,
+// and sets status Submitting.
+#[test]
+fn status_toggle_confirm_emits_submit_task_edit_cmd() {
+    let m = detail_model_with_task(
+        "myinst",
+        5,
+        99,
+        serde_json::json!({ "is_completed": false }),
+    );
+    let m = update(m, Msg::StatusToggleOpen).0;
+    let (m, cmds) = update(m, Msg::StatusToggleConfirm);
+
+    assert_eq!(cmds.len(), 1, "must emit exactly one Cmd::SubmitTaskEdit");
+    match &cmds[0] {
+        Cmd::SubmitTaskEdit {
+            instance,
+            project_id,
+            task_id,
+            completion,
+            assignee_id,
+            estimate,
+        } => {
+            assert_eq!(instance, "myinst");
+            assert_eq!(*project_id, 5);
+            assert_eq!(*task_id, 99);
+            assert_eq!(*completion, Some(true));
+            assert_eq!(*assignee_id, None);
+            assert_eq!(*estimate, None);
+        }
+        other => panic!("expected Cmd::SubmitTaskEdit, got {other:?}"),
+    }
+    let (_, status) = extract_status_confirm(&m).expect("status-confirm overlay must be Some");
+    assert_eq!(*status, EditStatus::Submitting);
+}
+
+// AC2: StatusToggleConfirm is a no-op (no Cmd) when the overlay's status is not Editing.
+#[test]
+fn status_toggle_confirm_while_submitting_emits_no_cmd() {
+    let mut m = detail_model_with_task("inst", 5, 99, serde_json::json!({ "is_completed": false }));
+    if let Some(Screen::Detail {
+        ref mut overlay, ..
+    }) = m.stack.last_mut()
+    {
+        *overlay = DetailOverlay::StatusConfirm {
+            completed_target: true,
+            status: EditStatus::Submitting,
+        };
+    }
+    let (_, cmds) = update(m, Msg::StatusToggleConfirm);
+    assert!(
+        cmds.is_empty(),
+        "StatusToggleConfirm while Submitting must emit no Cmd"
+    );
+}
+
+// AC2: StatusToggleConfirm is a no-op (no Cmd) when no status-confirm overlay is active.
+#[test]
+fn status_toggle_confirm_without_overlay_emits_no_cmd() {
+    let m = detail_model_with_task("inst", 5, 99, serde_json::json!({ "is_completed": false }));
+    let (_, cmds) = update(m, Msg::StatusToggleConfirm);
+    assert!(
+        cmds.is_empty(),
+        "StatusToggleConfirm with no overlay must emit no Cmd"
+    );
+}
+
+// AC3: TaskEditOk clears the status-confirm overlay AND emits exactly one
+// Cmd::LoadDetail{refresh:true}, the same shared refresh path as the estimate write.
+#[test]
+fn status_task_edit_ok_clears_overlay_and_emits_load_detail_refresh() {
+    let m = detail_model_with_task("inst", 7, 13, serde_json::json!({ "is_completed": false }));
+    let m = update(m, Msg::StatusToggleOpen).0;
+    let (m, cmds) = update(m, Msg::TaskEditOk);
+
+    assert!(
+        extract_status_confirm(&m).is_none(),
+        "status-confirm overlay must be None after TaskEditOk"
+    );
+    assert_eq!(cmds.len(), 1, "must emit exactly one Cmd::LoadDetail");
+    match &cmds[0] {
+        Cmd::LoadDetail {
+            instance,
+            project_id,
+            task_id,
+            refresh,
+        } => {
+            assert_eq!(instance, "inst");
+            assert_eq!(*project_id, 7);
+            assert_eq!(*task_id, 13);
+            assert!(*refresh, "refresh must be true");
+        }
+        other => panic!("expected Cmd::LoadDetail, got {other:?}"),
+    }
+}
+
+// AC3: TaskEditErr sets the status-confirm overlay's status to Error(msg), proving the
+// generalized task-edit error setter reaches this overlay too.
+#[test]
+fn status_task_edit_err_sets_error_status() {
+    let m = detail_model_with_task("inst", 1, 1, serde_json::json!({ "is_completed": false }));
+    let m = update(m, Msg::StatusToggleOpen).0;
+    let (m, cmds) = update(m, Msg::TaskEditErr("Network error".into()));
+
+    assert!(cmds.is_empty(), "TaskEditErr must emit no Cmd");
+    let (completed_target, status) =
+        extract_status_confirm(&m).expect("status-confirm overlay must still be Some after error");
+    assert!(
+        completed_target,
+        "completed_target must be preserved on error"
+    );
+    assert_eq!(
+        *status,
+        EditStatus::Error("Network error".into()),
+        "status must be Error(msg)"
+    );
+}
+
+// AC1/AC2: map_status_confirm_key_event maps Enter -> StatusToggleConfirm.
+#[test]
+fn map_status_confirm_key_event_enter_yields_status_toggle_confirm() {
+    use crate::tui::events::map_status_confirm_key_event;
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState};
+    let key = KeyEvent {
+        code: KeyCode::Enter,
+        modifiers: KeyModifiers::NONE,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+    assert!(
+        matches!(
+            map_status_confirm_key_event(key),
+            Some(Msg::StatusToggleConfirm)
+        ),
+        "Enter must map to StatusToggleConfirm"
+    );
+}
+
+// AC1/AC2: map_status_confirm_key_event maps Ctrl+S -> StatusToggleConfirm.
+#[test]
+fn map_status_confirm_key_event_ctrl_s_yields_status_toggle_confirm() {
+    use crate::tui::events::map_status_confirm_key_event;
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState};
+    let key = KeyEvent {
+        code: KeyCode::Char('s'),
+        modifiers: KeyModifiers::CONTROL,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+    assert!(
+        matches!(
+            map_status_confirm_key_event(key),
+            Some(Msg::StatusToggleConfirm)
+        ),
+        "Ctrl+S must map to StatusToggleConfirm"
+    );
+}
+
+// AC1: map_status_confirm_key_event maps Esc -> StatusToggleCancel.
+#[test]
+fn map_status_confirm_key_event_esc_yields_status_toggle_cancel() {
+    use crate::tui::events::map_status_confirm_key_event;
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState};
+    let key = KeyEvent {
+        code: KeyCode::Esc,
+        modifiers: KeyModifiers::NONE,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+    assert!(
+        matches!(
+            map_status_confirm_key_event(key),
+            Some(Msg::StatusToggleCancel)
+        ),
+        "Esc must map to StatusToggleCancel"
+    );
+}
+
+// AC1: map_status_confirm_key_event ignores a plain printable char — no text entry.
+#[test]
+fn map_status_confirm_key_event_printable_char_yields_none() {
+    use crate::tui::events::map_status_confirm_key_event;
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState};
+    let key = KeyEvent {
+        code: KeyCode::Char('x'),
+        modifiers: KeyModifiers::NONE,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+    assert!(
+        map_status_confirm_key_event(key).is_none(),
+        "a plain printable char must not map to any Msg"
+    );
+}
+
+// AC1: map_browse_key_event maps plain 's' -> StatusToggleOpen (not a selection or nav action).
+#[test]
+fn map_browse_key_event_plain_s_yields_status_toggle_open() {
+    use crate::tui::events::map_browse_key_event;
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState};
+    let key = KeyEvent {
+        code: KeyCode::Char('s'),
+        modifiers: KeyModifiers::NONE,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+    assert!(
+        matches!(map_browse_key_event(key), Some(Msg::StatusToggleOpen)),
+        "plain 's' must map to StatusToggleOpen"
+    );
+}
+
 // ── Comment-edit-ui tests (BDR 0024 Sc.4-5 / ADR 0036) ───────────────────────
 
 /// Build a Detail model that has one owned comment (created_by_id == current_user_id)

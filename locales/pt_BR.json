@@ -163,5 +163,9 @@
   "Estimate (hours)": "Estimativa (horas)",
   "Failed to update task": "Falha ao atualizar a tarefa",
   "Enter a non-negative number of hours": "Informe um número de horas não negativo",
-  "↑/↓ · j/k move · c comment · t log time · e estimate · r refresh · Esc/b back · q quit": "↑/↓ · j/k mover · c comentar · t registrar tempo · e estimativa · r atualizar · Esc/b voltar · q sair"
+  "Change status": "Alterar status",
+  "Mark task as completed?": "Marcar tarefa como concluída?",
+  "Reopen task?": "Reabrir tarefa?",
+  "Enter/Ctrl+S confirm · Esc cancel": "Enter/Ctrl+S confirmar · Esc cancelar",
+  "↑/↓ · j/k move · c comment · t log time · e estimate · s status · r refresh · Esc/b back · q quit": "↑/↓ · j/k mover · c comentar · t registrar tempo · e estimativa · s status · r atualizar · Esc/b voltar · q sair"
 }

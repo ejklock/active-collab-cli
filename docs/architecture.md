@@ -321,9 +321,11 @@ sequenceDiagram
   tests (no token off-host, no token on a scheme downgrade).
 - **`tui/model.update` stays pure** through the write path: it owns the Detail overlay state
   as one typed `Screen::Detail.overlay: DetailOverlay { None, Compose(Compose),
-  LogTime(LogTimeForm), EstimateEdit(EstimateForm), ConfirmDelete, ImageViewer { asset, status } }`
-  — compose, the log-time form, the estimate-edit form, delete-confirm, and the image viewer are
-  mutually exclusive by construction ([ADR 0047](/adr/0047-detail-overlay-as-one-typed-state.md))
+  LogTime(LogTimeForm), EstimateEdit(EstimateForm), StatusConfirm { completed_target, status },
+  ConfirmDelete, ImageViewer { asset, status } }`
+  — compose, the log-time form, the estimate-edit form, the status-confirm prompt, delete-confirm,
+  and the image viewer are mutually exclusive by construction
+  ([ADR 0047](/adr/0047-detail-overlay-as-one-typed-state.md))
   — and emits write `Cmd`s, but never performs I/O. The shell owns the mode-aware key mapping
   (which keys are *text*) and the spawned write
   ([ADR 0034](/adr/0034-comment-compose-mode-multiline.md)).
@@ -339,12 +341,15 @@ sequenceDiagram
 - **Editing task fields (issue 0068) shares one write effect across every field**: the `e` key
   opens `EstimateEdit(EstimateForm)` prefilled from the task's current `estimate`; `EstimateSubmit`
   parses the value (must be `>= 0`) and emits the shared `Cmd::SubmitTaskEdit { completion,
-  assignee_id, estimate }`, with only `estimate` set for this affordance — the status toggle and
-  assignee picker land as later affordances on the same overlay/effect pair, reusing it unchanged.
-  The shell (`spawn_task_edit`) calls `client.set_task_completion` when `completion` is given, then
-  `client.update_task` when `assignee_id` and/or `estimate` are given, stopping at the first
-  non-Ok outcome; `TaskEditOk` clears the overlay and emits the same
-  `Cmd::LoadDetail { refresh: true }` via `refresh_detail_after_write`.
+  assignee_id, estimate }`, with only `estimate` set for this affordance. The `s` key opens
+  `StatusConfirm { completed_target, status }` with `completed_target` set to the opposite of the
+  task's current `is_completed`; `StatusToggleConfirm` emits the same `Cmd::SubmitTaskEdit` with
+  only `completion: Some(completed_target)` set — the assignee picker lands as a later affordance
+  on the same overlay/effect pair, reusing it unchanged. The shell (`spawn_task_edit`) calls
+  `client.set_task_completion` when `completion` is given, then `client.update_task` when
+  `assignee_id` and/or `estimate` are given, stopping at the first non-Ok outcome; `TaskEditOk`
+  clears the overlay and emits the same `Cmd::LoadDetail { refresh: true }` via
+  `refresh_detail_after_write`.
 - **image attachments open in an in-TUI viewer overlay** ([ADR 0065](/adr/0065-image-attachment-viewer-modal-overlay.md)):
   an asset whose derived filename ([ADR 0023](/adr/0023-asset-label-derivation.md)) is a raster
   image (`png/jpg/jpeg/gif/webp/bmp`, case-insensitive) emits a structural

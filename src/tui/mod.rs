@@ -28,7 +28,7 @@ use crossterm::{
 };
 use events::{
     map_browse_key_event, map_browse_mouse_event, map_compose_key_event, map_confirm_key_event,
-    map_estimate_key_event, map_log_time_key_event,
+    map_estimate_key_event, map_log_time_key_event, map_status_confirm_key_event,
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
 use std::io;
@@ -116,6 +116,14 @@ fn estimate_active(model: &Model) -> bool {
     )
 }
 
+/// Return true when the status-confirm modal is active on the top screen.
+fn status_confirm_active(model: &Model) -> bool {
+    matches!(
+        model.top(),
+        Some(model::Screen::Detail { overlay, .. }) if overlay.is_status_confirm()
+    )
+}
+
 /// Handle a crossterm input event: map to a Msg, run update, and dispatch commands.
 ///
 /// Key routing priority (highest first):
@@ -123,7 +131,8 @@ fn estimate_active(model: &Model) -> bool {
 ///   2. compose sub-mode (comment compose open) — typed chars + Ctrl+S/Esc
 ///   3. log-time sub-mode (log-time modal open) — typed chars + Ctrl+S/Tab/Esc
 ///   4. estimate-edit sub-mode (estimate modal open) — typed chars + Ctrl+S/Esc
-///   5. browse mode — navigation, shortcuts
+///   5. status-confirm sub-mode (status-confirm modal open) — Enter/Ctrl+S/Esc only
+///   6. browse mode — navigation, shortcuts
 fn handle_input_event(
     ev: Event,
     model: Model,
@@ -142,6 +151,8 @@ fn handle_input_event(
                 map_log_time_key_event(key)
             } else if estimate_active(&model) {
                 map_estimate_key_event(key)
+            } else if status_confirm_active(&model) {
+                map_status_confirm_key_event(key)
             } else {
                 map_browse_key_event(key)
             }
