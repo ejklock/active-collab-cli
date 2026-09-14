@@ -31,6 +31,37 @@ pub(crate) fn write_comment_success(
     }
 }
 
+pub(crate) fn write_time_success(
+    time_record_id: i64,
+    task_id: i64,
+    project_id: i64,
+    hours: f64,
+    json: bool,
+    out: &mut dyn Write,
+) {
+    if json {
+        writeln!(
+            out,
+            "{}",
+            agent_json::time_result(time_record_id, task_id, project_id, hours)
+        )
+        .ok();
+    } else {
+        writeln!(
+            out,
+            "{}",
+            t(&format!(
+                "Time logged (time_record_id={time_record_id}, {hours} hours, task {project_id}/{task_id}).",
+                time_record_id = time_record_id,
+                hours = hours,
+                project_id = project_id,
+                task_id = task_id
+            ))
+        )
+        .ok();
+    }
+}
+
 pub(crate) fn write_comment_failure(
     reason: &str,
     json: bool,

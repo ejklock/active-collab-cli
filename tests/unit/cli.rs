@@ -379,6 +379,58 @@ fn parse_browse() {
 }
 
 #[test]
+fn parse_time_log_with_all_flags() {
+    let cli = parse(&[
+        "time",
+        "log",
+        "665/75159",
+        "--hours",
+        "1.5",
+        "--date",
+        "2026-01-15",
+        "--summary",
+        "Deploy",
+        "--job-type",
+        "Development",
+        "--json",
+        "--instance",
+        "work",
+    ])
+    .unwrap();
+    let Command::Time(opts) = cli.command.unwrap() else {
+        panic!("expected Time")
+    };
+    let TimeCmd::Log(log) = opts.subcommand;
+    assert_eq!(log.task_ref.as_deref(), Some("665/75159"));
+    assert_eq!(log.hours, 1.5);
+    assert_eq!(log.date.as_deref(), Some("2026-01-15"));
+    assert_eq!(log.summary.as_deref(), Some("Deploy"));
+    assert_eq!(log.job_type.as_deref(), Some("Development"));
+    assert!(log.json);
+    assert_eq!(log.instance.as_deref(), Some("work"));
+}
+
+#[test]
+fn parse_time_log_without_task_ref_defaults_to_none() {
+    let cli = parse(&["time", "log", "--hours", "2"]).unwrap();
+    let Command::Time(opts) = cli.command.unwrap() else {
+        panic!("expected Time")
+    };
+    let TimeCmd::Log(log) = opts.subcommand;
+    assert!(log.task_ref.is_none());
+    assert_eq!(log.hours, 2.0);
+    assert!(log.date.is_none());
+    assert!(log.summary.is_none());
+    assert!(log.job_type.is_none());
+}
+
+#[test]
+fn parse_time_log_missing_hours_is_usage_error() {
+    let err = parse(&["time", "log", "665/75159"]);
+    assert!(err.is_err());
+}
+
+#[test]
 fn parse_unknown_subcommand_returns_error() {
     let err = parse(&["unknown-cmd"]);
     assert!(err.is_err());

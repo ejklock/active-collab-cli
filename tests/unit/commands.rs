@@ -3217,3 +3217,407 @@ fn reauth_message_english_key_is_identity() {
         "English key must be returned as-is (identity)"
     );
 }
+
+fn job_type_response(id: i64, name: &str, is_default: bool) -> serde_json::Value {
+    serde_json::json!({ "id": id, "name": name, "is_default": is_default })
+}
+
+fn time_record_response(id: i64) -> serde_json::Value {
+    serde_json::json!({ "id": id })
+}
+
+async fn mount_job_types(server: &MockServer, types: serde_json::Value) {
+    Mock::given(method("GET"))
+        .and(path("/api/v1/job-types"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(types))
+        .mount(server)
+        .await;
+}
+
+#[tokio::test]
+async fn time_log_core_explicit_date_and_default_job_type_posts_and_returns_0() {
+    let server = MockServer::start().await;
+    mount_job_types(
+        &server,
+        serde_json::json!([job_type_response(7, "Development", true)]),
+    )
+    .await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/projects/524/time-records"))
+        .and(body_json(serde_json::json!({
+            "task_id": 75346,
+            "value": 1.5,
+            "record_date": "2026-01-15",
+            "job_type_id": 7,
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(time_record_response(901)))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let inst = comment_inst(&server.uri());
+    let client = ActiveCollabClient::new(inst.clone(), make_http());
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    let code = time_log_core(
+        Some("524/75346"),
+        None,
+        1.5,
+        Some("2026-01-15"),
+        None,
+        None,
+        &client,
+        false,
+        &mut out,
+        &mut err,
+    )
+    .await;
+
+    server.verify().await;
+    assert_eq!(code, 0, "err: {}", output_str(&err));
+    let s = output_str(&out);
+    assert!(
+        s.contains("901"),
+        "confirmation must contain record id: {s}"
+    );
+    assert!(
+        s.contains("75346"),
+        "confirmation must contain task_id: {s}"
+    );
+    assert!(
+        s.contains("524"),
+        "confirmation must contain project_id: {s}"
+    );
+}
+
+#[tokio::test]
+async fn time_log_core_summary_is_included_in_posted_body() {
+    let server = MockServer::start().await;
+    mount_job_types(
+        &server,
+        serde_json::json!([job_type_response(7, "Development", true)]),
+    )
+    .await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/projects/524/time-records"))
+        .and(body_json(serde_json::json!({
+            "task_id": 75346,
+            "value": 2.0,
+            "record_date": "2026-01-15",
+            "job_type_id": 7,
+            "summary": "Deploy em homolog.",
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(time_record_response(902)))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let inst = comment_inst(&server.uri());
+    let client = ActiveCollabClient::new(inst.clone(), make_http());
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    let code = time_log_core(
+        Some("524/75346"),
+        None,
+        2.0,
+        Some("2026-01-15"),
+        Some("Deploy em homolog."),
+        None,
+        &client,
+        false,
+        &mut out,
+        &mut err,
+    )
+    .await;
+
+    server.verify().await;
+    assert_eq!(code, 0, "err: {}", output_str(&err));
+}
+
+#[tokio::test]
+async fn time_log_core_job_type_override_matched_by_name_case_insensitive() {
+    let server = MockServer::start().await;
+    mount_job_types(
+        &server,
+        serde_json::json!([
+            job_type_response(7, "Development", true),
+            job_type_response(9, "Design", false),
+        ]),
+    )
+    .await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/projects/524/time-records"))
+        .and(body_json(serde_json::json!({
+            "task_id": 75346,
+            "value": 1.0,
+            "record_date": "2026-01-15",
+            "job_type_id": 9,
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(time_record_response(903)))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let inst = comment_inst(&server.uri());
+    let client = ActiveCollabClient::new(inst.clone(), make_http());
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    let code = time_log_core(
+        Some("524/75346"),
+        None,
+        1.0,
+        Some("2026-01-15"),
+        None,
+        Some("design"),
+        &client,
+        false,
+        &mut out,
+        &mut err,
+    )
+    .await;
+
+    server.verify().await;
+    assert_eq!(code, 0, "err: {}", output_str(&err));
+}
+
+#[tokio::test]
+async fn time_log_core_job_type_override_matched_by_id() {
+    let server = MockServer::start().await;
+    mount_job_types(
+        &server,
+        serde_json::json!([
+            job_type_response(7, "Development", true),
+            job_type_response(9, "Design", false),
+        ]),
+    )
+    .await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/projects/524/time-records"))
+        .and(body_json(serde_json::json!({
+            "task_id": 75346,
+            "value": 1.0,
+            "record_date": "2026-01-15",
+            "job_type_id": 9,
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(time_record_response(904)))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let inst = comment_inst(&server.uri());
+    let client = ActiveCollabClient::new(inst.clone(), make_http());
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    let code = time_log_core(
+        Some("524/75346"),
+        None,
+        1.0,
+        Some("2026-01-15"),
+        None,
+        Some("9"),
+        &client,
+        false,
+        &mut out,
+        &mut err,
+    )
+    .await;
+
+    server.verify().await;
+    assert_eq!(code, 0, "err: {}", output_str(&err));
+}
+
+#[tokio::test]
+async fn time_log_core_no_job_types_available_errors_without_posting_time_record() {
+    let server = MockServer::start().await;
+    mount_job_types(&server, serde_json::json!([])).await;
+    // No POST mock — a create_time_record call would fail the test via an unexpected request.
+
+    let inst = comment_inst(&server.uri());
+    let client = ActiveCollabClient::new(inst.clone(), make_http());
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    let code = time_log_core(
+        Some("524/75346"),
+        None,
+        1.0,
+        Some("2026-01-15"),
+        None,
+        None,
+        &client,
+        false,
+        &mut out,
+        &mut err,
+    )
+    .await;
+
+    assert_ne!(code, 0, "no resolvable job type must not return exit 0");
+    assert!(
+        output_str(&err).contains("job type"),
+        "error must mention job type: {}",
+        output_str(&err)
+    );
+}
+
+#[tokio::test]
+async fn time_log_core_nonpositive_hours_returns_exit2_without_network_call() {
+    // No mocks configured at all — any HTTP call fails the test via connection refused
+    // to an unreachable address, but the point is time_log_core must never attempt one.
+    let inst = comment_inst("http://127.0.0.1:1");
+    let client = ActiveCollabClient::new(inst.clone(), make_http());
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    let code = time_log_core(
+        Some("524/75346"),
+        None,
+        0.0,
+        None,
+        None,
+        None,
+        &client,
+        false,
+        &mut out,
+        &mut err,
+    )
+    .await;
+
+    assert_eq!(code, 2, "non-positive hours must return exit code 2");
+    assert!(output_str(&err).contains("positive"));
+    assert!(output_str(&out).is_empty());
+}
+
+#[tokio::test]
+async fn time_log_core_json_flag_stdout_is_exact_minified_result_line() {
+    let server = MockServer::start().await;
+    mount_job_types(
+        &server,
+        serde_json::json!([job_type_response(7, "Development", true)]),
+    )
+    .await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/projects/524/time-records"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(time_record_response(905)))
+        .mount(&server)
+        .await;
+
+    let inst = comment_inst(&server.uri());
+    let client = ActiveCollabClient::new(inst.clone(), make_http());
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    let code = time_log_core(
+        Some("524/75346"),
+        None,
+        1.5,
+        Some("2026-01-15"),
+        None,
+        None,
+        &client,
+        true,
+        &mut out,
+        &mut err,
+    )
+    .await;
+
+    assert_eq!(code, 0, "err: {}", output_str(&err));
+    let s = output_str(&out);
+    let trimmed = s.trim_end_matches('\n');
+    assert!(
+        !trimmed.contains('\n'),
+        "json output must be a single line: {s:?}"
+    );
+    let obj: serde_json::Value = serde_json::from_str(trimmed).expect("stdout must be valid JSON");
+    assert_eq!(obj["ok"], true);
+    assert_eq!(obj["time_record_id"], 905);
+    assert_eq!(obj["task_id"], 75346);
+    assert_eq!(obj["project_id"], 524);
+    assert_eq!(obj["hours"], 1.5);
+}
+
+#[tokio::test]
+async fn time_log_core_401_prints_reauth_message_and_returns_nonzero() {
+    let server = MockServer::start().await;
+    mount_job_types(
+        &server,
+        serde_json::json!([job_type_response(7, "Development", true)]),
+    )
+    .await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/projects/524/time-records"))
+        .respond_with(ResponseTemplate::new(401))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let inst = comment_inst(&server.uri());
+    let client = ActiveCollabClient::new(inst.clone(), make_http());
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    let code = time_log_core(
+        Some("524/75346"),
+        None,
+        1.0,
+        Some("2026-01-15"),
+        None,
+        None,
+        &client,
+        false,
+        &mut out,
+        &mut err,
+    )
+    .await;
+
+    server.verify().await;
+    assert_ne!(code, 0);
+    assert!(output_str(&err).contains("ac setup add"));
+}
+
+#[tokio::test]
+async fn time_log_core_http_failure_with_json_flag_emits_error_object() {
+    let server = MockServer::start().await;
+    mount_job_types(
+        &server,
+        serde_json::json!([job_type_response(7, "Development", true)]),
+    )
+    .await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/projects/524/time-records"))
+        .respond_with(ResponseTemplate::new(500).set_body_string("server error"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let inst = comment_inst(&server.uri());
+    let client = ActiveCollabClient::new(inst.clone(), make_http());
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    let code = time_log_core(
+        Some("524/75346"),
+        None,
+        1.0,
+        Some("2026-01-15"),
+        None,
+        None,
+        &client,
+        true,
+        &mut out,
+        &mut err,
+    )
+    .await;
+
+    server.verify().await;
+    assert_ne!(code, 0);
+    let s = output_str(&out);
+    let trimmed = s.trim_end_matches('\n');
+    let obj: serde_json::Value =
+        serde_json::from_str(trimmed).expect("stdout must be valid JSON on --json failure");
+    assert_eq!(obj["ok"], false);
+    assert!(obj.get("error").is_some());
+}

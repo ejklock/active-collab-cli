@@ -1,7 +1,7 @@
 use clap::{Args, CommandFactory, Parser, Subcommand};
 
-pub const KNOWN_COMMANDS: [&str; 8] = [
-    "setup", "get", "current", "mine", "list", "browse", "comment", "skill",
+pub const KNOWN_COMMANDS: [&str; 9] = [
+    "setup", "get", "current", "mine", "list", "browse", "comment", "skill", "time",
 ];
 
 /// Name used in help, usage, and version output when `argv[0]` is unavailable.
@@ -49,6 +49,8 @@ pub enum Command {
     Browse(BrowseArgs),
     /// Post a comment to a task as the logged-in user.
     Comment(CommentArgs),
+    /// Manage time tracking entries.
+    Time(TimeOpts),
     /// Print an embedded agent skill (ac skill list | ac skill <name>).
     Skill(SkillArgs),
 }
@@ -175,6 +177,43 @@ pub struct CommentArgs {
     /// Comment body. When omitted, the body is read from stdin.
     #[arg(short = 'm', long)]
     pub message: Option<String>,
+    /// Print curated minified JSON write result for agent/LLM consumption.
+    #[arg(long)]
+    pub json: bool,
+    /// Force a named instance.
+    #[arg(long)]
+    pub instance: Option<String>,
+}
+
+/// Wrapper that holds the time subcommand.
+#[derive(Args, Debug)]
+pub struct TimeOpts {
+    #[command(subcommand)]
+    pub subcommand: TimeCmd,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum TimeCmd {
+    /// Log time against a task as the logged-in user.
+    Log(TimeLogArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct TimeLogArgs {
+    /// Task URL or PROJECT_ID/TASK_ID. When omitted, resolved from the current git branch.
+    pub task_ref: Option<String>,
+    /// Hours to log (must be a positive number).
+    #[arg(long, required = true)]
+    pub hours: f64,
+    /// Record date (YYYY-MM-DD). Defaults to today.
+    #[arg(long)]
+    pub date: Option<String>,
+    /// Free-text summary for the time record.
+    #[arg(long)]
+    pub summary: Option<String>,
+    /// Job type id or name. Defaults to the instance's default job type.
+    #[arg(long = "job-type")]
+    pub job_type: Option<String>,
     /// Print curated minified JSON write result for agent/LLM consumption.
     #[arg(long)]
     pub json: bool,

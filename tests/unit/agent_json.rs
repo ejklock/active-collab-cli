@@ -631,3 +631,38 @@ fn comment_error_is_single_minified_line() {
         "comment_error must not contain newlines: {line:?}"
     );
 }
+
+// --- time_result shape (issue 0067) ---
+
+#[test]
+fn time_result_exact_minified_string() {
+    let line = time_result(901, 75346, 524, 1.5);
+    assert_eq!(
+        line, r#"{"ok":true,"time_record_id":901,"task_id":75346,"project_id":524,"hours":1.5}"#,
+        "time_result must match the exact minified contract"
+    );
+}
+
+#[test]
+fn time_result_is_valid_json_with_ok_true() {
+    let line = time_result(1, 2, 3, 4.0);
+    let obj: serde_json::Value = serde_json::from_str(&line).expect("must be valid JSON");
+    assert_eq!(obj["ok"], true);
+    assert_eq!(obj["time_record_id"], 1);
+    assert_eq!(obj["task_id"], 2);
+    assert_eq!(obj["project_id"], 3);
+    assert_eq!(obj["hours"], 4.0);
+}
+
+#[test]
+fn time_result_is_single_minified_line() {
+    let line = time_result(100, 200, 300, 0.5);
+    assert!(
+        !line.contains('\n'),
+        "time_result must not contain newlines: {line:?}"
+    );
+    assert!(
+        !line.contains("  "),
+        "time_result must not contain 2-space indent: {line:?}"
+    );
+}
