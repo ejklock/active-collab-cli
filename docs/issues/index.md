@@ -24,7 +24,6 @@ TUI/UX work (V/R/ARCH slices), tracing to
 * [0064 — Installers drop the short ac command — restore it as an alias next to active-collab](0064-installers-drop-the-short-ac-command-restore-it-as-an-alias-next-to-active-collab.md) - Proposed
 * [0065 — The ac alias only half works: help says active-collab, make install ships a Linux binary, and a stale ac wins the PATH](0065-the-ac-alias-only-half-works-help-says-active-collab-make-install-ships-a-linux-binary-and-a-stale-ac-wins-the-path.md) - Proposed
 * [0066 — Comment writes preserve paragraph breaks — encode newlines as HTML before POST/PUT](0066-comment-writes-preserve-paragraph-breaks-encode-newlines-as-html-before-post-put.md) - open
-* [0067 — Log time on a task — add a time entry from CLI and TUI](0067-log-time-on-a-task-add-a-time-entry-from-cli-and-tui.md) - open
 * [0068 — Edit task fields — status, assignee, time estimate from CLI and TUI](0068-edit-task-fields-status-assignee-time-estimate-from-cli-and-tui.md) - open
 
 ## Closed
@@ -77,3 +76,4 @@ TUI/UX work (V/R/ARCH slices), tracing to
 * [0053 — Unify the parallel plain/rich word-wrap engines into one greedy_wrap core over a cell abstraction — and fix the rich blank-line drop (ADR 0048)](0053-unify-wrap-engines.md) - closed
 * [0054 — Bring the comment-policy harness find_line_comment within the complexity budget — extract the duplicated quoted-literal skip (obs 34)](0054-simplify-find-line-comment.md) - closed
 * [0055 — Reconcile CHANGELOG.md with the Rust crate tag line — retire/segregate the legacy Python history](0055-reconcile-changelog-with-rust-tag-line.md) - closed
+* [0067 — Log time on a task — add a time entry from CLI and TUI](0067-log-time-on-a-task-add-a-time-entry-from-cli-and-tui.md) - closed
