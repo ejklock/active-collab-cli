@@ -160,6 +160,15 @@ pub enum Cmd {
         instance: String,
         comment_id: i64,
     },
+    /// POST a new time record for the task. `summary` carries the optional note; the
+    /// job type and record date are resolved by the shell, never by the pure core.
+    SubmitTimeLog {
+        instance: String,
+        project_id: i64,
+        task_id: i64,
+        hours: f64,
+        summary: Option<String>,
+    },
     /// Fetch and decode the image bytes for an opened image-viewer asset.
     /// Handled entirely by the shell (ADR 0065); the pure Model never sees bytes.
     LoadImage {
@@ -220,21 +229,59 @@ pub struct Compose {
     pub status: ComposeStatus,
 }
 
+/// Which field of the log-time modal currently has focus.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum LogTimeField {
+    Hours,
+    Summary,
+}
+
+/// Current lifecycle phase of the log-time modal.
+#[derive(Debug, Clone, PartialEq)]
+pub enum LogTimeStatus {
+    Editing,
+    Submitting,
+    Error(String),
+}
+
+/// Transient state for the in-progress log-time modal.
+///
+/// Plain `String` buffers (not a `TextArea`) since each field is a single line with
+/// no caret/undo needs, so the whole form stays `PartialEq` unlike `Compose`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LogTimeForm {
+    pub hours: String,
+    pub summary: String,
+    pub field: LogTimeField,
+    pub status: LogTimeStatus,
+}
+
+impl LogTimeForm {
+    fn focused_buffer_mut(&mut self) -> &mut String {
+        match self.field {
+            LogTimeField::Hours => &mut self.hours,
+            LogTimeField::Summary => &mut self.summary,
+        }
+    }
+}
+
 /// The active modal overlay on the Detail read view.
 ///
-/// Compose and the delete prompt are mutually exclusive by construction — only one overlay
-/// at a time. The combined state (both active) cannot be constructed with this enum,
-/// replacing the previous two independent `Option` fields (ADR 0047).
+/// Compose, the log-time form, the delete prompt, and the image viewer are mutually
+/// exclusive by construction — only one overlay at a time. The combined state (more
+/// than one active) cannot be constructed with this enum, replacing the previous
+/// independent `Option` fields (ADR 0047).
 ///
-/// `Compose` is intentionally larger than `ConfirmDelete`: it carries a `TextArea` with
-/// caret/selection/undo history (ADR 0064). Construction happens only on open/edit, never
-/// per-keystroke, so boxing would add indirection with no practical benefit — same
-/// rationale as `Screen`'s `large_enum_variant` allow below.
+/// `Compose` is intentionally larger than the other variants: it carries a `TextArea`
+/// with caret/selection/undo history (ADR 0064). Construction happens only on
+/// open/edit, never per-keystroke, so boxing would add indirection with no practical
+/// benefit — same rationale as `Screen`'s `large_enum_variant` allow below.
 #[derive(Debug, Clone)]
 #[allow(clippy::large_enum_variant)]
 pub enum DetailOverlay {
     None,
     Compose(Compose),
+    LogTime(LogTimeForm),
     ConfirmDelete {
         comment_id: i64,
     },
@@ -255,6 +302,20 @@ impl DetailOverlay {
     pub fn compose_mut(&mut self) -> Option<&mut Compose> {
         match self {
             DetailOverlay::Compose(c) => Some(c),
+            _ => Option::None,
+        }
+    }
+
+    pub fn log_time(&self) -> Option<&LogTimeForm> {
+        match self {
+            DetailOverlay::LogTime(f) => Some(f),
+            _ => Option::None,
+        }
+    }
+
+    pub fn log_time_mut(&mut self) -> Option<&mut LogTimeForm> {
+        match self {
+            DetailOverlay::LogTime(f) => Some(f),
             _ => Option::None,
         }
     }
@@ -282,6 +343,10 @@ impl DetailOverlay {
 
     pub fn is_compose(&self) -> bool {
         matches!(self, DetailOverlay::Compose(_))
+    }
+
+    pub fn is_log_time(&self) -> bool {
+        matches!(self, DetailOverlay::LogTime(_))
     }
 
     pub fn is_confirm(&self) -> bool {
@@ -586,7 +651,7 @@ pub enum Msg {
     ///
     /// Carries everything but the shell-level Ctrl+S/Esc shortcuts: printable chars,
     /// Enter (newline), caret movement, Home/End, Backspace/Delete, undo/redo. The
-    /// shell (events.rs) converts the crossterm `KeyEvent` to `tui_textarea::Input`;
+    /// shell (events.rs) converts the crossterm `KeyEvent` to `tui_textarea::Input`.
     /// `update()` applies it via `TextArea::input` (ADR 0064).
     ComposeInput(tui_textarea::Input),
     /// Submit the current compose buffer as a new comment.
@@ -600,6 +665,22 @@ pub enum Msg {
     /// A 401 response from a comment mutation (create/update/delete).
     /// Sets auth_error on the Detail screen without clearing the compose buffer.
     AuthExpired,
+    /// Open the log-time modal on the current Detail screen.
+    LogTimeOpen,
+    /// Append a printable character to the currently focused log-time field.
+    LogTimeChar(char),
+    /// Remove the last character from the currently focused log-time field.
+    LogTimeBackspace,
+    /// Switch focus between the Hours and Summary fields.
+    LogTimeToggleField,
+    /// Submit the current log-time buffers as a new time record.
+    LogTimeSubmit,
+    /// Cancel the log-time modal, discarding the buffers.
+    LogTimeCancel,
+    /// The time-record POST succeeded; refresh the detail view.
+    TimeMutationOk,
+    /// The time-record POST failed; preserve the buffers and show an error.
+    TimeMutationErr(String),
     /// Move the comment-card focus cursor forward by one card (j / Down in Detail browse mode).
     FocusNextComment,
     /// Move the comment-card focus cursor backward by one card (k / Up in Detail browse mode).
@@ -791,6 +872,14 @@ pub fn update(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
         | Msg::CommentMutationOk
         | Msg::CommentMutationErr(_)
         | Msg::AuthExpired) => update_compose(model, m),
+        m @ (Msg::LogTimeOpen
+        | Msg::LogTimeChar(_)
+        | Msg::LogTimeBackspace
+        | Msg::LogTimeToggleField
+        | Msg::LogTimeSubmit
+        | Msg::LogTimeCancel
+        | Msg::TimeMutationOk
+        | Msg::TimeMutationErr(_)) => update_log_time(model, m),
         Msg::FocusNextComment => (handle_focus_next(model), vec![]),
         Msg::FocusPrevComment => (handle_focus_prev(model), vec![]),
         Msg::ConfirmDeleteComment => handle_confirm_delete(model),
@@ -891,6 +980,20 @@ fn update_compose(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
         Msg::CommentMutationOk => handle_comment_mutation_ok(model),
         Msg::CommentMutationErr(msg) => (handle_comment_mutation_err(model, msg), vec![]),
         Msg::AuthExpired => (handle_auth_expired(model), vec![]),
+        _ => (model, vec![]),
+    }
+}
+
+fn update_log_time(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
+    match msg {
+        Msg::LogTimeOpen => (handle_log_time_open(model), vec![]),
+        Msg::LogTimeChar(c) => (handle_log_time_char(model, c), vec![]),
+        Msg::LogTimeBackspace => (handle_log_time_backspace(model), vec![]),
+        Msg::LogTimeToggleField => (handle_log_time_toggle_field(model), vec![]),
+        Msg::LogTimeSubmit => handle_log_time_submit(model),
+        Msg::LogTimeCancel => (handle_log_time_cancel(model), vec![]),
+        Msg::TimeMutationOk => handle_time_mutation_ok(model),
+        Msg::TimeMutationErr(msg) => (handle_time_mutation_err(model, msg), vec![]),
         _ => (model, vec![]),
     }
 }
@@ -1806,7 +1909,10 @@ fn handle_cancel_delete(mut model: Model) -> Model {
     model
 }
 
-fn handle_comment_mutation_ok(mut model: Model) -> (Model, Vec<Cmd>) {
+/// Clear the active overlay and emit `Cmd::LoadDetail { refresh: true }` for the
+/// current Detail screen — the server-truth refresh shared by every write path
+/// (comment mutation, time-record mutation) after a successful POST/PUT (ADR 0035).
+fn refresh_detail_after_write(mut model: Model) -> (Model, Vec<Cmd>) {
     let detail_fields = match model.top() {
         Some(Screen::Detail {
             instance,
@@ -1837,6 +1943,10 @@ fn handle_comment_mutation_ok(mut model: Model) -> (Model, Vec<Cmd>) {
     (model, vec![cmd])
 }
 
+fn handle_comment_mutation_ok(model: Model) -> (Model, Vec<Cmd>) {
+    refresh_detail_after_write(model)
+}
+
 fn handle_comment_mutation_err(mut model: Model, msg: String) -> Model {
     if let Some(Screen::Detail {
         overlay: DetailOverlay::Compose(cp),
@@ -1847,6 +1957,202 @@ fn handle_comment_mutation_err(mut model: Model, msg: String) -> Model {
         cp.status = ComposeStatus::Error(msg);
         *rendered_width = usize::MAX;
     }
+    model
+}
+
+/// Open the log-time modal on the current Detail screen with empty buffers.
+///
+/// No-op when the log-time modal is already open — mirrors `handle_compose_open`.
+fn handle_log_time_open(mut model: Model) -> Model {
+    if let Some(Screen::Detail {
+        ref mut overlay,
+        ref mut rendered_width,
+        ..
+    }) = model.top_mut()
+    {
+        if !overlay.is_log_time() {
+            *overlay = DetailOverlay::LogTime(LogTimeForm {
+                hours: String::new(),
+                summary: String::new(),
+                field: LogTimeField::Hours,
+                status: LogTimeStatus::Editing,
+            });
+            *rendered_width = usize::MAX;
+        }
+    }
+    model
+}
+
+/// Append `c` to the currently focused log-time field while the form is `Editing`.
+fn handle_log_time_char(mut model: Model, c: char) -> Model {
+    if let Some(Screen::Detail {
+        ref mut overlay,
+        ref mut rendered_width,
+        ..
+    }) = model.top_mut()
+    {
+        if let Some(form) = overlay.log_time_mut() {
+            if form.status == LogTimeStatus::Editing {
+                form.focused_buffer_mut().push(c);
+                *rendered_width = usize::MAX;
+            }
+        }
+    }
+    model
+}
+
+/// Remove the last character from the currently focused log-time field while
+/// the form is `Editing`.
+fn handle_log_time_backspace(mut model: Model) -> Model {
+    if let Some(Screen::Detail {
+        ref mut overlay,
+        ref mut rendered_width,
+        ..
+    }) = model.top_mut()
+    {
+        if let Some(form) = overlay.log_time_mut() {
+            if form.status == LogTimeStatus::Editing {
+                form.focused_buffer_mut().pop();
+                *rendered_width = usize::MAX;
+            }
+        }
+    }
+    model
+}
+
+/// Switch the focused log-time field between Hours and Summary.
+fn handle_log_time_toggle_field(mut model: Model) -> Model {
+    if let Some(Screen::Detail {
+        ref mut overlay,
+        ref mut rendered_width,
+        ..
+    }) = model.top_mut()
+    {
+        if let Some(form) = overlay.log_time_mut() {
+            form.field = match form.field {
+                LogTimeField::Hours => LogTimeField::Summary,
+                LogTimeField::Summary => LogTimeField::Hours,
+            };
+            *rendered_width = usize::MAX;
+        }
+    }
+    model
+}
+
+/// Dismiss the log-time modal without submitting.
+fn handle_log_time_cancel(mut model: Model) -> Model {
+    if let Some(Screen::Detail {
+        ref mut overlay,
+        ref mut rendered_width,
+        ..
+    }) = model.top_mut()
+    {
+        *overlay = DetailOverlay::None;
+        *rendered_width = usize::MAX;
+    }
+    model
+}
+
+/// Extract the fields needed to submit the log-time form, or None when the guard fails.
+///
+/// Guard: overlay must be `LogTime` and its status must be `Editing`.
+fn extract_log_time_submit_info(model: &Model) -> Option<(String, i64, i64, String, String)> {
+    match model.top() {
+        Some(Screen::Detail {
+            instance,
+            project_id,
+            task_id,
+            overlay,
+            ..
+        }) => {
+            let form = overlay.log_time()?;
+            if form.status != LogTimeStatus::Editing {
+                return None;
+            }
+            Some((
+                instance.clone(),
+                *project_id,
+                *task_id,
+                form.hours.clone(),
+                form.summary.clone(),
+            ))
+        }
+        _ => None,
+    }
+}
+
+/// Set the log-time overlay's status to `Error(message)`, when the overlay is active.
+fn set_log_time_error(model: &mut Model, message: String) {
+    if let Some(Screen::Detail {
+        ref mut overlay,
+        ref mut rendered_width,
+        ..
+    }) = model.top_mut()
+    {
+        if let Some(form) = overlay.log_time_mut() {
+            form.status = LogTimeStatus::Error(message);
+            *rendered_width = usize::MAX;
+        }
+    }
+}
+
+/// Parse the hours buffer and, when it is a value greater than zero, set the form to
+/// `Submitting` and emit `Cmd::SubmitTimeLog`. An empty, zero, negative, or
+/// non-numeric hours buffer sets `Error` instead and emits no `Cmd`. The summary
+/// buffer becomes `Some` only when non-empty after trimming.
+fn handle_log_time_submit(mut model: Model) -> (Model, Vec<Cmd>) {
+    let Some((instance, project_id, task_id, hours_input, summary_input)) =
+        extract_log_time_submit_info(&model)
+    else {
+        return (model, vec![]);
+    };
+
+    let parsed_hours = hours_input
+        .trim()
+        .parse::<f64>()
+        .ok()
+        .filter(|hours| *hours > 0.0);
+
+    let Some(hours) = parsed_hours else {
+        set_log_time_error(&mut model, t("Enter a positive number of hours"));
+        return (model, vec![]);
+    };
+
+    if let Some(Screen::Detail {
+        ref mut overlay,
+        ref mut rendered_width,
+        ..
+    }) = model.top_mut()
+    {
+        if let Some(form) = overlay.log_time_mut() {
+            form.status = LogTimeStatus::Submitting;
+            *rendered_width = usize::MAX;
+        }
+    }
+
+    let summary = {
+        let trimmed = summary_input.trim();
+        (!trimmed.is_empty()).then(|| trimmed.to_string())
+    };
+
+    (
+        model,
+        vec![Cmd::SubmitTimeLog {
+            instance,
+            project_id,
+            task_id,
+            hours,
+            summary,
+        }],
+    )
+}
+
+fn handle_time_mutation_ok(model: Model) -> (Model, Vec<Cmd>) {
+    refresh_detail_after_write(model)
+}
+
+fn handle_time_mutation_err(mut model: Model, msg: String) -> Model {
+    set_log_time_error(&mut model, msg);
     model
 }
 

@@ -114,7 +114,9 @@ fn resolve_job_type_id(job_types: &[JobType], job_type_arg: Option<&str>) -> Opt
 /// Resolve the record date: the given `--date` value verbatim, or today
 /// (local time, `YYYY-MM-DD`) when omitted. Kept as a small pure function so
 /// tests can pass an explicit date and assert the posted body deterministically.
-fn resolve_record_date(date: Option<&str>) -> String {
+/// `pub(crate)` so the TUI shell can resolve the same "today" default (no date
+/// field in the log-time modal) without re-deriving the rule.
+pub(crate) fn resolve_record_date(date: Option<&str>) -> String {
     date.map(str::to_owned)
         .unwrap_or_else(|| chrono::Local::now().format("%Y-%m-%d").to_string())
 }

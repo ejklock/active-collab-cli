@@ -7,7 +7,7 @@
 
 use crate::i18n::t;
 use crate::render::{display_width, wrap_text};
-use crate::tui::model::{Compose, Screen};
+use crate::tui::model::{Compose, LogTimeForm, Screen};
 
 /// Reformat a BRT timestamp `YYYY-MM-DDTHH:MM:SS` into `DD/MM/YYYY HH:MM`.
 /// Returns None when the input is too short or cannot be sliced at the expected offsets.
@@ -44,6 +44,13 @@ pub(crate) fn hint_for_screen(screen: &Screen) -> String {
             } else {
                 overlay.compose()
             };
+            // The log-time modal owns its hint when active; pass None to footer,
+            // same one-home rule as compose.
+            let log_time_for_footer = if overlay.is_log_time() {
+                None
+            } else {
+                overlay.log_time()
+            };
             // The confirm modal owns its hint; pass None so the footer does not
             // duplicate it (ADR 0039 §5 one-home suppression).
             let confirm_for_footer = if overlay.is_confirm() {
@@ -53,6 +60,7 @@ pub(crate) fn hint_for_screen(screen: &Screen) -> String {
             };
             detail_hint(
                 compose_for_footer,
+                log_time_for_footer,
                 confirm_for_footer,
                 *focused_comment,
                 comments,
@@ -65,10 +73,11 @@ pub(crate) fn hint_for_screen(screen: &Screen) -> String {
 
 /// Derive the context-aware instruction hint for the Detail screen.
 ///
-/// Priority order matches ADR 0038 §1: composing beats confirming-delete beats
-/// own-comment-focused beats the browsing default.
+/// Priority order matches ADR 0038 §1: composing/logging-time beats
+/// confirming-delete beats own-comment-focused beats the browsing default.
 pub(crate) fn detail_hint(
     compose: Option<&Compose>,
+    log_time: Option<&LogTimeForm>,
     confirm_delete: Option<i64>,
     focused_comment: Option<usize>,
     comments: &[serde_json::Value],
@@ -77,13 +86,16 @@ pub(crate) fn detail_hint(
     if compose.is_some() {
         return t("Ctrl+S send · Esc cancel");
     }
+    if log_time.is_some() {
+        return t("Ctrl+S send · Tab switch field · Esc cancel");
+    }
     if confirm_delete.is_some() {
         return t("Enter/click confirm · Esc cancel");
     }
     if is_own_comment_focused(focused_comment, comments, current_user_id) {
         return t("↑/↓ · j/k move · Ctrl+click edit/delete · c new");
     }
-    t("↑/↓ · j/k move · c comment · r refresh · Esc/b back · q quit")
+    t("↑/↓ · j/k move · c comment · t log time · r refresh · Esc/b back · q quit")
 }
 
 pub(crate) fn is_own_comment_focused(
@@ -105,8 +117,8 @@ pub(crate) fn is_own_comment_focused(
 /// Derive the transient status string for the Detail footer status row.
 ///
 /// Priority (highest first): auth_error > copied_feedback.
-/// When `compose` is `Some`, the modal overlay owns the compose hint/status (ADR 0039 §5);
-/// the footer still shows auth_error or copied_feedback if either is set.
+/// When `compose` is `Some`, the modal overlay owns the compose hint/status (ADR 0039 §5).
+/// The footer still shows auth_error or copied_feedback if either is set.
 pub(crate) fn detail_status_line(
     compose: Option<&Compose>,
     copied_feedback: bool,

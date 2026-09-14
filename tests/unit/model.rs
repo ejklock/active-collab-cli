@@ -2800,7 +2800,7 @@ fn detail_max_offset_empty_assets_no_inline_section() {
 // AC2 (BDR 0022 Sc.2): last asset row is reachable at max scroll offset.
 // With 1 body line + blank + 6 section rows = 8 total lines, viewport_rows=24,
 // text_vh=20, max=8-20=0 (all fits), so the asset section is always visible at offset=0.
-// For the long list scenario: 25 body lines + blank + 6 section = 32 lines;
+// For the long list scenario: 25 body lines + blank + 6 section = 32 lines.
 // max=32-20=12; at offset=12 the visible range is [12..31] inclusive (rows 2..21),
 // which covers the last section rows at lines[31]=section_row5 (visible).
 #[test]
@@ -3033,8 +3033,8 @@ fn is_in_body_area_includes_asset_rows_no_panel_height_subtracted() {
 // emits Cmd::OpenAsset with that asset's url; a plain (unmodified) click on the SAME row
 // does NOT emit OpenAsset (reserved for text selection). Pins the Ctrl/Cmd gate end-to-end.
 //
-// This is the regression guard for ADR 0032: the hit-test (asset_panel_cmd_at) is intact;
-// what was broken was only the VISUAL affordance (no link style). Both are now tested together.
+// This is the regression guard for ADR 0032: the hit-test (asset_panel_cmd_at) is intact.
+// What was broken was only the VISUAL affordance (no link style). Both are now tested together.
 //
 // Layout math for viewport (80, 24), 3 body lines + blank + section:
 //   inner_width = 78, content_width = inline_content_width(78)
@@ -3265,7 +3265,9 @@ fn plain_click_on_wrapped_asset_continuation_emits_no_open_asset() {
 
 // ── Compose mode tests (BDR 0024 / ADR 0034 / ADR 0035) ──────────────────────
 
-use crate::tui::model::{Compose, ComposeKind, ComposeStatus, DetailOverlay};
+use crate::tui::model::{
+    Compose, ComposeKind, ComposeStatus, DetailOverlay, LogTimeField, LogTimeForm, LogTimeStatus,
+};
 
 fn detail_model_for_compose(instance: &str, project_id: i64, task_id: i64) -> Model {
     Model {
@@ -3785,6 +3787,362 @@ fn compose_multiline_editor_produces_two_lines() {
         cp.editor.lines(),
         ["line1", "l2"],
         "Enter must split the editor into two lines"
+    );
+}
+
+// ── Log-time modal tests (issue 0067 TUI slice) ───────────────────────────────
+
+fn extract_log_time(model: &Model) -> Option<&LogTimeForm> {
+    match model.top() {
+        Some(Screen::Detail { overlay, .. }) => overlay.log_time(),
+        _ => None,
+    }
+}
+
+// AC1-part1: LogTimeOpen on a Detail screen sets the form to Editing/Hours/empty buffers.
+#[test]
+fn log_time_open_on_detail_sets_editing_state_with_empty_buffers() {
+    let m = detail_model_for_compose("inst", 10, 42);
+    let (m, cmds) = update(m, Msg::LogTimeOpen);
+    assert!(cmds.is_empty(), "LogTimeOpen must emit no Cmd");
+    let form = extract_log_time(&m).expect("log-time form must be Some after LogTimeOpen");
+    assert_eq!(form.hours, "");
+    assert_eq!(form.summary, "");
+    assert_eq!(form.field, LogTimeField::Hours);
+    assert_eq!(form.status, LogTimeStatus::Editing);
+}
+
+// AC1-part2: LogTimeOpen on a screen that already has the log-time modal active is a no-op.
+#[test]
+fn log_time_open_when_already_active_is_noop() {
+    let mut m = detail_model_for_compose("inst", 10, 42);
+    if let Some(Screen::Detail {
+        ref mut overlay, ..
+    }) = m.stack.last_mut()
+    {
+        *overlay = DetailOverlay::LogTime(LogTimeForm {
+            hours: "3".into(),
+            summary: String::new(),
+            field: LogTimeField::Hours,
+            status: LogTimeStatus::Editing,
+        });
+    }
+    let (m, _) = update(m, Msg::LogTimeOpen);
+    let form = extract_log_time(&m).expect("log-time form must still be Some");
+    assert_eq!(form.hours, "3", "existing hours buffer must be preserved");
+}
+
+// AC1-part3: LogTimeChar appends to the focused (Hours) field only.
+#[test]
+fn log_time_char_appends_to_focused_hours_field() {
+    let m = detail_model_for_compose("inst", 10, 42);
+    let (m, _) = update(m, Msg::LogTimeOpen);
+    let (m, cmds) = update(m, Msg::LogTimeChar('1'));
+    assert!(cmds.is_empty());
+    let (m, _) = update(m, Msg::LogTimeChar('.'));
+    let (m, _) = update(m, Msg::LogTimeChar('5'));
+    let form = extract_log_time(&m).expect("log-time form must be Some");
+    assert_eq!(form.hours, "1.5");
+    assert_eq!(form.summary, "", "summary must stay untouched");
+}
+
+// AC1-part3: LogTimeToggleField switches focus so LogTimeChar edits Summary instead.
+#[test]
+fn log_time_char_edits_summary_after_toggle_field() {
+    let m = detail_model_for_compose("inst", 10, 42);
+    let (m, _) = update(m, Msg::LogTimeOpen);
+    let (m, _) = update(m, Msg::LogTimeToggleField);
+    let (m, _) = update(m, Msg::LogTimeChar('a'));
+    let (m, _) = update(m, Msg::LogTimeChar('b'));
+    let form = extract_log_time(&m).expect("log-time form must be Some");
+    assert_eq!(form.field, LogTimeField::Summary);
+    assert_eq!(form.summary, "ab");
+    assert_eq!(form.hours, "", "hours must stay untouched");
+}
+
+// AC1: LogTimeToggleField is symmetric — a second toggle returns focus to Hours.
+#[test]
+fn log_time_toggle_field_twice_returns_to_hours() {
+    let m = detail_model_for_compose("inst", 10, 42);
+    let (m, _) = update(m, Msg::LogTimeOpen);
+    let (m, _) = update(m, Msg::LogTimeToggleField);
+    let (m, _) = update(m, Msg::LogTimeToggleField);
+    let form = extract_log_time(&m).expect("log-time form must be Some");
+    assert_eq!(form.field, LogTimeField::Hours);
+}
+
+// AC1-part5: LogTimeBackspace removes the last character of the focused field.
+#[test]
+fn log_time_backspace_removes_last_character() {
+    let m = detail_model_for_compose("inst", 10, 42);
+    let (m, _) = update(m, Msg::LogTimeOpen);
+    let (m, _) = update(m, Msg::LogTimeChar('2'));
+    let (m, _) = update(m, Msg::LogTimeChar('4'));
+    let (m, cmds) = update(m, Msg::LogTimeBackspace);
+    assert!(cmds.is_empty());
+    let form = extract_log_time(&m).expect("log-time form must be Some");
+    assert_eq!(form.hours, "2");
+}
+
+// AC1-part6: LogTimeCancel clears the overlay and emits no Cmd.
+#[test]
+fn log_time_cancel_clears_overlay_and_emits_no_cmd() {
+    let m = detail_model_for_compose("inst", 10, 42);
+    let (m, _) = update(m, Msg::LogTimeOpen);
+    let (m, _) = update(m, Msg::LogTimeChar('1'));
+    let (m, cmds) = update(m, Msg::LogTimeCancel);
+    assert!(cmds.is_empty(), "LogTimeCancel must emit no Cmd");
+    assert!(
+        extract_log_time(&m).is_none(),
+        "log-time form must be None after LogTimeCancel"
+    );
+}
+
+// AC2-part1: LogTimeSubmit with a valid hours buffer and no summary emits exactly one
+// Cmd::SubmitTimeLog with summary=None and sets status=Submitting.
+#[test]
+fn log_time_submit_valid_hours_emits_submit_time_log_cmd_with_no_summary() {
+    let m = detail_model_for_compose("myinst", 5, 99);
+    let m = type_log_time_chars(update(m, Msg::LogTimeOpen).0, "1.5");
+    let (m, cmds) = update(m, Msg::LogTimeSubmit);
+
+    assert_eq!(cmds.len(), 1, "must emit exactly one Cmd::SubmitTimeLog");
+    match &cmds[0] {
+        Cmd::SubmitTimeLog {
+            instance,
+            project_id,
+            task_id,
+            hours,
+            summary,
+        } => {
+            assert_eq!(instance, "myinst");
+            assert_eq!(*project_id, 5);
+            assert_eq!(*task_id, 99);
+            assert!((*hours - 1.5).abs() < f64::EPSILON);
+            assert_eq!(*summary, None);
+        }
+        other => panic!("expected Cmd::SubmitTimeLog, got {other:?}"),
+    }
+    let form = extract_log_time(&m).expect("log-time form must be Some after submit");
+    assert_eq!(form.status, LogTimeStatus::Submitting);
+}
+
+// AC2-part1: a non-empty summary buffer flows into Cmd::SubmitTimeLog as Some(trimmed).
+#[test]
+fn log_time_submit_with_summary_includes_some_summary() {
+    let m = detail_model_for_compose("inst", 1, 1);
+    let m = type_log_time_chars(update(m, Msg::LogTimeOpen).0, "2");
+    let (m, _) = update(m, Msg::LogTimeToggleField);
+    let m = type_log_time_chars(m, "  worked on the fix  ");
+    let (_m, cmds) = update(m, Msg::LogTimeSubmit);
+
+    match &cmds[0] {
+        Cmd::SubmitTimeLog { summary, .. } => {
+            assert_eq!(summary.as_deref(), Some("worked on the fix"));
+        }
+        other => panic!("expected Cmd::SubmitTimeLog, got {other:?}"),
+    }
+}
+
+// AC2-part2: an empty hours buffer sets Error and emits no Cmd.
+#[test]
+fn log_time_submit_empty_hours_sets_error_and_emits_no_cmd() {
+    let m = detail_model_for_compose("inst", 1, 1);
+    let (m, _) = update(m, Msg::LogTimeOpen);
+    let (m, cmds) = update(m, Msg::LogTimeSubmit);
+    assert!(cmds.is_empty(), "empty hours must emit no Cmd");
+    let form = extract_log_time(&m).expect("log-time form must still be Some");
+    assert!(matches!(form.status, LogTimeStatus::Error(_)));
+}
+
+// AC2-part2: a zero hours buffer sets Error and emits no Cmd.
+#[test]
+fn log_time_submit_zero_hours_sets_error_and_emits_no_cmd() {
+    let m = detail_model_for_compose("inst", 1, 1);
+    let m = type_log_time_chars(update(m, Msg::LogTimeOpen).0, "0");
+    let (m, cmds) = update(m, Msg::LogTimeSubmit);
+    assert!(cmds.is_empty(), "zero hours must emit no Cmd");
+    let form = extract_log_time(&m).expect("log-time form must still be Some");
+    assert!(matches!(form.status, LogTimeStatus::Error(_)));
+}
+
+// AC2-part2: a negative hours buffer sets Error and emits no Cmd.
+#[test]
+fn log_time_submit_negative_hours_sets_error_and_emits_no_cmd() {
+    let m = detail_model_for_compose("inst", 1, 1);
+    let m = type_log_time_chars(update(m, Msg::LogTimeOpen).0, "-2");
+    let (m, cmds) = update(m, Msg::LogTimeSubmit);
+    assert!(cmds.is_empty(), "negative hours must emit no Cmd");
+    let form = extract_log_time(&m).expect("log-time form must still be Some");
+    assert!(matches!(form.status, LogTimeStatus::Error(_)));
+}
+
+// AC2-part2: a non-numeric hours buffer sets Error and emits no Cmd.
+#[test]
+fn log_time_submit_non_numeric_hours_sets_error_and_emits_no_cmd() {
+    let m = detail_model_for_compose("inst", 1, 1);
+    let m = type_log_time_chars(update(m, Msg::LogTimeOpen).0, "abc");
+    let (m, cmds) = update(m, Msg::LogTimeSubmit);
+    assert!(cmds.is_empty(), "non-numeric hours must emit no Cmd");
+    let form = extract_log_time(&m).expect("log-time form must still be Some");
+    assert!(matches!(form.status, LogTimeStatus::Error(_)));
+}
+
+// AC3-part1: TimeMutationOk clears the overlay AND emits exactly one
+// Cmd::LoadDetail{refresh:true}, the same server-truth refresh as the comment path.
+#[test]
+fn time_mutation_ok_clears_overlay_and_emits_load_detail_refresh() {
+    let m = detail_model_for_compose("inst", 7, 13);
+    let m = type_log_time_chars(update(m, Msg::LogTimeOpen).0, "4");
+    let (m, cmds) = update(m, Msg::TimeMutationOk);
+
+    assert!(
+        extract_log_time(&m).is_none(),
+        "log-time form must be None after TimeMutationOk"
+    );
+    assert_eq!(cmds.len(), 1, "must emit exactly one Cmd::LoadDetail");
+    match &cmds[0] {
+        Cmd::LoadDetail {
+            instance,
+            project_id,
+            task_id,
+            refresh,
+        } => {
+            assert_eq!(instance, "inst");
+            assert_eq!(*project_id, 7);
+            assert_eq!(*task_id, 13);
+            assert!(*refresh, "refresh must be true");
+        }
+        other => panic!("expected Cmd::LoadDetail, got {other:?}"),
+    }
+}
+
+// AC3-part2: TimeMutationErr keeps the buffers intact and sets status=Error(msg), emits no Cmd.
+#[test]
+fn time_mutation_err_preserves_buffers_and_sets_error_status() {
+    let m = detail_model_for_compose("inst", 1, 1);
+    let m = type_log_time_chars(update(m, Msg::LogTimeOpen).0, "3");
+    let (m, cmds) = update(m, Msg::TimeMutationErr("Network error".into()));
+
+    assert!(cmds.is_empty(), "TimeMutationErr must emit no Cmd");
+    let form = extract_log_time(&m).expect("log-time form must still be Some after error");
+    assert_eq!(form.hours, "3", "hours buffer must be preserved");
+    assert_eq!(
+        form.status,
+        LogTimeStatus::Error("Network error".into()),
+        "status must be Error(msg)"
+    );
+}
+
+/// Drive `LogTimeChar` through `update()` for every char in `s`, in order. Types
+/// into whichever field currently has focus (Hours by default, or Summary after
+/// a `LogTimeToggleField`).
+fn type_log_time_chars(mut model: Model, s: &str) -> Model {
+    for c in s.chars() {
+        model = update(model, Msg::LogTimeChar(c)).0;
+    }
+    model
+}
+
+// AC4: map_log_time_key_event maps Ctrl+S -> LogTimeSubmit.
+#[test]
+fn map_log_time_key_event_ctrl_s_yields_log_time_submit() {
+    use crate::tui::events::map_log_time_key_event;
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState};
+    let key = KeyEvent {
+        code: KeyCode::Char('s'),
+        modifiers: KeyModifiers::CONTROL,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+    assert!(
+        matches!(map_log_time_key_event(key), Some(Msg::LogTimeSubmit)),
+        "Ctrl+S must map to LogTimeSubmit"
+    );
+}
+
+// AC4: map_log_time_key_event maps Esc -> LogTimeCancel.
+#[test]
+fn map_log_time_key_event_esc_yields_log_time_cancel() {
+    use crate::tui::events::map_log_time_key_event;
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState};
+    let key = KeyEvent {
+        code: KeyCode::Esc,
+        modifiers: KeyModifiers::NONE,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+    assert!(
+        matches!(map_log_time_key_event(key), Some(Msg::LogTimeCancel)),
+        "Esc must map to LogTimeCancel"
+    );
+}
+
+// AC4: map_log_time_key_event maps Tab -> LogTimeToggleField.
+#[test]
+fn map_log_time_key_event_tab_yields_log_time_toggle_field() {
+    use crate::tui::events::map_log_time_key_event;
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState};
+    let key = KeyEvent {
+        code: KeyCode::Tab,
+        modifiers: KeyModifiers::NONE,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+    assert!(
+        matches!(map_log_time_key_event(key), Some(Msg::LogTimeToggleField)),
+        "Tab must map to LogTimeToggleField"
+    );
+}
+
+// AC4: map_log_time_key_event maps Backspace -> LogTimeBackspace.
+#[test]
+fn map_log_time_key_event_backspace_yields_log_time_backspace() {
+    use crate::tui::events::map_log_time_key_event;
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState};
+    let key = KeyEvent {
+        code: KeyCode::Backspace,
+        modifiers: KeyModifiers::NONE,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+    assert!(
+        matches!(map_log_time_key_event(key), Some(Msg::LogTimeBackspace)),
+        "Backspace must map to LogTimeBackspace"
+    );
+}
+
+// AC4: map_log_time_key_event maps a printable char -> LogTimeChar(c).
+#[test]
+fn map_log_time_key_event_printable_char_yields_log_time_char() {
+    use crate::tui::events::map_log_time_key_event;
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState};
+    let key = KeyEvent {
+        code: KeyCode::Char('5'),
+        modifiers: KeyModifiers::NONE,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+    assert!(
+        matches!(map_log_time_key_event(key), Some(Msg::LogTimeChar('5'))),
+        "printable char must map to LogTimeChar(c)"
+    );
+}
+
+// AC4: map_browse_key_event maps plain 't' -> LogTimeOpen (not a selection or nav action).
+#[test]
+fn map_browse_key_event_plain_t_yields_log_time_open() {
+    use crate::tui::events::map_browse_key_event;
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState};
+    let key = KeyEvent {
+        code: KeyCode::Char('t'),
+        modifiers: KeyModifiers::NONE,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+    assert!(
+        matches!(map_browse_key_event(key), Some(Msg::LogTimeOpen)),
+        "plain 't' must map to LogTimeOpen"
     );
 }
 
@@ -5482,7 +5840,7 @@ fn comment_mutation_ok_after_delete_triggers_load_detail_refresh_regression() {
 
 // AC3: plain left click on the [confirmar] button target emits Cmd::DeleteComment.
 // Button targets are set on the model (mirroring the shell's render-then-set flow).
-// For an 80×24 frame: modal at x=12,y=4,w=56,h=16; inner_x=13; hint_row=18;
+// For an 80×24 frame: modal at x=12,y=4,w=56,h=16, inner_x=13, hint_row=18.
 // [confirmar] → x_start=13, x_end=24.
 #[test]
 fn plain_click_on_confirm_button_emits_delete_comment() {

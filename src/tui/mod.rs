@@ -15,7 +15,7 @@ pub use model::{
 };
 pub use view::view;
 
-use crate::client::CommentWriteOutcome;
+use crate::client::{CommentWriteOutcome, TimeWriteOutcome};
 use crate::controller;
 use crate::http::Http;
 use crate::render::MineTableRow;
@@ -28,6 +28,7 @@ use crossterm::{
 };
 use events::{
     map_browse_key_event, map_browse_mouse_event, map_compose_key_event, map_confirm_key_event,
+    map_log_time_key_event,
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
 use std::io;
@@ -99,12 +100,21 @@ fn confirm_active(model: &Model) -> bool {
     )
 }
 
+/// Return true when the log-time modal is active on the top screen.
+fn log_time_active(model: &Model) -> bool {
+    matches!(
+        model.top(),
+        Some(model::Screen::Detail { overlay, .. }) if overlay.is_log_time()
+    )
+}
+
 /// Handle a crossterm input event: map to a Msg, run update, and dispatch commands.
 ///
 /// Key routing priority (highest first):
 ///   1. confirm sub-mode (delete-confirm modal open) — Enter/Esc only
 ///   2. compose sub-mode (comment compose open) — typed chars + Ctrl+S/Esc
-///   3. browse mode — navigation, shortcuts
+///   3. log-time sub-mode (log-time modal open) — typed chars + Ctrl+S/Tab/Esc
+///   4. browse mode — navigation, shortcuts
 fn handle_input_event(
     ev: Event,
     model: Model,
@@ -119,6 +129,8 @@ fn handle_input_event(
                 map_confirm_key_event(key)
             } else if compose_active(&model) {
                 map_compose_key_event(key)
+            } else if log_time_active(&model) {
+                map_log_time_key_event(key)
             } else {
                 map_browse_key_event(key)
             }
@@ -533,6 +545,17 @@ fn dispatch_cmds(
             | Cmd::DeleteComment { .. }) => {
                 dispatch_comment_write(cmd, targets, http, &tx);
             }
+            Cmd::SubmitTimeLog {
+                instance,
+                project_id,
+                task_id,
+                hours,
+                summary,
+            } => {
+                spawn_time_write(
+                    targets, http, &tx, instance, project_id, task_id, hours, summary,
+                );
+            }
             // The fetch/decode/StatefulProtocol handling for the image viewer is
             // slice 0059 (ADR 0065); this slice only wires the pure overlay lifecycle,
             // so the viewer stays on its Loading placeholder until that slice lands.
@@ -695,6 +718,64 @@ fn spawn_comment_write(
                 let _ = tx.send(Msg::CommentMutationErr(crate::i18n::t(
                     "Failed to post comment",
                 )));
+            }
+        }
+    });
+}
+
+/// Spawn the log-time write: fetch the instance's job types, resolve the default one,
+/// then POST the time record and map the outcome to a `Msg`.
+///
+/// Errors out with `Msg::TimeMutationErr` WITHOUT calling `create_time_record` when no
+/// job type can be resolved (empty or failed job-types fetch) — mirroring the CLI's
+/// `time_log_core` guard so the TUI never posts a record with a missing job type.
+#[allow(clippy::too_many_arguments)]
+fn spawn_time_write(
+    targets: &[Instance],
+    http: &Http,
+    tx: &mpsc::UnboundedSender<Msg>,
+    instance: String,
+    project_id: i64,
+    task_id: i64,
+    hours: f64,
+    summary: Option<String>,
+) {
+    let inst = targets.iter().find(|t| t.name == instance).cloned();
+    let http = http.clone();
+    let tx = tx.clone();
+    tokio::spawn(async move {
+        let Some(inst) = inst else {
+            let _ = tx.send(Msg::TimeMutationErr(crate::i18n::t("Failed to log time")));
+            return;
+        };
+        let client = crate::client::ActiveCollabClient::new(inst, http);
+        let job_types = client.fetch_job_types().await.unwrap_or_default();
+        let Some(job_type_id) = crate::client::pick_default_job_type(&job_types) else {
+            let _ = tx.send(Msg::TimeMutationErr(crate::i18n::t(
+                "No job type available for this instance",
+            )));
+            return;
+        };
+        let record_date = crate::commands::time::resolve_record_date(None);
+        let outcome = client
+            .create_time_record(
+                project_id,
+                task_id,
+                hours,
+                &record_date,
+                job_type_id,
+                summary.as_deref(),
+            )
+            .await;
+        match outcome {
+            Ok(TimeWriteOutcome::Ok(_)) => {
+                let _ = tx.send(Msg::TimeMutationOk);
+            }
+            Ok(TimeWriteOutcome::Unauthorized) => {
+                let _ = tx.send(Msg::AuthExpired);
+            }
+            Ok(TimeWriteOutcome::Failed(_)) | Err(_) => {
+                let _ = tx.send(Msg::TimeMutationErr(crate::i18n::t("Failed to log time")));
             }
         }
     });

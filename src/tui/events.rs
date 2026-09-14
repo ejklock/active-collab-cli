@@ -37,6 +37,7 @@ pub fn map_browse_key_event(key: crossterm::event::KeyEvent) -> Option<Msg> {
         KeyCode::Esc | KeyCode::Char('b') => Some(Msg::Back),
         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => Some(Msg::Quit),
         KeyCode::Char('c') => Some(Msg::ComposeOpen),
+        KeyCode::Char('t') => Some(Msg::LogTimeOpen),
         KeyCode::Char('r') => Some(Msg::Refresh),
         KeyCode::Enter => Some(Msg::Select),
         _ => None,
@@ -56,6 +57,25 @@ pub fn map_compose_key_event(key: crossterm::event::KeyEvent) -> Option<Msg> {
         KeyCode::Char('s') if ctrl => Some(Msg::ComposeSubmit),
         KeyCode::Esc => Some(Msg::ComposeCancel),
         _ => Some(Msg::ComposeInput(Input::from(key))),
+    }
+}
+
+/// Map a key event when the log-time modal is active.
+///
+/// Ctrl+S submits and Esc cancels — the same shell-intercepted shortcuts as compose
+/// mode. Tab switches the focused field between Hours and Summary; every other
+/// printable char and Backspace edit the focused field's plain-text buffer directly
+/// (no `tui_textarea` — each field is a single line, so `update()` applies char/backspace
+/// Msgs to the buffer itself rather than routing through a generic `Input`).
+pub fn map_log_time_key_event(key: crossterm::event::KeyEvent) -> Option<Msg> {
+    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    match key.code {
+        KeyCode::Char('s') if ctrl => Some(Msg::LogTimeSubmit),
+        KeyCode::Esc => Some(Msg::LogTimeCancel),
+        KeyCode::Tab => Some(Msg::LogTimeToggleField),
+        KeyCode::Backspace => Some(Msg::LogTimeBackspace),
+        KeyCode::Char(c) => Some(Msg::LogTimeChar(c)),
+        _ => None,
     }
 }
 
