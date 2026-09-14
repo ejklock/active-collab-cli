@@ -633,10 +633,10 @@ async fn redirect_to_second_host_is_not_followed() {
 #[tokio::test]
 async fn create_comment_posts_to_correct_path_with_body() {
     let server = MockServer::start().await;
-    let comment = serde_json::json!({ "id": 10, "body": "hello" });
+    let comment = serde_json::json!({ "id": 10, "body": "<p>hello</p>" });
     Mock::given(method("POST"))
         .and(path("/api/v1/comments/task/42"))
-        .and(body_json(serde_json::json!({ "body": "hello" })))
+        .and(body_json(serde_json::json!({ "body": "<p>hello</p>" })))
         .respond_with(ResponseTemplate::new(200).set_body_json(comment.clone()))
         .expect(1)
         .mount(&server)
@@ -707,10 +707,12 @@ async fn create_comment_attaches_token_header() {
 #[tokio::test]
 async fn update_comment_puts_to_correct_path_with_body() {
     let server = MockServer::start().await;
-    let comment = serde_json::json!({ "id": 99, "body": "updated text" });
+    let comment = serde_json::json!({ "id": 99, "body": "<p>updated text</p>" });
     Mock::given(method("PUT"))
         .and(path("/api/v1/comments/99"))
-        .and(body_json(serde_json::json!({ "body": "updated text" })))
+        .and(body_json(
+            serde_json::json!({ "body": "<p>updated text</p>" }),
+        ))
         .respond_with(ResponseTemplate::new(200).set_body_json(comment.clone()))
         .expect(1)
         .mount(&server)
@@ -939,4 +941,28 @@ async fn base_url_trailing_slash_is_trimmed() {
     let (status, _) = client.list_projects().await.unwrap();
     assert_eq!(status, 200);
     server.verify().await;
+}
+
+#[test]
+fn encode_comment_body_wraps_blank_line_separated_paragraphs() {
+    let encoded = encode_comment_body("first paragraph\n\nsecond paragraph");
+    assert_eq!(encoded, "<p>first paragraph</p><p>second paragraph</p>");
+}
+
+#[test]
+fn encode_comment_body_encodes_single_newline_as_br() {
+    let encoded = encode_comment_body("line one\nline two");
+    assert_eq!(encoded, "<p>line one<br>line two</p>");
+}
+
+#[test]
+fn encode_comment_body_escapes_html_special_characters() {
+    let encoded = encode_comment_body("a < b & c > d");
+    assert_eq!(encoded, "<p>a &lt; b &amp; c &gt; d</p>");
+}
+
+#[test]
+fn encode_comment_body_wraps_single_line_in_one_paragraph() {
+    let encoded = encode_comment_body("hello");
+    assert_eq!(encoded, "<p>hello</p>");
 }

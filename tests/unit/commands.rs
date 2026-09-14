@@ -2463,7 +2463,7 @@ async fn comment_core_flag_body_explicit_ref_calls_create_comment_and_returns_0(
     Mock::given(method("POST"))
         .and(path("/api/v1/comments/task/75346"))
         .and(body_json(
-            serde_json::json!({ "body": "Deploy em homolog." }),
+            serde_json::json!({ "body": "<p>Deploy em homolog.</p>" }),
         ))
         .respond_with(ResponseTemplate::new(200).set_body_json(comment_response(101)))
         .expect(1)
@@ -2505,12 +2505,14 @@ async fn comment_core_flag_body_explicit_ref_calls_create_comment_and_returns_0(
 }
 
 #[tokio::test]
-async fn comment_core_multiline_stdin_body_passed_verbatim() {
+async fn comment_core_multiline_stdin_body_encoded_as_br() {
     let server = MockServer::start().await;
     let multiline = "Linha 1\nLinha 2\nLinha 3";
     Mock::given(method("POST"))
         .and(path("/api/v1/comments/task/75346"))
-        .and(body_json(serde_json::json!({ "body": multiline })))
+        .and(body_json(
+            serde_json::json!({ "body": "<p>Linha 1<br>Linha 2<br>Linha 3</p>" }),
+        ))
         .respond_with(ResponseTemplate::new(200).set_body_json(comment_response(202)))
         .expect(1)
         .mount(&server)
@@ -2643,7 +2645,9 @@ async fn comment_core_branch_resolved_task_posts_to_branch_task() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/api/v1/comments/task/75159"))
-        .and(body_json(serde_json::json!({ "body": "branch comment" })))
+        .and(body_json(
+            serde_json::json!({ "body": "<p>branch comment</p>" }),
+        ))
         .respond_with(ResponseTemplate::new(200).set_body_json(comment_response(50)))
         .expect(1)
         .mount(&server)
