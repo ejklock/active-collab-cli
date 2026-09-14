@@ -315,6 +315,13 @@ pub enum DetailOverlay {
     Compose(Compose),
     LogTime(LogTimeForm),
     EstimateEdit(EstimateForm),
+    /// The status-toggle confirm prompt. `completed_target` is the completion value
+    /// the confirm would submit — the opposite of the task's current `is_completed`
+    /// at the moment the overlay opened.
+    StatusConfirm {
+        completed_target: bool,
+        status: EditStatus,
+    },
     ConfirmDelete {
         comment_id: i64,
     },
@@ -367,6 +374,26 @@ impl DetailOverlay {
         }
     }
 
+    pub fn status_confirm(&self) -> Option<(bool, &EditStatus)> {
+        match self {
+            DetailOverlay::StatusConfirm {
+                completed_target,
+                status,
+            } => Some((*completed_target, status)),
+            _ => Option::None,
+        }
+    }
+
+    pub fn status_confirm_mut(&mut self) -> Option<(&mut bool, &mut EditStatus)> {
+        match self {
+            DetailOverlay::StatusConfirm {
+                completed_target,
+                status,
+            } => Some((completed_target, status)),
+            _ => Option::None,
+        }
+    }
+
     pub fn confirm_delete_id(&self) -> Option<i64> {
         match self {
             DetailOverlay::ConfirmDelete { comment_id } => Some(*comment_id),
@@ -398,6 +425,10 @@ impl DetailOverlay {
 
     pub fn is_estimate_edit(&self) -> bool {
         matches!(self, DetailOverlay::EstimateEdit(_))
+    }
+
+    pub fn is_status_confirm(&self) -> bool {
+        matches!(self, DetailOverlay::StatusConfirm { .. })
     }
 
     pub fn is_confirm(&self) -> bool {
@@ -747,6 +778,13 @@ pub enum Msg {
     TaskEditOk,
     /// A task-field write failed; preserve the open form's buffer and show an error.
     TaskEditErr(String),
+    /// Open the status-confirm modal on the current Detail screen, targeting the
+    /// opposite of the task's current completion state.
+    StatusToggleOpen,
+    /// Confirm the pending status change and submit it as a task-field write.
+    StatusToggleConfirm,
+    /// Cancel the status-confirm modal without submitting.
+    StatusToggleCancel,
     /// Move the comment-card focus cursor forward by one card (j / Down in Detail browse mode).
     FocusNextComment,
     /// Move the comment-card focus cursor backward by one card (k / Up in Detail browse mode).
@@ -953,6 +991,9 @@ pub fn update(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
         | Msg::EstimateCancel
         | Msg::TaskEditOk
         | Msg::TaskEditErr(_)) => update_task_edit(model, m),
+        m @ (Msg::StatusToggleOpen | Msg::StatusToggleConfirm | Msg::StatusToggleCancel) => {
+            update_status_toggle(model, m)
+        }
         Msg::FocusNextComment => (handle_focus_next(model), vec![]),
         Msg::FocusPrevComment => (handle_focus_prev(model), vec![]),
         Msg::ConfirmDeleteComment => handle_confirm_delete(model),
@@ -1080,6 +1121,15 @@ fn update_task_edit(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
         Msg::EstimateCancel => (handle_estimate_cancel(model), vec![]),
         Msg::TaskEditOk => handle_task_edit_ok(model),
         Msg::TaskEditErr(msg) => (handle_task_edit_err(model, msg), vec![]),
+        _ => (model, vec![]),
+    }
+}
+
+fn update_status_toggle(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
+    match msg {
+        Msg::StatusToggleOpen => (handle_status_toggle_open(model), vec![]),
+        Msg::StatusToggleConfirm => handle_status_toggle_confirm(model),
+        Msg::StatusToggleCancel => (handle_status_toggle_cancel(model), vec![]),
         _ => (model, vec![]),
     }
 }
@@ -2350,8 +2400,9 @@ fn extract_estimate_submit_info(model: &Model) -> Option<(String, i64, i64, Stri
     }
 }
 
-/// Set the estimate-edit overlay's status to `Error(message)`, when the overlay is active.
-fn set_estimate_error(model: &mut Model, message: String) {
+/// Set the active task-edit overlay's status to `Error(message)` — the estimate-edit
+/// form or the status-confirm modal, whichever is active. A no-op when neither is.
+fn set_task_edit_error(model: &mut Model, message: String) {
     if let Some(Screen::Detail {
         ref mut overlay,
         ref mut rendered_width,
@@ -2360,6 +2411,9 @@ fn set_estimate_error(model: &mut Model, message: String) {
     {
         if let Some(form) = overlay.estimate_edit_mut() {
             form.status = EditStatus::Error(message);
+            *rendered_width = usize::MAX;
+        } else if let Some((_, status)) = overlay.status_confirm_mut() {
+            *status = EditStatus::Error(message);
             *rendered_width = usize::MAX;
         }
     }
@@ -2382,7 +2436,7 @@ fn handle_estimate_submit(mut model: Model) -> (Model, Vec<Cmd>) {
         .filter(|value| *value >= 0.0);
 
     let Some(estimate) = parsed_estimate else {
-        set_estimate_error(&mut model, t("Enter a non-negative number of hours"));
+        set_task_edit_error(&mut model, t("Enter a non-negative number of hours"));
         return (model, vec![]);
     };
 
@@ -2416,8 +2470,114 @@ fn handle_task_edit_ok(model: Model) -> (Model, Vec<Cmd>) {
 }
 
 fn handle_task_edit_err(mut model: Model, msg: String) -> Model {
-    set_estimate_error(&mut model, msg);
+    set_task_edit_error(&mut model, msg);
     model
+}
+
+/// Read the task's current `is_completed` field, defaulting to `false` when absent
+/// or not boolean.
+fn task_is_completed(task: &Value) -> bool {
+    task.get("is_completed")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+}
+
+/// Open the status-confirm modal on the current Detail screen, targeting the
+/// opposite of the task's current `is_completed`.
+///
+/// No-op when the status-confirm modal is already open — mirrors `handle_estimate_open`.
+fn handle_status_toggle_open(mut model: Model) -> Model {
+    let completed_target = match model.top() {
+        Some(Screen::Detail { task, .. }) => !task_is_completed(task),
+        _ => false,
+    };
+    if let Some(Screen::Detail {
+        ref mut overlay,
+        ref mut rendered_width,
+        ..
+    }) = model.top_mut()
+    {
+        if !overlay.is_status_confirm() {
+            *overlay = DetailOverlay::StatusConfirm {
+                completed_target,
+                status: EditStatus::Editing,
+            };
+            *rendered_width = usize::MAX;
+        }
+    }
+    model
+}
+
+/// Dismiss the status-confirm modal without submitting.
+fn handle_status_toggle_cancel(mut model: Model) -> Model {
+    if let Some(Screen::Detail {
+        ref mut overlay,
+        ref mut rendered_width,
+        ..
+    }) = model.top_mut()
+    {
+        *overlay = DetailOverlay::None;
+        *rendered_width = usize::MAX;
+    }
+    model
+}
+
+/// Extract the fields needed to submit the pending status-confirm target, or None
+/// when the guard fails.
+///
+/// Guard: overlay must be `StatusConfirm` and its status must be `Editing`.
+fn extract_status_confirm_submit_info(model: &Model) -> Option<(String, i64, i64, bool)> {
+    match model.top() {
+        Some(Screen::Detail {
+            instance,
+            project_id,
+            task_id,
+            overlay,
+            ..
+        }) => {
+            let (completed_target, status) = overlay.status_confirm()?;
+            if *status != EditStatus::Editing {
+                return None;
+            }
+            Some((instance.clone(), *project_id, *task_id, completed_target))
+        }
+        _ => None,
+    }
+}
+
+/// Set the status-confirm overlay to `Submitting` and emit `Cmd::SubmitTaskEdit`
+/// carrying `completion: Some(completed_target)` with `assignee_id` and `estimate`
+/// both `None`. A no-op (no Cmd) when the overlay is absent or not `Editing`.
+fn handle_status_toggle_confirm(mut model: Model) -> (Model, Vec<Cmd>) {
+    let Some((instance, project_id, task_id, completed_target)) =
+        extract_status_confirm_submit_info(&model)
+    else {
+        return (model, vec![]);
+    };
+
+    if let Some(Screen::Detail {
+        ref mut overlay,
+        ref mut rendered_width,
+        ..
+    }) = model.top_mut()
+    {
+        if let Some((_, status)) = overlay.status_confirm_mut() {
+            *status = EditStatus::Submitting;
+            *rendered_width = usize::MAX;
+        }
+    }
+
+    (
+        model,
+        vec![Cmd::SubmitTaskEdit {
+            instance,
+            project_id,
+            task_id,
+            completion: Some(completed_target),
+            assignee_id: None,
+            estimate: None,
+        }],
+    )
 }
 
 /// Initial browse boot: emits Cmd::LoadTasksByProject and marks loading (or revalidating).

@@ -39,6 +39,7 @@ pub fn map_browse_key_event(key: crossterm::event::KeyEvent) -> Option<Msg> {
         KeyCode::Char('c') => Some(Msg::ComposeOpen),
         KeyCode::Char('t') => Some(Msg::LogTimeOpen),
         KeyCode::Char('e') => Some(Msg::EstimateOpen),
+        KeyCode::Char('s') => Some(Msg::StatusToggleOpen),
         KeyCode::Char('r') => Some(Msg::Refresh),
         KeyCode::Enter => Some(Msg::Select),
         _ => None,
@@ -92,6 +93,20 @@ pub fn map_estimate_key_event(key: crossterm::event::KeyEvent) -> Option<Msg> {
         KeyCode::Esc => Some(Msg::EstimateCancel),
         KeyCode::Backspace => Some(Msg::EstimateBackspace),
         KeyCode::Char(c) => Some(Msg::EstimateChar(c)),
+        _ => None,
+    }
+}
+
+/// Map a key event when the status-confirm modal is active.
+///
+/// Enter or Ctrl+S confirms the pending status change; Esc cancels it. There is no
+/// text entry here — the target is fixed by `StatusToggleOpen`, not typed.
+pub fn map_status_confirm_key_event(key: crossterm::event::KeyEvent) -> Option<Msg> {
+    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    match key.code {
+        KeyCode::Enter => Some(Msg::StatusToggleConfirm),
+        KeyCode::Char('s') if ctrl => Some(Msg::StatusToggleConfirm),
+        KeyCode::Esc => Some(Msg::StatusToggleCancel),
         _ => None,
     }
 }

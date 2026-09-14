@@ -6254,6 +6254,151 @@ mod estimate_edit_render {
     }
 }
 
+// AC3 (issue 0068 TUI slice): the status-confirm modal renders the complete-vs-reopen
+// prompt and hint via the shared modal primitive.
+
+mod status_confirm_render {
+    use crate::i18n::set_language;
+    use crate::tui::model::{DetailOverlay, EditStatus, Header, Model, Screen};
+    use crate::tui::view::view;
+    use ratatui::{backend::TestBackend, Terminal};
+    use serde_json::Value;
+    use std::collections::HashMap;
+
+    use super::LANG_MUTEX;
+
+    fn make_detail_model(overlay: DetailOverlay) -> Model {
+        Model {
+            stack: vec![Screen::Detail {
+                instance: "inst".into(),
+                project_id: 1,
+                task_id: 42,
+                task: Value::Null,
+                comments: vec![],
+                user_map: HashMap::new(),
+                lines: vec![],
+                line_styles: vec![],
+                assets: vec![],
+                offset: 0,
+                loading: false,
+                rendered_width: usize::MAX,
+                overlay,
+                current_user_id: None,
+                affordances: vec![],
+                focused_comment: None,
+                auth_error: false,
+                comment_spans: vec![],
+            }],
+            should_quit: false,
+            header: Header::from_instances(&[], None),
+            viewport: (80, 24),
+            click_targets: vec![],
+            modal_button_targets: vec![],
+            last_loaded: None,
+            selection: None,
+            copied_feedback: false,
+        }
+    }
+
+    fn render_via_view(model: &Model, width: u16, height: u16) -> ratatui::buffer::Buffer {
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| view(model, frame, &mut vec![], &mut vec![]))
+            .unwrap();
+        terminal.backend().buffer().clone()
+    }
+
+    fn buf_text(buf: &ratatui::buffer::Buffer) -> String {
+        let area = buf.area();
+        let mut out = String::new();
+        for y in 0..area.height {
+            for x in 0..area.width {
+                out.push_str(buf.cell((x, y)).unwrap().symbol());
+            }
+            out.push('\n');
+        }
+        out
+    }
+
+    // AC3: completed_target=true shows the "mark as completed" prompt.
+    #[test]
+    fn status_confirm_targeting_completion_shows_complete_prompt() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let model = make_detail_model(DetailOverlay::StatusConfirm {
+            completed_target: true,
+            status: EditStatus::Editing,
+        });
+        let buf = render_via_view(&model, 80, 24);
+        set_language("en");
+        let content = buf_text(&buf);
+        assert!(
+            content.contains("Change status"),
+            "modal must show 'Change status' title: {content}"
+        );
+        assert!(
+            content.contains("Mark task as completed?"),
+            "modal must show the complete prompt when completed_target=true: {content}"
+        );
+        assert!(
+            content.contains("Enter/Ctrl+S confirm"),
+            "in-box hint must contain 'Enter/Ctrl+S confirm': {content}"
+        );
+    }
+
+    // AC3: completed_target=false shows the "reopen" prompt.
+    #[test]
+    fn status_confirm_targeting_reopen_shows_reopen_prompt() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let model = make_detail_model(DetailOverlay::StatusConfirm {
+            completed_target: false,
+            status: EditStatus::Editing,
+        });
+        let buf = render_via_view(&model, 80, 24);
+        set_language("en");
+        let content = buf_text(&buf);
+        assert!(
+            content.contains("Reopen task?"),
+            "modal must show the reopen prompt when completed_target=false: {content}"
+        );
+    }
+
+    // AC3: the modal shows the Submitting status text while the form is submitting.
+    #[test]
+    fn status_confirm_submitting_shows_sending_status() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let model = make_detail_model(DetailOverlay::StatusConfirm {
+            completed_target: true,
+            status: EditStatus::Submitting,
+        });
+        let buf = render_via_view(&model, 80, 24);
+        set_language("en");
+        let content = buf_text(&buf);
+        assert!(
+            content.contains("Sending…"),
+            "modal must show the submitting status: {content}"
+        );
+    }
+
+    // AC3: status-confirm inactive — no status-confirm content leaks into the render.
+    #[test]
+    fn status_confirm_inactive_shows_no_status_confirm_content() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let model = make_detail_model(DetailOverlay::None);
+        let buf = render_via_view(&model, 80, 24);
+        set_language("en");
+        let content = buf_text(&buf);
+        assert!(
+            !content.contains("Change status"),
+            "modal title must NOT appear when status-confirm overlay is None: {content}"
+        );
+    }
+}
+
 // AC B1 (slice 0057b): render_modal returns the inner content (body) Rect — the
 // area beneath the title border and above the hint row, not the outer bordered box.
 
@@ -7411,6 +7556,10 @@ mod contextual_footer {
             "browsing hint must contain 'e estimate': {content}"
         );
         assert!(
+            content.contains("s status"),
+            "browsing hint must contain 's status': {content}"
+        );
+        assert!(
             content.contains("r refresh"),
             "browsing hint must contain 'r refresh': {content}"
         );
@@ -7466,6 +7615,34 @@ mod contextual_footer {
         assert!(
             content.contains("e estimate"),
             "footer must show the 'e estimate' affordance when the estimate-edit modal is open: {content}"
+        );
+    }
+
+    // (issue 0068 TUI slice) while the status-confirm modal is open, the footer shows
+    // the browse hint — the modal owns its own hint (one-home rule, mirrors estimate).
+    #[test]
+    fn detail_footer_status_confirm_mode_shows_browse_hint() {
+        let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let buf = render_detail_model(
+            DetailOverlay::StatusConfirm {
+                completed_target: true,
+                status: EditStatus::Editing,
+            },
+            None,
+            vec![],
+            None,
+            false,
+        );
+        set_language("en");
+        let content = buf_to_string(&buf);
+        assert!(
+            content.contains("j/k move"),
+            "footer must show browse hint when the status-confirm modal is open: {content}"
+        );
+        assert!(
+            content.contains("s status"),
+            "footer must show the 's status' affordance when the status-confirm modal is open: {content}"
         );
     }
 

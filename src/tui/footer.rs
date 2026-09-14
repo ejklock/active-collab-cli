@@ -7,7 +7,7 @@
 
 use crate::i18n::t;
 use crate::render::{display_width, wrap_text};
-use crate::tui::model::{Compose, EstimateForm, LogTimeForm, Screen};
+use crate::tui::model::{Compose, EditStatus, EstimateForm, LogTimeForm, Screen};
 
 /// Reformat a BRT timestamp `YYYY-MM-DDTHH:MM:SS` into `DD/MM/YYYY HH:MM`.
 /// Returns None when the input is too short or cannot be sliced at the expected offsets.
@@ -24,6 +24,17 @@ pub(crate) fn format_br_datetime(iso: &str) -> Option<String> {
     Some(format!("{}/{}/{} {}:{}", day, month, year, hour, minute))
 }
 
+/// Overlay-derived hint sources for the Detail footer's one-home suppression
+/// (ADR 0039 §5). Each field is `Some` only when its overlay is active AND does
+/// not already own its own in-modal hint.
+pub(crate) struct DetailHintOverlays<'a> {
+    pub(crate) compose: Option<&'a Compose>,
+    pub(crate) log_time: Option<&'a LogTimeForm>,
+    pub(crate) estimate: Option<&'a EstimateForm>,
+    pub(crate) status_confirm: Option<(bool, &'a EditStatus)>,
+    pub(crate) confirm_delete: Option<i64>,
+}
+
 /// Footer hint for the given screen.
 ///
 /// When a compose modal is open the modal owns the compose hint (ADR 0039 §5).
@@ -38,42 +49,43 @@ pub(crate) fn hint_for_screen(screen: &Screen) -> String {
             current_user_id,
             ..
         } => {
-            // The compose modal owns its hint when active; pass None to footer.
-            let compose_for_footer = if overlay.is_compose() {
-                None
-            } else {
-                overlay.compose()
+            let overlays = DetailHintOverlays {
+                // The compose modal owns its hint when active; pass None to footer.
+                compose: if overlay.is_compose() {
+                    None
+                } else {
+                    overlay.compose()
+                },
+                // The log-time modal owns its hint when active; pass None to
+                // footer, same one-home rule as compose.
+                log_time: if overlay.is_log_time() {
+                    None
+                } else {
+                    overlay.log_time()
+                },
+                // The estimate-edit modal owns its hint when active; pass None
+                // to footer, same one-home rule as compose and log time.
+                estimate: if overlay.is_estimate_edit() {
+                    None
+                } else {
+                    overlay.estimate_edit()
+                },
+                // The status-confirm modal owns its hint when active; pass None
+                // to footer, same one-home rule as estimate.
+                status_confirm: if overlay.is_status_confirm() {
+                    None
+                } else {
+                    overlay.status_confirm()
+                },
+                // The confirm modal owns its hint; pass None so the footer does
+                // not duplicate it (ADR 0039 §5 one-home suppression).
+                confirm_delete: if overlay.is_confirm() {
+                    None
+                } else {
+                    overlay.confirm_delete_id()
+                },
             };
-            // The log-time modal owns its hint when active; pass None to footer,
-            // same one-home rule as compose.
-            let log_time_for_footer = if overlay.is_log_time() {
-                None
-            } else {
-                overlay.log_time()
-            };
-            // The estimate-edit modal owns its hint when active; pass None to
-            // footer, same one-home rule as compose and log time.
-            let estimate_for_footer = if overlay.is_estimate_edit() {
-                None
-            } else {
-                overlay.estimate_edit()
-            };
-            // The confirm modal owns its hint; pass None so the footer does not
-            // duplicate it (ADR 0039 §5 one-home suppression).
-            let confirm_for_footer = if overlay.is_confirm() {
-                None
-            } else {
-                overlay.confirm_delete_id()
-            };
-            detail_hint(
-                compose_for_footer,
-                log_time_for_footer,
-                estimate_for_footer,
-                confirm_for_footer,
-                *focused_comment,
-                comments,
-                *current_user_id,
-            )
+            detail_hint(&overlays, *focused_comment, comments, *current_user_id)
         }
         _ => t("↑/↓ navigate  Enter select  r refresh  Esc/b back  q quit"),
     }
@@ -84,30 +96,30 @@ pub(crate) fn hint_for_screen(screen: &Screen) -> String {
 /// Priority order matches ADR 0038 §1: composing/logging-time/editing-estimate
 /// beats confirming-delete beats own-comment-focused beats the browsing default.
 pub(crate) fn detail_hint(
-    compose: Option<&Compose>,
-    log_time: Option<&LogTimeForm>,
-    estimate: Option<&EstimateForm>,
-    confirm_delete: Option<i64>,
+    overlays: &DetailHintOverlays,
     focused_comment: Option<usize>,
     comments: &[serde_json::Value],
     current_user_id: Option<i64>,
 ) -> String {
-    if compose.is_some() {
+    if overlays.compose.is_some() {
         return t("Ctrl+S send · Esc cancel");
     }
-    if log_time.is_some() {
+    if overlays.log_time.is_some() {
         return t("Ctrl+S send · Tab switch field · Esc cancel");
     }
-    if estimate.is_some() {
+    if overlays.estimate.is_some() {
         return t("Ctrl+S send · Esc cancel");
     }
-    if confirm_delete.is_some() {
+    if overlays.status_confirm.is_some() {
+        return t("Enter/Ctrl+S confirm · Esc cancel");
+    }
+    if overlays.confirm_delete.is_some() {
         return t("Enter/click confirm · Esc cancel");
     }
     if is_own_comment_focused(focused_comment, comments, current_user_id) {
         return t("↑/↓ · j/k move · Ctrl+click edit/delete · c new");
     }
-    t("↑/↓ · j/k move · c comment · t log time · e estimate · r refresh · Esc/b back · q quit")
+    t("↑/↓ · j/k move · c comment · t log time · e estimate · s status · r refresh · Esc/b back · q quit")
 }
 
 pub(crate) fn is_own_comment_focused(

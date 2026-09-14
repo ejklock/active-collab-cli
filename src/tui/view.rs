@@ -60,6 +60,18 @@ pub(crate) fn estimate_modal_status(form: &EstimateForm) -> Option<String> {
     }
 }
 
+/// Status text rendered inside the status-confirm modal's in-box hint line.
+///
+/// Returns `Some(status)` when the overlay has a transient state to display,
+/// `None` when awaiting confirmation normally (the hint text suffices).
+pub(crate) fn status_confirm_modal_status(status: &EditStatus) -> Option<String> {
+    match status {
+        EditStatus::Submitting => Some(t("Sending…")),
+        EditStatus::Error(_) => Some(t("Failed to update task")),
+        EditStatus::Editing => None,
+    }
+}
+
 /// Render the top screen into the terminal frame.
 ///
 /// Splits the frame into the main content area and a one-line footer, then
@@ -195,6 +207,9 @@ pub fn view(
             if let Some(form) = overlay.estimate_edit() {
                 render_estimate_modal(frame, area, form);
             }
+            if let Some((completed_target, status)) = overlay.status_confirm() {
+                render_status_confirm_modal(frame, area, completed_target, status);
+            }
             if overlay.is_confirm() {
                 render_confirm_modal(frame, area, modal_btn_targets);
             }
@@ -306,6 +321,45 @@ fn render_estimate_modal(
         frame_area,
         ModalContent {
             title: &t("Edit estimate"),
+            lines: &lines,
+            hint: Some(&hint),
+        },
+    );
+}
+
+fn status_confirm_modal_hint(status: &EditStatus) -> String {
+    match status_confirm_modal_status(status) {
+        Some(status) => status,
+        None => t("Enter/Ctrl+S confirm · Esc cancel"),
+    }
+}
+
+/// The complete-vs-reopen prompt line, chosen from the pending `completed_target`.
+fn status_confirm_prompt(completed_target: bool) -> String {
+    if completed_target {
+        t("Mark task as completed?")
+    } else {
+        t("Reopen task?")
+    }
+}
+
+/// Render the status-confirm modal chrome via `render_modal`: the complete-vs-reopen
+/// prompt as a single line, plus the hint/status line. No text entry — the target is
+/// fixed by `completed_target`, not typed.
+fn render_status_confirm_modal(
+    frame: &mut Frame,
+    frame_area: ratatui::layout::Rect,
+    completed_target: bool,
+    status: &EditStatus,
+) {
+    use crate::tui::widgets::modal::render_modal;
+    let hint = status_confirm_modal_hint(status);
+    let lines = [status_confirm_prompt(completed_target)];
+    render_modal(
+        frame,
+        frame_area,
+        ModalContent {
+            title: &t("Change status"),
             lines: &lines,
             hint: Some(&hint),
         },
