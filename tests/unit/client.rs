@@ -888,6 +888,138 @@ async fn create_time_record_non_2xx_returns_failed_with_status() {
 }
 
 #[tokio::test]
+async fn set_task_completion_true_puts_to_complete_endpoint() {
+    let server = MockServer::start().await;
+    let task = serde_json::json!({ "id": 42, "is_completed": true });
+    Mock::given(method("PUT"))
+        .and(path("/api/v1/complete/task/42"))
+        .and(body_json(serde_json::json!({})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(task.clone()))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = make_client(&server.uri());
+    let outcome = client.set_task_completion(42, true).await.unwrap();
+    match outcome {
+        TaskWriteOutcome::Ok(payload) => assert_eq!(payload.unwrap(), task),
+        other => panic!("expected Ok outcome, got {other:?}"),
+    }
+    server.verify().await;
+}
+
+#[tokio::test]
+async fn set_task_completion_false_puts_to_open_endpoint() {
+    let server = MockServer::start().await;
+    Mock::given(method("PUT"))
+        .and(path("/api/v1/open/task/42"))
+        .and(body_json(serde_json::json!({})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({ "id": 42 })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = make_client(&server.uri());
+    let outcome = client.set_task_completion(42, false).await.unwrap();
+    assert!(matches!(outcome, TaskWriteOutcome::Ok(_)));
+    server.verify().await;
+}
+
+#[tokio::test]
+async fn set_task_completion_401_returns_unauthorized() {
+    let server = MockServer::start().await;
+    Mock::given(method("PUT"))
+        .and(path("/api/v1/complete/task/42"))
+        .respond_with(ResponseTemplate::new(401).set_body_string("unauthorized"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = make_client(&server.uri());
+    let outcome = client.set_task_completion(42, true).await.unwrap();
+    assert!(
+        matches!(outcome, TaskWriteOutcome::Unauthorized),
+        "expected Unauthorized, got {outcome:?}"
+    );
+}
+
+#[tokio::test]
+async fn update_task_puts_assignee_only_body() {
+    let server = MockServer::start().await;
+    Mock::given(method("PUT"))
+        .and(path("/api/v1/projects/3/tasks/42"))
+        .and(body_json(serde_json::json!({ "assignee_id": 9 })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({ "id": 42 })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = make_client(&server.uri());
+    let outcome = client.update_task(3, 42, Some(9), None).await.unwrap();
+    assert!(matches!(outcome, TaskWriteOutcome::Ok(_)));
+    server.verify().await;
+}
+
+#[tokio::test]
+async fn update_task_puts_estimate_only_body() {
+    let server = MockServer::start().await;
+    Mock::given(method("PUT"))
+        .and(path("/api/v1/projects/3/tasks/42"))
+        .and(body_json(serde_json::json!({ "estimate": 4.5 })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({ "id": 42 })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = make_client(&server.uri());
+    let outcome = client.update_task(3, 42, None, Some(4.5)).await.unwrap();
+    assert!(matches!(outcome, TaskWriteOutcome::Ok(_)));
+    server.verify().await;
+}
+
+#[tokio::test]
+async fn update_task_puts_both_fields() {
+    let server = MockServer::start().await;
+    let task = serde_json::json!({ "id": 42, "assignee_id": 9, "estimate": 4.5 });
+    Mock::given(method("PUT"))
+        .and(path("/api/v1/projects/3/tasks/42"))
+        .and(body_json(serde_json::json!({
+            "assignee_id": 9,
+            "estimate": 4.5
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(task.clone()))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = make_client(&server.uri());
+    let outcome = client.update_task(3, 42, Some(9), Some(4.5)).await.unwrap();
+    match outcome {
+        TaskWriteOutcome::Ok(payload) => assert_eq!(payload.unwrap(), task),
+        other => panic!("expected Ok outcome, got {other:?}"),
+    }
+    server.verify().await;
+}
+
+#[tokio::test]
+async fn update_task_non_2xx_returns_failed_with_status() {
+    let server = MockServer::start().await;
+    Mock::given(method("PUT"))
+        .and(path("/api/v1/projects/3/tasks/42"))
+        .respond_with(ResponseTemplate::new(422).set_body_string("invalid"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = make_client(&server.uri());
+    let outcome = client.update_task(3, 42, Some(9), None).await.unwrap();
+    match outcome {
+        TaskWriteOutcome::Failed(status) => assert_eq!(status, 422),
+        other => panic!("expected Failed(422), got {other:?}"),
+    }
+}
+
+#[tokio::test]
 async fn update_comment_puts_to_correct_path_with_body() {
     let server = MockServer::start().await;
     let comment = serde_json::json!({ "id": 99, "body": "<p>updated text</p>" });

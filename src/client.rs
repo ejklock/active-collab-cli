@@ -82,6 +82,28 @@ fn classify_time_write(status: u16, body: Option<Value>) -> TimeWriteOutcome {
     }
 }
 
+/// Typed outcome of a task-field write call (completion or field update),
+/// classified the same way as `CommentWriteOutcome` (ADR 0054).
+#[derive(Debug)]
+pub enum TaskWriteOutcome {
+    /// 2xx — carries the response body when present.
+    Ok(Option<Value>),
+    /// HTTP 401.
+    Unauthorized,
+    /// Any other status.
+    Failed(u16),
+}
+
+/// Classify a task-write response status/body into a `TaskWriteOutcome`:
+/// (200..=299) -> Ok(body), HTTP_UNAUTHORIZED -> Unauthorized, else -> Failed(status).
+fn classify_task_write(status: u16, body: Option<Value>) -> TaskWriteOutcome {
+    match classify_write_status(status) {
+        WriteStatus::Ok => TaskWriteOutcome::Ok(body),
+        WriteStatus::Unauthorized => TaskWriteOutcome::Unauthorized,
+        WriteStatus::Failed(status) => TaskWriteOutcome::Failed(status),
+    }
+}
+
 /// Return the id of the instance's default job type, falling back to the
 /// first entry when none is flagged default. ActiveCollab requires a
 /// `job_type_id` on every time record, so a caller with no explicit
@@ -407,6 +429,47 @@ impl ActiveCollabClient {
         }
         let (status, body) = self.post_json_write(&url, &payload).await?;
         Ok(classify_time_write(status, body))
+    }
+
+    /// PUT /api/v1/complete/task/{task_id} when `completed`, else
+    /// /api/v1/open/task/{task_id}. Classifies the response into a
+    /// `TaskWriteOutcome`: (200..=299) -> Ok(Some(task)), 401 ->
+    /// Unauthorized, else -> Failed(status).
+    pub async fn set_task_completion(
+        &self,
+        task_id: i64,
+        completed: bool,
+    ) -> Result<TaskWriteOutcome> {
+        let base = self.instance.base_url.trim_end_matches('/');
+        let action = if completed { "complete" } else { "open" };
+        let url = format!("{}/api/v1/{}/task/{}", base, action, task_id);
+        let payload = serde_json::json!({});
+        let (status, body) = self.put_json_write(&url, &payload).await?;
+        Ok(classify_task_write(status, body))
+    }
+
+    /// PUT /api/v1/projects/{project_id}/tasks/{task_id}. Serializes only the
+    /// provided fields: `assignee_id` and/or `estimate`, each omitted when
+    /// `None`. Classifies the response into a `TaskWriteOutcome`: (200..=299)
+    /// -> Ok(Some(task)), 401 -> Unauthorized, else -> Failed(status).
+    pub async fn update_task(
+        &self,
+        project_id: i64,
+        task_id: i64,
+        assignee_id: Option<i64>,
+        estimate: Option<f64>,
+    ) -> Result<TaskWriteOutcome> {
+        let base = self.instance.base_url.trim_end_matches('/');
+        let url = format!("{}/api/v1/projects/{}/tasks/{}", base, project_id, task_id);
+        let mut payload = serde_json::Map::new();
+        if let Some(assignee_id) = assignee_id {
+            payload.insert("assignee_id".to_string(), Value::from(assignee_id));
+        }
+        if let Some(estimate) = estimate {
+            payload.insert("estimate".to_string(), Value::from(estimate));
+        }
+        let (status, body) = self.put_json_write(&url, &Value::Object(payload)).await?;
+        Ok(classify_task_write(status, body))
     }
 
     /// PUT /api/v1/comments/{comment_id}. Classifies the response into a
