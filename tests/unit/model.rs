@@ -4777,6 +4777,387 @@ fn map_browse_key_event_plain_s_yields_status_toggle_open() {
     );
 }
 
+// Assignee-picker modal tests (issue 0068 TUI slice)
+
+fn detail_model_with_task_and_users(
+    instance: &str,
+    project_id: i64,
+    task_id: i64,
+    task: serde_json::Value,
+    user_map: HashMap<i64, String>,
+) -> Model {
+    let mut m = detail_model_with_task(instance, project_id, task_id, task);
+    if let Some(Screen::Detail {
+        user_map: ref mut m_user_map,
+        ..
+    }) = m.stack.last_mut()
+    {
+        *m_user_map = user_map;
+    }
+    m
+}
+
+fn extract_assignee_picker(model: &Model) -> Option<AssigneePickerView<'_>> {
+    match model.top() {
+        Some(Screen::Detail { overlay, .. }) => overlay.assignee_picker(),
+        _ => None,
+    }
+}
+
+fn users_two() -> HashMap<i64, String> {
+    let mut map = HashMap::new();
+    map.insert(2i64, "Bob".to_string());
+    map.insert(1i64, "Alice".to_string());
+    map
+}
+
+// AC1: AssigneePickerOpen builds candidates sorted case-insensitively by name and
+// pre-selects index 0 when the task has no current assignee.
+#[test]
+fn assignee_picker_open_builds_sorted_candidates_with_no_assignee_selects_zero() {
+    let m = detail_model_with_task_and_users("inst", 10, 42, serde_json::json!({}), users_two());
+    let (m, cmds) = update(m, Msg::AssigneePickerOpen);
+    assert!(cmds.is_empty(), "AssigneePickerOpen must emit no Cmd");
+    let (candidates, selected, status) =
+        extract_assignee_picker(&m).expect("assignee-picker overlay must be Some after open");
+    assert_eq!(
+        candidates,
+        &[(1i64, "Alice".to_string()), (2i64, "Bob".to_string())],
+        "candidates must be sorted case-insensitively by name"
+    );
+    assert_eq!(selected, 0, "no current assignee must select index 0");
+    assert_eq!(*status, EditStatus::Editing);
+}
+
+// AC1: AssigneePickerOpen pre-selects the index of the task's current assignee_id.
+#[test]
+fn assignee_picker_open_preselects_current_assignee_index() {
+    let m = detail_model_with_task_and_users(
+        "inst",
+        10,
+        42,
+        serde_json::json!({ "assignee_id": 2 }),
+        users_two(),
+    );
+    let (m, _) = update(m, Msg::AssigneePickerOpen);
+    let (candidates, selected, _) =
+        extract_assignee_picker(&m).expect("assignee-picker overlay must be Some after open");
+    assert_eq!(
+        candidates[selected].0, 2,
+        "must select the current assignee's id"
+    );
+}
+
+// AC1: an empty user directory produces an empty candidate list and selected 0.
+#[test]
+fn assignee_picker_open_with_empty_directory_yields_empty_candidates() {
+    let m = detail_model_with_task_and_users("inst", 10, 42, serde_json::json!({}), HashMap::new());
+    let (m, _) = update(m, Msg::AssigneePickerOpen);
+    let (candidates, selected, _) =
+        extract_assignee_picker(&m).expect("assignee-picker overlay must be Some after open");
+    assert!(candidates.is_empty(), "candidates must be empty");
+    assert_eq!(selected, 0);
+}
+
+// AC1: AssigneePickerOpen on a screen that already has the picker active is a no-op.
+#[test]
+fn assignee_picker_open_when_already_active_is_noop() {
+    let mut m =
+        detail_model_with_task_and_users("inst", 10, 42, serde_json::json!({}), users_two());
+    if let Some(Screen::Detail {
+        ref mut overlay, ..
+    }) = m.stack.last_mut()
+    {
+        *overlay = DetailOverlay::AssigneePicker {
+            candidates: vec![(9i64, "Zed".to_string())],
+            selected: 0,
+            status: EditStatus::Editing,
+        };
+    }
+    let (m, _) = update(m, Msg::AssigneePickerOpen);
+    let (candidates, _, _) =
+        extract_assignee_picker(&m).expect("assignee-picker overlay must still be Some");
+    assert_eq!(
+        candidates,
+        &[(9i64, "Zed".to_string())],
+        "existing candidate list must be preserved, not rebuilt"
+    );
+}
+
+// AC1: AssigneePickerDown moves the selection forward and saturates at the last row.
+#[test]
+fn assignee_picker_down_moves_selection_and_saturates_at_end() {
+    let m = detail_model_with_task_and_users("inst", 10, 42, serde_json::json!({}), users_two());
+    let m = update(m, Msg::AssigneePickerOpen).0;
+    let (m, cmds) = update(m, Msg::AssigneePickerDown);
+    assert!(cmds.is_empty());
+    let (_, selected, _) = extract_assignee_picker(&m).expect("overlay must be Some");
+    assert_eq!(selected, 1);
+    let (m, _) = update(m, Msg::AssigneePickerDown);
+    let (_, selected, _) = extract_assignee_picker(&m).expect("overlay must be Some");
+    assert_eq!(selected, 1, "must saturate at the last candidate index");
+}
+
+// AC1: AssigneePickerUp moves the selection backward and saturates at the first row.
+#[test]
+fn assignee_picker_up_moves_selection_and_saturates_at_start() {
+    let m = detail_model_with_task_and_users("inst", 10, 42, serde_json::json!({}), users_two());
+    let m = update(m, Msg::AssigneePickerOpen).0;
+    let m = update(m, Msg::AssigneePickerDown).0;
+    let (m, cmds) = update(m, Msg::AssigneePickerUp);
+    assert!(cmds.is_empty());
+    let (_, selected, _) = extract_assignee_picker(&m).expect("overlay must be Some");
+    assert_eq!(selected, 0);
+    let (m, _) = update(m, Msg::AssigneePickerUp);
+    let (_, selected, _) = extract_assignee_picker(&m).expect("overlay must be Some");
+    assert_eq!(selected, 0, "must saturate at the first candidate index");
+}
+
+// AC1: AssigneePickerCancel clears the overlay and emits no Cmd.
+#[test]
+fn assignee_picker_cancel_clears_overlay_and_emits_no_cmd() {
+    let m = detail_model_with_task_and_users("inst", 10, 42, serde_json::json!({}), users_two());
+    let m = update(m, Msg::AssigneePickerOpen).0;
+    let (m, cmds) = update(m, Msg::AssigneePickerCancel);
+    assert!(cmds.is_empty(), "AssigneePickerCancel must emit no Cmd");
+    assert!(
+        extract_assignee_picker(&m).is_none(),
+        "assignee-picker overlay must be None after AssigneePickerCancel"
+    );
+}
+
+// AC2: AssigneePickerSubmit while Editing emits exactly one Cmd::SubmitTaskEdit
+// carrying assignee_id: Some(selected id), completion: None, estimate: None,
+// and sets status Submitting.
+#[test]
+fn assignee_picker_submit_emits_submit_task_edit_cmd() {
+    let m = detail_model_with_task_and_users("myinst", 5, 99, serde_json::json!({}), users_two());
+    let m = update(m, Msg::AssigneePickerOpen).0;
+    let m = update(m, Msg::AssigneePickerDown).0;
+    let (m, cmds) = update(m, Msg::AssigneePickerSubmit);
+
+    assert_eq!(cmds.len(), 1, "must emit exactly one Cmd::SubmitTaskEdit");
+    match &cmds[0] {
+        Cmd::SubmitTaskEdit {
+            instance,
+            project_id,
+            task_id,
+            completion,
+            assignee_id,
+            estimate,
+        } => {
+            assert_eq!(instance, "myinst");
+            assert_eq!(*project_id, 5);
+            assert_eq!(*task_id, 99);
+            assert_eq!(*completion, None);
+            assert_eq!(*assignee_id, Some(2));
+            assert_eq!(*estimate, None);
+        }
+        other => panic!("expected Cmd::SubmitTaskEdit, got {other:?}"),
+    }
+    let (_, _, status) = extract_assignee_picker(&m).expect("overlay must be Some");
+    assert_eq!(*status, EditStatus::Submitting);
+}
+
+// AC2: AssigneePickerSubmit is a no-op (no Cmd) when candidates is empty.
+#[test]
+fn assignee_picker_submit_with_empty_candidates_emits_no_cmd() {
+    let m = detail_model_with_task_and_users("inst", 5, 99, serde_json::json!({}), HashMap::new());
+    let m = update(m, Msg::AssigneePickerOpen).0;
+    let (_, cmds) = update(m, Msg::AssigneePickerSubmit);
+    assert!(
+        cmds.is_empty(),
+        "AssigneePickerSubmit with no candidates must emit no Cmd"
+    );
+}
+
+// AC2: AssigneePickerSubmit is a no-op (no Cmd) when the overlay's status is not Editing.
+#[test]
+fn assignee_picker_submit_while_submitting_emits_no_cmd() {
+    let mut m = detail_model_with_task_and_users("inst", 5, 99, serde_json::json!({}), users_two());
+    if let Some(Screen::Detail {
+        ref mut overlay, ..
+    }) = m.stack.last_mut()
+    {
+        *overlay = DetailOverlay::AssigneePicker {
+            candidates: vec![(1i64, "Alice".to_string())],
+            selected: 0,
+            status: EditStatus::Submitting,
+        };
+    }
+    let (_, cmds) = update(m, Msg::AssigneePickerSubmit);
+    assert!(
+        cmds.is_empty(),
+        "AssigneePickerSubmit while Submitting must emit no Cmd"
+    );
+}
+
+// AC2: AssigneePickerSubmit is a no-op (no Cmd) when no assignee-picker overlay is active.
+#[test]
+fn assignee_picker_submit_without_overlay_emits_no_cmd() {
+    let m = detail_model_with_task_and_users("inst", 5, 99, serde_json::json!({}), users_two());
+    let (_, cmds) = update(m, Msg::AssigneePickerSubmit);
+    assert!(
+        cmds.is_empty(),
+        "AssigneePickerSubmit with no overlay must emit no Cmd"
+    );
+}
+
+// AC3: TaskEditOk clears the assignee-picker overlay AND emits exactly one
+// Cmd::LoadDetail{refresh:true}, the same shared refresh path as the other task-edit writes.
+#[test]
+fn assignee_picker_task_edit_ok_clears_overlay_and_emits_load_detail_refresh() {
+    let m = detail_model_with_task_and_users("inst", 7, 13, serde_json::json!({}), users_two());
+    let m = update(m, Msg::AssigneePickerOpen).0;
+    let (m, cmds) = update(m, Msg::TaskEditOk);
+
+    assert!(
+        extract_assignee_picker(&m).is_none(),
+        "assignee-picker overlay must be None after TaskEditOk"
+    );
+    assert_eq!(cmds.len(), 1, "must emit exactly one Cmd::LoadDetail");
+    match &cmds[0] {
+        Cmd::LoadDetail {
+            instance,
+            project_id,
+            task_id,
+            refresh,
+        } => {
+            assert_eq!(instance, "inst");
+            assert_eq!(*project_id, 7);
+            assert_eq!(*task_id, 13);
+            assert!(*refresh, "refresh must be true");
+        }
+        other => panic!("expected Cmd::LoadDetail, got {other:?}"),
+    }
+}
+
+// AC3: TaskEditErr sets the assignee-picker overlay's status to Error(msg), proving
+// the generalized task-edit error setter reaches this overlay too.
+#[test]
+fn assignee_picker_task_edit_err_sets_error_status() {
+    let m = detail_model_with_task_and_users("inst", 1, 1, serde_json::json!({}), users_two());
+    let m = update(m, Msg::AssigneePickerOpen).0;
+    let (m, cmds) = update(m, Msg::TaskEditErr("Network error".into()));
+
+    assert!(cmds.is_empty(), "TaskEditErr must emit no Cmd");
+    let (_, _, status) = extract_assignee_picker(&m)
+        .expect("assignee-picker overlay must still be Some after error");
+    assert_eq!(
+        *status,
+        EditStatus::Error("Network error".into()),
+        "status must be Error(msg)"
+    );
+}
+
+// AC1/AC2: map_assignee_picker_key_event maps j/Down -> AssigneePickerDown.
+#[test]
+fn map_assignee_picker_key_event_j_and_down_yield_assignee_picker_down() {
+    use crate::tui::events::map_assignee_picker_key_event;
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState};
+    for code in [KeyCode::Char('j'), KeyCode::Down] {
+        let key = KeyEvent {
+            code,
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::NONE,
+        };
+        assert!(
+            matches!(
+                map_assignee_picker_key_event(key),
+                Some(Msg::AssigneePickerDown)
+            ),
+            "{code:?} must map to AssigneePickerDown"
+        );
+    }
+}
+
+// AC1/AC2: map_assignee_picker_key_event maps k/Up -> AssigneePickerUp.
+#[test]
+fn map_assignee_picker_key_event_k_and_up_yield_assignee_picker_up() {
+    use crate::tui::events::map_assignee_picker_key_event;
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState};
+    for code in [KeyCode::Char('k'), KeyCode::Up] {
+        let key = KeyEvent {
+            code,
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::NONE,
+        };
+        assert!(
+            matches!(
+                map_assignee_picker_key_event(key),
+                Some(Msg::AssigneePickerUp)
+            ),
+            "{code:?} must map to AssigneePickerUp"
+        );
+    }
+}
+
+// AC1/AC2: map_assignee_picker_key_event maps Enter and Ctrl+S -> AssigneePickerSubmit.
+#[test]
+fn map_assignee_picker_key_event_enter_and_ctrl_s_yield_assignee_picker_submit() {
+    use crate::tui::events::map_assignee_picker_key_event;
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState};
+    let enter = KeyEvent {
+        code: KeyCode::Enter,
+        modifiers: KeyModifiers::NONE,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+    assert!(matches!(
+        map_assignee_picker_key_event(enter),
+        Some(Msg::AssigneePickerSubmit)
+    ));
+    let ctrl_s = KeyEvent {
+        code: KeyCode::Char('s'),
+        modifiers: KeyModifiers::CONTROL,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+    assert!(matches!(
+        map_assignee_picker_key_event(ctrl_s),
+        Some(Msg::AssigneePickerSubmit)
+    ));
+}
+
+// AC1: map_assignee_picker_key_event maps Esc -> AssigneePickerCancel.
+#[test]
+fn map_assignee_picker_key_event_esc_yields_assignee_picker_cancel() {
+    use crate::tui::events::map_assignee_picker_key_event;
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState};
+    let key = KeyEvent {
+        code: KeyCode::Esc,
+        modifiers: KeyModifiers::NONE,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+    assert!(
+        matches!(
+            map_assignee_picker_key_event(key),
+            Some(Msg::AssigneePickerCancel)
+        ),
+        "Esc must map to AssigneePickerCancel"
+    );
+}
+
+// AC1: map_browse_key_event maps plain 'a' -> AssigneePickerOpen (not a selection or nav action).
+#[test]
+fn map_browse_key_event_plain_a_yields_assignee_picker_open() {
+    use crate::tui::events::map_browse_key_event;
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState};
+    let key = KeyEvent {
+        code: KeyCode::Char('a'),
+        modifiers: KeyModifiers::NONE,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+    assert!(
+        matches!(map_browse_key_event(key), Some(Msg::AssigneePickerOpen)),
+        "plain 'a' must map to AssigneePickerOpen"
+    );
+}
+
 // ── Comment-edit-ui tests (BDR 0024 Sc.4-5 / ADR 0036) ───────────────────────
 
 /// Build a Detail model that has one owned comment (created_by_id == current_user_id)

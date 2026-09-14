@@ -40,6 +40,7 @@ pub fn map_browse_key_event(key: crossterm::event::KeyEvent) -> Option<Msg> {
         KeyCode::Char('t') => Some(Msg::LogTimeOpen),
         KeyCode::Char('e') => Some(Msg::EstimateOpen),
         KeyCode::Char('s') => Some(Msg::StatusToggleOpen),
+        KeyCode::Char('a') => Some(Msg::AssigneePickerOpen),
         KeyCode::Char('r') => Some(Msg::Refresh),
         KeyCode::Enter => Some(Msg::Select),
         _ => None,
@@ -107,6 +108,23 @@ pub fn map_status_confirm_key_event(key: crossterm::event::KeyEvent) -> Option<M
         KeyCode::Enter => Some(Msg::StatusToggleConfirm),
         KeyCode::Char('s') if ctrl => Some(Msg::StatusToggleConfirm),
         KeyCode::Esc => Some(Msg::StatusToggleCancel),
+        _ => None,
+    }
+}
+
+/// Map a key event when the assignee-picker modal is active.
+///
+/// j/Down and k/Up move the selection; Enter or Ctrl+S confirms the highlighted
+/// candidate; Esc cancels. There is no text entry — candidates come from the cached
+/// user directory, not typed.
+pub fn map_assignee_picker_key_event(key: crossterm::event::KeyEvent) -> Option<Msg> {
+    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    match key.code {
+        KeyCode::Down | KeyCode::Char('j') => Some(Msg::AssigneePickerDown),
+        KeyCode::Up | KeyCode::Char('k') => Some(Msg::AssigneePickerUp),
+        KeyCode::Enter => Some(Msg::AssigneePickerSubmit),
+        KeyCode::Char('s') if ctrl => Some(Msg::AssigneePickerSubmit),
+        KeyCode::Esc => Some(Msg::AssigneePickerCancel),
         _ => None,
     }
 }

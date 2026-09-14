@@ -6399,6 +6399,186 @@ mod status_confirm_render {
     }
 }
 
+// AC3 (issue 0068 TUI slice): the assignee-picker modal renders the candidate list
+// with the highlighted row marked, the empty-directory state, and the hint/status
+// via the shared modal primitive.
+
+mod assignee_picker_render {
+    use crate::i18n::set_language;
+    use crate::tui::model::{DetailOverlay, EditStatus, Header, Model, Screen};
+    use crate::tui::view::view;
+    use ratatui::{backend::TestBackend, Terminal};
+    use serde_json::Value;
+    use std::collections::HashMap;
+
+    use super::LANG_MUTEX;
+
+    fn make_detail_model(overlay: DetailOverlay) -> Model {
+        Model {
+            stack: vec![Screen::Detail {
+                instance: "inst".into(),
+                project_id: 1,
+                task_id: 42,
+                task: Value::Null,
+                comments: vec![],
+                user_map: HashMap::new(),
+                lines: vec![],
+                line_styles: vec![],
+                assets: vec![],
+                offset: 0,
+                loading: false,
+                rendered_width: usize::MAX,
+                overlay,
+                current_user_id: None,
+                affordances: vec![],
+                focused_comment: None,
+                auth_error: false,
+                comment_spans: vec![],
+            }],
+            should_quit: false,
+            header: Header::from_instances(&[], None),
+            viewport: (80, 24),
+            click_targets: vec![],
+            modal_button_targets: vec![],
+            last_loaded: None,
+            selection: None,
+            copied_feedback: false,
+        }
+    }
+
+    fn render_via_view(model: &Model, width: u16, height: u16) -> ratatui::buffer::Buffer {
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| view(model, frame, &mut vec![], &mut vec![]))
+            .unwrap();
+        terminal.backend().buffer().clone()
+    }
+
+    fn buf_text(buf: &ratatui::buffer::Buffer) -> String {
+        let area = buf.area();
+        let mut out = String::new();
+        for y in 0..area.height {
+            for x in 0..area.width {
+                out.push_str(buf.cell((x, y)).unwrap().symbol());
+            }
+            out.push('\n');
+        }
+        out
+    }
+
+    fn two_candidates() -> Vec<(i64, String)> {
+        vec![(1i64, "Alice".to_string()), (2i64, "Bob".to_string())]
+    }
+
+    // AC3: the modal shows the title, every candidate name, and the navigate/confirm hint.
+    #[test]
+    fn assignee_picker_active_shows_title_candidates_and_hint() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let model = make_detail_model(DetailOverlay::AssigneePicker {
+            candidates: two_candidates(),
+            selected: 0,
+            status: EditStatus::Editing,
+        });
+        let buf = render_via_view(&model, 80, 24);
+        set_language("en");
+        let content = buf_text(&buf);
+        assert!(
+            content.contains("Assign task"),
+            "modal must show 'Assign task' title: {content}"
+        );
+        assert!(
+            content.contains("Alice"),
+            "modal must show the 'Alice' candidate: {content}"
+        );
+        assert!(
+            content.contains("Bob"),
+            "modal must show the 'Bob' candidate: {content}"
+        );
+        assert!(
+            content.contains("Enter/Ctrl+S confirm"),
+            "in-box hint must contain 'Enter/Ctrl+S confirm': {content}"
+        );
+    }
+
+    // AC3: the highlighted row is marked distinctly from the non-selected rows.
+    #[test]
+    fn assignee_picker_marks_the_selected_row() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let model = make_detail_model(DetailOverlay::AssigneePicker {
+            candidates: two_candidates(),
+            selected: 1,
+            status: EditStatus::Editing,
+        });
+        let buf = render_via_view(&model, 80, 24);
+        set_language("en");
+        let content = buf_text(&buf);
+        assert!(
+            content.contains("> Bob"),
+            "the selected row (Bob) must carry the selection marker: {content}"
+        );
+        assert!(
+            !content.contains("> Alice"),
+            "a non-selected row (Alice) must not carry the selection marker: {content}"
+        );
+    }
+
+    // AC3: an empty candidate list shows the empty-directory state.
+    #[test]
+    fn assignee_picker_with_no_candidates_shows_empty_state() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let model = make_detail_model(DetailOverlay::AssigneePicker {
+            candidates: vec![],
+            selected: 0,
+            status: EditStatus::Editing,
+        });
+        let buf = render_via_view(&model, 80, 24);
+        set_language("en");
+        let content = buf_text(&buf);
+        assert!(
+            content.contains("No assignable users"),
+            "modal must show the empty-directory state: {content}"
+        );
+    }
+
+    // AC3: the modal shows the Submitting status text while the picker is submitting.
+    #[test]
+    fn assignee_picker_submitting_shows_sending_status() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let model = make_detail_model(DetailOverlay::AssigneePicker {
+            candidates: two_candidates(),
+            selected: 0,
+            status: EditStatus::Submitting,
+        });
+        let buf = render_via_view(&model, 80, 24);
+        set_language("en");
+        let content = buf_text(&buf);
+        assert!(
+            content.contains("Sending…"),
+            "modal must show the submitting status: {content}"
+        );
+    }
+
+    // AC3: assignee-picker inactive — no assignee-picker content leaks into the render.
+    #[test]
+    fn assignee_picker_inactive_shows_no_assignee_picker_content() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let model = make_detail_model(DetailOverlay::None);
+        let buf = render_via_view(&model, 80, 24);
+        set_language("en");
+        let content = buf_text(&buf);
+        assert!(
+            !content.contains("Assign task"),
+            "modal title must NOT appear when assignee-picker overlay is None: {content}"
+        );
+    }
+}
+
 // AC B1 (slice 0057b): render_modal returns the inner content (body) Rect — the
 // area beneath the title border and above the hint row, not the outer bordered box.
 
@@ -7565,6 +7745,45 @@ mod contextual_footer {
         );
     }
 
+    // (issue 0068 TUI slice) the Detail browsing hint exposes the 'a assignee'
+    // affordance. Checked against the pure hint string rather than the width-80
+    // render above: the hint already exceeds 80 columns before this token, so a
+    // fixed-width render clips it the same way it already clips the trailing
+    // 'Esc/b back · q quit' tokens.
+    #[test]
+    fn detail_hint_browsing_mode_contains_assignee_affordance() {
+        use crate::tui::footer::hint_for_screen;
+        use crate::tui::model::Screen;
+        let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let screen = Screen::Detail {
+            instance: "inst".into(),
+            project_id: 1,
+            task_id: 1,
+            task: json!({}),
+            comments: vec![],
+            user_map: HashMap::new(),
+            lines: vec![],
+            line_styles: vec![],
+            assets: vec![],
+            offset: 0,
+            loading: false,
+            rendered_width: usize::MAX,
+            overlay: DetailOverlay::None,
+            current_user_id: None,
+            affordances: vec![],
+            focused_comment: None,
+            auth_error: false,
+            comment_spans: vec![],
+        };
+        let hint = hint_for_screen(&screen);
+        set_language("en");
+        assert!(
+            hint.contains("a assignee"),
+            "Detail browsing hint must contain 'a assignee': {hint:?}"
+        );
+    }
+
     // AC4 (issue 0067 TUI slice): while the log-time modal is open, the footer shows
     // the browse hint — the modal owns its own hint (one-home rule, mirrors compose).
     #[test]
@@ -7643,6 +7862,31 @@ mod contextual_footer {
         assert!(
             content.contains("s status"),
             "footer must show the 's status' affordance when the status-confirm modal is open: {content}"
+        );
+    }
+
+    // (issue 0068 TUI slice) while the assignee-picker modal is open, the footer shows
+    // the browse hint — the modal owns its own hint (one-home rule, mirrors status).
+    #[test]
+    fn detail_footer_assignee_picker_mode_shows_browse_hint() {
+        let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let buf = render_detail_model(
+            DetailOverlay::AssigneePicker {
+                candidates: vec![],
+                selected: 0,
+                status: EditStatus::Editing,
+            },
+            None,
+            vec![],
+            None,
+            false,
+        );
+        set_language("en");
+        let content = buf_to_string(&buf);
+        assert!(
+            content.contains("j/k move"),
+            "footer must show browse hint when the assignee-picker modal is open: {content}"
         );
     }
 

@@ -167,5 +167,8 @@
   "Mark task as completed?": "Marcar tarefa como concluída?",
   "Reopen task?": "Reabrir tarefa?",
   "Enter/Ctrl+S confirm · Esc cancel": "Enter/Ctrl+S confirmar · Esc cancelar",
-  "↑/↓ · j/k move · c comment · t log time · e estimate · s status · r refresh · Esc/b back · q quit": "↑/↓ · j/k mover · c comentar · t registrar tempo · e estimativa · s status · r atualizar · Esc/b voltar · q sair"
+  "↑/↓ · j/k move · c comment · t log time · e estimate · s status · r refresh · a assignee · Esc/b back · q quit": "↑/↓ · j/k mover · c comentar · t registrar tempo · e estimativa · s status · r atualizar · a responsável · Esc/b voltar · q sair",
+  "↑/↓ · j/k move · Enter/Ctrl+S confirm · Esc cancel": "↑/↓ · j/k mover · Enter/Ctrl+S confirmar · Esc cancelar",
+  "Assign task": "Atribuir tarefa",
+  "No assignable users": "Nenhum usuário disponível para atribuição"
 }

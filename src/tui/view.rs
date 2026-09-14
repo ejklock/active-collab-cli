@@ -72,6 +72,18 @@ pub(crate) fn status_confirm_modal_status(status: &EditStatus) -> Option<String>
     }
 }
 
+/// Status text rendered inside the assignee-picker modal's in-box hint line.
+///
+/// Returns `Some(status)` when the picker has a transient state to display,
+/// `None` when awaiting selection normally (the hint text suffices).
+pub(crate) fn assignee_picker_modal_status(status: &EditStatus) -> Option<String> {
+    match status {
+        EditStatus::Submitting => Some(t("Sending…")),
+        EditStatus::Error(_) => Some(t("Failed to update task")),
+        EditStatus::Editing => None,
+    }
+}
+
 /// Render the top screen into the terminal frame.
 ///
 /// Splits the frame into the main content area and a one-line footer, then
@@ -209,6 +221,9 @@ pub fn view(
             }
             if let Some((completed_target, status)) = overlay.status_confirm() {
                 render_status_confirm_modal(frame, area, completed_target, status);
+            }
+            if let Some((candidates, selected, status)) = overlay.assignee_picker() {
+                render_assignee_picker_modal(frame, area, candidates, selected, status);
             }
             if overlay.is_confirm() {
                 render_confirm_modal(frame, area, modal_btn_targets);
@@ -360,6 +375,52 @@ fn render_status_confirm_modal(
         frame_area,
         ModalContent {
             title: &t("Change status"),
+            lines: &lines,
+            hint: Some(&hint),
+        },
+    );
+}
+
+fn assignee_picker_modal_hint(status: &EditStatus) -> String {
+    match assignee_picker_modal_status(status) {
+        Some(status) => status,
+        None => t("↑/↓ · j/k move · Enter/Ctrl+S confirm · Esc cancel"),
+    }
+}
+
+/// Mark the highlighted candidate row with a leading indicator, mirroring the
+/// focused-field marker convention used by the log-time modal.
+fn assignee_candidate_line(name: &str, is_selected: bool) -> String {
+    let marker = if is_selected { ">" } else { " " };
+    format!("{marker} {name}")
+}
+
+/// Render the assignee-picker modal chrome via `render_modal`: the candidate list as
+/// labeled rows with the highlighted row marked, an empty-directory line when the
+/// user directory has no candidates, plus the hint/status line.
+fn render_assignee_picker_modal(
+    frame: &mut Frame,
+    frame_area: ratatui::layout::Rect,
+    candidates: &[(i64, String)],
+    selected: usize,
+    status: &EditStatus,
+) {
+    use crate::tui::widgets::modal::render_modal;
+    let hint = assignee_picker_modal_hint(status);
+    let lines: Vec<String> = if candidates.is_empty() {
+        vec![t("No assignable users")]
+    } else {
+        candidates
+            .iter()
+            .enumerate()
+            .map(|(i, (_, name))| assignee_candidate_line(name, i == selected))
+            .collect()
+    };
+    render_modal(
+        frame,
+        frame_area,
+        ModalContent {
+            title: &t("Assign task"),
             lines: &lines,
             hint: Some(&hint),
         },
