@@ -5,6 +5,7 @@ mod resolve;
 mod setup;
 mod skill;
 mod task;
+pub(crate) mod time;
 
 pub(crate) use comment::comment_core;
 pub(crate) use mine::{collect_mine_rows, mine_core, MineOutcome};
@@ -13,9 +14,10 @@ pub(crate) use setup::{
     setup_add, setup_language, setup_list, setup_remove, setup_test, setup_theme, SetupAddFields,
 };
 pub(crate) use skill::skill_output;
-pub(crate) use task::{current_core, get_core, DisplayFlags};
+pub(crate) use task::{current_core, get_core, task_set_core, DisplayFlags};
 #[cfg(test)]
 pub(crate) use task::{do_get_task, load_task};
+pub(crate) use time::time_log_core;
 
 #[cfg(test)]
 use crate::client::ActiveCollabClient;

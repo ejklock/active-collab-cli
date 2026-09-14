@@ -37,6 +37,10 @@ pub fn map_browse_key_event(key: crossterm::event::KeyEvent) -> Option<Msg> {
         KeyCode::Esc | KeyCode::Char('b') => Some(Msg::Back),
         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => Some(Msg::Quit),
         KeyCode::Char('c') => Some(Msg::ComposeOpen),
+        KeyCode::Char('t') => Some(Msg::LogTimeOpen),
+        KeyCode::Char('e') => Some(Msg::EstimateOpen),
+        KeyCode::Char('s') => Some(Msg::StatusToggleOpen),
+        KeyCode::Char('a') => Some(Msg::AssigneePickerOpen),
         KeyCode::Char('r') => Some(Msg::Refresh),
         KeyCode::Enter => Some(Msg::Select),
         _ => None,
@@ -56,6 +60,72 @@ pub fn map_compose_key_event(key: crossterm::event::KeyEvent) -> Option<Msg> {
         KeyCode::Char('s') if ctrl => Some(Msg::ComposeSubmit),
         KeyCode::Esc => Some(Msg::ComposeCancel),
         _ => Some(Msg::ComposeInput(Input::from(key))),
+    }
+}
+
+/// Map a key event when the log-time modal is active.
+///
+/// Ctrl+S submits and Esc cancels — the same shell-intercepted shortcuts as compose
+/// mode. Tab switches the focused field between Hours and Summary; every other
+/// printable char and Backspace edit the focused field's plain-text buffer directly
+/// (no `tui_textarea` — each field is a single line, so `update()` applies char/backspace
+/// Msgs to the buffer itself rather than routing through a generic `Input`).
+pub fn map_log_time_key_event(key: crossterm::event::KeyEvent) -> Option<Msg> {
+    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    match key.code {
+        KeyCode::Char('s') if ctrl => Some(Msg::LogTimeSubmit),
+        KeyCode::Esc => Some(Msg::LogTimeCancel),
+        KeyCode::Tab => Some(Msg::LogTimeToggleField),
+        KeyCode::Backspace => Some(Msg::LogTimeBackspace),
+        KeyCode::Char(c) => Some(Msg::LogTimeChar(c)),
+        _ => None,
+    }
+}
+
+/// Map a key event when the estimate-edit modal is active.
+///
+/// Ctrl+S submits and Esc cancels — the same shell-intercepted shortcuts as the
+/// log-time modal. There is no Tab here: a single field has nothing to switch
+/// between, unlike log time's Hours/Summary pair.
+pub fn map_estimate_key_event(key: crossterm::event::KeyEvent) -> Option<Msg> {
+    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    match key.code {
+        KeyCode::Char('s') if ctrl => Some(Msg::EstimateSubmit),
+        KeyCode::Esc => Some(Msg::EstimateCancel),
+        KeyCode::Backspace => Some(Msg::EstimateBackspace),
+        KeyCode::Char(c) => Some(Msg::EstimateChar(c)),
+        _ => None,
+    }
+}
+
+/// Map a key event when the status-confirm modal is active.
+///
+/// Enter or Ctrl+S confirms the pending status change; Esc cancels it. There is no
+/// text entry here — the target is fixed by `StatusToggleOpen`, not typed.
+pub fn map_status_confirm_key_event(key: crossterm::event::KeyEvent) -> Option<Msg> {
+    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    match key.code {
+        KeyCode::Enter => Some(Msg::StatusToggleConfirm),
+        KeyCode::Char('s') if ctrl => Some(Msg::StatusToggleConfirm),
+        KeyCode::Esc => Some(Msg::StatusToggleCancel),
+        _ => None,
+    }
+}
+
+/// Map a key event when the assignee-picker modal is active.
+///
+/// j/Down and k/Up move the selection; Enter or Ctrl+S confirms the highlighted
+/// candidate; Esc cancels. There is no text entry — candidates come from the cached
+/// user directory, not typed.
+pub fn map_assignee_picker_key_event(key: crossterm::event::KeyEvent) -> Option<Msg> {
+    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    match key.code {
+        KeyCode::Down | KeyCode::Char('j') => Some(Msg::AssigneePickerDown),
+        KeyCode::Up | KeyCode::Char('k') => Some(Msg::AssigneePickerUp),
+        KeyCode::Enter => Some(Msg::AssigneePickerSubmit),
+        KeyCode::Char('s') if ctrl => Some(Msg::AssigneePickerSubmit),
+        KeyCode::Esc => Some(Msg::AssigneePickerCancel),
+        _ => None,
     }
 }
 

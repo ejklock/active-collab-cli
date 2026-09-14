@@ -160,6 +160,27 @@ pub enum Cmd {
         instance: String,
         comment_id: i64,
     },
+    /// POST a new time record for the task. `summary` carries the optional note; the
+    /// job type and record date are resolved by the shell, never by the pure core.
+    SubmitTimeLog {
+        instance: String,
+        project_id: i64,
+        task_id: i64,
+        hours: f64,
+        summary: Option<String>,
+    },
+    /// PUT one or more task-field writes (completion and/or assignee/estimate) for
+    /// the current Detail task. Each field is optional so this single shared effect
+    /// covers every task-edit affordance (estimate now; status and assignee once
+    /// their own overlays land) without a per-field `Cmd` variant.
+    SubmitTaskEdit {
+        instance: String,
+        project_id: i64,
+        task_id: i64,
+        completion: Option<bool>,
+        assignee_id: Option<i64>,
+        estimate: Option<f64>,
+    },
     /// Fetch and decode the image bytes for an opened image-viewer asset.
     /// Handled entirely by the shell (ADR 0065); the pure Model never sees bytes.
     LoadImage {
@@ -220,21 +241,95 @@ pub struct Compose {
     pub status: ComposeStatus,
 }
 
+/// Which field of the log-time modal currently has focus.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum LogTimeField {
+    Hours,
+    Summary,
+}
+
+/// Current lifecycle phase of the log-time modal.
+#[derive(Debug, Clone, PartialEq)]
+pub enum LogTimeStatus {
+    Editing,
+    Submitting,
+    Error(String),
+}
+
+/// Transient state for the in-progress log-time modal.
+///
+/// Plain `String` buffers (not a `TextArea`) since each field is a single line with
+/// no caret/undo needs, so the whole form stays `PartialEq` unlike `Compose`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LogTimeForm {
+    pub hours: String,
+    pub summary: String,
+    pub field: LogTimeField,
+    pub status: LogTimeStatus,
+}
+
+impl LogTimeForm {
+    fn focused_buffer_mut(&mut self) -> &mut String {
+        match self.field {
+            LogTimeField::Hours => &mut self.hours,
+            LogTimeField::Summary => &mut self.summary,
+        }
+    }
+}
+
+/// Current lifecycle phase of a task-field edit modal (the estimate form and any
+/// future status/assignee affordances that share the same `Cmd::SubmitTaskEdit`
+/// effect).
+#[derive(Debug, Clone, PartialEq)]
+pub enum EditStatus {
+    Editing,
+    Submitting,
+    Error(String),
+}
+
+/// Transient state for the in-progress estimate-edit modal.
+///
+/// A plain `String` buffer (not a `TextArea`) since the field is a single line with
+/// no caret/undo needs, so the whole form stays `PartialEq` unlike `Compose`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EstimateForm {
+    pub value: String,
+    pub status: EditStatus,
+}
+
 /// The active modal overlay on the Detail read view.
 ///
-/// Compose and the delete prompt are mutually exclusive by construction — only one overlay
-/// at a time. The combined state (both active) cannot be constructed with this enum,
-/// replacing the previous two independent `Option` fields (ADR 0047).
+/// Compose, the log-time form, the estimate-edit form, the delete prompt, and the
+/// image viewer are mutually exclusive by construction — only one overlay at a
+/// time. The combined state (more than one active) cannot be constructed with this
+/// enum, replacing the previous independent `Option` fields (ADR 0047).
 ///
-/// `Compose` is intentionally larger than `ConfirmDelete`: it carries a `TextArea` with
-/// caret/selection/undo history (ADR 0064). Construction happens only on open/edit, never
-/// per-keystroke, so boxing would add indirection with no practical benefit — same
-/// rationale as `Screen`'s `large_enum_variant` allow below.
+/// `Compose` is intentionally larger than the other variants: it carries a `TextArea`
+/// with caret/selection/undo history (ADR 0064). Construction happens only on
+/// open/edit, never per-keystroke, so boxing would add indirection with no practical
+/// benefit — same rationale as `Screen`'s `large_enum_variant` allow below.
 #[derive(Debug, Clone)]
 #[allow(clippy::large_enum_variant)]
 pub enum DetailOverlay {
     None,
     Compose(Compose),
+    LogTime(LogTimeForm),
+    EstimateEdit(EstimateForm),
+    /// The status-toggle confirm prompt. `completed_target` is the completion value
+    /// the confirm would submit — the opposite of the task's current `is_completed`
+    /// at the moment the overlay opened.
+    StatusConfirm {
+        completed_target: bool,
+        status: EditStatus,
+    },
+    /// The assignee-picker modal. `candidates` holds id/name pairs built from the
+    /// Detail screen's cached user directory, sorted case-insensitively by name.
+    /// `selected` is the index of the highlighted row within `candidates`.
+    AssigneePicker {
+        candidates: Vec<(i64, String)>,
+        selected: usize,
+        status: EditStatus,
+    },
     ConfirmDelete {
         comment_id: i64,
     },
@@ -243,6 +338,17 @@ pub enum DetailOverlay {
         status: ImageStatus,
     },
 }
+
+/// Borrowed view into an active `AssigneePicker` overlay: its candidate list, the
+/// highlighted index, and its lifecycle status.
+pub type AssigneePickerView<'a> = (&'a [(i64, String)], usize, &'a EditStatus);
+
+/// Mutable counterpart of [`AssigneePickerView`].
+pub type AssigneePickerViewMut<'a> = (
+    &'a mut Vec<(i64, String)>,
+    &'a mut usize,
+    &'a mut EditStatus,
+);
 
 impl DetailOverlay {
     pub fn compose(&self) -> Option<&Compose> {
@@ -255,6 +361,76 @@ impl DetailOverlay {
     pub fn compose_mut(&mut self) -> Option<&mut Compose> {
         match self {
             DetailOverlay::Compose(c) => Some(c),
+            _ => Option::None,
+        }
+    }
+
+    pub fn log_time(&self) -> Option<&LogTimeForm> {
+        match self {
+            DetailOverlay::LogTime(f) => Some(f),
+            _ => Option::None,
+        }
+    }
+
+    pub fn log_time_mut(&mut self) -> Option<&mut LogTimeForm> {
+        match self {
+            DetailOverlay::LogTime(f) => Some(f),
+            _ => Option::None,
+        }
+    }
+
+    pub fn estimate_edit(&self) -> Option<&EstimateForm> {
+        match self {
+            DetailOverlay::EstimateEdit(f) => Some(f),
+            _ => Option::None,
+        }
+    }
+
+    pub fn estimate_edit_mut(&mut self) -> Option<&mut EstimateForm> {
+        match self {
+            DetailOverlay::EstimateEdit(f) => Some(f),
+            _ => Option::None,
+        }
+    }
+
+    pub fn status_confirm(&self) -> Option<(bool, &EditStatus)> {
+        match self {
+            DetailOverlay::StatusConfirm {
+                completed_target,
+                status,
+            } => Some((*completed_target, status)),
+            _ => Option::None,
+        }
+    }
+
+    pub fn status_confirm_mut(&mut self) -> Option<(&mut bool, &mut EditStatus)> {
+        match self {
+            DetailOverlay::StatusConfirm {
+                completed_target,
+                status,
+            } => Some((completed_target, status)),
+            _ => Option::None,
+        }
+    }
+
+    pub fn assignee_picker(&self) -> Option<AssigneePickerView<'_>> {
+        match self {
+            DetailOverlay::AssigneePicker {
+                candidates,
+                selected,
+                status,
+            } => Some((candidates.as_slice(), *selected, status)),
+            _ => Option::None,
+        }
+    }
+
+    pub fn assignee_picker_mut(&mut self) -> Option<AssigneePickerViewMut<'_>> {
+        match self {
+            DetailOverlay::AssigneePicker {
+                candidates,
+                selected,
+                status,
+            } => Some((candidates, selected, status)),
             _ => Option::None,
         }
     }
@@ -282,6 +458,22 @@ impl DetailOverlay {
 
     pub fn is_compose(&self) -> bool {
         matches!(self, DetailOverlay::Compose(_))
+    }
+
+    pub fn is_log_time(&self) -> bool {
+        matches!(self, DetailOverlay::LogTime(_))
+    }
+
+    pub fn is_estimate_edit(&self) -> bool {
+        matches!(self, DetailOverlay::EstimateEdit(_))
+    }
+
+    pub fn is_status_confirm(&self) -> bool {
+        matches!(self, DetailOverlay::StatusConfirm { .. })
+    }
+
+    pub fn is_assignee_picker(&self) -> bool {
+        matches!(self, DetailOverlay::AssigneePicker { .. })
     }
 
     pub fn is_confirm(&self) -> bool {
@@ -586,7 +778,7 @@ pub enum Msg {
     ///
     /// Carries everything but the shell-level Ctrl+S/Esc shortcuts: printable chars,
     /// Enter (newline), caret movement, Home/End, Backspace/Delete, undo/redo. The
-    /// shell (events.rs) converts the crossterm `KeyEvent` to `tui_textarea::Input`;
+    /// shell (events.rs) converts the crossterm `KeyEvent` to `tui_textarea::Input`.
     /// `update()` applies it via `TextArea::input` (ADR 0064).
     ComposeInput(tui_textarea::Input),
     /// Submit the current compose buffer as a new comment.
@@ -600,6 +792,55 @@ pub enum Msg {
     /// A 401 response from a comment mutation (create/update/delete).
     /// Sets auth_error on the Detail screen without clearing the compose buffer.
     AuthExpired,
+    /// Open the log-time modal on the current Detail screen.
+    LogTimeOpen,
+    /// Append a printable character to the currently focused log-time field.
+    LogTimeChar(char),
+    /// Remove the last character from the currently focused log-time field.
+    LogTimeBackspace,
+    /// Switch focus between the Hours and Summary fields.
+    LogTimeToggleField,
+    /// Submit the current log-time buffers as a new time record.
+    LogTimeSubmit,
+    /// Cancel the log-time modal, discarding the buffers.
+    LogTimeCancel,
+    /// The time-record POST succeeded; refresh the detail view.
+    TimeMutationOk,
+    /// The time-record POST failed; preserve the buffers and show an error.
+    TimeMutationErr(String),
+    /// Open the estimate-edit modal on the current Detail screen.
+    EstimateOpen,
+    /// Append a printable character to the estimate value buffer.
+    EstimateChar(char),
+    /// Remove the last character from the estimate value buffer.
+    EstimateBackspace,
+    /// Submit the current estimate buffer as a task-field write.
+    EstimateSubmit,
+    /// Cancel the estimate-edit modal, discarding the buffer.
+    EstimateCancel,
+    /// A task-field write (completion and/or assignee/estimate) succeeded; refresh
+    /// the detail view.
+    TaskEditOk,
+    /// A task-field write failed; preserve the open form's buffer and show an error.
+    TaskEditErr(String),
+    /// Open the status-confirm modal on the current Detail screen, targeting the
+    /// opposite of the task's current completion state.
+    StatusToggleOpen,
+    /// Confirm the pending status change and submit it as a task-field write.
+    StatusToggleConfirm,
+    /// Cancel the status-confirm modal without submitting.
+    StatusToggleCancel,
+    /// Open the assignee-picker modal on the current Detail screen, built from the
+    /// already-loaded user directory.
+    AssigneePickerOpen,
+    /// Move the assignee-picker selection up by one row.
+    AssigneePickerUp,
+    /// Move the assignee-picker selection down by one row.
+    AssigneePickerDown,
+    /// Confirm the highlighted candidate and submit it as a task-field write.
+    AssigneePickerSubmit,
+    /// Cancel the assignee-picker modal without submitting.
+    AssigneePickerCancel,
     /// Move the comment-card focus cursor forward by one card (j / Down in Detail browse mode).
     FocusNextComment,
     /// Move the comment-card focus cursor backward by one card (k / Up in Detail browse mode).
@@ -791,6 +1032,29 @@ pub fn update(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
         | Msg::CommentMutationOk
         | Msg::CommentMutationErr(_)
         | Msg::AuthExpired) => update_compose(model, m),
+        m @ (Msg::LogTimeOpen
+        | Msg::LogTimeChar(_)
+        | Msg::LogTimeBackspace
+        | Msg::LogTimeToggleField
+        | Msg::LogTimeSubmit
+        | Msg::LogTimeCancel
+        | Msg::TimeMutationOk
+        | Msg::TimeMutationErr(_)) => update_log_time(model, m),
+        m @ (Msg::EstimateOpen
+        | Msg::EstimateChar(_)
+        | Msg::EstimateBackspace
+        | Msg::EstimateSubmit
+        | Msg::EstimateCancel
+        | Msg::TaskEditOk
+        | Msg::TaskEditErr(_)) => update_task_edit(model, m),
+        m @ (Msg::StatusToggleOpen | Msg::StatusToggleConfirm | Msg::StatusToggleCancel) => {
+            update_status_toggle(model, m)
+        }
+        m @ (Msg::AssigneePickerOpen
+        | Msg::AssigneePickerUp
+        | Msg::AssigneePickerDown
+        | Msg::AssigneePickerSubmit
+        | Msg::AssigneePickerCancel) => update_assignee_picker(model, m),
         Msg::FocusNextComment => (handle_focus_next(model), vec![]),
         Msg::FocusPrevComment => (handle_focus_prev(model), vec![]),
         Msg::ConfirmDeleteComment => handle_confirm_delete(model),
@@ -891,6 +1155,53 @@ fn update_compose(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
         Msg::CommentMutationOk => handle_comment_mutation_ok(model),
         Msg::CommentMutationErr(msg) => (handle_comment_mutation_err(model, msg), vec![]),
         Msg::AuthExpired => (handle_auth_expired(model), vec![]),
+        _ => (model, vec![]),
+    }
+}
+
+fn update_log_time(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
+    match msg {
+        Msg::LogTimeOpen => (handle_log_time_open(model), vec![]),
+        Msg::LogTimeChar(c) => (handle_log_time_char(model, c), vec![]),
+        Msg::LogTimeBackspace => (handle_log_time_backspace(model), vec![]),
+        Msg::LogTimeToggleField => (handle_log_time_toggle_field(model), vec![]),
+        Msg::LogTimeSubmit => handle_log_time_submit(model),
+        Msg::LogTimeCancel => (handle_log_time_cancel(model), vec![]),
+        Msg::TimeMutationOk => handle_time_mutation_ok(model),
+        Msg::TimeMutationErr(msg) => (handle_time_mutation_err(model, msg), vec![]),
+        _ => (model, vec![]),
+    }
+}
+
+fn update_task_edit(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
+    match msg {
+        Msg::EstimateOpen => (handle_estimate_open(model), vec![]),
+        Msg::EstimateChar(c) => (handle_estimate_char(model, c), vec![]),
+        Msg::EstimateBackspace => (handle_estimate_backspace(model), vec![]),
+        Msg::EstimateSubmit => handle_estimate_submit(model),
+        Msg::EstimateCancel => (handle_estimate_cancel(model), vec![]),
+        Msg::TaskEditOk => handle_task_edit_ok(model),
+        Msg::TaskEditErr(msg) => (handle_task_edit_err(model, msg), vec![]),
+        _ => (model, vec![]),
+    }
+}
+
+fn update_status_toggle(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
+    match msg {
+        Msg::StatusToggleOpen => (handle_status_toggle_open(model), vec![]),
+        Msg::StatusToggleConfirm => handle_status_toggle_confirm(model),
+        Msg::StatusToggleCancel => (handle_status_toggle_cancel(model), vec![]),
+        _ => (model, vec![]),
+    }
+}
+
+fn update_assignee_picker(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
+    match msg {
+        Msg::AssigneePickerOpen => (handle_assignee_picker_open(model), vec![]),
+        Msg::AssigneePickerUp => (handle_assignee_picker_up(model), vec![]),
+        Msg::AssigneePickerDown => (handle_assignee_picker_down(model), vec![]),
+        Msg::AssigneePickerSubmit => handle_assignee_picker_submit(model),
+        Msg::AssigneePickerCancel => (handle_assignee_picker_cancel(model), vec![]),
         _ => (model, vec![]),
     }
 }
@@ -1806,7 +2117,10 @@ fn handle_cancel_delete(mut model: Model) -> Model {
     model
 }
 
-fn handle_comment_mutation_ok(mut model: Model) -> (Model, Vec<Cmd>) {
+/// Clear the active overlay and emit `Cmd::LoadDetail { refresh: true }` for the
+/// current Detail screen — the server-truth refresh shared by every write path
+/// (comment mutation, time-record mutation) after a successful POST/PUT (ADR 0035).
+fn refresh_detail_after_write(mut model: Model) -> (Model, Vec<Cmd>) {
     let detail_fields = match model.top() {
         Some(Screen::Detail {
             instance,
@@ -1837,6 +2151,10 @@ fn handle_comment_mutation_ok(mut model: Model) -> (Model, Vec<Cmd>) {
     (model, vec![cmd])
 }
 
+fn handle_comment_mutation_ok(model: Model) -> (Model, Vec<Cmd>) {
+    refresh_detail_after_write(model)
+}
+
 fn handle_comment_mutation_err(mut model: Model, msg: String) -> Model {
     if let Some(Screen::Detail {
         overlay: DetailOverlay::Compose(cp),
@@ -1848,6 +2166,664 @@ fn handle_comment_mutation_err(mut model: Model, msg: String) -> Model {
         *rendered_width = usize::MAX;
     }
     model
+}
+
+/// Open the log-time modal on the current Detail screen with empty buffers.
+///
+/// No-op when the log-time modal is already open — mirrors `handle_compose_open`.
+fn handle_log_time_open(mut model: Model) -> Model {
+    if let Some(Screen::Detail {
+        ref mut overlay,
+        ref mut rendered_width,
+        ..
+    }) = model.top_mut()
+    {
+        if !overlay.is_log_time() {
+            *overlay = DetailOverlay::LogTime(LogTimeForm {
+                hours: String::new(),
+                summary: String::new(),
+                field: LogTimeField::Hours,
+                status: LogTimeStatus::Editing,
+            });
+            *rendered_width = usize::MAX;
+        }
+    }
+    model
+}
+
+/// Append `c` to the currently focused log-time field while the form is `Editing`.
+fn handle_log_time_char(mut model: Model, c: char) -> Model {
+    if let Some(Screen::Detail {
+        ref mut overlay,
+        ref mut rendered_width,
+        ..
+    }) = model.top_mut()
+    {
+        if let Some(form) = overlay.log_time_mut() {
+            if form.status == LogTimeStatus::Editing {
+                form.focused_buffer_mut().push(c);
+                *rendered_width = usize::MAX;
+            }
+        }
+    }
+    model
+}
+
+/// Remove the last character from the currently focused log-time field while
+/// the form is `Editing`.
+fn handle_log_time_backspace(mut model: Model) -> Model {
+    if let Some(Screen::Detail {
+        ref mut overlay,
+        ref mut rendered_width,
+        ..
+    }) = model.top_mut()
+    {
+        if let Some(form) = overlay.log_time_mut() {
+            if form.status == LogTimeStatus::Editing {
+                form.focused_buffer_mut().pop();
+                *rendered_width = usize::MAX;
+            }
+        }
+    }
+    model
+}
+
+/// Switch the focused log-time field between Hours and Summary.
+fn handle_log_time_toggle_field(mut model: Model) -> Model {
+    if let Some(Screen::Detail {
+        ref mut overlay,
+        ref mut rendered_width,
+        ..
+    }) = model.top_mut()
+    {
+        if let Some(form) = overlay.log_time_mut() {
+            form.field = match form.field {
+                LogTimeField::Hours => LogTimeField::Summary,
+                LogTimeField::Summary => LogTimeField::Hours,
+            };
+            *rendered_width = usize::MAX;
+        }
+    }
+    model
+}
+
+/// Dismiss the log-time modal without submitting.
+fn handle_log_time_cancel(mut model: Model) -> Model {
+    if let Some(Screen::Detail {
+        ref mut overlay,
+        ref mut rendered_width,
+        ..
+    }) = model.top_mut()
+    {
+        *overlay = DetailOverlay::None;
+        *rendered_width = usize::MAX;
+    }
+    model
+}
+
+/// Extract the fields needed to submit the log-time form, or None when the guard fails.
+///
+/// Guard: overlay must be `LogTime` and its status must be `Editing`.
+fn extract_log_time_submit_info(model: &Model) -> Option<(String, i64, i64, String, String)> {
+    match model.top() {
+        Some(Screen::Detail {
+            instance,
+            project_id,
+            task_id,
+            overlay,
+            ..
+        }) => {
+            let form = overlay.log_time()?;
+            if form.status != LogTimeStatus::Editing {
+                return None;
+            }
+            Some((
+                instance.clone(),
+                *project_id,
+                *task_id,
+                form.hours.clone(),
+                form.summary.clone(),
+            ))
+        }
+        _ => None,
+    }
+}
+
+/// Set the log-time overlay's status to `Error(message)`, when the overlay is active.
+fn set_log_time_error(model: &mut Model, message: String) {
+    if let Some(Screen::Detail {
+        ref mut overlay,
+        ref mut rendered_width,
+        ..
+    }) = model.top_mut()
+    {
+        if let Some(form) = overlay.log_time_mut() {
+            form.status = LogTimeStatus::Error(message);
+            *rendered_width = usize::MAX;
+        }
+    }
+}
+
+/// Parse the hours buffer and, when it is a value greater than zero, set the form to
+/// `Submitting` and emit `Cmd::SubmitTimeLog`. An empty, zero, negative, or
+/// non-numeric hours buffer sets `Error` instead and emits no `Cmd`. The summary
+/// buffer becomes `Some` only when non-empty after trimming.
+fn handle_log_time_submit(mut model: Model) -> (Model, Vec<Cmd>) {
+    let Some((instance, project_id, task_id, hours_input, summary_input)) =
+        extract_log_time_submit_info(&model)
+    else {
+        return (model, vec![]);
+    };
+
+    let parsed_hours = hours_input
+        .trim()
+        .parse::<f64>()
+        .ok()
+        .filter(|hours| *hours > 0.0);
+
+    let Some(hours) = parsed_hours else {
+        set_log_time_error(&mut model, t("Enter a positive number of hours"));
+        return (model, vec![]);
+    };
+
+    if let Some(Screen::Detail {
+        ref mut overlay,
+        ref mut rendered_width,
+        ..
+    }) = model.top_mut()
+    {
+        if let Some(form) = overlay.log_time_mut() {
+            form.status = LogTimeStatus::Submitting;
+            *rendered_width = usize::MAX;
+        }
+    }
+
+    let summary = {
+        let trimmed = summary_input.trim();
+        (!trimmed.is_empty()).then(|| trimmed.to_string())
+    };
+
+    (
+        model,
+        vec![Cmd::SubmitTimeLog {
+            instance,
+            project_id,
+            task_id,
+            hours,
+            summary,
+        }],
+    )
+}
+
+fn handle_time_mutation_ok(model: Model) -> (Model, Vec<Cmd>) {
+    refresh_detail_after_write(model)
+}
+
+fn handle_time_mutation_err(mut model: Model, msg: String) -> Model {
+    set_log_time_error(&mut model, msg);
+    model
+}
+
+/// Read the task's current `estimate` field as a plain decimal string, or an empty
+/// string when the field is absent or not numeric.
+fn estimate_prefill(task: &Value) -> String {
+    match task.get("estimate").and_then(|v| v.as_f64()) {
+        Some(hours) if hours == hours.trunc() => (hours as i64).to_string(),
+        Some(hours) => hours.to_string(),
+        None => String::new(),
+    }
+}
+
+/// Open the estimate-edit modal on the current Detail screen, prefilled from the
+/// task's current estimate when present.
+///
+/// No-op when the estimate-edit modal is already open — mirrors `handle_log_time_open`.
+fn handle_estimate_open(mut model: Model) -> Model {
+    let prefill = match model.top() {
+        Some(Screen::Detail { task, .. }) => estimate_prefill(task),
+        _ => String::new(),
+    };
+    if let Some(Screen::Detail {
+        ref mut overlay,
+        ref mut rendered_width,
+        ..
+    }) = model.top_mut()
+    {
+        if !overlay.is_estimate_edit() {
+            *overlay = DetailOverlay::EstimateEdit(EstimateForm {
+                value: prefill,
+                status: EditStatus::Editing,
+            });
+            *rendered_width = usize::MAX;
+        }
+    }
+    model
+}
+
+/// Append `c` to the estimate value buffer while the form is `Editing`.
+fn handle_estimate_char(mut model: Model, c: char) -> Model {
+    if let Some(Screen::Detail {
+        ref mut overlay,
+        ref mut rendered_width,
+        ..
+    }) = model.top_mut()
+    {
+        if let Some(form) = overlay.estimate_edit_mut() {
+            if form.status == EditStatus::Editing {
+                form.value.push(c);
+                *rendered_width = usize::MAX;
+            }
+        }
+    }
+    model
+}
+
+/// Remove the last character from the estimate value buffer while the form is `Editing`.
+fn handle_estimate_backspace(mut model: Model) -> Model {
+    if let Some(Screen::Detail {
+        ref mut overlay,
+        ref mut rendered_width,
+        ..
+    }) = model.top_mut()
+    {
+        if let Some(form) = overlay.estimate_edit_mut() {
+            if form.status == EditStatus::Editing {
+                form.value.pop();
+                *rendered_width = usize::MAX;
+            }
+        }
+    }
+    model
+}
+
+/// Dismiss the estimate-edit modal without submitting.
+fn handle_estimate_cancel(mut model: Model) -> Model {
+    if let Some(Screen::Detail {
+        ref mut overlay,
+        ref mut rendered_width,
+        ..
+    }) = model.top_mut()
+    {
+        *overlay = DetailOverlay::None;
+        *rendered_width = usize::MAX;
+    }
+    model
+}
+
+/// Extract the fields needed to submit the estimate form, or None when the guard fails.
+///
+/// Guard: overlay must be `EstimateEdit` and its status must be `Editing`.
+fn extract_estimate_submit_info(model: &Model) -> Option<(String, i64, i64, String)> {
+    match model.top() {
+        Some(Screen::Detail {
+            instance,
+            project_id,
+            task_id,
+            overlay,
+            ..
+        }) => {
+            let form = overlay.estimate_edit()?;
+            if form.status != EditStatus::Editing {
+                return None;
+            }
+            Some((instance.clone(), *project_id, *task_id, form.value.clone()))
+        }
+        _ => None,
+    }
+}
+
+/// Set the active task-edit overlay's status to `Error(message)` — the estimate-edit
+/// form or the status-confirm modal, whichever is active. A no-op when neither is.
+fn set_task_edit_error(model: &mut Model, message: String) {
+    if let Some(Screen::Detail {
+        ref mut overlay,
+        ref mut rendered_width,
+        ..
+    }) = model.top_mut()
+    {
+        if let Some(form) = overlay.estimate_edit_mut() {
+            form.status = EditStatus::Error(message);
+            *rendered_width = usize::MAX;
+        } else if let Some((_, status)) = overlay.status_confirm_mut() {
+            *status = EditStatus::Error(message);
+            *rendered_width = usize::MAX;
+        } else if let Some((_, _, status)) = overlay.assignee_picker_mut() {
+            *status = EditStatus::Error(message);
+            *rendered_width = usize::MAX;
+        }
+    }
+}
+
+/// Parse the estimate value buffer and, when it is a number >= 0, set the form to
+/// `Submitting` and emit `Cmd::SubmitTaskEdit` carrying `estimate: Some(value)` with
+/// `completion` and `assignee_id` both `None`. An empty, negative, or non-numeric
+/// buffer sets `Error` instead and emits no `Cmd`.
+fn handle_estimate_submit(mut model: Model) -> (Model, Vec<Cmd>) {
+    let Some((instance, project_id, task_id, value_input)) = extract_estimate_submit_info(&model)
+    else {
+        return (model, vec![]);
+    };
+
+    let parsed_estimate = value_input
+        .trim()
+        .parse::<f64>()
+        .ok()
+        .filter(|value| *value >= 0.0);
+
+    let Some(estimate) = parsed_estimate else {
+        set_task_edit_error(&mut model, t("Enter a non-negative number of hours"));
+        return (model, vec![]);
+    };
+
+    if let Some(Screen::Detail {
+        ref mut overlay,
+        ref mut rendered_width,
+        ..
+    }) = model.top_mut()
+    {
+        if let Some(form) = overlay.estimate_edit_mut() {
+            form.status = EditStatus::Submitting;
+            *rendered_width = usize::MAX;
+        }
+    }
+
+    (
+        model,
+        vec![Cmd::SubmitTaskEdit {
+            instance,
+            project_id,
+            task_id,
+            completion: None,
+            assignee_id: None,
+            estimate: Some(estimate),
+        }],
+    )
+}
+
+fn handle_task_edit_ok(model: Model) -> (Model, Vec<Cmd>) {
+    refresh_detail_after_write(model)
+}
+
+fn handle_task_edit_err(mut model: Model, msg: String) -> Model {
+    set_task_edit_error(&mut model, msg);
+    model
+}
+
+/// Read the task's current `is_completed` field, defaulting to `false` when absent
+/// or not boolean.
+fn task_is_completed(task: &Value) -> bool {
+    task.get("is_completed")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+}
+
+/// Open the status-confirm modal on the current Detail screen, targeting the
+/// opposite of the task's current `is_completed`.
+///
+/// No-op when the status-confirm modal is already open — mirrors `handle_estimate_open`.
+fn handle_status_toggle_open(mut model: Model) -> Model {
+    let completed_target = match model.top() {
+        Some(Screen::Detail { task, .. }) => !task_is_completed(task),
+        _ => false,
+    };
+    if let Some(Screen::Detail {
+        ref mut overlay,
+        ref mut rendered_width,
+        ..
+    }) = model.top_mut()
+    {
+        if !overlay.is_status_confirm() {
+            *overlay = DetailOverlay::StatusConfirm {
+                completed_target,
+                status: EditStatus::Editing,
+            };
+            *rendered_width = usize::MAX;
+        }
+    }
+    model
+}
+
+/// Dismiss the status-confirm modal without submitting.
+fn handle_status_toggle_cancel(mut model: Model) -> Model {
+    if let Some(Screen::Detail {
+        ref mut overlay,
+        ref mut rendered_width,
+        ..
+    }) = model.top_mut()
+    {
+        *overlay = DetailOverlay::None;
+        *rendered_width = usize::MAX;
+    }
+    model
+}
+
+/// Extract the fields needed to submit the pending status-confirm target, or None
+/// when the guard fails.
+///
+/// Guard: overlay must be `StatusConfirm` and its status must be `Editing`.
+fn extract_status_confirm_submit_info(model: &Model) -> Option<(String, i64, i64, bool)> {
+    match model.top() {
+        Some(Screen::Detail {
+            instance,
+            project_id,
+            task_id,
+            overlay,
+            ..
+        }) => {
+            let (completed_target, status) = overlay.status_confirm()?;
+            if *status != EditStatus::Editing {
+                return None;
+            }
+            Some((instance.clone(), *project_id, *task_id, completed_target))
+        }
+        _ => None,
+    }
+}
+
+/// Set the status-confirm overlay to `Submitting` and emit `Cmd::SubmitTaskEdit`
+/// carrying `completion: Some(completed_target)` with `assignee_id` and `estimate`
+/// both `None`. A no-op (no Cmd) when the overlay is absent or not `Editing`.
+fn handle_status_toggle_confirm(mut model: Model) -> (Model, Vec<Cmd>) {
+    let Some((instance, project_id, task_id, completed_target)) =
+        extract_status_confirm_submit_info(&model)
+    else {
+        return (model, vec![]);
+    };
+
+    if let Some(Screen::Detail {
+        ref mut overlay,
+        ref mut rendered_width,
+        ..
+    }) = model.top_mut()
+    {
+        if let Some((_, status)) = overlay.status_confirm_mut() {
+            *status = EditStatus::Submitting;
+            *rendered_width = usize::MAX;
+        }
+    }
+
+    (
+        model,
+        vec![Cmd::SubmitTaskEdit {
+            instance,
+            project_id,
+            task_id,
+            completion: Some(completed_target),
+            assignee_id: None,
+            estimate: None,
+        }],
+    )
+}
+
+/// Build the assignee-picker candidate list from the Detail screen's cached user
+/// directory, sorted case-insensitively by name with the user id as a tiebreaker so
+/// the order is deterministic regardless of the map's iteration order.
+fn assignee_candidates(user_map: &HashMap<i64, String>) -> Vec<(i64, String)> {
+    let mut candidates: Vec<(i64, String)> = user_map
+        .iter()
+        .map(|(id, name)| (*id, name.clone()))
+        .collect();
+    candidates.sort_by(|a, b| {
+        a.1.to_lowercase()
+            .cmp(&b.1.to_lowercase())
+            .then(a.0.cmp(&b.0))
+    });
+    candidates
+}
+
+/// Index of `assignee_id` within `candidates`, or 0 when absent or not found.
+fn assignee_candidate_index(candidates: &[(i64, String)], assignee_id: Option<i64>) -> usize {
+    assignee_id
+        .and_then(|id| candidates.iter().position(|(cid, _)| *cid == id))
+        .unwrap_or(0)
+}
+
+/// Open the assignee-picker modal on the current Detail screen, with candidates built
+/// from the already-loaded user directory and the task's current assignee pre-selected.
+///
+/// No-op when the assignee-picker modal is already open — mirrors `handle_estimate_open`.
+fn handle_assignee_picker_open(mut model: Model) -> Model {
+    let built = match model.top() {
+        Some(Screen::Detail { user_map, task, .. }) => {
+            let candidates = assignee_candidates(user_map);
+            let assignee_id = task.get("assignee_id").and_then(|v| v.as_i64());
+            let selected = assignee_candidate_index(&candidates, assignee_id);
+            Some((candidates, selected))
+        }
+        _ => None,
+    };
+    if let Some(Screen::Detail {
+        ref mut overlay,
+        ref mut rendered_width,
+        ..
+    }) = model.top_mut()
+    {
+        if !overlay.is_assignee_picker() {
+            if let Some((candidates, selected)) = built {
+                *overlay = DetailOverlay::AssigneePicker {
+                    candidates,
+                    selected,
+                    status: EditStatus::Editing,
+                };
+                *rendered_width = usize::MAX;
+            }
+        }
+    }
+    model
+}
+
+/// Move the assignee-picker selection up by one row, saturating at the top. No-op
+/// while not `Editing` or when there are no candidates.
+fn handle_assignee_picker_up(mut model: Model) -> Model {
+    if let Some(Screen::Detail {
+        ref mut overlay,
+        ref mut rendered_width,
+        ..
+    }) = model.top_mut()
+    {
+        if let Some((candidates, selected, status)) = overlay.assignee_picker_mut() {
+            if *status == EditStatus::Editing && !candidates.is_empty() {
+                *selected = selected.saturating_sub(1);
+                *rendered_width = usize::MAX;
+            }
+        }
+    }
+    model
+}
+
+/// Move the assignee-picker selection down by one row, saturating at the bottom.
+/// No-op while not `Editing` or when there are no candidates.
+fn handle_assignee_picker_down(mut model: Model) -> Model {
+    if let Some(Screen::Detail {
+        ref mut overlay,
+        ref mut rendered_width,
+        ..
+    }) = model.top_mut()
+    {
+        if let Some((candidates, selected, status)) = overlay.assignee_picker_mut() {
+            if *status == EditStatus::Editing && !candidates.is_empty() {
+                let max = candidates.len() - 1;
+                *selected = (*selected + 1).min(max);
+                *rendered_width = usize::MAX;
+            }
+        }
+    }
+    model
+}
+
+/// Dismiss the assignee-picker modal without submitting.
+fn handle_assignee_picker_cancel(mut model: Model) -> Model {
+    if let Some(Screen::Detail {
+        ref mut overlay,
+        ref mut rendered_width,
+        ..
+    }) = model.top_mut()
+    {
+        *overlay = DetailOverlay::None;
+        *rendered_width = usize::MAX;
+    }
+    model
+}
+
+/// Extract the fields needed to submit the assignee-picker's highlighted candidate,
+/// or None when the guard fails.
+///
+/// Guard: overlay must be `AssigneePicker`, its status must be `Editing`, and its
+/// candidate list must be non-empty.
+fn extract_assignee_picker_submit_info(model: &Model) -> Option<(String, i64, i64, i64)> {
+    match model.top() {
+        Some(Screen::Detail {
+            instance,
+            project_id,
+            task_id,
+            overlay,
+            ..
+        }) => {
+            let (candidates, selected, status) = overlay.assignee_picker()?;
+            if *status != EditStatus::Editing || candidates.is_empty() {
+                return None;
+            }
+            let (assignee_id, _) = candidates.get(selected)?;
+            Some((instance.clone(), *project_id, *task_id, *assignee_id))
+        }
+        _ => None,
+    }
+}
+
+/// Set the assignee-picker overlay to `Submitting` and emit `Cmd::SubmitTaskEdit`
+/// carrying `assignee_id: Some(the highlighted candidate id)` with `completion` and
+/// `estimate` both `None`. A no-op (no Cmd) when the overlay is absent, not `Editing`,
+/// or the candidate list is empty.
+fn handle_assignee_picker_submit(mut model: Model) -> (Model, Vec<Cmd>) {
+    let Some((instance, project_id, task_id, assignee_id)) =
+        extract_assignee_picker_submit_info(&model)
+    else {
+        return (model, vec![]);
+    };
+
+    if let Some(Screen::Detail {
+        ref mut overlay,
+        ref mut rendered_width,
+        ..
+    }) = model.top_mut()
+    {
+        if let Some((_, _, status)) = overlay.assignee_picker_mut() {
+            *status = EditStatus::Submitting;
+            *rendered_width = usize::MAX;
+        }
+    }
+
+    (
+        model,
+        vec![Cmd::SubmitTaskEdit {
+            instance,
+            project_id,
+            task_id,
+            completion: None,
+            assignee_id: Some(assignee_id),
+            estimate: None,
+        }],
+    )
 }
 
 /// Initial browse boot: emits Cmd::LoadTasksByProject and marks loading (or revalidating).
