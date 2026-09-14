@@ -2,7 +2,7 @@
 type: Issue
 title: Log time on a task — add a time entry from CLI and TUI
 description: "Add a 'log time on a task' write from CLI (ac time log) and TUI, reusing the ADR 0033 host-gated write seam. Gated on a scope decision: a constitution amendment plus a product ADR making active-collab-cli a limited write client, since this extends writes beyond comments."
-status: open
+status: closed
 timestamp: 2026-09-14T14:26:32Z
 ---
 
