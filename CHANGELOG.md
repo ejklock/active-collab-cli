@@ -26,6 +26,25 @@ version numbers are a separate line and do not continue into the Rust crate
 - Modal boxes size their width to fit the hint line, so a long in-modal hint is
   no longer clipped (issue 0070).
 
+## [0.8.0] - 2026-09-14
+
+### Added
+
+- `ac time log` records time on a task from the CLI or the TUI's log-time
+  affordance: hours, an optional date and summary, and a job type resolved
+  from the instance's default (issue 0067).
+- `ac task set` edits a task's status, assignee, and estimate from the CLI;
+  the TUI gains matching status-toggle, assignee-picker, and estimate-edit
+  affordances on the task detail view (issue 0068).
+
+### Changed
+
+- `ac comment` and the TUI's comment compose now encode the body before
+  posting: a blank line becomes a new paragraph, a single newline becomes a
+  line break, and `<`, `>`, and `&` are escaped. Plain text previously
+  arrived at the server unescaped and glued into one run-on paragraph
+  (issue 0066).
+
 ## [0.7.2] - 2026-07-31
 
 ### Changed

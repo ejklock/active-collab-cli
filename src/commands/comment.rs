@@ -1,5 +1,5 @@
 use super::{presenter, resolve};
-use crate::client::{ActiveCollabClient, CommentWriteOutcome};
+use crate::client::{ActiveCollabClient, BodyFormat, CommentWriteOutcome};
 use crate::i18n::t;
 use crate::store::instances::Instance;
 use std::io::Write;
@@ -7,13 +7,16 @@ use std::io::Write;
 /// Non-interactive comment post (ADR 0040, BDR 0027).
 ///
 /// Resolves the task, guards against an empty body, posts via
-/// `client.create_comment`, and writes the result to the injected writers.
-/// Returns an exit code: 0 success, 2 usage error, non-zero runtime failure.
+/// `client.create_comment` — as HTML-encoded plain text, or unchanged when
+/// `html` is set (issue 0071) — and writes the result to the injected
+/// writers. Returns an exit code: 0 success, 2 usage error, non-zero runtime
+/// failure.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn comment_core(
     task_ref: Option<&str>,
     branch: Option<&str>,
     body: &str,
+    html: bool,
     _instance: &Instance,
     client: &ActiveCollabClient,
     json: bool,
@@ -30,7 +33,12 @@ pub(crate) async fn comment_core(
         Err(code) => return code,
     };
 
-    let result = client.create_comment(task_id, body).await;
+    let format = if html {
+        BodyFormat::Html
+    } else {
+        BodyFormat::Text
+    };
+    let result = client.create_comment(task_id, body, format).await;
 
     match result {
         Err(e) => {

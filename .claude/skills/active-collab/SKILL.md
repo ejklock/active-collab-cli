@@ -1,6 +1,6 @@
 ---
 name: active-collab
-description: Read ActiveCollab task data — a task, your assignments, comments, or projects — as machine-readable JSON from the `ac` CLI, non-interactively without the TUI. Use when an agent or script needs to fetch a task by id or URL, list the logged-in user's open tasks, read the task for the current git branch, or browse projects, and wants structured JSON instead of the interactive terminal UI. Covers `ac get`, `ac current`, `ac mine`, and `ac browse` with `--json` — the curated minified schemas, the round-trippable `ref`, and the cache/`--no-comments` flags. Also covers posting a comment with `ac comment`, whose body must be formatted as HTML (`<p>` per line, `<p>&nbsp;</p>` between sections) because ActiveCollab renders it as HTML and collapses plain newlines.
+description: Read ActiveCollab task data — a task, your assignments, comments, or projects — as machine-readable JSON from the `ac` CLI, non-interactively without the TUI. Use when an agent or script needs to fetch a task by id or URL, list the logged-in user's open tasks, read the task for the current git branch, or browse projects, and wants structured JSON instead of the interactive terminal UI. Covers `ac get`, `ac current`, `ac mine`, and `ac browse` with `--json` — the curated minified schemas, the round-trippable `ref`, and the cache/`--no-comments` flags. Also covers posting a comment with `ac comment`, whose body is plain text by default (a blank line starts a new paragraph, a newline is a line break) and can be posted as raw HTML unchanged with the opt-in `--html` flag.
 ---
 
 # ac --json — agent read contract
@@ -115,36 +115,40 @@ user. Omit `TASK_REF` to resolve the task from the current git branch; omit
 write result; `--instance <name>` forces a configured instance.
 
 ```bash
-ac comment 665/75159 -m "<p>Lorem ipsum dolor sit amet.</p>"   # explicit ref
-ac comment -m "<p>Lorem ipsum dolor sit amet.</p>"             # ref from git branch
-ac comment 665/75159 < body.html                               # body from stdin
+ac comment 665/75159 -m "Lorem ipsum dolor sit amet."   # explicit ref
+ac comment -m "Lorem ipsum dolor sit amet."             # ref from git branch
+ac comment 665/75159 < body.txt                          # body from stdin
 ```
 
-### The body is HTML — format it as HTML
+### Default: plain text, encoded to paragraphs and line breaks
 
-ActiveCollab stores and renders the comment body as **HTML**, and `ac comment`
-sends whatever you pass **verbatim** — it does not convert newlines. A plain
-`\n` is not a line break in HTML: the renderer collapses runs of whitespace, so
-multi-line plain text arrives **glued into a single run-on paragraph**. Format
-every comment as HTML:
+By default `ac comment` treats the body as **plain text** and encodes it
+before posting: a blank line starts a new paragraph (`<p>…</p>`), a single
+newline inside a paragraph becomes a line break (`<br>`), and `<`, `>` and `&`
+are escaped, so they show up literally in the rendered comment. Consecutive
+paragraphs render with **no visible gap** — ActiveCollab's comment view sets
+`p { margin: 0 }` — so a blank line in your plain text does not read as a
+blank line in the UI.
 
-- **One `<p>…</p>` per line.** Each line/paragraph is its own `<p>` element.
-- **Blank line between sections → an empty paragraph `<p>&nbsp;</p>`.** A bare
-  `<p></p>` can be collapsed; the `&nbsp;` forces the visible gap.
-- **No Markdown.** `**bold**`, `#` headings, ``` fences, and `-` bullets do not
-  render. Use HTML: `<strong>`, `<em>`, `<ul><li>…</li></ul>`, `<a href="…">`.
-- URLs can be bare text inside a `<p>` — ActiveCollab auto-links them.
+```bash
+ac comment 665/75159 -m "Section one.
 
-```html
-<p>📌 Section one</p>
-<p>Lorem ipsum dolor sit amet, consectetur adipiscing elit.</p>
-<p>&nbsp;</p>
-<p>🧪 Section two</p>
-<p>https://example.com/tasks/665/75159</p>
+Section two."
 ```
 
-Without the `<p>` tags those lines render as one run-on paragraph; without the
-`<p>&nbsp;</p>` spacer the two sections touch with no blank line between them.
+### Raw HTML — `--html`
+
+Pass `--html` to send the body **unchanged**, with no encoding: newlines carry
+no meaning, and `<`, `>` and `&` are not escaped. Use it when the comment
+needs markup the default encoder cannot produce — bold text or a visible gap
+between paragraphs. Only these tags are verified against ActiveCollab's
+renderer: `<p>`, `<strong>`, and a spacer paragraph `<p>&nbsp;</p>` for a
+visible gap (a bare `<p></p>` can be collapsed).
+
+```bash
+ac comment 665/75159 --html -m "<p><strong>Section one</strong></p><p>Lorem ipsum.</p><p>&nbsp;</p><p>Section two.</p>"
+ac comment 665/75159 --html < body.html
+```
 
 ## Notes for agents
 
