@@ -729,7 +729,10 @@ async fn create_comment_posts_to_correct_path_with_body() {
         .await;
 
     let client = make_client(&server.uri());
-    let outcome = client.create_comment(42, "hello").await.unwrap();
+    let outcome = client
+        .create_comment(42, "hello", BodyFormat::Text)
+        .await
+        .unwrap();
     match outcome {
         CommentWriteOutcome::Ok(payload) => assert_eq!(payload.unwrap(), comment),
         other => panic!("expected Ok outcome, got {other:?}"),
@@ -748,7 +751,10 @@ async fn create_comment_non_2xx_returns_failed_with_status() {
         .await;
 
     let client = make_client(&server.uri());
-    let outcome = client.create_comment(42, "hello").await.unwrap();
+    let outcome = client
+        .create_comment(42, "hello", BodyFormat::Text)
+        .await
+        .unwrap();
     match outcome {
         CommentWriteOutcome::Failed(status) => assert_eq!(status, 403),
         other => panic!("expected Failed(403), got {other:?}"),
@@ -766,7 +772,10 @@ async fn create_comment_401_returns_unauthorized() {
         .await;
 
     let client = make_client(&server.uri());
-    let outcome = client.create_comment(42, "hello").await.unwrap();
+    let outcome = client
+        .create_comment(42, "hello", BodyFormat::Text)
+        .await
+        .unwrap();
     assert!(
         matches!(outcome, CommentWriteOutcome::Unauthorized),
         "expected Unauthorized, got {outcome:?}"
@@ -785,7 +794,10 @@ async fn create_comment_attaches_token_header() {
         .await;
 
     let client = make_client(&server.uri());
-    let outcome = client.create_comment(5, "text").await.unwrap();
+    let outcome = client
+        .create_comment(5, "text", BodyFormat::Text)
+        .await
+        .unwrap();
     assert!(matches!(outcome, CommentWriteOutcome::Ok(_)));
     server.verify().await;
 }

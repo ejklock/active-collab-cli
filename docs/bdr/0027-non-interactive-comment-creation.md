@@ -1,7 +1,7 @@
 ---
 type: BDR
 title: "A non-interactive `comment` command posts a comment to a task as the logged-in user, from a -m flag or stdin, with a --json write result"
-description: Running `ac comment [TASK_REF] [-m TEXT] [--json] [--instance NAME]` posts a comment to the resolved task as the logged-in user (the instance token owner). The task is the explicit ref (URL or PROJECT_ID/TASK_ID) or, when omitted, the current git branch's task. The body comes from -m/--message or, absent that, from piped stdin (multi-line preserved); an empty body is a usage error (exit 2) with no write. Success prints a human confirmation, or with --json a minified {"ok":true,"comment_id":N,"task_id":N,"project_id":N}; failures (no body, no task, no instance, HTTP error) exit non-zero with no false success. The token reaches only the instance host.
+description: Running `ac comment [TASK_REF] [-m TEXT] [--html] [--json] [--instance NAME]` posts a comment to the resolved task as the logged-in user (the instance token owner). The task is the explicit ref (URL or PROJECT_ID/TASK_ID) or, when omitted, the current git branch's task. The body comes from -m/--message or, absent that, from piped stdin (multi-line preserved); an empty body is a usage error (exit 2) with no write. By default the body is encoded to HTML (blank line to paragraph, newline to line break) before posting; --html sends it unchanged. Success prints a human confirmation, or with --json a minified {"ok":true,"comment_id":N,"task_id":N,"project_id":N}; failures (no body, no task, no instance, HTTP error) exit non-zero with no false success. The token reaches only the instance host.
 status: Accepted
 superseded_by:
 supersedes:
@@ -31,6 +31,12 @@ Running `ac comment`:
 - The **body** is `-m/--message <TEXT>` when given; otherwise it is read in full from
   **stdin** (piped), preserving multi-line content. An empty/absent body is a **usage
   error** (exit `2`) — nothing is posted.
+- By default the body is **encoded to HTML** before posting: a blank line starts a new
+  paragraph, a single newline becomes a line break, and `<`, `>`, `&` are escaped
+  ([issue 0066](/issues/0066-comment-writes-preserve-paragraph-breaks-encode-newlines-as-html-before-post-put.md)).
+  The opt-in `--html` flag skips this encoding and posts the body **unchanged**, so the
+  caller is responsible for valid markup
+  ([issue 0071](/issues/0071-comment-writes-can-send-formatted-bodies-add-a-raw-html-option-and-fix-the-stale-skill-text.md)).
 - The comment is posted as the **logged-in user** — created with the selected instance's
   host-gated token, so ActiveCollab attributes it to the token owner. A **configured
   instance is required** (`--instance <NAME>` selects among several); with none configured
@@ -50,8 +56,9 @@ When the user runs `ac comment 524/75346 -m "Deploy em homolog."`, Then the comm
 created on task 75346 as the logged-in user and a confirmation prints, exit 0.
 
 **Scenario 2: post via stdin pipe** — Given a configured instance, When the user runs
-`printf 'Linha 1\nLinha 2' | ac comment 524/75346`, Then the two-line body is posted
-verbatim, exit 0.
+`printf 'Linha 1\nLinha 2' | ac comment 524/75346`, Then the two-line body is posted as
+plain text encoded to a single paragraph with the lines joined by a line break
+(`<p>Linha 1<br>Linha 2</p>`), not verbatim, exit 0.
 
 **Scenario 3: --json write result** — Given a configured instance, When the user runs
 `ac comment 524/75346 -m "ok" --json`, Then exactly one minified line
@@ -81,6 +88,12 @@ When the user posts a comment, Then the command exits non-zero and reports the f
 instance, When the comment is posted, Then `create_comment` attaches the token only to the
 instance host and the comment is attributed to the token owner (the logged-in user).
 
+**Scenario 10: `--html` posts the body unchanged** — Given a configured instance, When the
+user runs `ac comment 524/75346 -m "<p><strong>Deploy</strong></p>" --html`, Then the body
+reaches the server exactly as given, with no HTML encoding, and exit 0. The empty-body guard
+(Scenario 4) is unchanged: a markup-only body such as `<p></p>` is still accepted, since
+`str::trim` does not treat it as blank.
+
 ## Test Design
 
 `comment_core` is unit-tested against a **mocked client** with injected stdout/stderr
@@ -100,10 +113,11 @@ token-host-isolation negative test already covers `authed_post`
 | No instance | unit | 7 | non-zero exit; "not logged in"; no `create_comment` | requires logged-in user |
 | HTTP failure | unit | 8 | non-zero exit; error reported; **no** success line / `{"ok":false,…}` with `--json` | no false success |
 | Token host-isolation | unit (existing) | 9 | token attached only to the instance host | write stays host-gated |
+| `--html` flag | unit | 10 | posted body equals the input byte for byte (no encoding); exit 0 | opt-in raw HTML, same seam |
 
 ## Related
 
 - ADR: [/adr/0040-non-interactive-comment-write-command.md](/adr/0040-non-interactive-comment-write-command.md)
 - ADR: [/adr/0033-authenticated-write-seam-comment-client.md](/adr/0033-authenticated-write-seam-comment-client.md), [/adr/0011-agent-json-output-contract.md](/adr/0011-agent-json-output-contract.md)
 - BDR: [/bdr/0024-comment-authoring-create-edit-delete.md](/bdr/0024-comment-authoring-create-edit-delete.md) (the interactive authoring this complements), [/bdr/0010-agent-json-output-contract.md](/bdr/0010-agent-json-output-contract.md) (the read `--json` contract)
-- Issue: [/issues/0039-non-tty-comment-command.md](/issues/0039-non-tty-comment-command.md)
+- Issue: [/issues/0039-non-tty-comment-command.md](/issues/0039-non-tty-comment-command.md), [/issues/0066-comment-writes-preserve-paragraph-breaks-encode-newlines-as-html-before-post-put.md](/issues/0066-comment-writes-preserve-paragraph-breaks-encode-newlines-as-html-before-post-put.md) (default HTML encoding), [/issues/0071-comment-writes-can-send-formatted-bodies-add-a-raw-html-option-and-fix-the-stale-skill-text.md](/issues/0071-comment-writes-can-send-formatted-bodies-add-a-raw-html-option-and-fix-the-stale-skill-text.md) (`--html`)

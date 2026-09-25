@@ -5,7 +5,7 @@ use crate::render;
 use crate::store::Store;
 use std::sync::Mutex;
 use tempfile::TempDir;
-use wiremock::matchers::{body_json, method, path};
+use wiremock::matchers::{body_json, header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 fn mine_outcome_code(outcome: MineOutcome) -> i32 {
@@ -2479,6 +2479,7 @@ async fn comment_core_flag_body_explicit_ref_calls_create_comment_and_returns_0(
         Some("524/75346"),
         None,
         "Deploy em homolog.",
+        false,
         &inst,
         &client,
         false,
@@ -2527,6 +2528,7 @@ async fn comment_core_multiline_stdin_body_encoded_as_br() {
         Some("524/75346"),
         None,
         multiline,
+        false,
         &inst,
         &client,
         false,
@@ -2557,6 +2559,7 @@ async fn comment_core_json_flag_stdout_is_exact_minified_result_line() {
         Some("524/75346"),
         None,
         "ok",
+        false,
         &inst,
         &client,
         true,
@@ -2597,6 +2600,7 @@ async fn comment_core_empty_body_returns_exit2_and_no_create_comment_call() {
         Some("524/75346"),
         None,
         "",
+        false,
         &inst,
         &client,
         false,
@@ -2628,6 +2632,7 @@ async fn comment_core_whitespace_only_body_returns_exit2() {
         Some("524/75346"),
         None,
         "   \n  ",
+        false,
         &inst,
         &client,
         false,
@@ -2662,6 +2667,7 @@ async fn comment_core_branch_resolved_task_posts_to_branch_task() {
         None,
         Some("feature/665-75159"),
         "branch comment",
+        false,
         &inst,
         &client,
         false,
@@ -2692,6 +2698,7 @@ async fn comment_core_no_ref_and_no_branch_returns_exit2_without_write() {
         None,
         None,
         "some body",
+        false,
         &inst,
         &client,
         false,
@@ -2834,6 +2841,7 @@ async fn comment_core_unresolvable_branch_returns_exit2_without_write() {
         None,
         Some("main"),
         "some body",
+        false,
         &inst,
         &client,
         false,
@@ -2873,6 +2881,7 @@ async fn comment_core_http_4xx_returns_nonzero_without_success_line() {
         Some("524/75346"),
         None,
         "body text",
+        false,
         &inst,
         &client,
         false,
@@ -2913,6 +2922,7 @@ async fn comment_core_http_failure_with_json_flag_emits_error_object() {
         Some("524/75346"),
         None,
         "body text",
+        false,
         &inst,
         &client,
         true,
@@ -3035,6 +3045,7 @@ async fn comment_core_401_prints_reauth_message_and_returns_nonzero() {
         Some("524/75346"),
         None,
         "some body",
+        false,
         &inst,
         &client,
         false,
@@ -3077,6 +3088,7 @@ async fn comment_core_401_json_emits_failure_shape_without_ok_true() {
         Some("524/75346"),
         None,
         "some body",
+        false,
         &inst,
         &client,
         true,
@@ -3165,6 +3177,7 @@ async fn comment_core_404_keeps_existing_output_without_reauth_message() {
         Some("524/75346"),
         None,
         "some body",
+        false,
         &inst,
         &client,
         false,
@@ -3183,6 +3196,250 @@ async fn comment_core_404_keeps_existing_output_without_reauth_message() {
     assert!(
         !e.contains("ac setup add"),
         "re-auth message must NOT appear for 404: {e}"
+    );
+}
+
+// Issue 0071 AC2: with --html, the posted body equals the caller's input
+// byte for byte — no escaping, no paragraph wrapping — reaching the server
+// through the same client.create_comment seam the TUI uses.
+#[tokio::test]
+async fn comment_core_html_flag_posts_body_verbatim() {
+    let cases = [
+        "<p><strong>H</strong></p><p>&nbsp;</p>",
+        "line one\nline two",
+        "<p>unclosed",
+        "a < b & c",
+        "<hr>",
+        "<script>x</script>",
+    ];
+
+    for (i, body) in cases.iter().enumerate() {
+        let server = MockServer::start().await;
+        let task_id = 75346 + i as i64;
+        Mock::given(method("POST"))
+            .and(path(format!("/api/v1/comments/task/{task_id}")))
+            .and(body_json(serde_json::json!({ "body": body })))
+            .and(header("x-angie-authapitoken", "tok-comment"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(comment_response(1)))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let inst = comment_inst(&server.uri());
+        let client = ActiveCollabClient::new(inst.clone(), make_http());
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        let code = comment_core(
+            Some(&format!("524/{task_id}")),
+            None,
+            body,
+            true,
+            &inst,
+            &client,
+            false,
+            &mut out,
+            &mut err,
+        )
+        .await;
+
+        server.verify().await;
+        assert_eq!(code, 0, "case {i} ({body:?}) err: {}", output_str(&err));
+    }
+}
+
+// Issue 0071 AC3: an empty or whitespace-only body under --html still exits
+// 2 with the existing message and sends no request — the html flag changes
+// encoding, never the empty-body guard.
+#[tokio::test]
+async fn comment_core_html_flag_whitespace_only_body_returns_exit2() {
+    let bodies = ["", "   ", "\n\n", "\u{00A0}"];
+
+    for body in bodies {
+        let server = MockServer::start().await;
+        // No mock mounted — any POST would fail the test via unexpected request.
+
+        let inst = comment_inst(&server.uri());
+        let client = ActiveCollabClient::new(inst.clone(), make_http());
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+
+        let code = comment_core(
+            Some("524/75346"),
+            None,
+            body,
+            true,
+            &inst,
+            &client,
+            false,
+            &mut out,
+            &mut err,
+        )
+        .await;
+
+        assert_eq!(code, 2, "body {body:?} must return exit code 2");
+        assert!(output_str(&err).contains("no comment body"));
+        assert!(
+            server.received_requests().await.unwrap().is_empty(),
+            "body {body:?} must send no request"
+        );
+    }
+}
+
+// Issue 0071: a markup-only body such as `<p></p>` is accepted under --html
+// (owner decision) — the empty-body guard stays `str::trim`, which does not
+// treat markup as blank.
+#[tokio::test]
+async fn comment_core_html_flag_markup_only_body_is_posted() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/comments/task/75346"))
+        .and(body_json(serde_json::json!({ "body": "<p></p>" })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(comment_response(1)))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let inst = comment_inst(&server.uri());
+    let client = ActiveCollabClient::new(inst.clone(), make_http());
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    let code = comment_core(
+        Some("524/75346"),
+        None,
+        "<p></p>",
+        true,
+        &inst,
+        &client,
+        false,
+        &mut out,
+        &mut err,
+    )
+    .await;
+
+    server.verify().await;
+    assert_eq!(code, 0, "err: {}", output_str(&err));
+}
+
+// Issue 0071 AC5: --html changes only the posted body, never the --json
+// output shape, the HTTP-4xx failure path or the 401 re-auth message.
+#[tokio::test]
+async fn comment_core_html_flag_json_output_is_unchanged() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/comments/task/75346"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(comment_response(123)))
+        .mount(&server)
+        .await;
+
+    let inst = comment_inst(&server.uri());
+    let client = ActiveCollabClient::new(inst.clone(), make_http());
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    let code = comment_core(
+        Some("524/75346"),
+        None,
+        "<p>ok</p>",
+        true,
+        &inst,
+        &client,
+        true,
+        &mut out,
+        &mut err,
+    )
+    .await;
+
+    assert_eq!(code, 0, "err: {}", output_str(&err));
+    let s = output_str(&out);
+    let trimmed = s.trim_end_matches('\n');
+    assert!(
+        !trimmed.contains('\n'),
+        "json output must be a single line: {s:?}"
+    );
+    let obj: serde_json::Value = serde_json::from_str(trimmed).expect("stdout must be valid JSON");
+    assert_eq!(obj["ok"], true, "ok must be true");
+    assert_eq!(obj["comment_id"], 123);
+    assert_eq!(obj["task_id"], 75346);
+    assert_eq!(obj["project_id"], 524);
+}
+
+#[tokio::test]
+async fn comment_core_html_flag_http_4xx_returns_nonzero() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/comments/task/75346"))
+        .respond_with(ResponseTemplate::new(403).set_body_string("forbidden"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let inst = comment_inst(&server.uri());
+    let client = ActiveCollabClient::new(inst.clone(), make_http());
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    let code = comment_core(
+        Some("524/75346"),
+        None,
+        "<p>body</p>",
+        true,
+        &inst,
+        &client,
+        false,
+        &mut out,
+        &mut err,
+    )
+    .await;
+
+    server.verify().await;
+    assert_ne!(code, 0, "HTTP 4xx must not return exit 0");
+    assert!(
+        !output_str(&out).contains("posted"),
+        "success line must not appear on HTTP error"
+    );
+}
+
+#[tokio::test]
+async fn comment_core_html_flag_401_prints_reauth_message() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/comments/task/75346"))
+        .respond_with(ResponseTemplate::new(401).set_body_string("unauthorized"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let inst = comment_inst(&server.uri());
+    let client = ActiveCollabClient::new(inst.clone(), make_http());
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+
+    let code = comment_core(
+        Some("524/75346"),
+        None,
+        "<p>body</p>",
+        true,
+        &inst,
+        &client,
+        false,
+        &mut out,
+        &mut err,
+    )
+    .await;
+
+    server.verify().await;
+    assert_ne!(code, 0, "HTTP 401 must return non-zero exit");
+    let e = output_str(&err);
+    assert!(
+        e.contains("ac setup add"),
+        "re-auth message must mention 'ac setup add': {e}"
+    );
+    assert!(
+        !output_str(&out).contains("ok"),
+        "success marker must not appear on 401: {}",
+        output_str(&out)
     );
 }
 

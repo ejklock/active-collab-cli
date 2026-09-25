@@ -514,6 +514,7 @@ async fn dispatch_comment(args: cli::CommentArgs) -> i32 {
         args.task_ref.as_deref(),
         branch.as_deref(),
         &body,
+        args.html,
         &inst,
         &ac_client,
         args.json,
