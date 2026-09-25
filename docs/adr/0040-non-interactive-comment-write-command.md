@@ -47,7 +47,7 @@ Add a **one-shot, non-interactive `comment` subcommand** — `Command::Comment` 
 ### 1. Invocation contract
 
 ```
-ac comment [TASK_REF] [-m|--message <TEXT>] [--json] [--instance <NAME>]
+ac comment [TASK_REF] [-m|--message <TEXT>] [--html] [--json] [--instance <NAME>]
 ```
 
 - **Task** (`TASK_REF`, optional positional): a task URL or `PROJECT_ID/TASK_ID`, resolved

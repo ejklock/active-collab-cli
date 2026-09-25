@@ -106,6 +106,63 @@ fn skill_registry_body_is_the_canonical_source() {
 }
 
 #[test]
+fn skill_comment_section_documents_plain_default_and_html_flag() {
+    let body = canonical_body();
+
+    assert!(
+        !body.contains("sends whatever you pass **verbatim**"),
+        "the stale verbatim-send sentence must be gone: {body}"
+    );
+    assert!(
+        !body.contains("must be formatted as HTML"),
+        "the frontmatter must no longer require HTML: {body}"
+    );
+
+    for line in body.lines().filter(|line| line.contains("ac comment")) {
+        let has_markup_tag = line.contains("</") || line.contains("<p>") || line.contains("<hr>");
+        if has_markup_tag {
+            assert!(
+                line.contains("--html"),
+                "an `ac comment` example with a tag must carry --html: {line}"
+            );
+        }
+    }
+
+    assert!(
+        body.contains("plain text") && body.contains("blank line"),
+        "must document the plain-text default: {body}"
+    );
+    assert!(
+        body.contains("line break") || body.contains("<br>"),
+        "must document that a newline becomes a line break: {body}"
+    );
+    assert!(
+        body.contains("no visible gap"),
+        "must document that the web UI shows no gap between paragraphs: {body}"
+    );
+    assert!(
+        body.contains("--html"),
+        "must document the --html flag: {body}"
+    );
+    assert!(
+        body.contains("unchanged") && body.contains("newlines carry"),
+        "must document that --html sends the body unchanged with meaningless newlines: {body}"
+    );
+    assert!(
+        body.contains("<p>&nbsp;</p>"),
+        "must teach the visible-gap spacer: {body}"
+    );
+    assert!(
+        !body.contains("<ul><li>"),
+        "must not teach the unverified list markup: {body}"
+    );
+    assert!(
+        !body.contains("new_mention"),
+        "must not teach the unverified mention span: {body}"
+    );
+}
+
+#[test]
 fn skill_is_known_command_and_not_rewritten_to_get() {
     assert!(crate::cli::KNOWN_COMMANDS.contains(&"skill"));
     assert_eq!(

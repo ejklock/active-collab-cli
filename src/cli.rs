@@ -182,6 +182,10 @@ pub struct CommentArgs {
     /// Print curated minified JSON write result for agent/LLM consumption.
     #[arg(long)]
     pub json: bool,
+    /// Post the body unchanged, skipping the default plain-text-to-HTML
+    /// encoding. The caller is responsible for valid markup.
+    #[arg(long)]
+    pub html: bool,
     /// Force a named instance.
     #[arg(long)]
     pub instance: Option<String>,
