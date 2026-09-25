@@ -11,6 +11,22 @@ pre-cutover Python package's history is preserved verbatim under
 version numbers are a separate line and do not continue into the Rust crate
 (issue 0055).
 
+## [0.10.0] - 2026-09-25
+
+### Added
+
+- `ac comment --html` posts the body unchanged, skipping the default
+  plain-text encoding, so a comment can carry bold headings and visible
+  section gaps (`<p>&nbsp;</p>`). Without the flag the body is encoded as
+  before (issue 0071).
+
+### Fixed
+
+- The embedded `active-collab` skill no longer tells agents to pass HTML to
+  `ac comment` without a flag, which since 0.8.0 posted the tags as literal
+  text. It now documents the plain-text default and the `--html` mode
+  (issue 0071).
+
 ## [0.9.0] - 2026-09-14
 
 ### Added
