@@ -550,3 +550,47 @@ fn explicit_get_subcommand_parses_to_some_command() {
     let cli = parse(&["get", "1/2"]).unwrap();
     assert!(matches!(cli.command, Some(Command::Get(_))));
 }
+
+#[test]
+fn parse_comment_html_flag_with_message() {
+    let cli = parse(&["comment", "665/75159", "-m", "hi", "--html"]).unwrap();
+    let Command::Comment(args) = cli.command.unwrap() else {
+        panic!("expected Comment")
+    };
+    assert_eq!(args.task_ref.as_deref(), Some("665/75159"));
+    assert_eq!(args.message.as_deref(), Some("hi"));
+    assert!(args.html);
+}
+
+#[test]
+fn parse_comment_html_flag_without_message() {
+    let cli = parse(&["comment", "665/75159", "--html"]).unwrap();
+    let Command::Comment(args) = cli.command.unwrap() else {
+        panic!("expected Comment")
+    };
+    assert!(args.message.is_none());
+    assert!(args.html);
+}
+
+#[test]
+fn parse_comment_html_flag_defaults_to_false() {
+    let cli = parse(&["comment", "665/75159", "-m", "hi"]).unwrap();
+    let Command::Comment(args) = cli.command.unwrap() else {
+        panic!("expected Comment")
+    };
+    assert!(!args.html);
+}
+
+#[test]
+fn comment_help_lists_html_flag() {
+    let help = command_as("ac")
+        .find_subcommand("comment")
+        .expect("comment subcommand must exist")
+        .clone()
+        .render_long_help()
+        .to_string();
+    assert!(
+        help.contains("--html"),
+        "comment help must list --html: {help}"
+    );
+}

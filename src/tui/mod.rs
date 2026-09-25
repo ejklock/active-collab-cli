@@ -757,7 +757,11 @@ fn spawn_comment_write(
         };
         let client = crate::client::ActiveCollabClient::new(inst, http);
         let outcome = match write {
-            CommentWrite::Create { task_id } => client.create_comment(task_id, &body).await,
+            CommentWrite::Create { task_id } => {
+                client
+                    .create_comment(task_id, &body, crate::client::BodyFormat::Text)
+                    .await
+            }
             CommentWrite::Update { comment_id } => client.update_comment(comment_id, &body).await,
             CommentWrite::Delete { comment_id } => client.delete_comment(comment_id).await,
         };

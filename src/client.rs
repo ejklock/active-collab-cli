@@ -116,6 +116,16 @@ pub fn pick_default_job_type(job_types: &[JobType]) -> Option<i64> {
         .map(|job_type| job_type.id)
 }
 
+/// How `create_comment` prepares a caller-supplied body before it is posted.
+/// `Text` runs it through `encode_comment_body`; `Html` sends it unchanged,
+/// so the caller who asks for raw HTML is responsible for its markup
+/// (issue 0071).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BodyFormat {
+    Text,
+    Html,
+}
+
 /// Encodes a plain-text comment body as the HTML ActiveCollab expects: text is
 /// escaped, blank-line-separated paragraphs become `<p>...</p>` blocks, and a
 /// single in-paragraph newline becomes `<br>` — newlines carry no meaning in
@@ -392,13 +402,24 @@ impl ActiveCollabClient {
         Ok((status, body))
     }
 
-    /// POST /api/v1/comments/task/{task_id}. Classifies the response into a
-    /// `CommentWriteOutcome`: (200..=299) -> Ok(Some(comment)), 401 ->
+    /// POST /api/v1/comments/task/{task_id}. `format` controls whether `body`
+    /// is run through `encode_comment_body` (`BodyFormat::Text`) or sent
+    /// unchanged (`BodyFormat::Html`, issue 0071). Classifies the response
+    /// into a `CommentWriteOutcome`: (200..=299) -> Ok(Some(comment)), 401 ->
     /// Unauthorized, else -> Failed(status).
-    pub async fn create_comment(&self, task_id: i64, body: &str) -> Result<CommentWriteOutcome> {
+    pub async fn create_comment(
+        &self,
+        task_id: i64,
+        body: &str,
+        format: BodyFormat,
+    ) -> Result<CommentWriteOutcome> {
         let base = self.instance.base_url.trim_end_matches('/');
         let url = format!("{}/api/v1/comments/task/{}", base, task_id);
-        let payload = serde_json::json!({ "body": encode_comment_body(body) });
+        let encoded_body = match format {
+            BodyFormat::Text => encode_comment_body(body),
+            BodyFormat::Html => body.to_string(),
+        };
+        let payload = serde_json::json!({ "body": encoded_body });
         let (status, body) = self.post_json_write(&url, &payload).await?;
         Ok(classify_comment_write(status, body))
     }
