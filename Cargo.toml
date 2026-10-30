@@ -31,6 +31,10 @@ url = "2"
 arboard = "3"
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
 
+rust_xlsxwriter = { version = "0.102", features = ["chrono"] }
+
 [dev-dependencies]
+calamine = { version = "0.37", features = ["dates"] }
 tempfile = "3"
 wiremock = "0.6"
+zip = { version = "9", default-features = false, features = ["deflate"] }

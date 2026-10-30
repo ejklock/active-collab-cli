@@ -1,4 +1,5 @@
 mod comment;
+mod hours_report;
 mod mine;
 mod presenter;
 mod resolve;
@@ -8,6 +9,10 @@ mod task;
 pub(crate) mod time;
 
 pub(crate) use comment::comment_core;
+pub(crate) use hours_report::{
+    export_hours_report, resolve_period, time_report_core, validate_range, ExportError,
+    ExportedReport, OwnedReportPeriod, PeriodPreset, ReportFormat, ReportPeriod, ReportRequest,
+};
 pub(crate) use mine::{collect_mine_rows, mine_core, MineOutcome};
 pub(crate) use resolve::*;
 pub(crate) use setup::{

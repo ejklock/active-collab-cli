@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use crate::http::{Http, HTTP_UNAUTHORIZED};
-use crate::models::{JobType, MineTask};
+use crate::models::{JobType, MineTask, TimeRecordsReport};
 use crate::store::instances::Instance;
 use anyhow::Result;
 use serde_json::Value;
@@ -37,6 +37,17 @@ pub enum CommentWriteOutcome {
 pub enum TimeWriteOutcome {
     /// 2xx — carries the response body when present.
     Ok(Option<Value>),
+    /// HTTP 401.
+    Unauthorized,
+    /// Any other status.
+    Failed(u16),
+}
+
+/// Typed outcome of the time-records-by-date read.
+#[derive(Debug)]
+pub enum TimeRecordsOutcome {
+    /// 200 — the parsed records with their related projects and tasks.
+    Ok(TimeRecordsReport),
     /// HTTP 401.
     Unauthorized,
     /// Any other status.
@@ -268,6 +279,32 @@ impl ActiveCollabClient {
             return Ok(vec![]);
         }
         Ok(serde_json::from_slice(&body).unwrap_or_default())
+    }
+
+    /// GET /api/v1/users/{user_id}/time-records/filtered-by-date?from&to
+    /// (both `YYYY-MM-DD`, `to` inclusive). 200 -> parsed records (a body
+    /// that does not parse is an error, never an empty report), 401 ->
+    /// Unauthorized, else -> Failed(status).
+    pub async fn fetch_time_records_by_date(
+        &self,
+        user_id: i64,
+        from: &str,
+        to: &str,
+    ) -> Result<TimeRecordsOutcome> {
+        let base = self.instance.base_url.trim_end_matches('/');
+        let url = format!(
+            "{}/api/v1/users/{}/time-records/filtered-by-date?from={}&to={}",
+            base, user_id, from, to
+        );
+        let (status, body) = self
+            .http
+            .authed_get(&url, &self.instance.base_url, &self.instance.token)
+            .await?;
+        match status {
+            200 => Ok(TimeRecordsOutcome::Ok(serde_json::from_slice(&body)?)),
+            HTTP_UNAUTHORIZED => Ok(TimeRecordsOutcome::Unauthorized),
+            other => Ok(TimeRecordsOutcome::Failed(other)),
+        }
     }
 
     /// GET /api/v1/projects/{pid}/tasks/{tid}.

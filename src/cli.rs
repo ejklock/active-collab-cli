@@ -1,4 +1,4 @@
-use clap::{Args, CommandFactory, Parser, Subcommand};
+use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
 
 pub const KNOWN_COMMANDS: [&str; 10] = [
     "setup", "get", "current", "mine", "list", "browse", "comment", "skill", "time", "task",
@@ -202,6 +202,41 @@ pub struct TimeOpts {
 pub enum TimeCmd {
     /// Log time against a task as the logged-in user.
     Log(TimeLogArgs),
+    /// Write the logged-in user's hours report for a period to an XLSX or CSV file.
+    Report(TimeReportArgs),
+}
+
+/// Current period of the report, resolved from today's date.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+pub enum ReportPeriodArg {
+    Month,
+    Fortnight,
+    Week,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+pub enum ReportFormatArg {
+    Xlsx,
+    Csv,
+}
+
+#[derive(Args, Debug)]
+pub struct TimeReportArgs {
+    /// First day of the period (DD-MM-YYYY).
+    #[arg(long, requires = "end", conflicts_with = "period")]
+    pub start: Option<String>,
+    /// Last day of the period, inclusive (DD-MM-YYYY).
+    #[arg(long, requires = "start", conflicts_with = "period")]
+    pub end: Option<String>,
+    /// Current month, fortnight (1-15 or 16-end) or ISO week.
+    #[arg(long, value_enum, required_unless_present = "start")]
+    pub period: Option<ReportPeriodArg>,
+    /// Output file format.
+    #[arg(long, value_enum, default_value = "xlsx")]
+    pub format: ReportFormatArg,
+    /// Force a named instance.
+    #[arg(long)]
+    pub instance: Option<String>,
 }
 
 #[derive(Args, Debug)]
