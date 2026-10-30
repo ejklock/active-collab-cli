@@ -11,6 +11,20 @@ pre-cutover Python package's history is preserved verbatim under
 version numbers are a separate line and do not continue into the Rust crate
 (issue 0055).
 
+## [0.11.0] - 2026-10-30
+
+### Added
+
+- `ac time report` exports your hours for a period to
+  `hours-report-<start>-<end>.xlsx` (default) or `.csv` in the current
+  directory. The period is `--start`/`--end` (`DD-MM-YYYY`) or `--period
+  month|fortnight|week` for the current one; `--format xlsx|csv` picks the
+  file type. The CSV keeps the web `me-report.php` layout (`;` separator,
+  decimal comma, `dd/mm/yy` dates, total on the first line) (issue 0072).
+- In `ac browse`, `H` opens a modal to export the same report with the
+  Monthly, Biweekly, Weekly or Custom period and the format of your choice
+  (issue 0072).
+
 ## [0.10.0] - 2026-09-25
 
 ### Added
