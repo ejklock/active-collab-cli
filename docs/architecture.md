@@ -26,7 +26,7 @@ flowchart TD
     view --> screens["tui/screens/\nprojects.rs · tasks.rs · detail.rs\neach owns its draw_* fn\n(responsive Table · detail wraps text + assets panel)"]
     view --> drawer["tui/drawer.rs\nshared widget builders (render_table)"]
     view --> theme["tui/theme.rs\ncentralized Style / Color constants"]
-    view --> widgets["tui/widgets/modal.rs\nreusable centered modal overlay\n(DIM backdrop + Clear + bordered box)\ncompose · delete-confirm · image-viewer"]
+    view --> widgets["tui/widgets/modal.rs\nreusable centered modal overlay\n(DIM backdrop + Clear + bordered box)\ncompose · delete-confirm · image-viewer · hours-report"]
     widgets --> theme
     screens --> asset_panel["tui/screens/asset_panel.rs\nAnexos/Artefatos composition source\nlayout → Vec&lt;PanelRow&gt; → inline content lines\n+ pure line→asset-index map"]
     detail_render --> asset_panel
@@ -40,6 +40,7 @@ flowchart TD
         cmd_setup["setup.rs\nsetup list·remove·language·test·add"]
         cmd_task["task.rs\nget · current"]
         cmd_comment["comment.rs\ncomment_core"]
+        cmd_hours["hours_report.rs\nexport_hours_report · time_report_core · resolve_period · render_hours_report_csv · render_hours_report_xlsx"]
         cmd_mine["mine.rs\nmine_core · collect_mine_rows"]
         cmd_skill["skill.rs\nskill_output · SKILL registry\n(body = include_str! canonical SKILL.md)"]
         cmd_resolve["resolve.rs (master 1)\ninput resolution\nparse_task_ref · branch · pick_instance"]
@@ -49,6 +50,7 @@ flowchart TD
         cmd_comment --> cmd_resolve
         cmd_comment --> cmd_presenter
         cmd_mine --> cmd_presenter
+        cmd_hours --> cmd_presenter
     end
     commands --> controller["controller\n(async orchestration)"]
     model --> controller
@@ -99,7 +101,13 @@ flowchart TD
   owns input resolution (`parse_task_ref`/`parse_branch_ref`/`pick_instance`/`resolve_task_ref_for_comment`),
   `presenter.rs` (master 3) owns the user-facing strings and single-homes the [ADR 0042](/adr/0042-detect-401-and-guide-reauthentication.md)
   re-auth message in one `reauth_message()`, and one orchestration module per family
-  (`setup.rs`/`task.rs`/`comment.rs`/`mine.rs`) wires the two. `mod.rs` is a thin root: only
+  (`setup.rs`/`task.rs`/`comment.rs`/`mine.rs`/`hours_report.rs`) wires the two. `hours_report.rs`
+  (`ac time report`) pairs pure CSV and XLSX renderers (XLSX via `rust_xlsxwriter`) of the typed
+  `fetch_time_records_by_date` response and a pure period resolver (`resolve_period`, over an injected
+  today) with `export_hours_report`, which resolves the period, fetches, renders in memory, and writes the
+  file once through a temporary sibling renamed over the target, returning the path and total or a
+  typed `ExportError`; `time_report_core` (CLI messages and exit codes) and the TUI's `H` modal effect
+  both sit on that one function. `mod.rs` is a thin root: only
   `mod` declarations, the `pub(crate) use` re-export surface, and the `#[path]` test include.
   Fitness: `resolve.rs` imports no client/cache; `presenter.rs` imports only `i18n`/`agent_json`/`Write`;
   the family modules may depend on the masters (`task`/`comment` on both, `mine` on `presenter`;
@@ -353,6 +361,14 @@ sequenceDiagram
   `assignee_id` and/or `estimate` are given, stopping at the first non-Ok outcome; `TaskEditOk`
   clears the overlay and emits the same `Cmd::LoadDetail { refresh: true }` via
   `refresh_detail_after_write`.
+- **the hours-report modal is a model-level overlay**, not a `DetailOverlay` variant, because it
+  opens from Projects, Tasks and Detail: `Model.report: Option<ReportForm>`. `H` emits
+  `Msg::ReportOpen`; while the form is open the shell's `route_key_event` sends every key to
+  `map_report_key_event` before any per-screen check. `update` stays pure: submit validates a
+  Custom range with `validate_range` and emits `Cmd::ExportHoursReport { instance, period:
+  OwnedReportPeriod, format }`; the shell spawns `export_hours_report` with today's local date and
+  the current directory and answers `Msg::ReportOk` / `Msg::ReportErr` / `Msg::AuthExpired`. Only
+  the view reads today, to show a preset's resolved range.
 - **image attachments open in an in-TUI viewer overlay** ([ADR 0065](/adr/0065-image-attachment-viewer-modal-overlay.md)):
   an asset whose derived filename ([ADR 0023](/adr/0023-asset-label-derivation.md)) is a raster
   image (`png/jpg/jpeg/gif/webp/bmp`, case-insensitive) emits a structural

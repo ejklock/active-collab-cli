@@ -16,6 +16,10 @@ pub use model::{
 pub use view::view;
 
 use crate::client::{CommentWriteOutcome, TaskWriteOutcome, TimeWriteOutcome};
+use crate::commands::{
+    export_hours_report, ExportError, ExportedReport, OwnedReportPeriod, ReportFormat,
+    ReportRequest,
+};
 use crate::controller;
 use crate::http::Http;
 use crate::render::MineTableRow;
@@ -29,7 +33,7 @@ use crossterm::{
 use events::{
     map_assignee_picker_key_event, map_browse_key_event, map_browse_mouse_event,
     map_compose_key_event, map_confirm_key_event, map_estimate_key_event, map_log_time_key_event,
-    map_status_confirm_key_event,
+    map_report_key_event, map_status_confirm_key_event,
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
 use std::io;
@@ -133,9 +137,10 @@ fn assignee_picker_active(model: &Model) -> bool {
     )
 }
 
-/// Handle a crossterm input event: map to a Msg, run update, and dispatch commands.
+/// Map a key event to a Msg according to which modal, if any, owns the keyboard.
 ///
 /// Key routing priority (highest first):
+///   0. hours-report modal (model-level, open on any screen) — digits, `-`, Tab, Enter, Esc, arrows
 ///   1. confirm sub-mode (delete-confirm modal open) — Enter/Esc only
 ///   2. compose sub-mode (comment compose open) — typed chars + Ctrl+S/Esc
 ///   3. log-time sub-mode (log-time modal open) — typed chars + Ctrl+S/Tab/Esc
@@ -143,6 +148,27 @@ fn assignee_picker_active(model: &Model) -> bool {
 ///   5. status-confirm sub-mode (status-confirm modal open) — Enter/Ctrl+S/Esc only
 ///   6. assignee-picker sub-mode (assignee-picker modal open) — j/k/Enter/Ctrl+S/Esc only
 ///   7. browse mode — navigation, shortcuts
+pub(crate) fn route_key_event(model: &Model, key: crossterm::event::KeyEvent) -> Option<Msg> {
+    if model.report.is_some() {
+        map_report_key_event(key)
+    } else if confirm_active(model) {
+        map_confirm_key_event(key)
+    } else if compose_active(model) {
+        map_compose_key_event(key)
+    } else if log_time_active(model) {
+        map_log_time_key_event(key)
+    } else if estimate_active(model) {
+        map_estimate_key_event(key)
+    } else if status_confirm_active(model) {
+        map_status_confirm_key_event(key)
+    } else if assignee_picker_active(model) {
+        map_assignee_picker_key_event(key)
+    } else {
+        map_browse_key_event(key)
+    }
+}
+
+/// Handle a crossterm input event: map to a Msg, run update, and dispatch commands.
 fn handle_input_event(
     ev: Event,
     model: Model,
@@ -152,23 +178,7 @@ fn handle_input_event(
     tx: &mpsc::UnboundedSender<Msg>,
 ) -> Model {
     let msg_opt = match ev {
-        Event::Key(key) => {
-            if confirm_active(&model) {
-                map_confirm_key_event(key)
-            } else if compose_active(&model) {
-                map_compose_key_event(key)
-            } else if log_time_active(&model) {
-                map_log_time_key_event(key)
-            } else if estimate_active(&model) {
-                map_estimate_key_event(key)
-            } else if status_confirm_active(&model) {
-                map_status_confirm_key_event(key)
-            } else if assignee_picker_active(&model) {
-                map_assignee_picker_key_event(key)
-            } else {
-                map_browse_key_event(key)
-            }
-        }
+        Event::Key(key) => route_key_event(&model, key),
         Event::Mouse(mouse) => map_browse_mouse_event(mouse),
         _ => None,
     };
@@ -614,6 +624,13 @@ fn dispatch_cmds(
             // slice 0059 (ADR 0065); this slice only wires the pure overlay lifecycle,
             // so the viewer stays on its Loading placeholder until that slice lands.
             Cmd::LoadImage { .. } => {}
+            Cmd::ExportHoursReport {
+                instance,
+                period,
+                format,
+            } => {
+                spawn_hours_report(targets, http, &tx, instance, period, format);
+            }
         }
     }
 }
@@ -731,6 +748,33 @@ fn spawn_open_asset(
     });
 }
 
+/// Resolve `instance` among `targets`, build its client and run `work` on a
+/// spawned task; an unknown instance sends `missing` instead.
+fn spawn_with_client<F, Fut>(
+    targets: &[Instance],
+    http: &Http,
+    tx: &mpsc::UnboundedSender<Msg>,
+    instance: &str,
+    missing: Msg,
+    work: F,
+) where
+    F: FnOnce(crate::client::ActiveCollabClient, mpsc::UnboundedSender<Msg>) -> Fut
+        + Send
+        + 'static,
+    Fut: std::future::Future<Output = ()> + Send + 'static,
+{
+    let inst = targets.iter().find(|t| t.name == instance).cloned();
+    let http = http.clone();
+    let tx = tx.clone();
+    tokio::spawn(async move {
+        let Some(inst) = inst else {
+            let _ = tx.send(missing);
+            return;
+        };
+        work(crate::client::ActiveCollabClient::new(inst, http), tx).await;
+    });
+}
+
 enum CommentWrite {
     Create { task_id: i64 },
     Update { comment_id: i64 },
@@ -745,40 +789,40 @@ fn spawn_comment_write(
     body: String,
     write: CommentWrite,
 ) {
-    let inst = targets.iter().find(|t| t.name == instance).cloned();
-    let http = http.clone();
-    let tx = tx.clone();
-    tokio::spawn(async move {
-        let Some(inst) = inst else {
-            let _ = tx.send(Msg::CommentMutationErr(crate::i18n::t(
-                "Failed to post comment",
-            )));
-            return;
-        };
-        let client = crate::client::ActiveCollabClient::new(inst, http);
-        let outcome = match write {
-            CommentWrite::Create { task_id } => {
-                client
-                    .create_comment(task_id, &body, crate::client::BodyFormat::Text)
-                    .await
+    let missing = Msg::CommentMutationErr(crate::i18n::t("Failed to post comment"));
+    spawn_with_client(
+        targets,
+        http,
+        tx,
+        &instance,
+        missing,
+        move |client, tx| async move {
+            let outcome = match write {
+                CommentWrite::Create { task_id } => {
+                    client
+                        .create_comment(task_id, &body, crate::client::BodyFormat::Text)
+                        .await
+                }
+                CommentWrite::Update { comment_id } => {
+                    client.update_comment(comment_id, &body).await
+                }
+                CommentWrite::Delete { comment_id } => client.delete_comment(comment_id).await,
+            };
+            match outcome {
+                Ok(CommentWriteOutcome::Ok(_)) => {
+                    let _ = tx.send(Msg::CommentMutationOk);
+                }
+                Ok(CommentWriteOutcome::Unauthorized) => {
+                    let _ = tx.send(Msg::AuthExpired);
+                }
+                Ok(CommentWriteOutcome::Failed(_)) | Err(_) => {
+                    let _ = tx.send(Msg::CommentMutationErr(crate::i18n::t(
+                        "Failed to post comment",
+                    )));
+                }
             }
-            CommentWrite::Update { comment_id } => client.update_comment(comment_id, &body).await,
-            CommentWrite::Delete { comment_id } => client.delete_comment(comment_id).await,
-        };
-        match outcome {
-            Ok(CommentWriteOutcome::Ok(_)) => {
-                let _ = tx.send(Msg::CommentMutationOk);
-            }
-            Ok(CommentWriteOutcome::Unauthorized) => {
-                let _ = tx.send(Msg::AuthExpired);
-            }
-            Ok(CommentWriteOutcome::Failed(_)) | Err(_) => {
-                let _ = tx.send(Msg::CommentMutationErr(crate::i18n::t(
-                    "Failed to post comment",
-                )));
-            }
-        }
-    });
+        },
+    );
 }
 
 /// Spawn the log-time write: fetch the instance's job types, resolve the default one,
@@ -798,45 +842,102 @@ fn spawn_time_write(
     hours: f64,
     summary: Option<String>,
 ) {
-    let inst = targets.iter().find(|t| t.name == instance).cloned();
-    let http = http.clone();
-    let tx = tx.clone();
-    tokio::spawn(async move {
-        let Some(inst) = inst else {
-            let _ = tx.send(Msg::TimeMutationErr(crate::i18n::t("Failed to log time")));
-            return;
-        };
-        let client = crate::client::ActiveCollabClient::new(inst, http);
-        let job_types = client.fetch_job_types().await.unwrap_or_default();
-        let Some(job_type_id) = crate::client::pick_default_job_type(&job_types) else {
-            let _ = tx.send(Msg::TimeMutationErr(crate::i18n::t(
-                "No job type available for this instance",
-            )));
-            return;
-        };
-        let record_date = crate::commands::time::resolve_record_date(None);
-        let outcome = client
-            .create_time_record(
-                project_id,
-                task_id,
-                hours,
-                &record_date,
-                job_type_id,
-                summary.as_deref(),
-            )
-            .await;
-        match outcome {
-            Ok(TimeWriteOutcome::Ok(_)) => {
-                let _ = tx.send(Msg::TimeMutationOk);
+    let missing = Msg::TimeMutationErr(crate::i18n::t("Failed to log time"));
+    spawn_with_client(
+        targets,
+        http,
+        tx,
+        &instance,
+        missing,
+        move |client, tx| async move {
+            let job_types = client.fetch_job_types().await.unwrap_or_default();
+            let Some(job_type_id) = crate::client::pick_default_job_type(&job_types) else {
+                let _ = tx.send(Msg::TimeMutationErr(crate::i18n::t(
+                    "No job type available for this instance",
+                )));
+                return;
+            };
+            let record_date = crate::commands::time::resolve_record_date(None);
+            let outcome = client
+                .create_time_record(
+                    project_id,
+                    task_id,
+                    hours,
+                    &record_date,
+                    job_type_id,
+                    summary.as_deref(),
+                )
+                .await;
+            match outcome {
+                Ok(TimeWriteOutcome::Ok(_)) => {
+                    let _ = tx.send(Msg::TimeMutationOk);
+                }
+                Ok(TimeWriteOutcome::Unauthorized) => {
+                    let _ = tx.send(Msg::AuthExpired);
+                }
+                Ok(TimeWriteOutcome::Failed(_)) | Err(_) => {
+                    let _ = tx.send(Msg::TimeMutationErr(crate::i18n::t("Failed to log time")));
+                }
             }
-            Ok(TimeWriteOutcome::Unauthorized) => {
-                let _ = tx.send(Msg::AuthExpired);
-            }
-            Ok(TimeWriteOutcome::Failed(_)) | Err(_) => {
-                let _ = tx.send(Msg::TimeMutationErr(crate::i18n::t("Failed to log time")));
-            }
-        }
-    });
+        },
+    );
+}
+
+/// Map a finished export to the `Msg` the modal reacts to: success carries the
+/// saved path and total, a 401 is an expired session, anything else is its
+/// translated message.
+pub(crate) fn report_outcome_msg(outcome: Result<ExportedReport, ExportError>) -> Msg {
+    match outcome {
+        Ok(exported) => Msg::ReportOk {
+            path: exported.path.display().to_string(),
+            total: exported.total,
+        },
+        Err(ExportError::Unauthorized) => Msg::AuthExpired,
+        Err(e) => Msg::ReportErr(e.to_string()),
+    }
+}
+
+/// Spawn the hours-report export for `instance`, writing into the process's
+/// current directory with today's local date, through the same function the
+/// `ac time report` command uses.
+fn spawn_hours_report(
+    targets: &[Instance],
+    http: &Http,
+    tx: &mpsc::UnboundedSender<Msg>,
+    instance: String,
+    period: OwnedReportPeriod,
+    format: ReportFormat,
+) {
+    let user_id = targets
+        .iter()
+        .find(|t| t.name == instance)
+        .and_then(|t| t.user_id);
+    let missing = Msg::ReportErr(crate::i18n::t("Unknown instance"));
+    spawn_with_client(
+        targets,
+        http,
+        tx,
+        &instance,
+        missing,
+        move |client, tx| async move {
+            let out_dir = match std::env::current_dir() {
+                Ok(dir) => dir,
+                Err(e) => {
+                    let _ = tx.send(Msg::ReportErr(e.to_string()));
+                    return;
+                }
+            };
+            let request = ReportRequest {
+                period: period.as_period(),
+                format,
+                today: chrono::Local::now().date_naive(),
+                user_id,
+                out_dir: &out_dir,
+            };
+            let outcome = export_hours_report(&request, &client).await;
+            let _ = tx.send(report_outcome_msg(outcome));
+        },
+    );
 }
 
 /// Whether a task-write step succeeded (continue on to the next step) or must stop
@@ -875,36 +976,35 @@ fn spawn_task_edit(
     assignee_id: Option<i64>,
     estimate: Option<f64>,
 ) {
-    let inst = targets.iter().find(|t| t.name == instance).cloned();
-    let http = http.clone();
-    let tx = tx.clone();
-    tokio::spawn(async move {
-        let Some(inst) = inst else {
-            let _ = tx.send(Msg::TaskEditErr(crate::i18n::t("Failed to update task")));
-            return;
-        };
-        let client = crate::client::ActiveCollabClient::new(inst, http);
-
-        if let Some(completed) = completion {
-            let outcome = client.set_task_completion(task_id, completed).await;
-            if let TaskEditStep::Stop(msg) = classify_task_edit_outcome(outcome) {
-                let _ = tx.send(msg);
-                return;
+    let missing = Msg::TaskEditErr(crate::i18n::t("Failed to update task"));
+    spawn_with_client(
+        targets,
+        http,
+        tx,
+        &instance,
+        missing,
+        move |client, tx| async move {
+            if let Some(completed) = completion {
+                let outcome = client.set_task_completion(task_id, completed).await;
+                if let TaskEditStep::Stop(msg) = classify_task_edit_outcome(outcome) {
+                    let _ = tx.send(msg);
+                    return;
+                }
             }
-        }
 
-        if assignee_id.is_some() || estimate.is_some() {
-            let outcome = client
-                .update_task(project_id, task_id, assignee_id, estimate)
-                .await;
-            if let TaskEditStep::Stop(msg) = classify_task_edit_outcome(outcome) {
-                let _ = tx.send(msg);
-                return;
+            if assignee_id.is_some() || estimate.is_some() {
+                let outcome = client
+                    .update_task(project_id, task_id, assignee_id, estimate)
+                    .await;
+                if let TaskEditStep::Stop(msg) = classify_task_edit_outcome(outcome) {
+                    let _ = tx.send(msg);
+                    return;
+                }
             }
-        }
 
-        let _ = tx.send(Msg::TaskEditOk);
-    });
+            let _ = tx.send(Msg::TaskEditOk);
+        },
+    );
 }
 
 fn spawn_opener(inst: Option<Instance>, url: &str) -> String {

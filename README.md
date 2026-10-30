@@ -173,6 +173,38 @@ open tasks aggregated across all configured instances. Select a task to view its
 detail or open/download its assets. When output is piped or redirected (non-TTY),
 `mine` falls back to a plain table suitable for scripts.
 
+### time report — export your hours for a period as XLSX or CSV
+
+```sh
+ac time report --period month|fortnight|week [--format xlsx|csv] [--instance NAME]
+ac time report --start 01-08-2026 --end 30-08-2026 [--format xlsx|csv] [--instance NAME]
+```
+
+Writes your time records for the period to `hours-report-<start>-<end>.<xlsx|csv>`
+in the current directory (dates as `DD-MM-YYYY`), overwriting a file of the same
+name; the file is written to a temporary sibling and renamed, so a failed run
+leaves an existing report intact. The period is either `--start`/`--end`
+(inclusive, both required together) or `--period`, which resolves the current
+period from today's local date: `month` is day 1 to the last day of the month,
+`fortnight` is 1-15 or 16-last day, `week` is Monday to Sunday.
+`--period` cannot be combined with `--start`/`--end`. The format defaults to `xlsx`.
+
+The XLSX file has one sheet, `Hours`: `Total hours for the period` and the total
+in row 1, the header `Project`, `Activity`, `Hours`, `Date` in row 3, then one row
+per record sorted by date, project and record id; hours are numbers and dates are
+Excel dates shown as `dd/mm/yy`. The CSV is `;`-separated UTF-8 with a BOM (opens
+in Excel) with the same rows: a `Total hours for the period;<total>` line, an
+empty line, the header `Project;Activity;Hours;Date`, then the records, with a
+decimal comma (`1,5`).
+Run `ac setup add` again if the instance has no stored user id.
+
+In `ac browse`, press `H` on any screen to open the same export as a modal:
+pick Monthly, Biweekly, Weekly or Custom (Start/End as `DD-MM-YYYY`, `Tab` moves
+between the fields) with `↑/↓` or `j/k`, toggle XLSX/CSV with `f` or `←/→`, and
+press `Enter`. It writes the same file as `ac time report` into the current
+directory, for the open task's instance (otherwise the first configured one),
+and shows the saved path and total; `Esc` closes it.
+
 ### browse — interactive TUI
 
 Arrow-key terminal browser for your open tasks. Navigate projects → tasks →

@@ -1061,6 +1061,7 @@ mod view_size_guard {
             last_loaded: None,
             selection: None,
             copied_feedback: false,
+            report: None,
         }
     }
 
@@ -2069,6 +2070,7 @@ fn view_detail_footer_has_no_tab_switch_hint() {
         last_loaded: None,
         selection: None,
         copied_feedback: false,
+        report: None,
     };
 
     let backend = TestBackend::new(80, 24);
@@ -2133,6 +2135,7 @@ fn view_detail_footer_without_assets_has_no_tab_hint() {
         last_loaded: None,
         selection: None,
         copied_feedback: false,
+        report: None,
     };
 
     let backend = TestBackend::new(80, 24);
@@ -2252,6 +2255,7 @@ fn view_renders_header_on_top_row_with_app_header_style() {
         last_loaded: None,
         selection: None,
         copied_feedback: false,
+        report: None,
     };
 
     let backend = TestBackend::new(80, 10);
@@ -2312,6 +2316,7 @@ fn view_content_and_footer_render_below_header() {
         last_loaded: None,
         selection: None,
         copied_feedback: false,
+        report: None,
     };
 
     let height = 10u16;
@@ -2364,6 +2369,7 @@ fn view_multi_instance_header_shows_extra_suffix() {
         last_loaded: None,
         selection: None,
         copied_feedback: false,
+        report: None,
     };
 
     let backend = TestBackend::new(80, 10);
@@ -2408,6 +2414,7 @@ fn view_too_small_suppresses_header_and_footer() {
         last_loaded: None,
         selection: None,
         copied_feedback: false,
+        report: None,
     };
 
     let backend = TestBackend::new(20, 5);
@@ -2762,6 +2769,7 @@ mod v2b_click_targets {
             last_loaded: None,
             selection: None,
             copied_feedback: false,
+            report: None,
         };
 
         render_and_capture(&mut model, 30, 15);
@@ -2839,6 +2847,7 @@ mod v2b_click_targets {
             last_loaded: None,
             selection: None,
             copied_feedback: false,
+            report: None,
         };
 
         render_and_capture(&mut model, 80, 15);
@@ -2913,6 +2922,7 @@ mod v2b_click_targets {
             last_loaded: None,
             selection: None,
             copied_feedback: false,
+            report: None,
         };
 
         render_and_capture(&mut model, 80, 20);
@@ -2986,6 +2996,7 @@ mod v2b_click_targets {
             last_loaded: None,
             selection: None,
             copied_feedback: false,
+            report: None,
         };
 
         render_and_capture(&mut model, 80, 6);
@@ -3080,6 +3091,7 @@ mod footer_refresh_hint {
             last_loaded,
             selection: None,
             copied_feedback: false,
+            report: None,
         }
     }
 
@@ -3163,6 +3175,7 @@ mod footer_refresh_hint {
             last_loaded: None,
             selection: None,
             copied_feedback: false,
+            report: None,
         };
         let content = render_model(&model);
         set_language("en");
@@ -3210,6 +3223,7 @@ mod footer_refresh_hint {
             last_loaded: None,
             selection: None,
             copied_feedback: false,
+            report: None,
         };
         let content = render_model(&model);
         set_language("en");
@@ -3502,6 +3516,7 @@ mod footer_refresh_hint {
             last_loaded: None,
             selection: None,
             copied_feedback: false,
+            report: None,
         };
         let load = DetailLoad {
             task: serde_json::json!({ "name": "T", "id": 7, "project_id": 1 }),
@@ -3638,6 +3653,7 @@ mod v6_view {
             last_loaded: None,
             selection: None,
             copied_feedback,
+            report: None,
         }
     }
 
@@ -3672,6 +3688,7 @@ mod v6_view {
             last_loaded: None,
             selection: sel,
             copied_feedback: false,
+            report: None,
         }
     }
 
@@ -4411,6 +4428,7 @@ mod w1_chrome_wrap {
             last_loaded,
             selection: None,
             copied_feedback: false,
+            report: None,
         }
     }
 
@@ -5678,6 +5696,7 @@ mod compose_render {
             last_loaded: None,
             selection: None,
             copied_feedback: false,
+            report: None,
         }
     }
 
@@ -6022,6 +6041,7 @@ mod log_time_render {
             last_loaded: None,
             selection: None,
             copied_feedback: false,
+            report: None,
         }
     }
 
@@ -6169,6 +6189,7 @@ mod estimate_edit_render {
             last_loaded: None,
             selection: None,
             copied_feedback: false,
+            report: None,
         }
     }
 
@@ -6297,6 +6318,7 @@ mod status_confirm_render {
             last_loaded: None,
             selection: None,
             copied_feedback: false,
+            report: None,
         }
     }
 
@@ -6443,6 +6465,7 @@ mod assignee_picker_render {
             last_loaded: None,
             selection: None,
             copied_feedback: false,
+            report: None,
         }
     }
 
@@ -6789,6 +6812,7 @@ mod confirm_modal_buttons {
             last_loaded: None,
             selection: None,
             copied_feedback: false,
+            report: None,
         }
     }
 
@@ -7060,6 +7084,7 @@ mod yes_no_confirm_labels {
             last_loaded: None,
             selection: None,
             copied_feedback: false,
+            report: None,
         }
     }
 
@@ -7751,6 +7776,7 @@ mod contextual_footer {
             last_loaded: None,
             selection: None,
             copied_feedback,
+            report: None,
         };
         let backend = TestBackend::new(80, 24);
         let mut terminal = Terminal::new(backend).unwrap();
@@ -8262,6 +8288,7 @@ mod contextual_footer {
             last_loaded: None,
             selection: None,
             copied_feedback: false,
+            report: None,
         };
         let backend = TestBackend::new(80, 6);
         let mut terminal = Terminal::new(backend).unwrap();
@@ -8401,6 +8428,7 @@ mod confirm_modal_render {
             last_loaded: None,
             selection: None,
             copied_feedback: false,
+            report: None,
         };
         let backend = TestBackend::new(80, 24);
         let mut terminal = Terminal::new(backend).unwrap();
@@ -8783,6 +8811,7 @@ fn ctrl_click_on_editar_cell_opens_compose_edit_regression() {
         last_loaded: None,
         selection: None,
         copied_feedback: false,
+        report: None,
     };
 
     let (m_ctrl, cmds) = update(
@@ -8879,6 +8908,7 @@ mod auth_error_render {
             last_loaded: None,
             selection: None,
             copied_feedback: false,
+            report: None,
         }
     }
 
@@ -9511,6 +9541,7 @@ mod image_viewer_render {
             last_loaded: None,
             selection: None,
             copied_feedback: false,
+            report: None,
         }
     }
 
@@ -9901,6 +9932,7 @@ mod view_image_hit_test_resolve {
             last_loaded: None,
             selection: None,
             copied_feedback: false,
+            report: None,
         }
     }
 
@@ -9996,5 +10028,164 @@ mod view_image_hit_test_resolve {
             )),
             "activating an image row must emit Cmd::LoadImage for the clicked asset: {cmds:?}"
         );
+    }
+}
+
+mod report_render {
+    use crate::commands::ReportFormat;
+    use crate::i18n::set_language;
+    use crate::tui::model::{
+        Header, Model, ReportField, ReportForm, ReportPeriodChoice, ReportStatus,
+    };
+    use crate::tui::view::{render_report_modal, view};
+    use ratatui::{backend::TestBackend, Terminal};
+
+    use super::LANG_MUTEX;
+
+    const MODAL_HINT: &str = "Enter export";
+
+    fn form() -> ReportForm {
+        ReportForm {
+            instance: "alpha".into(),
+            period: ReportPeriodChoice::Monthly,
+            format: ReportFormat::Xlsx,
+            start: String::new(),
+            end: String::new(),
+            focus: ReportField::Period,
+            status: ReportStatus::Editing,
+        }
+    }
+
+    fn text_of(buf: &ratatui::buffer::Buffer) -> String {
+        let area = buf.area();
+        let mut out = String::new();
+        for y in 0..area.height {
+            for x in 0..area.width {
+                out.push_str(buf.cell((x, y)).unwrap().symbol());
+            }
+            out.push('\n');
+        }
+        out
+    }
+
+    fn render_modal_text(form: &ReportForm) -> String {
+        let today = chrono::NaiveDate::from_ymd_opt(2026, 10, 30).unwrap();
+        let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
+        terminal
+            .draw(|frame| render_report_modal(frame, frame.area(), form, today))
+            .unwrap();
+        text_of(terminal.backend().buffer())
+    }
+
+    fn render_view_text(model: &Model) -> String {
+        let mut terminal = Terminal::new(TestBackend::new(140, 30)).unwrap();
+        terminal
+            .draw(|frame| view(model, frame, &mut vec![], &mut vec![]))
+            .unwrap();
+        text_of(terminal.backend().buffer())
+    }
+
+    fn browse_model(report: Option<ReportForm>) -> Model {
+        let mut model = Model::browse(Header::from_instances(&[], None), None);
+        model.report = report;
+        model
+    }
+
+    #[test]
+    fn report_render_open_modal_shows_title_instance_options_format_and_range() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let text = render_modal_text(&form());
+        for needle in [
+            "Hours report",
+            "alpha",
+            "> Monthly",
+            "Biweekly",
+            "Weekly",
+            "Custom",
+            "[x] XLSX",
+            "[ ] CSV",
+            "01/10/2026",
+            "31/10/2026",
+        ] {
+            assert!(text.contains(needle), "missing {needle:?}: {text}");
+        }
+    }
+
+    #[test]
+    fn report_render_preset_range_follows_the_selected_period() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let mut f = form();
+        f.period = ReportPeriodChoice::Biweekly;
+        let text = render_modal_text(&f);
+        assert!(text.contains("16/10/2026"), "{text}");
+        assert!(text.contains("> Biweekly"), "{text}");
+        assert!(!text.contains("> Monthly"), "{text}");
+    }
+
+    #[test]
+    fn report_render_custom_shows_start_and_end_with_the_focused_one_marked() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let mut f = form();
+        f.period = ReportPeriodChoice::Custom;
+        f.focus = ReportField::End;
+        f.start = "01-08-2026".into();
+        f.end = "30-08".into();
+        let text = render_modal_text(&f);
+        assert!(text.contains("  Start (DD-MM-YYYY): 01-08-2026"), "{text}");
+        assert!(text.contains("> End (DD-MM-YYYY): 30-08"), "{text}");
+        assert!(
+            !text.contains("01/10/2026"),
+            "no preset range for Custom: {text}"
+        );
+    }
+
+    #[test]
+    fn report_render_shows_exporting_success_and_error_statuses() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let mut f = form();
+        f.status = ReportStatus::Exporting;
+        assert!(render_modal_text(&f).contains("Exporting…"));
+        f.status = ReportStatus::Done {
+            path: "out/r.xlsx".into(),
+            total: "5,5".into(),
+        };
+        let done = render_modal_text(&f);
+        assert!(done.contains("out/r.xlsx"), "{done}");
+        assert!(done.contains("5,5"), "{done}");
+        f.status = ReportStatus::Error("boom failure".into());
+        assert!(render_modal_text(&f).contains("boom failure"));
+    }
+
+    #[test]
+    fn report_render_pt_br_translates_the_period_options() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("pt_BR");
+        let mut f = form();
+        f.period = ReportPeriodChoice::Custom;
+        let text = render_modal_text(&f);
+        set_language("en");
+        for needle in ["Mensal", "Quinzenal", "Semanal", "Personalizado"] {
+            assert!(text.contains(needle), "missing {needle:?}: {text}");
+        }
+    }
+
+    #[test]
+    fn report_render_browse_footer_advertises_h_and_the_modal_owns_its_hint() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let closed = render_view_text(&browse_model(None));
+        assert!(closed.contains("H report"), "{closed}");
+        assert!(
+            !closed.contains("Hours report"),
+            "no modal when closed: {closed}"
+        );
+        assert!(!closed.contains(MODAL_HINT), "{closed}");
+        let open = render_view_text(&browse_model(Some(form())));
+        assert!(open.contains("Hours report"), "{open}");
+        assert_eq!(open.matches(MODAL_HINT).count(), 1, "{open}");
     }
 }
