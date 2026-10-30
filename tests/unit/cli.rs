@@ -400,7 +400,9 @@ fn parse_time_log_with_all_flags() {
     let Command::Time(opts) = cli.command.unwrap() else {
         panic!("expected Time")
     };
-    let TimeCmd::Log(log) = opts.subcommand;
+    let TimeCmd::Log(log) = opts.subcommand else {
+        panic!("expected Log")
+    };
     assert_eq!(log.task_ref.as_deref(), Some("665/75159"));
     assert_eq!(log.hours, 1.5);
     assert_eq!(log.date.as_deref(), Some("2026-01-15"));
@@ -416,12 +418,102 @@ fn parse_time_log_without_task_ref_defaults_to_none() {
     let Command::Time(opts) = cli.command.unwrap() else {
         panic!("expected Time")
     };
-    let TimeCmd::Log(log) = opts.subcommand;
+    let TimeCmd::Log(log) = opts.subcommand else {
+        panic!("expected Log")
+    };
     assert!(log.task_ref.is_none());
     assert_eq!(log.hours, 2.0);
     assert!(log.date.is_none());
     assert!(log.summary.is_none());
     assert!(log.job_type.is_none());
+}
+
+#[test]
+fn time_report_parses_start_end_and_instance() {
+    let cli = parse(&[
+        "time",
+        "report",
+        "--start",
+        "01-08-2026",
+        "--end",
+        "30-08-2026",
+        "--instance",
+        "work",
+    ])
+    .unwrap();
+    let Command::Time(opts) = cli.command.unwrap() else {
+        panic!("expected Time")
+    };
+    let TimeCmd::Report(report) = opts.subcommand else {
+        panic!("expected Report")
+    };
+    assert_eq!(report.start.as_deref(), Some("01-08-2026"));
+    assert_eq!(report.end.as_deref(), Some("30-08-2026"));
+    assert_eq!(report.instance.as_deref(), Some("work"));
+}
+
+#[test]
+fn time_report_missing_start_or_end_is_usage_error() {
+    assert!(parse(&["time", "report", "--end", "30-08-2026"]).is_err());
+    assert!(parse(&["time", "report", "--start", "01-08-2026"]).is_err());
+}
+
+fn time_report_args(args: &[&str]) -> TimeReportArgs {
+    let mut all = vec!["time", "report"];
+    all.extend_from_slice(args);
+    let Command::Time(opts) = parse(&all).unwrap().command.unwrap() else {
+        panic!("expected Time")
+    };
+    let TimeCmd::Report(report) = opts.subcommand else {
+        panic!("expected Report")
+    };
+    report
+}
+
+#[test]
+fn time_report_format_defaults_to_xlsx_and_accepts_csv() {
+    let default = time_report_args(&["--period", "month"]);
+    assert_eq!(default.format, ReportFormatArg::Xlsx);
+    let csv = time_report_args(&["--period", "month", "--format", "csv"]);
+    assert_eq!(csv.format, ReportFormatArg::Csv);
+}
+
+#[test]
+fn time_report_period_parses_each_preset() {
+    for (raw, expected) in [
+        ("month", ReportPeriodArg::Month),
+        ("fortnight", ReportPeriodArg::Fortnight),
+        ("week", ReportPeriodArg::Week),
+    ] {
+        let report = time_report_args(&["--period", raw]);
+        assert_eq!(report.period, Some(expected));
+        assert!(report.start.is_none() && report.end.is_none());
+    }
+}
+
+#[test]
+fn time_report_invalid_option_combinations_are_usage_errors() {
+    for args in [
+        &[
+            "--period",
+            "month",
+            "--start",
+            "01-08-2026",
+            "--end",
+            "30-08-2026",
+        ][..],
+        &["--period", "month", "--start", "01-08-2026"],
+        &["--period", "month", "--end", "30-08-2026"],
+        &["--start", "01-08-2026"],
+        &["--end", "30-08-2026"],
+        &[],
+        &["--period", "year"],
+        &["--period", "month", "--format", "pdf"],
+    ] {
+        let mut all = vec!["time", "report"];
+        all.extend_from_slice(args);
+        assert!(parse(&all).is_err(), "{args:?}");
+    }
 }
 
 #[test]

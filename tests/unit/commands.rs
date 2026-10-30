@@ -4333,3 +4333,1370 @@ async fn task_set_core_second_write_failure_stops_after_first_write() {
         "the second write's failure must surface as a non-zero exit"
     );
 }
+
+const REPORT_BOM: &str = "\u{FEFF}";
+const DAY_ONE: i64 = 1785715200;
+const DAY_TWO: i64 = 1785801600;
+
+fn hours_report_fixture(value: serde_json::Value) -> crate::models::TimeRecordsReport {
+    serde_json::from_value(value).unwrap()
+}
+
+fn hours_report_lines(csv: &str) -> Vec<String> {
+    csv.trim_start_matches('\u{FEFF}')
+        .split('\n')
+        .map(|l| l.to_string())
+        .collect()
+}
+
+fn single_task_record(value: f64) -> serde_json::Value {
+    serde_json::json!({
+        "time_records": [
+            {"id": 1, "value": value, "record_date": DAY_ONE, "summary": "", "parent_type": "Task", "parent_id": 10}
+        ],
+        "related": {
+            "Project": {"5": {"id": 5, "name": "Projeto Ação"}},
+            "Task": {"10": {"id": 10, "project_id": 5, "name": "Tarefa única"}}
+        }
+    })
+}
+
+#[test]
+fn hours_report_csv_total_sums_all_values() {
+    let report = hours_report_fixture(serde_json::json!({
+        "time_records": [
+            {"id": 1, "value": 1.0, "record_date": DAY_ONE, "parent_type": "Project", "parent_id": 5},
+            {"id": 2, "value": 2.0, "record_date": DAY_ONE, "parent_type": "Project", "parent_id": 5},
+            {"id": 3, "value": 1.5, "record_date": DAY_ONE, "parent_type": "Project", "parent_id": 5},
+            {"id": 4, "value": 5.42, "record_date": DAY_ONE, "parent_type": "Project", "parent_id": 5},
+            {"id": 5, "value": 1.58, "record_date": DAY_ONE, "parent_type": "Project", "parent_id": 5}
+        ],
+        "related": {"Project": {"5": {"id": 5, "name": "P"}}}
+    }));
+    let lines = hours_report_lines(&hours_report::render_hours_report_csv(&report));
+    assert_eq!(lines[0], "Total hours for the period;11,5");
+}
+
+#[test]
+fn hours_report_csv_integral_total_has_no_decimal_comma() {
+    let report = hours_report_fixture(serde_json::json!({
+        "time_records": [
+            {"id": 1, "value": 39.5, "record_date": DAY_ONE, "parent_type": "Project", "parent_id": 5},
+            {"id": 2, "value": 39.5, "record_date": DAY_ONE, "parent_type": "Project", "parent_id": 5}
+        ],
+        "related": {"Project": {"5": {"id": 5, "name": "P"}}}
+    }));
+    let lines = hours_report_lines(&hours_report::render_hours_report_csv(&report));
+    assert_eq!(lines[0], "Total hours for the period;79");
+}
+
+#[test]
+fn hours_report_csv_formats_hours_with_decimal_comma_and_trimmed_zeros() {
+    for (value, expected) in [
+        (1.0, "1"),
+        (1.5, "1,5"),
+        (5.42, "5,42"),
+        (0.25, "0,25"),
+        (1.50, "1,5"),
+    ] {
+        let csv =
+            hours_report::render_hours_report_csv(&hours_report_fixture(single_task_record(value)));
+        let lines = hours_report_lines(&csv);
+        assert_eq!(
+            lines[3],
+            format!("Projeto Ação;Tarefa única;{expected};03/08/26"),
+            "value {value}"
+        );
+    }
+}
+
+#[test]
+fn hours_report_csv_sorts_by_date_then_project_then_id() {
+    let report = hours_report_fixture(serde_json::json!({
+        "time_records": [
+            {"id": 3, "value": 1.0, "record_date": DAY_TWO, "parent_type": "Task", "parent_id": 20},
+            {"id": 1, "value": 1.0, "record_date": DAY_ONE, "parent_type": "Task", "parent_id": 21},
+            {"id": 9, "value": 1.0, "record_date": DAY_ONE, "parent_type": "Task", "parent_id": 22},
+            {"id": 4, "value": 1.0, "record_date": DAY_ONE, "parent_type": "Task", "parent_id": 22}
+        ],
+        "related": {
+            "Project": {
+                "1": {"id": 1, "name": "[Manutenção] Zeta"},
+                "2": {"id": 2, "name": "[X][BASE] Alfa"},
+                "3": {"id": 3, "name": "[X] Demandas"}
+            },
+            "Task": {
+                "20": {"id": 20, "project_id": 1, "name": "t20"},
+                "21": {"id": 21, "project_id": 2, "name": "t21"},
+                "22": {"id": 22, "project_id": 3, "name": "t22"}
+            }
+        }
+    }));
+    let lines = hours_report_lines(&hours_report::render_hours_report_csv(&report));
+    assert_eq!(
+        &lines[3..],
+        [
+            "[X] Demandas;t22;1;03/08/26",
+            "[X] Demandas;t22;1;03/08/26",
+            "[X][BASE] Alfa;t21;1;03/08/26",
+            "[Manutenção] Zeta;t20;1;04/08/26",
+        ]
+    );
+}
+
+#[test]
+fn hours_report_csv_breaks_ties_by_record_id() {
+    let report = hours_report_fixture(serde_json::json!({
+        "time_records": [
+            {"id": 9, "value": 1.0, "record_date": DAY_ONE, "parent_type": "Task", "parent_id": 22},
+            {"id": 4, "value": 2.0, "record_date": DAY_ONE, "parent_type": "Task", "parent_id": 22}
+        ],
+        "related": {
+            "Project": {"3": {"id": 3, "name": "P"}},
+            "Task": {"22": {"id": 22, "project_id": 3, "name": "t"}}
+        }
+    }));
+    let lines = hours_report_lines(&hours_report::render_hours_report_csv(&report));
+    assert_eq!(lines[3], "P;t;2;03/08/26");
+    assert_eq!(lines[4], "P;t;1;03/08/26");
+}
+
+#[test]
+fn hours_report_csv_project_record_uses_summary_as_activity() {
+    let report = hours_report_fixture(serde_json::json!({
+        "time_records": [
+            {"id": 1, "value": 1.0, "record_date": DAY_ONE, "summary": "Reunião", "parent_type": "Project", "parent_id": 5},
+            {"id": 2, "value": 1.0, "record_date": DAY_ONE, "summary": "", "parent_type": "Project", "parent_id": 5},
+            {"id": 3, "value": 1.0, "record_date": DAY_ONE, "summary": null, "parent_type": "Project", "parent_id": 5}
+        ],
+        "related": {"Project": {"5": {"id": 5, "name": "Projeto"}}}
+    }));
+    let lines = hours_report_lines(&hours_report::render_hours_report_csv(&report));
+    assert_eq!(lines[3], "Projeto;Reunião;1;03/08/26");
+    assert_eq!(lines[4], "Projeto;;1;03/08/26");
+    assert_eq!(lines[5], "Projeto;;1;03/08/26");
+}
+
+#[test]
+fn hours_report_csv_missing_related_renders_empty_cells() {
+    let report = hours_report_fixture(serde_json::json!({
+        "time_records": [
+            {"id": 1, "value": 1.0, "record_date": DAY_ONE, "parent_type": "Task", "parent_id": 99},
+            {"id": 2, "value": 1.0, "record_date": DAY_ONE, "parent_type": "Project", "parent_id": 98}
+        ],
+        "related": {}
+    }));
+    let lines = hours_report_lines(&hours_report::render_hours_report_csv(&report));
+    assert_eq!(lines[3], ";;1;03/08/26");
+    assert_eq!(lines[4], ";;1;03/08/26");
+}
+
+#[test]
+fn hours_report_csv_task_with_unknown_project_keeps_task_name() {
+    let report = hours_report_fixture(serde_json::json!({
+        "time_records": [
+            {"id": 1, "value": 1.0, "record_date": DAY_ONE, "parent_type": "Task", "parent_id": 10}
+        ],
+        "related": {"Task": {"10": {"id": 10, "project_id": 77, "name": "Só a tarefa"}}}
+    }));
+    let lines = hours_report_lines(&hours_report::render_hours_report_csv(&report));
+    assert_eq!(lines[3], ";Só a tarefa;1;03/08/26");
+}
+
+#[test]
+fn hours_report_csv_reads_the_record_date_in_utc() {
+    let csv = hours_report::render_hours_report_csv(&hours_report_fixture(single_task_record(1.0)));
+    assert!(
+        hours_report_lines(&csv)[3].ends_with(";03/08/26"),
+        "got: {csv}"
+    );
+}
+
+#[test]
+fn hours_report_csv_quotes_fields_holding_separator_or_quote() {
+    let report = hours_report_fixture(serde_json::json!({
+        "time_records": [
+            {"id": 1, "value": 1.0, "record_date": DAY_ONE, "parent_type": "Task", "parent_id": 10},
+            {"id": 2, "value": 1.0, "record_date": DAY_ONE, "parent_type": "Task", "parent_id": 11}
+        ],
+        "related": {
+            "Project": {"5": {"id": 5, "name": "a;b"}},
+            "Task": {
+                "10": {"id": 10, "project_id": 5, "name": "say \"hi\""},
+                "11": {"id": 11, "project_id": 5, "name": "linha\ndupla"}
+            }
+        }
+    }));
+    let csv = hours_report::render_hours_report_csv(&report);
+    assert!(
+        csv.contains("\"a;b\";\"say \"\"hi\"\"\";1;03/08/26"),
+        "got: {csv}"
+    );
+    assert!(
+        csv.contains("\"a;b\";\"linha\ndupla\";1;03/08/26"),
+        "got: {csv}"
+    );
+}
+
+#[test]
+fn hours_report_csv_starts_with_bom_and_exact_header() {
+    let csv = hours_report::render_hours_report_csv(&hours_report_fixture(single_task_record(1.0)));
+    assert!(csv.starts_with(REPORT_BOM));
+    let lines = hours_report_lines(&csv);
+    assert_eq!(lines[1], "");
+    assert_eq!(lines[2], "Project;Activity;Hours;Date");
+}
+
+#[test]
+fn hours_report_csv_empty_response_has_zero_total_and_header_only() {
+    let csv = hours_report::render_hours_report_csv(&hours_report_fixture(serde_json::json!({
+        "time_records": [],
+        "related": []
+    })));
+    assert_eq!(
+        csv,
+        format!("{REPORT_BOM}Total hours for the period;0\n\nProject;Activity;Hours;Date")
+    );
+}
+
+fn report_response() -> serde_json::Value {
+    serde_json::json!({
+        "time_records": [
+            {"id": 1, "value": 1.0, "record_date": DAY_ONE, "summary": "", "parent_type": "Task", "parent_id": 10},
+            {"id": 2, "value": 0.5, "record_date": DAY_TWO, "summary": "", "parent_type": "Task", "parent_id": 10}
+        ],
+        "related": {
+            "Project": {"5": {"id": 5, "name": "Projeto Ação"}},
+            "Task": {"10": {"id": 10, "project_id": 5, "name": "Tarefa"}}
+        }
+    })
+}
+
+async fn mount_report(server: &MockServer, response: ResponseTemplate, expected_calls: u64) {
+    mount_report_range(server, "2026-08-01", "2026-08-30", response, expected_calls).await;
+}
+
+async fn mount_report_range(
+    server: &MockServer,
+    from: &str,
+    to: &str,
+    response: ResponseTemplate,
+    expected_calls: u64,
+) {
+    Mock::given(method("GET"))
+        .and(path("/api/v1/users/1/time-records/filtered-by-date"))
+        .and(wiremock::matchers::query_param("from", from))
+        .and(wiremock::matchers::query_param("to", to))
+        .respond_with(response)
+        .expect(expected_calls)
+        .mount(server)
+        .await;
+}
+
+struct ReportRun {
+    code: i32,
+    out: String,
+    err: String,
+}
+
+fn report_today() -> chrono::NaiveDate {
+    chrono::NaiveDate::from_ymd_opt(2026, 10, 30).unwrap()
+}
+
+async fn run_time_report(
+    server: &MockServer,
+    dir: &std::path::Path,
+    start: &str,
+    end: &str,
+    user_id: Option<i64>,
+) -> ReportRun {
+    run_time_report_as(
+        server,
+        dir,
+        hours_report::ReportPeriod::Range { start, end },
+        hours_report::ReportFormat::Csv,
+        user_id,
+    )
+    .await
+}
+
+async fn run_time_report_as(
+    server: &MockServer,
+    dir: &std::path::Path,
+    period: hours_report::ReportPeriod<'_>,
+    format: hours_report::ReportFormat,
+    user_id: Option<i64>,
+) -> ReportRun {
+    let client = ActiveCollabClient::new(comment_inst(&server.uri()), make_http());
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    let request = hours_report::ReportRequest {
+        period,
+        format,
+        today: report_today(),
+        user_id,
+        out_dir: dir,
+    };
+    let code = time_report_core(&request, &client, &mut out, &mut err).await;
+    ReportRun {
+        code,
+        out: output_str(&out).to_string(),
+        err: output_str(&err).to_string(),
+    }
+}
+
+fn dir_is_empty(dir: &std::path::Path) -> bool {
+    std::fs::read_dir(dir).unwrap().next().is_none()
+}
+
+#[tokio::test]
+async fn time_report_writes_the_named_file_and_prints_path_and_total() {
+    let server = MockServer::start().await;
+    mount_report(
+        &server,
+        ResponseTemplate::new(200).set_body_json(report_response()),
+        1,
+    )
+    .await;
+    let dir = TempDir::new().unwrap();
+
+    let run = run_time_report(&server, dir.path(), "01-08-2026", "30-08-2026", Some(1)).await;
+
+    server.verify().await;
+    assert_eq!(run.code, 0, "err: {}", run.err);
+    let file = dir.path().join("hours-report-01-08-2026-30-08-2026.csv");
+    let content = std::fs::read_to_string(&file).unwrap();
+    assert_eq!(
+        content,
+        format!(
+            "{REPORT_BOM}Total hours for the period;1,5\n\nProject;Activity;Hours;Date\nProjeto Ação;Tarefa;1;03/08/26\nProjeto Ação;Tarefa;0,5;04/08/26"
+        )
+    );
+    assert_eq!(
+        run.out,
+        format!(
+            "Hours report written to {} (total hours: 1,5)\n",
+            file.display()
+        )
+    );
+}
+
+#[tokio::test]
+async fn time_report_accepts_start_equal_to_end() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/users/1/time-records/filtered-by-date"))
+        .and(wiremock::matchers::query_param("from", "2026-08-03"))
+        .and(wiremock::matchers::query_param("to", "2026-08-03"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(report_response()))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let dir = TempDir::new().unwrap();
+
+    let run = run_time_report(&server, dir.path(), "03-08-2026", "03-08-2026", Some(1)).await;
+
+    server.verify().await;
+    assert_eq!(run.code, 0, "err: {}", run.err);
+    assert!(dir
+        .path()
+        .join("hours-report-03-08-2026-03-08-2026.csv")
+        .exists());
+}
+
+#[tokio::test]
+async fn time_report_start_after_end_is_usage_error_without_request_or_file() {
+    let server = MockServer::start().await;
+    mount_report(&server, ResponseTemplate::new(200), 0).await;
+    let dir = TempDir::new().unwrap();
+
+    let run = run_time_report(&server, dir.path(), "30-08-2026", "01-08-2026", Some(1)).await;
+
+    server.verify().await;
+    assert_eq!(run.code, 2);
+    assert!(run.err.contains("after"), "{}", run.err);
+    assert!(dir_is_empty(dir.path()));
+}
+
+#[tokio::test]
+async fn time_report_malformed_or_impossible_dates_are_usage_errors_without_request() {
+    for (start, end) in [
+        ("2026-08-01", "30-08-2026"),
+        ("01-08-2026", "2026-08-30"),
+        ("1-8-2026", "30-08-2026"),
+        ("aa-bb-cccc", "30-08-2026"),
+        ("01-08-2026", "31-02-2026"),
+    ] {
+        let server = MockServer::start().await;
+        mount_report(&server, ResponseTemplate::new(200), 0).await;
+        let dir = TempDir::new().unwrap();
+
+        let run = run_time_report(&server, dir.path(), start, end, Some(1)).await;
+
+        server.verify().await;
+        assert_eq!(run.code, 2, "{start} {end}");
+        assert!(run.err.contains("DD-MM-YYYY"), "{start} {end}: {}", run.err);
+        assert!(dir_is_empty(dir.path()), "{start} {end}");
+    }
+}
+
+#[tokio::test]
+async fn time_report_without_stored_user_id_fails_with_setup_hint_and_no_request() {
+    let server = MockServer::start().await;
+    mount_report(&server, ResponseTemplate::new(200), 0).await;
+    let dir = TempDir::new().unwrap();
+
+    let run = run_time_report(&server, dir.path(), "01-08-2026", "30-08-2026", None).await;
+
+    server.verify().await;
+    assert_ne!(run.code, 0);
+    assert!(run.err.contains("ac setup add"), "{}", run.err);
+    assert!(dir_is_empty(dir.path()));
+}
+
+#[tokio::test]
+async fn time_report_unauthorized_shows_reauth_message_and_writes_no_file() {
+    let server = MockServer::start().await;
+    mount_report(&server, ResponseTemplate::new(401), 1).await;
+    let dir = TempDir::new().unwrap();
+
+    let run = run_time_report(&server, dir.path(), "01-08-2026", "30-08-2026", Some(1)).await;
+
+    server.verify().await;
+    assert_ne!(run.code, 0);
+    assert!(
+        run.err.contains(&presenter::reauth_message()),
+        "{}",
+        run.err
+    );
+    assert!(dir_is_empty(dir.path()));
+}
+
+#[tokio::test]
+async fn time_report_server_error_names_the_status_and_writes_no_file() {
+    let server = MockServer::start().await;
+    mount_report(&server, ResponseTemplate::new(500), 1).await;
+    let dir = TempDir::new().unwrap();
+
+    let run = run_time_report(&server, dir.path(), "01-08-2026", "30-08-2026", Some(1)).await;
+
+    server.verify().await;
+    assert_ne!(run.code, 0);
+    assert!(
+        run.err
+            .contains("hours report request failed with HTTP 500"),
+        "{}",
+        run.err
+    );
+    assert!(dir_is_empty(dir.path()));
+}
+
+#[tokio::test]
+async fn time_report_overwrites_an_existing_file() {
+    let server = MockServer::start().await;
+    mount_report(
+        &server,
+        ResponseTemplate::new(200).set_body_json(report_response()),
+        1,
+    )
+    .await;
+    let dir = TempDir::new().unwrap();
+    let file = dir.path().join("hours-report-01-08-2026-30-08-2026.csv");
+    std::fs::write(&file, "stale content that is much longer than the new report ........................................................................................................................").unwrap();
+
+    let run = run_time_report(&server, dir.path(), "01-08-2026", "30-08-2026", Some(1)).await;
+
+    assert_eq!(run.code, 0, "err: {}", run.err);
+    let content = std::fs::read_to_string(&file).unwrap();
+    assert!(content.starts_with(REPORT_BOM), "{content}");
+    assert!(!content.contains("stale"));
+}
+
+#[test]
+fn hours_report_csv_parses_related_keyed_by_id_with_only_projects() {
+    let report: crate::models::TimeRecordsReport = serde_json::from_str(
+        r#"{"time_records":[{"id":1,"value":2.0,"record_date":1785715200,"summary":null,"parent_type":"Project","parent_id":694}],
+            "related":{"Project":{"694":{"id":694,"name":"Keyed"}}}}"#,
+    )
+    .unwrap();
+    assert_eq!(report.related.projects.len(), 1);
+    assert!(report.related.tasks.is_empty());
+    let lines = hours_report_lines(&hours_report::render_hours_report_csv(&report));
+    assert_eq!(lines[3], "Keyed;;2;03/08/26");
+}
+
+#[test]
+fn hours_report_csv_parses_task_keyed_by_its_id() {
+    let report: crate::models::TimeRecordsReport = serde_json::from_str(
+        r#"{"time_records":[{"id":1,"value":1.0,"record_date":1785715200,"summary":"","parent_type":"Task","parent_id":31525}],
+            "related":{"Project":{"459":{"id":459,"name":"Proj"}},"Task":{"31525":{"id":31525,"project_id":459,"name":"Keyed task"}}}}"#,
+    )
+    .unwrap();
+    let lines = hours_report_lines(&hours_report::render_hours_report_csv(&report));
+    assert_eq!(lines[3], "Proj;Keyed task;1;03/08/26");
+}
+
+#[test]
+fn hours_report_csv_record_missing_a_required_field_is_a_parse_error() {
+    for body in [
+        r#"{"time_records":[{"id":1,"record_date":1785715200,"parent_type":"Project","parent_id":5}],"related":{}}"#,
+        r#"{"time_records":[{"id":1,"value":1.0,"parent_type":"Project","parent_id":5}],"related":{}}"#,
+        r#"{"time_records":[{"id":1,"value":1.0,"record_date":1785715200,"parent_id":5}],"related":{}}"#,
+        r#"{"time_records":[{"id":1,"value":1.0,"record_date":1785715200,"parent_type":"Project"}],"related":{}}"#,
+        r#"{"time_records":[{"value":1.0,"record_date":1785715200,"parent_type":"Project","parent_id":5}],"related":{}}"#,
+        r#"{"time_records":[],"related":{"Task":{"1":{"id":1,"name":"x"}}}}"#,
+    ] {
+        assert!(
+            serde_json::from_str::<crate::models::TimeRecordsReport>(body).is_err(),
+            "{body}"
+        );
+    }
+}
+
+#[test]
+fn hours_report_csv_related_as_empty_array_parses_as_empty() {
+    let report = hours_report_fixture(serde_json::json!({
+        "time_records": [
+            {"id": 1, "value": 2.0, "record_date": DAY_ONE, "parent_type": "Project", "parent_id": 5}
+        ],
+        "related": []
+    }));
+    assert!(report.related.projects.is_empty());
+    assert!(report.related.tasks.is_empty());
+    let lines = hours_report_lines(&hours_report::render_hours_report_csv(&report));
+    assert_eq!(lines[3], ";;2;03/08/26");
+}
+
+fn hours_report_xlsx_range(
+    report: &crate::models::TimeRecordsReport,
+) -> calamine::Range<calamine::Data> {
+    use calamine::Reader;
+    let bytes = hours_report::render_hours_report_xlsx(report).unwrap();
+    let mut workbook: calamine::Xlsx<_> =
+        calamine::open_workbook_from_rs(std::io::Cursor::new(bytes)).unwrap();
+    assert_eq!(workbook.sheet_names(), vec!["Hours".to_string()]);
+    workbook.worksheet_range("Hours").unwrap()
+}
+
+fn xlsx_text(range: &calamine::Range<calamine::Data>, row: u32, col: u32) -> String {
+    match range.get_value((row, col)) {
+        Some(calamine::Data::String(s)) => s.clone(),
+        Some(calamine::Data::Empty) | None => String::new(),
+        other => panic!("cell ({row},{col}) is not text: {other:?}"),
+    }
+}
+
+fn xlsx_number(range: &calamine::Range<calamine::Data>, row: u32, col: u32) -> f64 {
+    match range.get_value((row, col)) {
+        Some(calamine::Data::Float(f)) => *f,
+        Some(calamine::Data::Int(i)) => *i as f64,
+        other => panic!("cell ({row},{col}) is not a number: {other:?}"),
+    }
+}
+
+fn xlsx_date(range: &calamine::Range<calamine::Data>, row: u32, col: u32) -> chrono::NaiveDateTime {
+    use calamine::DataType;
+    match range.get_value((row, col)) {
+        Some(cell @ calamine::Data::DateTime(_)) => cell.as_datetime().unwrap(),
+        other => panic!("cell ({row},{col}) is not a date: {other:?}"),
+    }
+}
+
+fn xlsx_fixture() -> crate::models::TimeRecordsReport {
+    hours_report_fixture(serde_json::json!({
+        "time_records": [
+            {"id": 1, "value": 1.0, "record_date": DAY_ONE, "summary": "", "parent_type": "Task", "parent_id": 10},
+            {"id": 2, "value": 2.0, "record_date": DAY_ONE, "summary": "Plan; \"phase\" 1", "parent_type": "Project", "parent_id": 6},
+            {"id": 3, "value": 1.5, "record_date": DAY_TWO, "summary": "", "parent_type": "Task", "parent_id": 10},
+            {"id": 4, "value": 5.42, "record_date": DAY_TWO, "summary": "Revisão", "parent_type": "Project", "parent_id": 5},
+            {"id": 5, "value": 1.58, "record_date": DAY_TWO, "summary": "", "parent_type": "Project", "parent_id": 5}
+        ],
+        "related": {
+            "Project": {
+                "5": {"id": 5, "name": "Projeto Ação"},
+                "6": {"id": 6, "name": "Semi; \"Quote\""}
+            },
+            "Task": {"10": {"id": 10, "project_id": 5, "name": "Tarefa única"}}
+        }
+    }))
+}
+
+#[test]
+fn hours_report_xlsx_has_total_header_and_typed_rows_in_csv_order() {
+    let range = hours_report_xlsx_range(&xlsx_fixture());
+
+    assert_eq!(xlsx_text(&range, 0, 0), "Total hours for the period");
+    assert!((xlsx_number(&range, 0, 1) - 11.5).abs() < 1e-9);
+    assert_eq!(xlsx_text(&range, 1, 0), "");
+    assert_eq!(xlsx_text(&range, 1, 1), "");
+    let header: Vec<String> = (0..4).map(|c| xlsx_text(&range, 2, c)).collect();
+    assert_eq!(header, ["Project", "Activity", "Hours", "Date"]);
+
+    let expected = [
+        ("Projeto Ação", "Tarefa única", 1.0, (2026, 8, 3)),
+        ("Semi; \"Quote\"", "Plan; \"phase\" 1", 2.0, (2026, 8, 3)),
+        ("Projeto Ação", "Tarefa única", 1.5, (2026, 8, 4)),
+        ("Projeto Ação", "Revisão", 5.42, (2026, 8, 4)),
+        ("Projeto Ação", "", 1.58, (2026, 8, 4)),
+    ];
+    assert_eq!(range.height(), 3 + expected.len());
+    for (i, (project, activity, hours, (y, m, d))) in expected.iter().enumerate() {
+        let row = 3 + i as u32;
+        assert_eq!(xlsx_text(&range, row, 0), *project, "row {row}");
+        assert_eq!(xlsx_text(&range, row, 1), *activity, "row {row}");
+        assert!(
+            (xlsx_number(&range, row, 2) - hours).abs() < 1e-9,
+            "row {row}"
+        );
+        assert_eq!(
+            xlsx_date(&range, row, 3),
+            chrono::NaiveDate::from_ymd_opt(*y, *m, *d)
+                .unwrap()
+                .and_hms_opt(0, 0, 0)
+                .unwrap(),
+            "row {row}"
+        );
+    }
+}
+
+#[test]
+fn hours_report_xlsx_rows_follow_the_csv_row_order() {
+    let report = xlsx_fixture();
+    let range = hours_report_xlsx_range(&report);
+    let csv = hours_report::render_hours_report_csv(&report);
+    let csv_hours: Vec<String> = hours_report_lines(&csv)[3..]
+        .iter()
+        .map(|line| line.rsplit(';').nth(1).unwrap().replace(',', "."))
+        .collect();
+    let xlsx_hours: Vec<String> = (3..range.height() as u32)
+        .map(|row| xlsx_number(&range, row, 2).to_string())
+        .collect();
+    assert_eq!(xlsx_hours, csv_hours);
+}
+
+#[test]
+fn hours_report_xlsx_empty_report_has_zero_total_and_header_only() {
+    let range = hours_report_xlsx_range(&hours_report_fixture(serde_json::json!({
+        "time_records": [],
+        "related": {}
+    })));
+    assert_eq!(xlsx_text(&range, 0, 0), "Total hours for the period");
+    assert_eq!(xlsx_number(&range, 0, 1), 0.0);
+    assert_eq!(xlsx_text(&range, 2, 0), "Project");
+    assert_eq!(xlsx_text(&range, 2, 3), "Date");
+    assert_eq!(range.height(), 3);
+}
+
+const REPORT_FORMATS: [hours_report::ReportFormat; 2] = [
+    hours_report::ReportFormat::Xlsx,
+    hours_report::ReportFormat::Csv,
+];
+
+fn report_file_names(dir: &std::path::Path) -> Vec<String> {
+    let mut names: Vec<String> = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    names
+}
+
+#[tokio::test]
+async fn time_report_xlsx_writes_only_the_xlsx_file_with_typed_cells() {
+    let server = MockServer::start().await;
+    mount_report(
+        &server,
+        ResponseTemplate::new(200).set_body_json(report_response()),
+        1,
+    )
+    .await;
+    let dir = TempDir::new().unwrap();
+
+    let run = run_time_report_as(
+        &server,
+        dir.path(),
+        hours_report::ReportPeriod::Range {
+            start: "01-08-2026",
+            end: "30-08-2026",
+        },
+        hours_report::ReportFormat::Xlsx,
+        Some(1),
+    )
+    .await;
+
+    assert_eq!(run.code, 0, "err: {}", run.err);
+    assert_eq!(
+        report_file_names(dir.path()),
+        ["hours-report-01-08-2026-30-08-2026.xlsx"]
+    );
+    assert!(
+        run.out.contains("hours-report-01-08-2026-30-08-2026.xlsx"),
+        "{}",
+        run.out
+    );
+    let bytes = std::fs::read(dir.path().join("hours-report-01-08-2026-30-08-2026.xlsx")).unwrap();
+    let mut workbook: calamine::Xlsx<_> =
+        calamine::open_workbook_from_rs(std::io::Cursor::new(bytes)).unwrap();
+    let range = calamine::Reader::worksheet_range(&mut workbook, "Hours").unwrap();
+    assert!((xlsx_number(&range, 0, 1) - 1.5).abs() < 1e-9);
+}
+
+#[tokio::test]
+async fn time_report_presets_request_the_resolved_dates_and_name_the_file() {
+    for (preset, from, to, file) in [
+        (
+            hours_report::PeriodPreset::Month,
+            "2026-10-01",
+            "2026-10-31",
+            "hours-report-01-10-2026-31-10-2026.xlsx",
+        ),
+        (
+            hours_report::PeriodPreset::Fortnight,
+            "2026-10-16",
+            "2026-10-31",
+            "hours-report-16-10-2026-31-10-2026.xlsx",
+        ),
+        (
+            hours_report::PeriodPreset::Week,
+            "2026-10-26",
+            "2026-11-01",
+            "hours-report-26-10-2026-01-11-2026.xlsx",
+        ),
+    ] {
+        let server = MockServer::start().await;
+        mount_report_range(
+            &server,
+            from,
+            to,
+            ResponseTemplate::new(200).set_body_json(report_response()),
+            1,
+        )
+        .await;
+        let dir = TempDir::new().unwrap();
+
+        let run = run_time_report_as(
+            &server,
+            dir.path(),
+            hours_report::ReportPeriod::Preset(preset),
+            hours_report::ReportFormat::Xlsx,
+            Some(1),
+        )
+        .await;
+
+        server.verify().await;
+        assert_eq!(run.code, 0, "{preset:?} err: {}", run.err);
+        assert_eq!(report_file_names(dir.path()), [file], "{preset:?}");
+    }
+}
+
+#[tokio::test]
+async fn time_report_failures_write_no_file_in_either_format() {
+    for format in REPORT_FORMATS {
+        let dir = TempDir::new().unwrap();
+        let server = MockServer::start().await;
+        let range = hours_report::ReportPeriod::Range {
+            start: "01-08-2026",
+            end: "30-08-2026",
+        };
+
+        let bad_dates = run_time_report_as(
+            &server,
+            dir.path(),
+            hours_report::ReportPeriod::Range {
+                start: "30-08-2026",
+                end: "01-08-2026",
+            },
+            format,
+            Some(1),
+        )
+        .await;
+        assert_eq!(bad_dates.code, 2, "{format:?}");
+
+        let no_user = run_time_report_as(&server, dir.path(), range, format, None).await;
+        assert_eq!(no_user.code, 1, "{format:?}");
+
+        for (status, needle) in [(401, ""), (500, "500")] {
+            let server = MockServer::start().await;
+            mount_report(&server, ResponseTemplate::new(status), 1).await;
+            let run = run_time_report_as(&server, dir.path(), range, format, Some(1)).await;
+            assert_eq!(run.code, 1, "{format:?} {status}");
+            assert!(run.err.contains(needle), "{format:?} {status}: {}", run.err);
+        }
+        assert!(dir_is_empty(dir.path()), "{format:?}");
+    }
+}
+
+#[tokio::test]
+async fn time_report_overwrites_an_existing_xlsx_file() {
+    let server = MockServer::start().await;
+    mount_report(
+        &server,
+        ResponseTemplate::new(200).set_body_json(report_response()),
+        1,
+    )
+    .await;
+    let dir = TempDir::new().unwrap();
+    let file = dir.path().join("hours-report-01-08-2026-30-08-2026.xlsx");
+    std::fs::write(&file, "stale").unwrap();
+
+    let run = run_time_report_as(
+        &server,
+        dir.path(),
+        hours_report::ReportPeriod::Range {
+            start: "01-08-2026",
+            end: "30-08-2026",
+        },
+        hours_report::ReportFormat::Xlsx,
+        Some(1),
+    )
+    .await;
+
+    assert_eq!(run.code, 0, "err: {}", run.err);
+    assert!(std::fs::read(&file).unwrap().starts_with(b"PK"));
+}
+
+#[tokio::test]
+async fn time_report_xlsx_render_failure_creates_no_file() {
+    let server = MockServer::start().await;
+    let mut response = report_response();
+    response["time_records"][0]["parent_type"] = "Project".into();
+    response["time_records"][0]["parent_id"] = 5.into();
+    response["time_records"][0]["summary"] = "x".repeat(40_000).into();
+    mount_report(
+        &server,
+        ResponseTemplate::new(200).set_body_json(response),
+        1,
+    )
+    .await;
+    let dir = TempDir::new().unwrap();
+
+    let run = run_time_report_as(
+        &server,
+        dir.path(),
+        hours_report::ReportPeriod::Range {
+            start: "01-08-2026",
+            end: "30-08-2026",
+        },
+        hours_report::ReportFormat::Xlsx,
+        Some(1),
+    )
+    .await;
+
+    assert_eq!(run.code, 1);
+    assert!(run.err.contains("Error:"), "{}", run.err);
+    assert!(dir_is_empty(dir.path()));
+}
+
+async fn run_export(
+    server: &MockServer,
+    dir: &std::path::Path,
+    period: hours_report::ReportPeriod<'_>,
+    format: hours_report::ReportFormat,
+    user_id: Option<i64>,
+) -> Result<hours_report::ExportedReport, hours_report::ExportError> {
+    let client = ActiveCollabClient::new(comment_inst(&server.uri()), make_http());
+    let request = hours_report::ReportRequest {
+        period,
+        format,
+        today: report_today(),
+        user_id,
+        out_dir: dir,
+    };
+    hours_report::export_hours_report(&request, &client).await
+}
+
+#[tokio::test]
+async fn hours_report_export_preset_requests_the_resolved_dates_and_returns_path_and_total() {
+    let server = MockServer::start().await;
+    mount_report_range(
+        &server,
+        "2026-10-01",
+        "2026-10-31",
+        ResponseTemplate::new(200).set_body_json(report_response()),
+        1,
+    )
+    .await;
+    let dir = TempDir::new().unwrap();
+
+    let exported = run_export(
+        &server,
+        dir.path(),
+        hours_report::ReportPeriod::Preset(hours_report::PeriodPreset::Month),
+        hours_report::ReportFormat::Xlsx,
+        Some(1),
+    )
+    .await
+    .expect("export must succeed");
+
+    server.verify().await;
+    assert_eq!(
+        exported.path,
+        dir.path().join("hours-report-01-10-2026-31-10-2026.xlsx")
+    );
+    assert_eq!(exported.total, "1,5");
+    assert!(exported.path.exists());
+}
+
+#[tokio::test]
+async fn hours_report_export_csv_is_byte_identical_to_the_cli_file() {
+    let server = MockServer::start().await;
+    mount_report(
+        &server,
+        ResponseTemplate::new(200).set_body_json(report_response()),
+        2,
+    )
+    .await;
+    let cli_dir = TempDir::new().unwrap();
+    let export_dir = TempDir::new().unwrap();
+    let range = hours_report::ReportPeriod::Range {
+        start: "01-08-2026",
+        end: "30-08-2026",
+    };
+
+    let run = run_time_report(&server, cli_dir.path(), "01-08-2026", "30-08-2026", Some(1)).await;
+    let exported = run_export(
+        &server,
+        export_dir.path(),
+        range,
+        hours_report::ReportFormat::Csv,
+        Some(1),
+    )
+    .await
+    .expect("export must succeed");
+
+    assert_eq!(run.code, 0, "err: {}", run.err);
+    let cli_bytes = std::fs::read(
+        cli_dir
+            .path()
+            .join("hours-report-01-08-2026-30-08-2026.csv"),
+    )
+    .unwrap();
+    assert_eq!(std::fs::read(&exported.path).unwrap(), cli_bytes);
+}
+
+#[tokio::test]
+async fn hours_report_export_unauthorized_fails_without_a_file() {
+    let server = MockServer::start().await;
+    mount_report(&server, ResponseTemplate::new(401), 1).await;
+    let dir = TempDir::new().unwrap();
+
+    let result = run_export(
+        &server,
+        dir.path(),
+        hours_report::ReportPeriod::Range {
+            start: "01-08-2026",
+            end: "30-08-2026",
+        },
+        hours_report::ReportFormat::Xlsx,
+        Some(1),
+    )
+    .await;
+
+    server.verify().await;
+    assert_eq!(result, Err(hours_report::ExportError::Unauthorized));
+    assert!(dir_is_empty(dir.path()));
+}
+
+#[tokio::test]
+async fn hours_report_export_server_error_names_the_status_without_a_file() {
+    let server = MockServer::start().await;
+    mount_report(&server, ResponseTemplate::new(500), 1).await;
+    let dir = TempDir::new().unwrap();
+
+    let result = run_export(
+        &server,
+        dir.path(),
+        hours_report::ReportPeriod::Range {
+            start: "01-08-2026",
+            end: "30-08-2026",
+        },
+        hours_report::ReportFormat::Xlsx,
+        Some(1),
+    )
+    .await;
+
+    server.verify().await;
+    assert_eq!(result, Err(hours_report::ExportError::Http(500)));
+    assert!(result.unwrap_err().to_string().contains("500"));
+    assert!(dir_is_empty(dir.path()));
+}
+
+#[tokio::test]
+async fn hours_report_export_without_a_user_id_fails_before_any_request() {
+    let server = MockServer::start().await;
+    mount_report(
+        &server,
+        ResponseTemplate::new(200).set_body_json(report_response()),
+        0,
+    )
+    .await;
+    let dir = TempDir::new().unwrap();
+
+    let result = run_export(
+        &server,
+        dir.path(),
+        hours_report::ReportPeriod::Range {
+            start: "01-08-2026",
+            end: "30-08-2026",
+        },
+        hours_report::ReportFormat::Csv,
+        None,
+    )
+    .await;
+
+    server.verify().await;
+    assert_eq!(result, Err(hours_report::ExportError::MissingUserId));
+    assert!(dir_is_empty(dir.path()));
+}
+
+#[tokio::test]
+async fn hours_report_export_bad_range_is_a_usage_failure_before_any_request() {
+    let server = MockServer::start().await;
+    mount_report(
+        &server,
+        ResponseTemplate::new(200).set_body_json(report_response()),
+        0,
+    )
+    .await;
+    let dir = TempDir::new().unwrap();
+
+    let result = run_export(
+        &server,
+        dir.path(),
+        hours_report::ReportPeriod::Range {
+            start: "30-08-2026",
+            end: "01-08-2026",
+        },
+        hours_report::ReportFormat::Csv,
+        Some(1),
+    )
+    .await;
+
+    server.verify().await;
+    assert!(
+        matches!(result, Err(hours_report::ExportError::Usage(_))),
+        "{result:?}"
+    );
+    assert!(dir_is_empty(dir.path()));
+}
+
+const ZONE_CHILD_MARKER: &str = "AC_HOURS_REPORT_ZONE_CHILD";
+
+/// Re-runs itself in a child process whose zone is UTC+5 so the test process's
+/// own environment is never mutated; the child performs the assertions.
+#[test]
+fn hours_report_hardening_reads_the_record_date_in_utc_whatever_the_zone() {
+    if std::env::var_os(ZONE_CHILD_MARKER).is_some() {
+        record_date_is_read_in_utc();
+        return;
+    }
+    let test_name = format!(
+        "{}::hours_report_hardening_reads_the_record_date_in_utc_whatever_the_zone",
+        module_path!().split_once("::").map_or("", |(_, rest)| rest)
+    );
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", &test_name, "--test-threads=1"])
+        .env("TZ", "UTC-5")
+        .env(ZONE_CHILD_MARKER, "1")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "child run failed:\n{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("1 passed"),
+        "the child must actually run the test"
+    );
+}
+
+fn record_date_is_read_in_utc() {
+    let report = hours_report_fixture(serde_json::json!({
+        "time_records": [
+            {"id": 1, "value": 1.0, "record_date": DAY_ONE + 86_399, "summary": "", "parent_type": "Project", "parent_id": 5}
+        ],
+        "related": {}
+    }));
+    let csv = hours_report::render_hours_report_csv(&report);
+    let xlsx_day = xlsx_date(&hours_report_xlsx_range(&report), 3, 3).date();
+
+    assert!(hours_report_lines(&csv)[3].ends_with(";03/08/26"), "{csv}");
+    assert_eq!(
+        xlsx_day,
+        chrono::NaiveDate::from_ymd_opt(2026, 8, 3).unwrap()
+    );
+}
+
+fn xlsx_part(bytes: &[u8], name: &str) -> String {
+    use std::io::Read;
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+    let mut text = String::new();
+    archive
+        .by_name(name)
+        .unwrap()
+        .read_to_string(&mut text)
+        .unwrap();
+    text
+}
+
+fn xml_attr(tag: &str, name: &str) -> Option<String> {
+    let pattern = regex::Regex::new(&format!(r#"\b{name}="([^"]*)""#)).unwrap();
+    pattern.captures(tag).map(|c| c[1].to_string())
+}
+
+/// Style index (`s`) of every cell in the sheet, keyed by its reference.
+fn xlsx_cell_styles(sheet: &str) -> Vec<(String, usize)> {
+    let cell = regex::Regex::new(r"<c [^>]*>").unwrap();
+    cell.find_iter(sheet)
+        .map(|m| {
+            let tag = m.as_str();
+            (
+                xml_attr(tag, "r").unwrap(),
+                xml_attr(tag, "s").map_or(0, |s| s.parse().unwrap()),
+            )
+        })
+        .collect()
+}
+
+/// `(numFmtId, fontId)` of every cell format, in style-index order.
+fn xlsx_cell_formats(styles: &str) -> Vec<(u32, usize)> {
+    let block = regex::Regex::new(r"(?s)<cellXfs[^>]*>(.*?)</cellXfs>").unwrap();
+    let xf = regex::Regex::new(r"<xf [^>]*>").unwrap();
+    let inner = &block.captures(styles).unwrap()[1];
+    xf.find_iter(inner)
+        .map(|m| {
+            (
+                xml_attr(m.as_str(), "numFmtId").unwrap().parse().unwrap(),
+                xml_attr(m.as_str(), "fontId").unwrap().parse().unwrap(),
+            )
+        })
+        .collect()
+}
+
+fn xlsx_font_is_bold(styles: &str, font_id: usize) -> bool {
+    let block = regex::Regex::new(r"(?s)<fonts[^>]*>(.*?)</fonts>").unwrap();
+    let font = regex::Regex::new(r"(?s)<font>(.*?)</font>|<font/>").unwrap();
+    let inner = &block.captures(styles).unwrap()[1];
+    let bold = font
+        .find_iter(inner)
+        .nth(font_id)
+        .is_some_and(|m| m.as_str().contains("<b/>"));
+    bold
+}
+
+fn xlsx_format_code(styles: &str, num_fmt_id: u32) -> Option<String> {
+    let fmt = regex::Regex::new(r"<numFmt [^>]*>").unwrap();
+    let code = fmt
+        .find_iter(styles)
+        .find(|m| xml_attr(m.as_str(), "numFmtId") == Some(num_fmt_id.to_string()))
+        .and_then(|m| xml_attr(m.as_str(), "formatCode"));
+    code
+}
+
+#[test]
+fn hours_report_xlsx_style_dates_use_the_short_format_and_the_header_is_bold() {
+    let bytes = hours_report::render_hours_report_xlsx(&xlsx_fixture()).unwrap();
+    let styles = xlsx_part(&bytes, "xl/styles.xml");
+    let sheet = xlsx_part(&bytes, "xl/worksheets/sheet1.xml");
+    let formats = xlsx_cell_formats(&styles);
+    let cells = xlsx_cell_styles(&sheet);
+
+    let date_cells: Vec<_> = cells
+        .iter()
+        .filter(|(r, _)| r.starts_with('D') && r != "D3")
+        .collect();
+    assert!(!date_cells.is_empty(), "the fixture must have date cells");
+    for (reference, style) in date_cells {
+        let (num_fmt, _) = formats[*style];
+        assert_eq!(
+            xlsx_format_code(&styles, num_fmt).as_deref(),
+            Some("dd/mm/yy"),
+            "{reference} must use the short date format"
+        );
+    }
+    for (reference, style) in cells
+        .iter()
+        .filter(|(r, _)| r.trim_start_matches(|c: char| c.is_ascii_alphabetic()) == "3")
+    {
+        let (_, font) = formats[*style];
+        assert!(
+            xlsx_font_is_bold(&styles, font),
+            "header cell {reference} must be bold"
+        );
+    }
+}
+
+fn atomic_report_run_dir() -> (TempDir, std::path::PathBuf) {
+    let dir = TempDir::new().unwrap();
+    let file = dir.path().join("hours-report-01-08-2026-30-08-2026.csv");
+    (dir, file)
+}
+
+#[tokio::test]
+async fn hours_report_hardening_failed_write_keeps_the_existing_report_and_leaves_no_temp_file() {
+    let server = MockServer::start().await;
+    mount_report(
+        &server,
+        ResponseTemplate::new(200).set_body_json(report_response()),
+        1,
+    )
+    .await;
+    let (dir, file) = atomic_report_run_dir();
+    std::fs::write(&file, "previous report").unwrap();
+    std::fs::create_dir(
+        dir.path()
+            .join("hours-report-01-08-2026-30-08-2026.csv.tmp"),
+    )
+    .unwrap();
+
+    let run = run_time_report(&server, dir.path(), "01-08-2026", "30-08-2026", Some(1)).await;
+
+    assert_eq!(run.code, 1);
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "previous report");
+}
+
+#[tokio::test]
+async fn hours_report_hardening_failed_rename_cleans_the_temp_file() {
+    let server = MockServer::start().await;
+    mount_report(
+        &server,
+        ResponseTemplate::new(200).set_body_json(report_response()),
+        1,
+    )
+    .await;
+    let (dir, file) = atomic_report_run_dir();
+    std::fs::create_dir(&file).unwrap();
+    std::fs::write(file.join("keep"), "x").unwrap();
+
+    let run = run_time_report(&server, dir.path(), "01-08-2026", "30-08-2026", Some(1)).await;
+
+    assert_eq!(run.code, 1);
+    assert_eq!(
+        report_file_names(dir.path()),
+        ["hours-report-01-08-2026-30-08-2026.csv"]
+    );
+}
+
+#[tokio::test]
+async fn hours_report_hardening_success_leaves_only_the_report() {
+    let server = MockServer::start().await;
+    mount_report(
+        &server,
+        ResponseTemplate::new(200).set_body_json(report_response()),
+        1,
+    )
+    .await;
+    let (dir, _file) = atomic_report_run_dir();
+
+    let run = run_time_report(&server, dir.path(), "01-08-2026", "30-08-2026", Some(1)).await;
+
+    assert_eq!(run.code, 0, "err: {}", run.err);
+    assert_eq!(
+        report_file_names(dir.path()),
+        ["hours-report-01-08-2026-30-08-2026.csv"]
+    );
+}
+
+#[test]
+fn hours_report_hardening_related_key_as_array_or_null_parses_as_empty() {
+    for empty in ["[]", "null"] {
+        for key in ["Project", "Task"] {
+            let other = if key == "Project" { "Task" } else { "Project" };
+            let body = format!(
+                r#"{{"time_records":[{{"id":1,"value":1.0,"record_date":1785715200,"summary":"","parent_type":"Project","parent_id":5}}],
+                    "related":{{"{other}":{{}},"{key}":{empty}}}}}"#
+            );
+            let report: crate::models::TimeRecordsReport = serde_json::from_str(&body).unwrap();
+            assert!(report.related.projects.is_empty() && report.related.tasks.is_empty());
+        }
+    }
+    let report = hours_report_fixture(serde_json::json!({
+        "time_records": [
+            {"id": 1, "value": 1.0, "record_date": DAY_ONE, "summary": "", "parent_type": "Project", "parent_id": 5}
+        ],
+        "related": {"Project": {"5": {"id": 5, "name": "P"}}, "Task": []}
+    }));
+    let lines = hours_report_lines(&hours_report::render_hours_report_csv(&report));
+    assert_eq!(lines[3], "P;;1;03/08/26");
+}
+
+#[test]
+fn hours_report_hardening_non_empty_array_or_entity_without_id_is_a_parse_error() {
+    for related in [
+        r#"{"Project":[{"id":5,"name":"P"}]}"#,
+        r#"{"Task":[{"id":1,"project_id":5,"name":"T"}]}"#,
+        r#"{"Project":{"5":{"name":"P"}}}"#,
+        r#"{"Task":{"1":{"project_id":5,"name":"T"}}}"#,
+    ] {
+        let body = format!(r#"{{"time_records":[],"related":{related}}}"#);
+        assert!(
+            serde_json::from_str::<crate::models::TimeRecordsReport>(&body).is_err(),
+            "{body}"
+        );
+    }
+}
+
+fn resolved_period(preset: hours_report::PeriodPreset, today: (i32, u32, u32)) -> (String, String) {
+    let today = chrono::NaiveDate::from_ymd_opt(today.0, today.1, today.2).unwrap();
+    let (from, to) = hours_report::resolve_period(preset, today);
+    (
+        from.format("%d-%m-%Y").to_string(),
+        to.format("%d-%m-%Y").to_string(),
+    )
+}
+
+#[test]
+fn hours_report_period_month_spans_the_whole_month() {
+    use hours_report::PeriodPreset::Month;
+    for (today, from, to) in [
+        ((2026, 10, 30), "01-10-2026", "31-10-2026"),
+        ((2026, 2, 10), "01-02-2026", "28-02-2026"),
+        ((2028, 2, 10), "01-02-2028", "29-02-2028"),
+        ((2026, 12, 31), "01-12-2026", "31-12-2026"),
+        ((2026, 9, 1), "01-09-2026", "30-09-2026"),
+    ] {
+        assert_eq!(
+            resolved_period(Month, today),
+            (from.to_string(), to.to_string()),
+            "today {today:?}"
+        );
+    }
+}
+
+#[test]
+fn hours_report_period_fortnight_splits_at_the_fifteenth() {
+    use hours_report::PeriodPreset::Fortnight;
+    for (today, from, to) in [
+        ((2026, 10, 1), "01-10-2026", "15-10-2026"),
+        ((2026, 10, 15), "01-10-2026", "15-10-2026"),
+        ((2026, 10, 16), "16-10-2026", "31-10-2026"),
+        ((2026, 9, 20), "16-09-2026", "30-09-2026"),
+        ((2026, 2, 28), "16-02-2026", "28-02-2026"),
+        ((2026, 12, 31), "16-12-2026", "31-12-2026"),
+    ] {
+        assert_eq!(
+            resolved_period(Fortnight, today),
+            (from.to_string(), to.to_string()),
+            "today {today:?}"
+        );
+    }
+}
+
+#[test]
+fn hours_report_period_week_runs_monday_to_sunday() {
+    use hours_report::PeriodPreset::Week;
+    for (today, from, to) in [
+        ((2026, 10, 26), "26-10-2026", "01-11-2026"),
+        ((2026, 11, 1), "26-10-2026", "01-11-2026"),
+        ((2026, 10, 30), "26-10-2026", "01-11-2026"),
+        ((2026, 12, 31), "28-12-2026", "03-01-2027"),
+    ] {
+        assert_eq!(
+            resolved_period(Week, today),
+            (from.to_string(), to.to_string()),
+            "today {today:?}"
+        );
+    }
+}

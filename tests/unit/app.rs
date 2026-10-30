@@ -25,6 +25,7 @@ fn tasks_model_for_reflow(tasks: Vec<TaskRow>) -> Model {
         last_loaded: None,
         selection: None,
         copied_feedback: false,
+        report: None,
     }
 }
 
@@ -81,6 +82,7 @@ fn projects_model(count: usize) -> Model {
         last_loaded: None,
         selection: None,
         copied_feedback: false,
+        report: None,
     }
 }
 
@@ -112,6 +114,7 @@ fn tasks_model(count: usize) -> Model {
         last_loaded: None,
         selection: None,
         copied_feedback: false,
+        report: None,
     }
 }
 
@@ -131,6 +134,7 @@ fn loading_projects_model() -> Model {
         last_loaded: None,
         selection: None,
         copied_feedback: false,
+        report: None,
     }
 }
 
@@ -312,6 +316,7 @@ fn empty_list_navigation_never_panics_or_quits_projects() {
         last_loaded: None,
         selection: None,
         copied_feedback: false,
+        report: None,
     };
     let (m, _) = update(m, Msg::Down);
     assert!(!m.should_quit);
@@ -361,6 +366,7 @@ fn empty_list_navigation_never_panics_or_quits_tasks() {
         last_loaded: None,
         selection: None,
         copied_feedback: false,
+        report: None,
     };
     let (m, _) = update(m, Msg::Down);
     assert!(!m.should_quit);
@@ -475,6 +481,7 @@ fn select_on_empty_projects_is_a_noop() {
         last_loaded: None,
         selection: None,
         copied_feedback: false,
+        report: None,
     };
     let (m, _) = update(m, Msg::Select);
     assert_eq!(m.stack.len(), 1);
@@ -528,6 +535,7 @@ fn tasks_model_with_project_id(task_count: usize, project_id: i64) -> Model {
         last_loaded: None,
         selection: None,
         copied_feedback: false,
+        report: None,
     }
 }
 
@@ -580,6 +588,7 @@ fn detail_model(line_count: usize, offset: usize) -> Model {
         last_loaded: None,
         selection: None,
         copied_feedback: false,
+        report: None,
     }
 }
 
@@ -631,6 +640,7 @@ fn loading_detail_model() -> Model {
         last_loaded: None,
         selection: None,
         copied_feedback: false,
+        report: None,
     }
 }
 
@@ -1074,6 +1084,7 @@ fn select_on_tasks_threads_instance_into_load_detail_cmd() {
         last_loaded: None,
         selection: None,
         copied_feedback: false,
+        report: None,
     };
     let (m, cmds) = update(m, Msg::Select);
     assert_eq!(cmds.len(), 1);
@@ -1395,6 +1406,7 @@ fn reflow_detail_builds_lines_and_is_memoized() {
         last_loaded: None,
         selection: None,
         copied_feedback: false,
+        report: None,
     };
 
     // First reflow at width 80: lines must be populated, rendered_width updated
@@ -1498,6 +1510,7 @@ fn reflow_detail_lines_fit_inner_width() {
         last_loaded: None,
         selection: None,
         copied_feedback: false,
+        report: None,
     };
     m.reflow_detail(inner_width);
     match m.stack.last() {
@@ -1549,6 +1562,7 @@ fn reflow_detail_rebuilds_on_width_change() {
         last_loaded: None,
         selection: None,
         copied_feedback: false,
+        report: None,
     };
     m.reflow_detail(80);
     let rw_80 = match m.stack.last() {
@@ -1598,6 +1612,7 @@ fn reflow_detail_is_noop_while_loading() {
         last_loaded: None,
         selection: None,
         copied_feedback: false,
+        report: None,
     };
     m.reflow_detail(80);
     match m.stack.last() {
@@ -1653,6 +1668,7 @@ fn reflow_detail_clamps_offset_when_content_shortens() {
         last_loaded: None,
         selection: None,
         copied_feedback: false,
+        report: None,
     };
     m.reflow_detail(80);
     match m.stack.last() {
@@ -1708,6 +1724,7 @@ fn user_map_resolved_updates_map_and_invalidates_cache() {
         last_loaded: None,
         selection: None,
         copied_feedback: false,
+        report: None,
     };
 
     let mut new_map = HashMap::new();
@@ -1789,6 +1806,7 @@ fn progressive_paint_assignee_fills_in_after_user_map_resolved() {
         last_loaded: None,
         selection: None,
         copied_feedback: false,
+        report: None,
     };
     let (m, _) = update(m, Msg::LoadedDetail(load));
 
@@ -1869,6 +1887,7 @@ fn header_name_resolved_fills_name_and_header_line_shows_it() {
         last_loaded: None,
         selection: None,
         copied_feedback: false,
+        report: None,
     };
     let stack_len_before = m.stack.len();
 
@@ -1926,6 +1945,7 @@ fn detail_global_scroll_offset_advances_through_all_content() {
         last_loaded: None,
         selection: None,
         copied_feedback: false,
+        report: None,
     };
 
     let (m, _) = update(m, Msg::ScrollDown);

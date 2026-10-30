@@ -1288,6 +1288,84 @@ fn encode_comment_body_escapes_html_special_characters() {
     assert_eq!(encoded, "<p>a &lt; b &amp; c &gt; d</p>");
 }
 
+async fn time_records_by_date_outcome(
+    response: ResponseTemplate,
+) -> (MockServer, TimeRecordsOutcome) {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/users/7/time-records/filtered-by-date"))
+        .and(wiremock::matchers::query_param("from", "2026-08-01"))
+        .and(wiremock::matchers::query_param("to", "2026-08-30"))
+        .and(wiremock::matchers::header_exists("x-angie-authapitoken"))
+        .respond_with(response)
+        .expect(1)
+        .mount(&server)
+        .await;
+    let outcome = make_client(&server.uri())
+        .fetch_time_records_by_date(7, "2026-08-01", "2026-08-30")
+        .await
+        .unwrap();
+    (server, outcome)
+}
+
+#[tokio::test]
+async fn time_records_by_date_200_returns_parsed_records() {
+    let (server, outcome) = time_records_by_date_outcome(ResponseTemplate::new(200).set_body_json(
+        serde_json::json!({
+            "time_records": [
+                {"id": 1, "value": 1.5, "record_date": 1785715200, "summary": "", "parent_type": "Task", "parent_id": 10}
+            ],
+            "related": {
+                "Project": {"5": {"id": 5, "name": "P"}},
+                "Task": {"10": {"id": 10, "project_id": 5, "name": "T"}}
+            }
+        }),
+    ))
+    .await;
+    server.verify().await;
+    let TimeRecordsOutcome::Ok(report) = outcome else {
+        panic!("expected Ok, got {outcome:?}")
+    };
+    assert_eq!(report.time_records.len(), 1);
+    assert_eq!(report.time_records[0].value, 1.5);
+    assert_eq!(report.time_records[0].parent_id, 10);
+    assert_eq!(report.related.tasks[0].project_id, 5);
+    assert_eq!(report.related.projects[0].name, "P");
+}
+
+#[tokio::test]
+async fn time_records_by_date_401_is_unauthorized() {
+    let (server, outcome) = time_records_by_date_outcome(ResponseTemplate::new(401)).await;
+    server.verify().await;
+    assert!(matches!(outcome, TimeRecordsOutcome::Unauthorized));
+}
+
+#[tokio::test]
+async fn time_records_by_date_404_and_500_are_failed_with_status() {
+    for status in [404u16, 500] {
+        let (server, outcome) = time_records_by_date_outcome(ResponseTemplate::new(status)).await;
+        server.verify().await;
+        assert!(
+            matches!(outcome, TimeRecordsOutcome::Failed(s) if s == status),
+            "status {status}: {outcome:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn time_records_by_date_unparseable_200_body_is_an_error() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/users/7/time-records/filtered-by-date"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("<html>not json</html>"))
+        .mount(&server)
+        .await;
+    let result = make_client(&server.uri())
+        .fetch_time_records_by_date(7, "2026-08-01", "2026-08-30")
+        .await;
+    assert!(result.is_err(), "got: {result:?}");
+}
+
 #[test]
 fn encode_comment_body_wraps_single_line_in_one_paragraph() {
     let encoded = encode_comment_body("hello");
