@@ -50,6 +50,7 @@ fn detail_model_with_assets_and_viewport(
         last_loaded: None,
         selection: None,
         copied_feedback: false,
+        report: None,
     }
 }
 
@@ -71,6 +72,7 @@ fn click_struct_form_accepted_by_update_on_projects_screen() {
         last_loaded: None,
         selection: None,
         copied_feedback: false,
+        report: None,
     };
     let (m, cmds) = update(
         m,
@@ -132,6 +134,7 @@ fn detail_model_scrollable(lines: Vec<String>, assets: Vec<Asset>, viewport: (u1
         last_loaded: None,
         selection: None,
         copied_feedback: false,
+        report: None,
     }
 }
 
@@ -318,6 +321,7 @@ fn click_on_projects_screen_with_target_drills_into_tasks() {
         last_loaded: None,
         selection: None,
         copied_feedback: false,
+        report: None,
     };
 
     m.set_click_targets(vec![
@@ -406,6 +410,7 @@ fn detail_model_with_lines_assets_affs(
         last_loaded: None,
         selection: None,
         copied_feedback: false,
+        report: None,
     }
 }
 
@@ -662,6 +667,7 @@ fn detail_model_with_wrapped_url_lines(
         last_loaded: None,
         selection: None,
         copied_feedback: false,
+        report: None,
     };
     (m, line0_idx, line1_idx, text_top)
 }
@@ -804,6 +810,7 @@ fn projects_browse_model() -> Model {
         last_loaded: None,
         selection: None,
         copied_feedback: false,
+        report: None,
     }
 }
 
@@ -851,6 +858,7 @@ fn detail_model_for_selection(lines: Vec<String>, viewport: (u16, u16), offset: 
         last_loaded: None,
         selection: None,
         copied_feedback: false,
+        report: None,
     }
 }
 
@@ -1465,6 +1473,7 @@ fn navigation_msgs_behave_identically_regardless_of_selection_state() {
         last_loaded: None,
         selection: None,
         copied_feedback: false,
+        report: None,
     };
     let with_sel_model = Model {
         stack: vec![Screen::Projects {
@@ -1484,6 +1493,7 @@ fn navigation_msgs_behave_identically_regardless_of_selection_state() {
             cursor: (2, 5),
         }),
         copied_feedback: false,
+        report: None,
     };
 
     let (no_sel_after, no_sel_cmds) = update(no_sel_model, Msg::Down);
@@ -1592,6 +1602,7 @@ fn loaded_tasks_clears_revalidating_and_stamps_last_loaded() {
         last_loaded: None,
         selection: None,
         copied_feedback: false,
+        report: None,
     };
     let fresh_groups = vec![ProjectGroup {
         project_id: 2,
@@ -1777,6 +1788,7 @@ fn detail_model_with_boxed_lines(lines: Vec<String>, viewport: (u16, u16), offse
         last_loaded: None,
         selection: None,
         copied_feedback: false,
+        report: None,
     }
 }
 
@@ -2755,6 +2767,7 @@ fn detail_model_with_inline_assets(
         last_loaded: None,
         selection: None,
         copied_feedback: false,
+        report: None,
     }
 }
 
@@ -3299,6 +3312,7 @@ fn detail_model_for_compose(instance: &str, project_id: i64, task_id: i64) -> Mo
         last_loaded: None,
         selection: None,
         copied_feedback: false,
+        report: None,
     }
 }
 
@@ -4183,6 +4197,7 @@ fn detail_model_with_task(
         last_loaded: None,
         selection: None,
         copied_feedback: false,
+        report: None,
     }
 }
 
@@ -5389,6 +5404,7 @@ fn detail_model_with_comments_for_edit(
         last_loaded: None,
         selection: None,
         copied_feedback: false,
+        report: None,
     };
     let inner_width = width.saturating_sub(2) as usize;
     m.reflow_detail(inner_width);
@@ -6016,6 +6032,7 @@ fn detail_model_with_n_comments(n: usize) -> Model {
         last_loaded: None,
         selection: None,
         copied_feedback: false,
+        report: None,
     }
 }
 
@@ -6212,6 +6229,7 @@ fn detail_model_with_comment_spans(
         last_loaded: None,
         selection: None,
         copied_feedback: false,
+        report: None,
     }
 }
 
@@ -6658,6 +6676,7 @@ fn reflow_detail_with_compose_does_not_append_compose_lines() {
         last_loaded: None,
         selection: None,
         copied_feedback: false,
+        report: None,
     };
     m.reflow_detail(78);
     match m.top() {
@@ -6716,6 +6735,7 @@ fn ac7_regression_compose_enter_input_inserts_newline_not_submit_after_modal_mig
         last_loaded: None,
         selection: None,
         copied_feedback: false,
+        report: None,
     };
     let (m2, cmds) = update(m, Msg::ComposeInput(key_input(Key::Enter)));
     assert!(
@@ -6771,6 +6791,7 @@ fn ac7_regression_compose_cancel_clears_compose_emits_no_cmd_after_modal_migrati
         last_loaded: None,
         selection: None,
         copied_feedback: false,
+        report: None,
     };
     let (m2, cmds) = update(m, Msg::ComposeCancel);
     assert!(cmds.is_empty(), "ComposeCancel must emit no Cmd: {cmds:?}");
@@ -6821,6 +6842,7 @@ fn ac7_regression_compose_submit_emits_write_cmd_after_modal_migration() {
         last_loaded: None,
         selection: None,
         copied_feedback: false,
+        report: None,
     };
     let (_m2, cmds) = update(m, Msg::ComposeSubmit);
     assert!(
@@ -6889,6 +6911,7 @@ fn detail_model_with_confirm_delete(comment_id: i64) -> Model {
         last_loaded: None,
         selection: None,
         copied_feedback: false,
+        report: None,
     }
 }
 
@@ -7209,6 +7232,7 @@ fn hit_test_model(lines: Vec<String>, affordances: Vec<LocalAffordance>) -> Mode
         last_loaded: None,
         selection: None,
         copied_feedback: false,
+        report: None,
     }
 }
 
@@ -7594,4 +7618,539 @@ fn q_still_quits_when_no_overlay_open() {
     let m = detail_model_for_compose("inst", 10, 42);
     let (m2, _) = update(m, Msg::Quit);
     assert!(m2.should_quit, "q must quit when no overlay is open");
+}
+
+// ── Hours-report modal ────────────────────────────────────────────────────────
+
+fn report_header() -> Header {
+    Header {
+        name: None,
+        email: "a@b.c".into(),
+        instance: "alpha".into(),
+        extra: 1,
+    }
+}
+
+fn report_browse_model() -> Model {
+    Model::browse(report_header(), None)
+}
+
+fn report_open_model() -> Model {
+    update(report_browse_model(), Msg::ReportOpen).0
+}
+
+fn report_form(model: &Model) -> &ReportForm {
+    model.report.as_ref().expect("report modal must be open")
+}
+
+fn report_apply(model: Model, msgs: Vec<Msg>) -> Model {
+    msgs.into_iter().fold(model, |m, msg| update(m, msg).0)
+}
+
+fn report_type(model: Model, text: &str) -> Model {
+    report_apply(model, text.chars().map(Msg::ReportChar).collect())
+}
+
+fn report_custom_with(start: &str, end: &str) -> Model {
+    let m = report_apply(
+        report_open_model(),
+        vec![Msg::ReportDown, Msg::ReportDown, Msg::ReportDown],
+    );
+    let m = update(m, Msg::ReportToggleField).0;
+    let m = report_type(m, start);
+    let m = update(m, Msg::ReportToggleField).0;
+    report_type(m, end)
+}
+
+#[test]
+fn report_modal_opens_on_projects_with_defaults_and_first_instance() {
+    let (m, cmds) = update(report_browse_model(), Msg::ReportOpen);
+    assert!(cmds.is_empty(), "open emits no Cmd");
+    let form = report_form(&m);
+    assert_eq!(form.period, ReportPeriodChoice::Monthly);
+    assert_eq!(form.format, ReportFormat::Xlsx);
+    assert_eq!(form.start, "");
+    assert_eq!(form.end, "");
+    assert_eq!(form.instance, "alpha");
+    assert_eq!(form.status, ReportStatus::Editing);
+}
+
+#[test]
+fn report_modal_opens_on_tasks_with_first_instance() {
+    let (tasks, _) = init_mine(report_header(), None);
+    let m = update(tasks, Msg::ReportOpen).0;
+    assert_eq!(report_form(&m).instance, "alpha");
+}
+
+#[test]
+fn report_modal_opens_on_detail_with_the_task_instance() {
+    let mut m = detail_model_for_compose("beta", 10, 42);
+    m.header = report_header();
+    let m = update(m, Msg::ReportOpen).0;
+    assert_eq!(report_form(&m).instance, "beta");
+}
+
+#[test]
+fn report_modal_open_while_open_keeps_the_edited_form() {
+    let m = report_apply(report_open_model(), vec![Msg::ReportDown]);
+    let m = update(m, Msg::ReportOpen).0;
+    assert_eq!(report_form(&m).period, ReportPeriodChoice::Biweekly);
+}
+
+#[test]
+fn report_modal_period_moves_through_the_list_and_stops_at_both_ends() {
+    let mut m = report_open_model();
+    m = update(m, Msg::ReportUp).0;
+    assert_eq!(report_form(&m).period, ReportPeriodChoice::Monthly);
+    let mut seen = vec![];
+    for _ in 0..5 {
+        m = update(m, Msg::ReportDown).0;
+        seen.push(report_form(&m).period);
+    }
+    assert_eq!(
+        seen,
+        vec![
+            ReportPeriodChoice::Biweekly,
+            ReportPeriodChoice::Weekly,
+            ReportPeriodChoice::Custom,
+            ReportPeriodChoice::Custom,
+            ReportPeriodChoice::Custom,
+        ]
+    );
+    m = update(m, Msg::ReportUp).0;
+    assert_eq!(report_form(&m).period, ReportPeriodChoice::Weekly);
+}
+
+#[test]
+fn report_modal_format_toggle_flips_between_xlsx_and_csv() {
+    let m = update(report_open_model(), Msg::ReportToggleFormat).0;
+    assert_eq!(report_form(&m).format, ReportFormat::Csv);
+    let m = update(m, Msg::ReportToggleFormat).0;
+    assert_eq!(report_form(&m).format, ReportFormat::Xlsx);
+}
+
+#[test]
+fn report_modal_typing_edits_only_the_focused_custom_field_with_digits_and_dashes() {
+    let m = report_apply(
+        report_open_model(),
+        vec![Msg::ReportDown, Msg::ReportDown, Msg::ReportDown],
+    );
+    let m = update(m, Msg::ReportToggleField).0;
+    let m = report_type(m, "01a-/0x8-2026");
+    assert_eq!(report_form(&m).start, "01-08-2026");
+    assert_eq!(report_form(&m).end, "");
+    let m = report_type(m, "9");
+    assert_eq!(report_form(&m).start, "01-08-2026", "at most 10 characters");
+    let m = update(m, Msg::ReportBackspace).0;
+    assert_eq!(report_form(&m).start, "01-08-202");
+    let m = update(m, Msg::ReportToggleField).0;
+    let m = report_type(m, "30-08-2026");
+    assert_eq!(report_form(&m).end, "30-08-2026");
+    assert_eq!(report_form(&m).start, "01-08-202");
+}
+
+#[test]
+fn report_modal_submit_on_a_preset_emits_one_export_and_sets_exporting() {
+    let m = report_apply(report_open_model(), vec![Msg::ReportDown]);
+    let (m, cmds) = update(m, Msg::ReportSubmit);
+    assert_eq!(
+        cmds,
+        vec![Cmd::ExportHoursReport {
+            instance: "alpha".into(),
+            period: OwnedReportPeriod::Preset(PeriodPreset::Fortnight),
+            format: ReportFormat::Xlsx,
+        }]
+    );
+    assert_eq!(report_form(&m).status, ReportStatus::Exporting);
+}
+
+#[test]
+fn report_modal_submit_on_a_valid_custom_range_emits_the_range() {
+    let m = report_apply(
+        report_custom_with("01-08-2026", "30-08-2026"),
+        vec![Msg::ReportToggleField, Msg::ReportToggleFormat],
+    );
+    let (_, cmds) = update(m, Msg::ReportSubmit);
+    assert_eq!(
+        cmds,
+        vec![Cmd::ExportHoursReport {
+            instance: "alpha".into(),
+            period: OwnedReportPeriod::Range {
+                start: "01-08-2026".into(),
+                end: "30-08-2026".into(),
+            },
+            format: ReportFormat::Csv,
+        }]
+    );
+}
+
+#[test]
+fn report_modal_submit_on_an_invalid_custom_range_emits_nothing_and_shows_an_error() {
+    let cases = [
+        ("", ""),
+        ("1-8-2026", "30-08-2026"),
+        ("31-02-2026", "01-03-2026"),
+        ("30-08-2026", "01-08-2026"),
+    ];
+    for (start, end) in cases {
+        let (m, cmds) = update(report_custom_with(start, end), Msg::ReportSubmit);
+        assert!(cmds.is_empty(), "{start}..{end} must emit no Cmd");
+        assert!(
+            matches!(report_form(&m).status, ReportStatus::Error(_)),
+            "{start}..{end} must set an inline error"
+        );
+    }
+}
+
+#[test]
+fn report_modal_submit_while_exporting_emits_nothing() {
+    let (m, first) = update(report_open_model(), Msg::ReportSubmit);
+    assert_eq!(first.len(), 1);
+    let (m, second) = update(m, Msg::ReportSubmit);
+    assert!(second.is_empty());
+    assert_eq!(report_form(&m).status, ReportStatus::Exporting);
+}
+
+#[test]
+fn report_modal_ok_stores_path_and_total_and_stays_open() {
+    let m = update(report_open_model(), Msg::ReportSubmit).0;
+    let m = update(
+        m,
+        Msg::ReportOk {
+            path: "/tmp/r.xlsx".into(),
+            total: "5,5".into(),
+        },
+    )
+    .0;
+    assert_eq!(
+        report_form(&m).status,
+        ReportStatus::Done {
+            path: "/tmp/r.xlsx".into(),
+            total: "5,5".into()
+        }
+    );
+}
+
+#[test]
+fn report_modal_err_stores_the_message_and_returns_to_editing() {
+    let m = update(report_open_model(), Msg::ReportSubmit).0;
+    let m = update(m, Msg::ReportErr("boom".into())).0;
+    assert_eq!(report_form(&m).status, ReportStatus::Error("boom".into()));
+    let (m, cmds) = update(m, Msg::ReportSubmit);
+    assert_eq!(cmds.len(), 1, "the form is editable again after a failure");
+    assert_eq!(report_form(&m).status, ReportStatus::Exporting);
+}
+
+#[test]
+fn report_modal_auth_expired_while_exporting_releases_the_form() {
+    let m = update(report_open_model(), Msg::ReportSubmit).0;
+    let m = update(m, Msg::AuthExpired).0;
+    assert!(
+        matches!(report_form(&m).status, ReportStatus::Error(_)),
+        "the form must not stay stuck exporting"
+    );
+}
+
+fn report_press(model: Model, code: crossterm::event::KeyCode) -> (Model, Vec<Cmd>) {
+    let key = crossterm::event::KeyEvent::new(code, KeyModifiers::NONE);
+    match crate::tui::route_key_event(&model, key) {
+        Some(msg) => update(model, msg),
+        None => (model, vec![]),
+    }
+}
+
+fn report_press_all(model: Model, chars: &str) -> Model {
+    chars.chars().fold(model, |m, c| {
+        report_press(m, crossterm::event::KeyCode::Char(c)).0
+    })
+}
+
+fn report_custom_start_focused() -> Model {
+    let m = report_press_all(report_open_model(), "jjj");
+    report_press(m, crossterm::event::KeyCode::Tab).0
+}
+
+#[test]
+fn report_keys_shift_h_opens_the_modal_and_lowercase_h_does_not() {
+    let shift_h =
+        crossterm::event::KeyEvent::new(crossterm::event::KeyCode::Char('H'), KeyModifiers::SHIFT);
+    let msg = crate::tui::route_key_event(&report_browse_model(), shift_h)
+        .expect("H must map to a Msg in browse mode");
+    let m = update(report_browse_model(), msg).0;
+    assert!(m.report.is_some());
+    let (m, _) = report_press(report_browse_model(), crossterm::event::KeyCode::Char('h'));
+    assert!(m.report.is_none(), "lowercase h must not open the modal");
+}
+
+#[test]
+fn report_keys_while_open_q_does_not_quit_and_other_shortcuts_open_nothing() {
+    let mut m = detail_model_for_compose("inst", 10, 42);
+    m.header = report_header();
+    let mut m = update(m, Msg::ReportOpen).0;
+    for c in ['q', 'c', 't', 'e', 's', 'a', 'r'] {
+        m = report_press(m, crossterm::event::KeyCode::Char(c)).0;
+    }
+    assert!(!m.should_quit, "q must not quit while the modal is open");
+    assert!(m.report.is_some());
+    match m.top() {
+        Some(Screen::Detail { overlay, .. }) => {
+            assert!(
+                matches!(overlay, DetailOverlay::None),
+                "no overlay may open"
+            )
+        }
+        _ => panic!("expected Detail screen"),
+    }
+}
+
+#[test]
+fn report_keys_escape_and_b_close_the_modal_instead_of_navigating_back() {
+    for code in [
+        crossterm::event::KeyCode::Esc,
+        crossterm::event::KeyCode::Char('b'),
+    ] {
+        let mut m = detail_model_for_compose("inst", 10, 42);
+        m.stack.insert(0, report_browse_model().stack.remove(0));
+        let m = update(m, Msg::ReportOpen).0;
+        let depth = m.stack.len();
+        let (m, _) = report_press(m, code);
+        assert!(m.report.is_none(), "{code:?} must close the modal");
+        assert_eq!(m.stack.len(), depth, "{code:?} must not navigate back");
+    }
+}
+
+#[test]
+fn report_keys_enter_submits() {
+    let (m, cmds) = report_press(report_open_model(), crossterm::event::KeyCode::Enter);
+    assert_eq!(cmds.len(), 1);
+    assert_eq!(report_form(&m).status, ReportStatus::Exporting);
+}
+
+#[test]
+fn report_keys_arrows_and_j_k_move_the_period() {
+    use crossterm::event::KeyCode;
+    let m = report_press(report_open_model(), KeyCode::Down).0;
+    assert_eq!(report_form(&m).period, ReportPeriodChoice::Biweekly);
+    let m = report_press(m, KeyCode::Char('j')).0;
+    assert_eq!(report_form(&m).period, ReportPeriodChoice::Weekly);
+    let m = report_press(m, KeyCode::Up).0;
+    assert_eq!(report_form(&m).period, ReportPeriodChoice::Biweekly);
+    let m = report_press(m, KeyCode::Char('k')).0;
+    assert_eq!(report_form(&m).period, ReportPeriodChoice::Monthly);
+}
+
+#[test]
+fn report_keys_in_a_date_field_only_digits_dash_and_editing_keys_act() {
+    use crossterm::event::KeyCode;
+    let m = report_custom_start_focused();
+    assert_eq!(report_form(&m).focus, ReportField::Start);
+    let m = report_press_all(m, "jkfbq1-x2");
+    let form = report_form(&m);
+    assert_eq!(form.start, "1-2", "only digits and `-` are typed");
+    assert_eq!(form.period, ReportPeriodChoice::Custom, "j/k must not move");
+    assert_eq!(form.format, ReportFormat::Xlsx, "f must not toggle");
+    let m = report_press(m, KeyCode::Right).0;
+    assert_eq!(report_form(&m).format, ReportFormat::Xlsx);
+    let m = report_press(m, KeyCode::Backspace).0;
+    assert_eq!(report_form(&m).start, "1-");
+    assert!(m.report.is_some(), "b must not close from a date field");
+}
+
+#[test]
+fn report_keys_tab_cycles_focus_only_when_custom_is_selected() {
+    use crossterm::event::KeyCode;
+    let m = report_press(report_open_model(), KeyCode::Tab).0;
+    assert_eq!(report_form(&m).focus, ReportField::Period);
+    let mut m = report_press_all(report_open_model(), "jjj");
+    let mut seen = vec![];
+    for _ in 0..3 {
+        m = report_press(m, KeyCode::Tab).0;
+        seen.push(report_form(&m).focus);
+    }
+    assert_eq!(
+        seen,
+        vec![ReportField::Start, ReportField::End, ReportField::Period]
+    );
+}
+
+#[test]
+fn report_keys_f_and_horizontal_arrows_toggle_the_format_outside_a_date_field() {
+    use crossterm::event::KeyCode;
+    let m = report_press(report_open_model(), KeyCode::Char('f')).0;
+    assert_eq!(report_form(&m).format, ReportFormat::Csv);
+    let m = report_press(m, KeyCode::Right).0;
+    assert_eq!(report_form(&m).format, ReportFormat::Xlsx);
+    let m = report_press(m, KeyCode::Left).0;
+    assert_eq!(report_form(&m).format, ReportFormat::Csv);
+}
+
+#[test]
+fn report_modal_close_clears_the_form_from_any_status() {
+    let exporting = update(report_open_model(), Msg::ReportSubmit).0;
+    let done = update(
+        exporting,
+        Msg::ReportOk {
+            path: "p".into(),
+            total: "1".into(),
+        },
+    )
+    .0;
+    for m in [
+        report_open_model(),
+        update(report_open_model(), Msg::ReportSubmit).0,
+        done,
+    ] {
+        assert!(m.report.is_some(), "the modal is open before closing");
+        let (m, cmds) = update(m, Msg::ReportClose);
+        assert!(m.report.is_none());
+        assert!(cmds.is_empty());
+    }
+}
+
+// ── Hours-report modal: export outcome mapping and pointer isolation ─────────
+
+#[test]
+fn report_outcome_ok_carries_the_saved_path_and_total() {
+    let path = "/x/hours-report-01-10-2026-31-10-2026.xlsx";
+    let exported = crate::commands::ExportedReport {
+        path: std::path::PathBuf::from(path),
+        total: "90".into(),
+    };
+    let msg = crate::tui::report_outcome_msg(Ok(exported));
+    assert!(
+        matches!(&msg, Msg::ReportOk { path: p, total } if p == path && total == "90"),
+        "unexpected msg"
+    );
+}
+
+#[test]
+fn report_outcome_unauthorized_expires_the_session() {
+    let msg = crate::tui::report_outcome_msg(Err(crate::commands::ExportError::Unauthorized));
+    assert!(matches!(msg, Msg::AuthExpired), "expected AuthExpired");
+}
+
+#[test]
+fn report_outcome_other_errors_carry_their_display_text() {
+    use crate::commands::ExportError;
+    let errors = vec![
+        ExportError::Http(500),
+        ExportError::MissingUserId,
+        ExportError::Usage("bad".into()),
+        ExportError::Render("render".into()),
+        ExportError::Write {
+            path: std::path::PathBuf::from("/x/out.csv"),
+            reason: "disk full".into(),
+        },
+    ];
+    for e in errors {
+        let text = e.to_string();
+        let msg = crate::tui::report_outcome_msg(Err(e));
+        assert!(matches!(&msg, Msg::ReportErr(t) if *t == text), "{text}");
+    }
+}
+
+fn report_pointer_group(name: &str) -> ProjectGroup {
+    ProjectGroup {
+        project_id: 1,
+        project_name: name.into(),
+        instance: "alpha".into(),
+        tasks: vec![],
+    }
+}
+
+fn report_pointer_with_targets(screen: Screen) -> Model {
+    let mut m = report_browse_model();
+    m.stack = vec![screen];
+    m.set_click_targets(vec![crate::tui::model::ClickTarget {
+        y_start: 2,
+        y_end: 3,
+        index: 0,
+    }]);
+    m
+}
+
+fn report_pointer_projects_model(selected: usize) -> Model {
+    report_pointer_with_targets(Screen::Projects {
+        groups: vec![report_pointer_group("P0"), report_pointer_group("P1")],
+        selected,
+        loading: false,
+        revalidating: false,
+    })
+}
+
+fn report_pointer_tasks_model() -> Model {
+    report_pointer_with_targets(Screen::Tasks {
+        project_name: "P0".into(),
+        tasks: vec![TaskRow {
+            task_id: 7,
+            task_number: 7,
+            name: "T".into(),
+            instance: "alpha".into(),
+            project_id: 1,
+            due_on: None,
+            project_name: None,
+        }],
+        selected: 0,
+        loading: false,
+        revalidating: false,
+        card_heights: vec![],
+        card_offsets: vec![],
+        rendered_width: usize::MAX,
+    })
+}
+
+fn report_pointer_click() -> Msg {
+    Msg::Click {
+        column: 10,
+        row: 2,
+        modifiers: KeyModifiers::NONE,
+    }
+}
+
+#[test]
+fn report_pointer_click_on_a_projects_row_is_ignored_while_the_modal_is_open() {
+    let m = update(report_pointer_projects_model(1), Msg::ReportOpen).0;
+    let (m, cmds) = update(m, report_pointer_click());
+    assert_eq!(m.stack.len(), 1, "no screen may be pushed behind the modal");
+    assert!(matches!(
+        m.top(),
+        Some(Screen::Projects { selected: 1, .. })
+    ));
+    assert!(cmds.is_empty());
+    assert!(m.report.is_some(), "the modal stays open");
+}
+
+#[test]
+fn report_pointer_click_on_a_tasks_row_is_ignored_while_the_modal_is_open() {
+    let m = update(report_pointer_tasks_model(), Msg::ReportOpen).0;
+    let (m, cmds) = update(m, report_pointer_click());
+    assert_eq!(m.stack.len(), 1, "no detail may open behind the modal");
+    assert!(cmds.is_empty());
+    assert!(m.report.is_some(), "the modal stays open");
+}
+
+#[test]
+fn report_pointer_wheel_scroll_leaves_the_selection_unchanged_while_the_modal_is_open() {
+    for msg in [Msg::ScrollUp, Msg::ScrollDown] {
+        let m = update(report_pointer_projects_model(1), Msg::ReportOpen).0;
+        let (m, cmds) = update(m, msg);
+        assert!(cmds.is_empty());
+        assert!(matches!(
+            m.top(),
+            Some(Screen::Projects { selected: 1, .. })
+        ));
+        assert!(m.report.is_some(), "the modal stays open");
+    }
+}
+
+#[test]
+fn report_pointer_click_opens_the_row_again_after_the_modal_closes() {
+    let m = update(report_pointer_projects_model(1), Msg::ReportOpen).0;
+    let m = update(m, Msg::ReportClose).0;
+    let (m, _) = update(m, report_pointer_click());
+    assert!(
+        matches!(m.top(), Some(Screen::Tasks { .. })),
+        "{:?}",
+        m.top()
+    );
 }

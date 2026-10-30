@@ -527,7 +527,48 @@ async fn dispatch_comment(args: cli::CommentArgs) -> i32 {
 async fn dispatch_time(cmd: cli::TimeCmd) -> i32 {
     match cmd {
         cli::TimeCmd::Log(args) => dispatch_time_log(args).await,
+        cli::TimeCmd::Report(args) => dispatch_time_report(args).await,
     }
+}
+
+async fn dispatch_time_report(args: cli::TimeReportArgs) -> i32 {
+    let (_store, inst, ac_client) = match setup_instance_client(args.instance.as_deref()) {
+        Ok(v) => v,
+        Err(code) => return code,
+    };
+    let out_dir = match std::env::current_dir() {
+        Ok(dir) => dir,
+        Err(e) => {
+            render::print_error(&format!("Error reading current directory: {e}"));
+            return 1;
+        }
+    };
+    let period = match (args.period, args.start.as_deref(), args.end.as_deref()) {
+        (Some(preset), _, _) => commands::ReportPeriod::Preset(match preset {
+            cli::ReportPeriodArg::Month => commands::PeriodPreset::Month,
+            cli::ReportPeriodArg::Fortnight => commands::PeriodPreset::Fortnight,
+            cli::ReportPeriodArg::Week => commands::PeriodPreset::Week,
+        }),
+        (None, Some(start), Some(end)) => commands::ReportPeriod::Range { start, end },
+        (None, _, _) => return 2,
+    };
+    let request = commands::ReportRequest {
+        period,
+        format: match args.format {
+            cli::ReportFormatArg::Xlsx => commands::ReportFormat::Xlsx,
+            cli::ReportFormatArg::Csv => commands::ReportFormat::Csv,
+        },
+        today: chrono::Local::now().date_naive(),
+        user_id: inst.user_id,
+        out_dir: &out_dir,
+    };
+    commands::time_report_core(
+        &request,
+        &ac_client,
+        &mut std::io::stdout(),
+        &mut std::io::stderr(),
+    )
+    .await
 }
 
 async fn dispatch_time_log(args: cli::TimeLogArgs) -> i32 {

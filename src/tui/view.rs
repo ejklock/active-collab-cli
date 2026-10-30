@@ -1,3 +1,4 @@
+use crate::commands::ReportFormat;
 use crate::i18n::t;
 use crate::render::{display_width, wrap_text};
 use crate::tui::detail_geometry::Selection;
@@ -5,7 +6,7 @@ use crate::tui::footer::{self, FooterPlan};
 use crate::tui::model::{
     filter_assignee_candidates, ClickTarget, Compose, ComposeKind, ComposeStatus, EditStatus,
     EstimateForm, ImageAssetRef, ImageStatus, LogTimeField, LogTimeForm, LogTimeStatus,
-    ModalButtonTarget, Model, Screen,
+    ModalButtonTarget, Model, ReportField, ReportForm, ReportPeriodChoice, ReportStatus, Screen,
 };
 use crate::tui::screens::{draw_detail, draw_projects, draw_tasks, DetailParams};
 use crate::tui::theme;
@@ -235,6 +236,10 @@ pub fn view(
         }
     }
 
+    if let Some(form) = &model.report {
+        render_report_modal(frame, area, form, chrono::Local::now().date_naive());
+    }
+
     render_footer(frame, chunks[2], footer_plan, theme::footer_style());
 }
 
@@ -306,6 +311,96 @@ fn render_log_time_modal(frame: &mut Frame, frame_area: ratatui::layout::Rect, f
         frame_area,
         ModalContent {
             title: &t("Log time"),
+            lines: &lines,
+            hint: Some(&hint),
+        },
+    );
+}
+
+fn report_period_label(choice: ReportPeriodChoice) -> String {
+    match choice {
+        ReportPeriodChoice::Monthly => t("Monthly"),
+        ReportPeriodChoice::Biweekly => t("Biweekly"),
+        ReportPeriodChoice::Weekly => t("Weekly"),
+        ReportPeriodChoice::Custom => t("Custom"),
+    }
+}
+
+fn report_status_line(status: &ReportStatus) -> String {
+    match status {
+        ReportStatus::Editing => String::new(),
+        ReportStatus::Exporting => t("Exporting…"),
+        ReportStatus::Done { path, total } => {
+            format!("{} {path} ({} {total})", t("Saved to"), t("total hours:"))
+        }
+        ReportStatus::Error(message) => message.clone(),
+    }
+}
+
+/// Body rows of the hours-report modal. `today` only feeds the preview of a
+/// preset's resolved range.
+fn report_modal_lines(form: &ReportForm, today: chrono::NaiveDate) -> Vec<String> {
+    let mut lines = vec![format!("{}: {}", t("Instance"), form.instance), t("Period")];
+    let choices = [
+        ReportPeriodChoice::Monthly,
+        ReportPeriodChoice::Biweekly,
+        ReportPeriodChoice::Weekly,
+        ReportPeriodChoice::Custom,
+    ];
+    for choice in choices {
+        let marker = if choice == form.period { ">" } else { " " };
+        lines.push(format!("{marker} {}", report_period_label(choice)));
+    }
+    match form.period.preset() {
+        Some(preset) => {
+            let (from, to) = crate::commands::resolve_period(preset, today);
+            lines.push(format!(
+                "{}: {} – {}",
+                t("Range"),
+                from.format("%d/%m/%Y"),
+                to.format("%d/%m/%Y")
+            ));
+        }
+        None => {
+            let field = |label: &str, value: &str, focused: bool| {
+                log_time_field_line(&format!("{label} (DD-MM-YYYY)"), value, focused)
+            };
+            lines.push(field(
+                &t("Start"),
+                &form.start,
+                form.focus == ReportField::Start,
+            ));
+            lines.push(field(&t("End"), &form.end, form.focus == ReportField::End));
+        }
+    }
+    let (xlsx, csv) = match form.format {
+        ReportFormat::Xlsx => ("[x]", "[ ]"),
+        ReportFormat::Csv => ("[ ]", "[x]"),
+    };
+    lines.push(format!("{}: {xlsx} XLSX  {csv} CSV", t("Format")));
+    let status = report_status_line(&form.status);
+    if !status.is_empty() {
+        lines.push(String::new());
+        lines.push(status);
+    }
+    lines
+}
+
+/// Render the hours-report modal over `frame_area`.
+pub(crate) fn render_report_modal(
+    frame: &mut Frame,
+    frame_area: ratatui::layout::Rect,
+    form: &ReportForm,
+    today: chrono::NaiveDate,
+) {
+    use crate::tui::widgets::modal::render_modal;
+    let lines = report_modal_lines(form, today);
+    let hint = t("↑/↓ period · Tab date field · f format · Enter export · Esc close");
+    render_modal(
+        frame,
+        frame_area,
+        ModalContent {
+            title: &t("Hours report"),
             lines: &lines,
             hint: Some(&hint),
         },

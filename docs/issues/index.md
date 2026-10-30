@@ -79,3 +79,4 @@ TUI/UX work (V/R/ARCH slices), tracing to
 * [0055 — Reconcile CHANGELOG.md with the Rust crate tag line — retire/segregate the legacy Python history](0055-reconcile-changelog-with-rust-tag-line.md) - closed
 * [0067 — Log time on a task — add a time entry from CLI and TUI](0067-log-time-on-a-task-add-a-time-entry-from-cli-and-tui.md) - closed
 * [0068 — Edit task fields — status, assignee, time estimate from CLI and TUI](0068-edit-task-fields-status-assignee-time-estimate-from-cli-and-tui.md) - closed
+* [0072 — Export the hours report for a period as XLSX or CSV (ac time report and TUI modal)](0072-export-the-hours-report-for-a-period-as-xlsx-or-csv-ac-time-report-and-tui-modal.md) - closed

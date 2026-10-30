@@ -42,6 +42,7 @@ pub fn map_browse_key_event(key: crossterm::event::KeyEvent) -> Option<Msg> {
         KeyCode::Char('s') => Some(Msg::StatusToggleOpen),
         KeyCode::Char('a') => Some(Msg::AssigneePickerOpen),
         KeyCode::Char('r') => Some(Msg::Refresh),
+        KeyCode::Char('H') => Some(Msg::ReportOpen),
         KeyCode::Enter => Some(Msg::Select),
         _ => None,
     })
@@ -78,6 +79,30 @@ pub fn map_log_time_key_event(key: crossterm::event::KeyEvent) -> Option<Msg> {
         KeyCode::Tab => Some(Msg::LogTimeToggleField),
         KeyCode::Backspace => Some(Msg::LogTimeBackspace),
         KeyCode::Char(c) => Some(Msg::LogTimeChar(c)),
+        _ => None,
+    }
+}
+
+/// Map a key event when the hours-report modal is open.
+///
+/// The modal owns the whole keyboard: every printable character becomes
+/// `ReportChar` and `update()` decides what it means for the focused part (j/k
+/// and f act on the period list, only digits and `-` land in a date field), so
+/// a shortcut such as `q` can never reach the browse map. Left/Right toggle the
+/// format; Up/Down move the period.
+pub fn map_report_key_event(key: crossterm::event::KeyEvent) -> Option<Msg> {
+    if key.modifiers.contains(KeyModifiers::CONTROL) {
+        return None;
+    }
+    match key.code {
+        KeyCode::Esc => Some(Msg::ReportClose),
+        KeyCode::Enter => Some(Msg::ReportSubmit),
+        KeyCode::Tab => Some(Msg::ReportToggleField),
+        KeyCode::Backspace => Some(Msg::ReportBackspace),
+        KeyCode::Up => Some(Msg::ReportUp),
+        KeyCode::Down => Some(Msg::ReportDown),
+        KeyCode::Left | KeyCode::Right => Some(Msg::ReportToggleFormat),
+        KeyCode::Char(c) => Some(Msg::ReportChar(c)),
         _ => None,
     }
 }

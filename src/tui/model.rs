@@ -1,3 +1,4 @@
+use crate::commands::{validate_range, OwnedReportPeriod, PeriodPreset, ReportFormat};
 use crate::i18n::t;
 use crate::render::{Asset, MineTableRow, StyleRun};
 use crate::store::instances::Instance;
@@ -160,6 +161,13 @@ pub enum Cmd {
         instance: String,
         comment_id: i64,
     },
+    /// Export the hours report of the logged-in user of `instance`; the shell
+    /// resolves today's date and the output directory.
+    ExportHoursReport {
+        instance: String,
+        period: OwnedReportPeriod,
+        format: ReportFormat,
+    },
     /// POST a new time record for the task. `summary` carries the optional note; the
     /// job type and record date are resolved by the shell, never by the pure core.
     SubmitTimeLog {
@@ -274,6 +282,155 @@ impl LogTimeForm {
             LogTimeField::Hours => &mut self.hours,
             LogTimeField::Summary => &mut self.summary,
         }
+    }
+}
+
+/// The period choices of the hours-report modal, in list order.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ReportPeriodChoice {
+    Monthly,
+    Biweekly,
+    Weekly,
+    Custom,
+}
+
+impl ReportPeriodChoice {
+    fn next(self) -> Self {
+        match self {
+            ReportPeriodChoice::Monthly => ReportPeriodChoice::Biweekly,
+            ReportPeriodChoice::Biweekly => ReportPeriodChoice::Weekly,
+            ReportPeriodChoice::Weekly | ReportPeriodChoice::Custom => ReportPeriodChoice::Custom,
+        }
+    }
+
+    fn prev(self) -> Self {
+        match self {
+            ReportPeriodChoice::Monthly | ReportPeriodChoice::Biweekly => {
+                ReportPeriodChoice::Monthly
+            }
+            ReportPeriodChoice::Weekly => ReportPeriodChoice::Biweekly,
+            ReportPeriodChoice::Custom => ReportPeriodChoice::Weekly,
+        }
+    }
+
+    /// The named period behind a preset choice; `None` for the typed range.
+    pub(crate) fn preset(self) -> Option<PeriodPreset> {
+        match self {
+            ReportPeriodChoice::Monthly => Some(PeriodPreset::Month),
+            ReportPeriodChoice::Biweekly => Some(PeriodPreset::Fortnight),
+            ReportPeriodChoice::Weekly => Some(PeriodPreset::Week),
+            ReportPeriodChoice::Custom => None,
+        }
+    }
+}
+
+/// Which part of the hours-report modal has focus.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ReportField {
+    Period,
+    Start,
+    End,
+}
+
+/// Lifecycle phase of the hours-report modal.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ReportStatus {
+    Editing,
+    Exporting,
+    Done { path: String, total: String },
+    Error(String),
+}
+
+/// Maximum length of a typed `DD-MM-YYYY` date.
+const REPORT_DATE_MAX_CHARS: usize = 10;
+
+/// Transient state of the hours-report modal.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ReportForm {
+    pub instance: String,
+    pub period: ReportPeriodChoice,
+    pub format: ReportFormat,
+    pub start: String,
+    pub end: String,
+    pub focus: ReportField,
+    pub status: ReportStatus,
+}
+
+impl ReportForm {
+    fn new(instance: String) -> Self {
+        ReportForm {
+            instance,
+            period: ReportPeriodChoice::Monthly,
+            format: ReportFormat::Xlsx,
+            start: String::new(),
+            end: String::new(),
+            focus: ReportField::Period,
+            status: ReportStatus::Editing,
+        }
+    }
+
+    fn date_buffer_mut(&mut self) -> Option<&mut String> {
+        match self.focus {
+            ReportField::Period => None,
+            ReportField::Start => Some(&mut self.start),
+            ReportField::End => Some(&mut self.end),
+        }
+    }
+
+    fn toggle_format(&mut self) {
+        self.format = match self.format {
+            ReportFormat::Xlsx => ReportFormat::Csv,
+            ReportFormat::Csv => ReportFormat::Xlsx,
+        };
+    }
+
+    fn move_period(&mut self, period: ReportPeriodChoice) {
+        self.period = period;
+        if period != ReportPeriodChoice::Custom {
+            self.focus = ReportField::Period;
+        }
+    }
+
+    fn cycle_focus(&mut self) {
+        if self.period != ReportPeriodChoice::Custom {
+            return;
+        }
+        self.focus = match self.focus {
+            ReportField::Period => ReportField::Start,
+            ReportField::Start => ReportField::End,
+            ReportField::End => ReportField::Period,
+        };
+    }
+
+    fn type_char(&mut self, c: char) {
+        match self.date_buffer_mut() {
+            Some(buffer) => {
+                if (c.is_ascii_digit() || c == '-') && buffer.len() < REPORT_DATE_MAX_CHARS {
+                    buffer.push(c);
+                }
+            }
+            None => match c {
+                'j' => self.move_period(self.period.next()),
+                'k' => self.move_period(self.period.prev()),
+                'f' => self.toggle_format(),
+                _ => {}
+            },
+        }
+    }
+
+    /// The export this form asks for, or the validation message of a bad range.
+    fn request(&self) -> Result<(OwnedReportPeriod, ReportFormat), String> {
+        let period = match self.period.preset() {
+            Some(preset) => OwnedReportPeriod::Preset(preset),
+            None => {
+                validate_range(&self.start, &self.end)?;
+                OwnedReportPeriod::Range {
+                    start: self.start.clone(),
+                    end: self.end.clone(),
+                }
+            }
+        };
+        Ok((period, self.format))
     }
 }
 
@@ -721,6 +878,8 @@ pub struct Model {
     pub selection: Option<Selection>,
     /// Set by the shell after a successful clipboard write; cleared at the start of the next selection.
     pub copied_feedback: bool,
+    /// The hours-report modal; model-level because it opens from every screen.
+    pub report: Option<ReportForm>,
 }
 
 /// All messages the update function understands.
@@ -815,6 +974,31 @@ pub enum Msg {
     TimeMutationOk,
     /// The time-record POST failed; preserve the buffers and show an error.
     TimeMutationErr(String),
+    /// Open the hours-report modal on any screen.
+    ReportOpen,
+    /// Move the period selection up.
+    ReportUp,
+    /// Move the period selection down.
+    ReportDown,
+    /// Toggle the format; ignored while a date field has focus.
+    ReportToggleFormat,
+    /// Move focus list → Start → End → list (Custom only).
+    ReportToggleField,
+    /// A typed character; its meaning depends on the focused part.
+    ReportChar(char),
+    /// Remove the last character of the focused date field.
+    ReportBackspace,
+    /// Start the export.
+    ReportSubmit,
+    /// Close the modal from any status.
+    ReportClose,
+    /// The export finished: the saved path and the formatted total.
+    ReportOk {
+        path: String,
+        total: String,
+    },
+    /// The export failed with a translated message.
+    ReportErr(String),
     /// Open the estimate-edit modal on the current Detail screen.
     EstimateOpen,
     /// Append a printable character to the estimate value buffer.
@@ -901,6 +1085,7 @@ impl Model {
             last_loaded: None,
             selection: None,
             copied_feedback: false,
+            report: None,
         }
     }
 
@@ -1051,6 +1236,17 @@ pub fn update(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
         | Msg::LogTimeCancel
         | Msg::TimeMutationOk
         | Msg::TimeMutationErr(_)) => update_log_time(model, m),
+        m @ (Msg::ReportOpen
+        | Msg::ReportUp
+        | Msg::ReportDown
+        | Msg::ReportToggleFormat
+        | Msg::ReportToggleField
+        | Msg::ReportChar(_)
+        | Msg::ReportBackspace
+        | Msg::ReportSubmit
+        | Msg::ReportClose
+        | Msg::ReportOk { .. }
+        | Msg::ReportErr(_)) => update_report(model, m),
         m @ (Msg::EstimateOpen
         | Msg::EstimateChar(_)
         | Msg::EstimateBackspace
@@ -1101,6 +1297,9 @@ fn update_image(mut model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
 }
 
 fn update_scroll(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
+    if model.report.is_some() && matches!(msg, Msg::ScrollUp | Msg::ScrollDown) {
+        return (model, vec![]);
+    }
     match msg {
         Msg::Up => (handle_up(model), vec![]),
         Msg::ScrollUp => (handle_scroll_up(model), vec![]),
@@ -1113,6 +1312,9 @@ fn update_scroll(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
 }
 
 fn update_pointer(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
+    if model.report.is_some() {
+        return (model, vec![]);
+    }
     match msg {
         Msg::Click {
             column,
@@ -1877,6 +2079,15 @@ fn handle_loaded_detail(mut model: Model, load: DetailLoad) -> Model {
 ///
 /// Called when a comment mutation returns HTTP 401. The user keeps their draft.
 fn handle_auth_expired(mut model: Model) -> Model {
+    if let Some(form) = model
+        .report
+        .as_mut()
+        .filter(|form| form.status == ReportStatus::Exporting)
+    {
+        form.status = ReportStatus::Error(t(
+            "Token invalid or revoked — run `ac setup add` to re-authenticate.",
+        ));
+    }
     if let Some(Screen::Detail {
         ref mut auth_error, ..
     }) = model.top_mut()
@@ -2368,6 +2579,88 @@ fn handle_log_time_submit(mut model: Model) -> (Model, Vec<Cmd>) {
             summary,
         }],
     )
+}
+
+/// The instance a report export targets: the open Detail task's instance, else
+/// the header's primary (first configured) instance.
+fn report_instance(model: &Model) -> String {
+    match model.top() {
+        Some(Screen::Detail { instance, .. }) => instance.clone(),
+        _ => model.header.instance.clone(),
+    }
+}
+
+fn report_submit(form: &mut ReportForm) -> Vec<Cmd> {
+    if form.status == ReportStatus::Exporting {
+        return vec![];
+    }
+    match form.request() {
+        Ok((period, format)) => {
+            form.status = ReportStatus::Exporting;
+            vec![Cmd::ExportHoursReport {
+                instance: form.instance.clone(),
+                period,
+                format,
+            }]
+        }
+        Err(message) => {
+            form.status = ReportStatus::Error(message);
+            vec![]
+        }
+    }
+}
+
+/// Apply a form-editing message to the open report modal; messages that do not
+/// edit the form are ignored.
+fn report_edit(form: &mut ReportForm, msg: Msg) -> Vec<Cmd> {
+    let on_date_field = form.focus != ReportField::Period;
+    match msg {
+        Msg::ReportUp => form.move_period(form.period.prev()),
+        Msg::ReportDown => form.move_period(form.period.next()),
+        Msg::ReportToggleFormat if !on_date_field => form.toggle_format(),
+        Msg::ReportToggleField => form.cycle_focus(),
+        Msg::ReportChar(c) => form.type_char(c),
+        Msg::ReportBackspace => {
+            if let Some(buffer) = form.date_buffer_mut() {
+                buffer.pop();
+            }
+        }
+        Msg::ReportSubmit => return report_submit(form),
+        Msg::ReportOk { path, total } => form.status = ReportStatus::Done { path, total },
+        Msg::ReportErr(message) => form.status = ReportStatus::Error(message),
+        _ => {}
+    }
+    vec![]
+}
+
+fn update_report(mut model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
+    match msg {
+        Msg::ReportOpen => {
+            if model.report.is_none() {
+                model.report = Some(ReportForm::new(report_instance(&model)));
+            }
+            return (model, vec![]);
+        }
+        Msg::ReportClose => {
+            model.report = None;
+            return (model, vec![]);
+        }
+        Msg::ReportChar('b')
+            if model
+                .report
+                .as_ref()
+                .is_some_and(|form| form.focus == ReportField::Period) =>
+        {
+            model.report = None;
+            return (model, vec![]);
+        }
+        _ => {}
+    }
+    let cmds = match model.report.as_mut() {
+        Some(form) => report_edit(form, msg),
+        None => vec![],
+    };
+    (model, cmds)
 }
 
 fn handle_time_mutation_ok(model: Model) -> (Model, Vec<Cmd>) {
@@ -2957,6 +3250,7 @@ pub fn init_mine(header: Header, seed: Option<Vec<MineTableRow>>) -> (Model, Vec
         last_loaded: None,
         selection: None,
         copied_feedback: false,
+        report: None,
     };
     (model, vec![Cmd::LoadMineTasks])
 }

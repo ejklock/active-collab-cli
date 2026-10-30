@@ -143,6 +143,95 @@ pub struct JobType {
     pub is_default: bool,
 }
 
+fn deserialize_related<'de, D>(deserializer: D) -> Result<TimeRecordsRelated, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    if value.is_array() || value.is_null() {
+        return Ok(TimeRecordsRelated::default());
+    }
+    serde_json::from_value(value).map_err(serde::de::Error::custom)
+}
+
+/// One time record of the filtered-by-date listing. `parent_type` is `Task`
+/// or `Project`; `record_date` is a UTC-midnight unix timestamp.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct TimeRecord {
+    pub id: i64,
+    pub value: f64,
+    pub record_date: i64,
+    #[serde(default, deserialize_with = "deserialize_nullable_string")]
+    pub summary: String,
+    pub parent_type: String,
+    pub parent_id: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct RelatedProject {
+    pub id: i64,
+    #[serde(default, deserialize_with = "deserialize_nullable_string")]
+    pub name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct RelatedTask {
+    pub id: i64,
+    pub project_id: i64,
+    #[serde(default, deserialize_with = "deserialize_nullable_string")]
+    pub name: String,
+}
+
+/// The API keys each related entity by its id; the key repeats the entity's
+/// own `id`, so only the values are kept.
+fn deserialize_keyed_values<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Keyed<T> {
+        Map(std::collections::HashMap<String, T>),
+        Empty(Vec<serde::de::IgnoredAny>),
+        Null(()),
+    }
+    match Keyed::<T>::deserialize(deserializer).map_err(serde::de::Error::custom)? {
+        Keyed::Map(map) => Ok(map.into_values().collect()),
+        Keyed::Empty(items) if items.is_empty() => Ok(Vec::new()),
+        Keyed::Empty(_) => Err(serde::de::Error::custom(
+            "expected an object keyed by id, got a non-empty array",
+        )),
+        Keyed::Null(()) => Ok(Vec::new()),
+    }
+}
+
+/// The `related` side-load of a time-records response; either key may be
+/// absent when empty.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+pub struct TimeRecordsRelated {
+    #[serde(
+        default,
+        rename = "Project",
+        deserialize_with = "deserialize_keyed_values"
+    )]
+    pub projects: Vec<RelatedProject>,
+    #[serde(
+        default,
+        rename = "Task",
+        deserialize_with = "deserialize_keyed_values"
+    )]
+    pub tasks: Vec<RelatedTask>,
+}
+
+/// Response of `GET /users/{id}/time-records/filtered-by-date`.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+pub struct TimeRecordsReport {
+    pub time_records: Vec<TimeRecord>,
+    #[serde(default, deserialize_with = "deserialize_related")]
+    pub related: TimeRecordsRelated,
+}
+
 #[cfg(test)]
 #[path = "../tests/unit/models.rs"]
 mod tests;

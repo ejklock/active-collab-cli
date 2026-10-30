@@ -97,7 +97,7 @@ pub(crate) fn hint_for_screen(screen: &Screen) -> String {
             };
             detail_hint(&overlays, *focused_comment, comments, *current_user_id)
         }
-        _ => t("↑/↓ navigate  Enter select  r refresh  Esc/b back  q quit"),
+        _ => t("↑/↓ navigate  Enter select  r refresh  H report  Esc/b back  q quit"),
     }
 }
 
@@ -132,7 +132,7 @@ pub(crate) fn detail_hint(
     if is_own_comment_focused(focused_comment, comments, current_user_id) {
         return t("↑/↓ · j/k move · Ctrl+click edit/delete · c new");
     }
-    t("↑/↓ · j/k move · c comment · t log time · e estimate · s status · r refresh · a assignee · Esc/b back · q quit")
+    t("↑/↓ · j/k move · c comment · t log time · e estimate · s status · r refresh · a assignee · H report · Esc/b back · q quit")
 }
 
 pub(crate) fn is_own_comment_focused(
