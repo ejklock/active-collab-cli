@@ -21,7 +21,7 @@ Included:
 - `ac mine` (table and TUI) groups tasks into buckets by `due_on`: Overdue, Today, This week (to Sunday), Later, No due date, in that order; tasks inside a bucket sort by due date, then project, then task number.
 - Each bucket header shows its task count and the sums of estimate, week and total hours.
 - `ac mine --json` adds `due_bucket` (`overdue|today|this_week|later|none`) to each task and a `buckets` array with each bucket's key, count and sums; existing fields are unchanged.
-- The `list_my_tasks` MCP tool returns the same.
+- The MCP `ac_read` `mine` operation returns the same.
 - Bucket labels go through the existing i18n (English source, pt_BR translation).
 
 Excluded: grouping by start date or by an interval, a separate `ac week` command, filters.

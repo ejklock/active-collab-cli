@@ -1,7 +1,7 @@
 ---
 type: Issue
 title: Show estimate and logged hours (this week and total) per task in ac mine
-description: ac mine table, TUI cards, JSON and the list_my_tasks MCP tool show each task's estimate, the user's hours logged this week and the task's total logged hours.
+description: ac mine table, TUI cards, JSON and the MCP ac_read mine operation show each task's estimate, the user's hours logged this week and the task's total logged hours.
 status: open
 labels: [cli, tui, agent, slice]
 blocked_by: [0073]
@@ -24,7 +24,7 @@ Included:
 - `logged_week` comes from one `filtered-by-date` call per instance, summed by `parent_id`; `logged_total` from one task call per listed task, run concurrently.
 - The `ac mine` table and the TUI task cards show `est`, `week` and `total` hours per task.
 - `ac mine --json` adds `due_on`, `estimate_hours`, `logged_week_hours` and `logged_total_hours` to each task; existing fields are unchanged.
-- The `list_my_tasks` MCP tool returns the new fields (through the shared JSON).
+- The MCP `ac_read` `mine` operation returns the new fields (through the shared JSON).
 - The `active-collab` skill documents the new fields.
 
 Excluded: totals per group ([issue 0075](/issues/0075-group-ac-mine-by-due-date-overdue-today-this-week-later-no-due-date.md)), other users' hours, editing from the list.

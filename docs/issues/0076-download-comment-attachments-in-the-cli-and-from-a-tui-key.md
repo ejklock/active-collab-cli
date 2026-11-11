@@ -21,7 +21,7 @@ Included:
 - `extract_assets` and `downloadable_assets` also read each comment's `attachments`, deduplicated by URL as today.
 - The TUI asset panel lists comment attachments.
 - A TUI key, `D` (free today), in the task detail downloads every downloadable asset of the open task to `~/Downloads/ac-attachments/<project_id>-<task_id>/` through the existing `download_task_attachments` (size cap, sanitized names, containment check of ADR 0066); the status line shows "Downloaded N of M attachment(s) to <dir>" or the failure.
-- `get_task` and `current_task` MCP tools return comment attachments in `downloaded_attachments` when asked to download.
+- The MCP `ac_read` `get` and `current` operations return comment attachments in `downloaded_attachments` when asked to download.
 - The `active-collab` skill and the TUI footer hint mention the new key.
 
 Excluded: choosing the TUI destination, downloading a single asset from the TUI, uploading attachments.

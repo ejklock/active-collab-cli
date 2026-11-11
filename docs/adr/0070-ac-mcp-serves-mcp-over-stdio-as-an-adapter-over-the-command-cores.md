@@ -1,7 +1,7 @@
 ---
 type: ADR
 title: ac mcp serves MCP over stdio as an adapter over the command cores
-description: An ac mcp subcommand serves MCP over stdio with rmcp; each tool calls an existing command core with json output, so the --json contract is the only agent contract; read and write tools always exposed with MCP annotations; the store moves to WAL.
+description: An ac mcp subcommand serves MCP over stdio with rmcp through two tools grouped by operation type, ac_read and ac_write, whose operations call the existing command cores with json output, so the --json contract is the only agent contract; both always exposed with read-only and destructive annotations; the store moves to WAL.
 owner: Evaldo Klock
 status: Accepted
 timestamp: 2026-11-11T21:40:48Z
@@ -19,14 +19,16 @@ Every command already has a testable core that writes to injected `out`/`err` wr
 
 ## Decision
 
-We will add an `ac mcp` subcommand that serves MCP over stdio with the official Rust SDK `rmcp` (3.9.0 on crates.io, probed 2026-11-11). Each MCP tool is a driving adapter over an existing command core: it calls the core with `json = true` and in-memory writers, returns the core's `out` buffer as the tool result on exit 0, and returns the `err` buffer as an `isError` result otherwise. No tool builds its own JSON; the `--json` contract of `src/agent_json.rs` is the only agent contract.
+We will add an `ac mcp` subcommand that serves MCP over stdio with the official Rust SDK `rmcp` (3.9.0 on crates.io, probed 2026-11-11). The server exposes two tools grouped by operation type, `ac_read` and `ac_write`, each selecting a command core by an `operation` field, so each session's context carries two tool definitions however many operations exist. Each operation is a driving adapter over an existing command core: it calls the core with `json = true` and in-memory writers, returns the core's `out` buffer as the tool result on exit 0, and returns the `err` buffer as an `isError` result otherwise. No tool builds its own JSON; the `--json` contract of `src/agent_json.rs` is the only agent contract.
 
-Read and write tools are always exposed, with no opt-in flag, as the owner chose. Each tool carries the MCP annotations: `readOnlyHint: true` on reads, `destructiveHint` on writes, so harnesses can require approval for writes only. Write tools go through the same host-gated write seam as the CLI ([ADR 0033](/adr/0033-authenticated-write-seam-comment-client.md)). The store moves to `journal_mode=WAL` so parallel `ac mcp` processes read and write the cache without waiting on each other.
+Both tools are always exposed, with no opt-in flag, as the owner chose. `ac_read` carries `readOnlyHint: true` and `ac_write` `destructiveHint: true`, so harnesses can require approval for writes only. Write tools go through the same host-gated write seam as the CLI ([ADR 0033](/adr/0033-authenticated-write-seam-comment-client.md)). The store moves to `journal_mode=WAL` so parallel `ac mcp` processes read and write the cache without waiting on each other.
 
 Rejected alternatives:
 
 - **Keep the skill and shell only** (the existing pattern): no new contract, but every agent composes shell commands and parses exit codes, and harness permission rules cannot tell a read from a write inside one `Bash` call.
 - **Streamable HTTP on a local port** (`ac mcp --port N`): one shared process for every session, but any local process, or a web page through DNS rebinding, can call the write tools with the owner's token unless the server adds its own authentication and `Origin` checks, and it needs a daemon lifecycle. Stdio gives each parallel session its own process with the same result.
+- **One tool per verb** (seven tools, growing with each capability): the finest per-verb permission, but every session pays the context tokens of every definition; the owner chose two tools by operation type.
+- **A single tool for every operation**: the fewest tokens, but a harness can no longer approve reads and writes separately, which the token-security ranking forbids.
 - **Writes behind `--allow-writes`**: the owner declined it; the per-tool permission rules of each harness are the control.
 - **A hand-written JSON-RPC loop**: the official SDK covers the handshake, schemas and transport; owning a protocol implementation is not worth it.
 - **Tools that build their own JSON**: two contracts that drift; rejected for the single-contract characteristic.
@@ -44,15 +46,15 @@ Rejected alternatives:
 - Each session spawns its own process; the SQLite cache is the shared state.
 
 **Follow-ups:**
-- Each later capability (estimate and hours in `mine`, day/week grouping, comment attachments, moving a task between task lists) ships its MCP tool in the same issue.
+- Each later capability (estimate and hours in `mine`, day/week grouping, comment attachments, moving a task between task lists) ships its MCP operation or parameters in the same issue.
 
 ## Verification
 
 **Implementation impact:** `Cargo.toml`, `src/cli.rs`, `src/main.rs`, a new `src/mcp/` module, `src/store/mod.rs` (WAL), `docs/architecture.md`, the `active-collab` skill.
 
 **Verification criteria:**
-- An integration test drives `ac mcp` over stdio: `initialize`, `tools/list` returns every tool with its annotations, and a `tools/call` result is byte-identical to the matching `--json` command output against the same mocked API.
-- Fitness function: a test runs each tool against a mocked API and asserts the process stdout holds only JSON-RPC frames.
+- An integration test drives `ac mcp` over stdio: `initialize`, `tools/list` returns `ac_read` and `ac_write` with their annotations, and each operation's `tools/call` result is byte-identical to the matching `--json` command output against the same mocked API.
+- Fitness function: a test runs each operation against a mocked API and asserts the process stdout holds only JSON-RPC frames.
 - Fitness function: a test asserts the store opens in `WAL` mode.
 - A request through any tool to a non-instance host carries no token (the existing token-host-isolation tests cover the shared seam).
 
