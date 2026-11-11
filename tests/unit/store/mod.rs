@@ -172,3 +172,91 @@ fn foreign_keys_pragma_is_applied() {
         .unwrap();
     assert_eq!(val, 1);
 }
+
+fn journal_mode(store: &Store) -> String {
+    store
+        .conn()
+        .query_row("PRAGMA journal_mode", [], |r| r.get(0))
+        .unwrap()
+}
+
+#[test]
+fn open_uses_wal_journal_mode() {
+    let (_dir, store) = open_test_store();
+    assert_eq!(journal_mode(&store), "wal");
+}
+
+#[test]
+fn two_stores_write_the_task_cache_concurrently_without_lock_errors() {
+    let dir = TempDir::new().unwrap();
+    let db_path = dir.path().join("shared.db");
+    let handles: Vec<_> = (0..2)
+        .map(|worker| {
+            let db_path = db_path.clone();
+            std::thread::spawn(move || -> Result<(), String> {
+                let config = Config {
+                    db_path,
+                    task_cache_ttl_hours: 24,
+                };
+                let store = Store::open(&config).map_err(|e| e.to_string())?;
+                let cache = cache::TaskCache::new(store.conn());
+                for i in 0..50 {
+                    cache
+                        .write(
+                            "inst",
+                            worker,
+                            i,
+                            &serde_json::json!({ "name": "t" }),
+                            &serde_json::json!([]),
+                        )
+                        .map_err(|e| e.to_string())?;
+                }
+                Ok(())
+            })
+        })
+        .collect();
+    for handle in handles {
+        assert_eq!(handle.join().unwrap(), Ok(()));
+    }
+    let store = Store::open(&Config {
+        db_path,
+        task_cache_ttl_hours: 24,
+    })
+    .unwrap();
+    let rows: i64 = store
+        .conn()
+        .query_row("SELECT COUNT(*) FROM ticket_cache", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(rows, 100);
+}
+
+#[test]
+fn existing_delete_mode_store_switches_to_wal_keeping_rows() {
+    let dir = TempDir::new().unwrap();
+    let db_path = dir.path().join("legacy.db");
+    {
+        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        let mode: String = conn
+            .query_row("PRAGMA journal_mode=DELETE", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(mode, "delete");
+        conn.execute_batch(
+            "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);\
+             INSERT INTO settings (key, value) VALUES ('theme', 'angie');",
+        )
+        .unwrap();
+    }
+    let store = Store::open(&Config {
+        db_path,
+        task_cache_ttl_hours: 24,
+    })
+    .unwrap();
+    assert_eq!(journal_mode(&store), "wal");
+    let value: String = store
+        .conn()
+        .query_row("SELECT value FROM settings WHERE key='theme'", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    assert_eq!(value, "angie");
+}

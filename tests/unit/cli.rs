@@ -686,3 +686,15 @@ fn comment_help_lists_html_flag() {
         "comment help must list --html: {help}"
     );
 }
+
+#[test]
+fn parse_mcp_subcommand_takes_no_arguments() {
+    let cli = parse(&["mcp"]).unwrap();
+    assert!(matches!(cli.command, Some(Command::Mcp)));
+    assert!(parse(&["mcp", "extra"]).is_err());
+}
+
+#[test]
+fn normalize_argv_keeps_mcp_as_a_command_not_a_task_ref() {
+    assert_eq!(normalize_argv(&argv(&["mcp"]), None), argv(&["mcp"]));
+}

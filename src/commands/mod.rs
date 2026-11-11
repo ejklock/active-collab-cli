@@ -1,4 +1,5 @@
 mod comment;
+mod context;
 mod hours_report;
 mod mine;
 mod presenter;
@@ -9,6 +10,9 @@ mod task;
 pub(crate) mod time;
 
 pub(crate) use comment::comment_core;
+pub(crate) use context::{
+    current_git_branch, open_store, open_store_and_http, setup_instance_client, InstanceContext,
+};
 pub(crate) use hours_report::{
     export_hours_report, resolve_period, time_report_core, validate_range, ExportError,
     ExportedReport, OwnedReportPeriod, PeriodPreset, ReportFormat, ReportPeriod, ReportRequest,
