@@ -68,7 +68,7 @@ fn set_file_mode_600(_path: &Path) -> Result<()> {
 
 fn apply_pragmas(conn: &Connection) -> Result<()> {
     conn.execute_batch(
-        "PRAGMA journal_mode=DELETE;\
+        "PRAGMA journal_mode=WAL;\
          PRAGMA busy_timeout=5000;\
          PRAGMA foreign_keys=ON;",
     )?;

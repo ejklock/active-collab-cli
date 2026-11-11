@@ -1,7 +1,7 @@
 use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
 
-pub const KNOWN_COMMANDS: [&str; 10] = [
-    "setup", "get", "current", "mine", "list", "browse", "comment", "skill", "time", "task",
+pub const KNOWN_COMMANDS: [&str; 11] = [
+    "setup", "get", "current", "mine", "list", "browse", "comment", "skill", "time", "task", "mcp",
 ];
 
 /// Name used in help, usage, and version output when `argv[0]` is unavailable.
@@ -55,6 +55,8 @@ pub enum Command {
     Task(TaskOpts),
     /// Print an embedded agent skill (ac skill list | ac skill <name>).
     Skill(SkillArgs),
+    /// Serve the CLI as MCP tools over stdio (ac_read, ac_write).
+    Mcp,
 }
 
 /// Wrapper that holds the setup subcommand.

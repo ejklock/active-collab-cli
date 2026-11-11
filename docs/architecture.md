@@ -35,8 +35,11 @@ flowchart TD
     screens --> theme
     main --> cli["cli (clap)"]
     cli --> commands
+    main --> mcp["mcp/mod.rs\nac mcp · rmcp stdio server\nac_read · ac_write (operation unions)"]
+    mcp --> commands
     subgraph commands["commands/ — three masters (ADR 0055)"]
         direction TB
+        cmd_context["context.rs\nsetup_instance_client · open_store_and_http\ncurrent_git_branch (shared by main and mcp)"]
         cmd_setup["setup.rs\nsetup list·remove·language·test·add"]
         cmd_task["task.rs\nget · current"]
         cmd_comment["comment.rs\ncomment_core"]
@@ -52,6 +55,8 @@ flowchart TD
         cmd_mine --> cmd_presenter
         cmd_hours --> cmd_presenter
     end
+    cmd_context --> store
+    cmd_context --> client
     commands --> controller["controller\n(async orchestration)"]
     model --> controller
     controller --> client["client\n(ActiveCollab API)"]
@@ -126,6 +131,20 @@ flowchart TD
   `install-skill.sh`. `skill` is in `KNOWN_COMMANDS` so a bare `ac skill …` is not
   rewritten to `get`. Fitness: the registry body equals the embedded `SKILL.md` bytes
   (a unit test pins it), and `skill_output` takes no store/HTTP dependency.
+- **`ac mcp` is a driving adapter over the command cores**
+  ([ADR 0070](/adr/0070-ac-mcp-serves-mcp-over-stdio-as-an-adapter-over-the-command-cores.md)):
+  `src/mcp/mod.rs` serves MCP over stdio with `rmcp` and exposes two tools, `ac_read`
+  (`readOnlyHint`: `get` · `current` · `mine`) and `ac_write` (`destructiveHint`: `comment` ·
+  `log_time` · `set_task` · `time_report`), each selecting a core by an `operation` field. An
+  operation calls the existing `*_core` with `json = true` and in-memory writers, returns `out`
+  on exit 0 and `err` as an `isError` result otherwise; no tool builds JSON or an HTTP request,
+  so the `--json` contract and the host-gated write seam have one home. The instance, store and
+  client setup that `main.rs` and `mcp` both need lives once in `commands/context.rs`. While the
+  server runs, stdout belongs to JSON-RPC: cores write only to their injected writers. Each
+  session is its own process; the SQLite cache (`journal_mode=WAL`) is the shared state.
+  Fitness: `tests/mcp_stdio.rs` drives the built binary over stdio and asserts the tool list,
+  byte-identical output against the `--json` commands, error mapping, and that every stdout line
+  is a JSON-RPC frame.
 - **tui/model.update** is pure — no terminal, no async, no I/O. Gate-checked by unit
   tests (BDR 0001) and `cargo test` running headless.
 - **client/http** is the only outbound-network boundary; **token host isolation**
@@ -277,6 +296,33 @@ Background results (e.g. `Msg::LoadedTasksByProject`) are delivered over a
 `tokio::sync::mpsc` channel that is a first-class arm of the `tokio::select!`
 loop. The model is updated and the screen repainted as soon as the result
 arrives — no input event is required.
+
+## MCP tool-call data flow
+
+```mermaid
+sequenceDiagram
+    participant Agent as agent harness
+    participant Mcp as ac mcp (rmcp stdio)
+    participant Core as commands/*_core
+    participant Cache as store (WAL)
+    participant API as client/http
+
+    Agent->>Mcp: tools/call ac_read | ac_write {operation, ...}
+    alt unknown operation or missing field
+        Mcp-->>Agent: JSON-RPC invalid_params
+    else valid
+        Mcp->>Core: setup_instance_client (mine: open_store_and_http), then *_core(json = true, Vec writers)
+        Core->>Cache: read/write task cache
+        Core->>API: request (token only to instance host)
+        API-->>Core: payload | 401 | error
+        Core-->>Mcp: exit code + out + err buffers
+        alt exit 0
+            Mcp-->>Agent: result text = out (the --json line)
+        else non-zero
+            Mcp-->>Agent: isError result text = err
+        end
+    end
+```
 
 ## Write / comment-mutation data flow
 

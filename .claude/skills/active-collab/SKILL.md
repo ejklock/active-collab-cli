@@ -150,6 +150,42 @@ ac comment 665/75159 --html -m "<p><strong>Section one</strong></p><p>Lorem ipsu
 ac comment 665/75159 --html < body.html
 ```
 
+## MCP server — `ac mcp`
+
+`ac mcp` serves the same commands as MCP tools over stdio, so a harness calls
+them with typed parameters instead of composing shell commands. Each session
+spawns its own `ac mcp` process; the SQLite cache is shared between them. Every
+operation returns exactly what the matching `--json` command prints, and a
+failure comes back as an `isError` result with the CLI's error text. See
+[ADR 0070](../../../docs/adr/0070-ac-mcp-serves-mcp-over-stdio-as-an-adapter-over-the-command-cores.md).
+
+Two tools, each selecting a command with `operation`; every operation takes an
+optional `instance`. `mine` without `instance` lists every configured instance;
+every other operation needs `instance` only when several instances are configured:
+
+| Tool | Hint | Operations (parameters) |
+|---|---|---|
+| `ac_read` | read-only | `get` (`ref`, `no_comments`, `refresh`, `download_attachments`, `attachments_dir`) · `current` (optional `branch`, else the git branch of the server's working directory) · `mine` |
+| `ac_write` | destructive | `comment` (`ref`, `body`, `html`) · `log_time` (`ref`, `hours`, `date`, `summary`, `job_type`) · `set_task` (`ref`, `status`, `assignee`, `estimate`) · `time_report` (`period` or `start` + `end`, `format`) |
+
+`time_report` has no JSON form: it returns the human line and writes the file in
+the server's working directory. An unknown `operation` or a missing required
+parameter is a JSON-RPC `invalid_params` error.
+
+Register it in Claude Code:
+
+```bash
+claude mcp add active-collab -- ac mcp
+```
+
+Register it in Codex, in `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.active-collab]
+command = "ac"
+args = ["mcp"]
+```
+
 ## Notes for agents
 
 - Parse the single line as one JSON object; do not assume pretty-printing.

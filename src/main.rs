@@ -6,6 +6,7 @@ mod config;
 mod controller;
 mod http;
 mod i18n;
+mod mcp;
 mod models;
 mod render;
 mod richtext;
@@ -17,7 +18,7 @@ mod tui;
 use clap::FromArgMatches;
 use cli::{bare_no_command_action, BareNoCommandAction, Cli, Command};
 use commands::{
-    comment_core, current_core, get_core, mine_core, pick_instance, setup_add, setup_language,
+    comment_core, current_core, current_git_branch, get_core, mine_core, setup_add, setup_language,
     setup_list, setup_remove, setup_test, setup_theme, skill_output, task_set_core, time_log_core,
     DisplayFlags, MineOutcome, SetupAddFields,
 };
@@ -125,7 +126,16 @@ async fn dispatch(command: Command) -> i32 {
         Command::Comment(args) => dispatch_comment(args).await,
         Command::Time(opts) => dispatch_time(opts.subcommand).await,
         Command::Task(opts) => dispatch_task(opts.subcommand).await,
+        Command::Skill(_) | Command::Mcp => dispatch_agent_surface(command).await,
+    }
+}
+
+/// The commands that serve an agent harness rather than run against the store
+/// directly: `skill` prints, `mcp` serves. `dispatch` routes only these two here.
+async fn dispatch_agent_surface(command: Command) -> i32 {
+    match command {
         Command::Skill(args) => dispatch_skill(args),
+        _ => mcp::serve().await,
     }
 }
 
@@ -149,20 +159,11 @@ async fn dispatch_setup(cmd: cli::SetupCmd) -> i32 {
 }
 
 fn open_store() -> Option<store::Store> {
-    let config = config::load();
-    match store::Store::open(&config) {
-        Ok(s) => Some(s),
-        Err(e) => {
-            render::print_error(&format!("Error opening database: {e}"));
-            None
-        }
-    }
+    commands::open_store(&mut std::io::stderr())
 }
 
-/// Shared instance+client bootstrap for get/current/comment/time: opens the
-/// store, builds the HTTP client, loads instances, resolves the target
-/// instance via `--instance`/`pick_instance`, and constructs the API client.
-/// Returns `Err(exit_code)` after writing any user-facing error to stderr.
+/// Shared instance+client bootstrap for get/current/comment/time, writing any
+/// user-facing error to stderr. Returns `Err(exit_code)` on failure.
 fn setup_instance_client(
     instance_name: Option<&str>,
 ) -> Result<
@@ -173,21 +174,8 @@ fn setup_instance_client(
     ),
     i32,
 > {
-    let store = open_store().ok_or(1)?;
-    let http = http::Http::new().map_err(|e| {
-        render::print_error(&format!("Error building HTTP client: {e}"));
-        1
-    })?;
-    let repo = store::instances::InstanceRepository::new(store.conn());
-    let instances = repo.load_all().map_err(|e| {
-        render::print_error(&format!("Error loading instances: {e}"));
-        1
-    })?;
-    let mut err_buf = std::io::stderr();
-    let idx = pick_instance(&instances, instance_name, &mut err_buf)?;
-    let inst = instances[idx].clone();
-    let ac_client = client::ActiveCollabClient::new(inst.clone(), http);
-    Ok((store, inst, ac_client))
+    let ctx = commands::setup_instance_client(instance_name, &mut std::io::stderr())?;
+    Ok((ctx.store, ctx.instance, ctx.client))
 }
 
 fn dispatch_setup_list() -> i32 {
@@ -402,16 +390,9 @@ async fn dispatch_current(args: cli::DisplayArgs) -> i32 {
 async fn dispatch_mine(args: cli::MineArgs) -> i32 {
     let config = config::load();
     let db_path = config.db_path.clone();
-    let store = match open_store() {
-        Some(s) => s,
-        None => return 1,
-    };
-    let http = match http::Http::new() {
-        Ok(h) => h,
-        Err(e) => {
-            render::print_error(&format!("Error building HTTP client: {e}"));
-            return 1;
-        }
+    let (store, http) = match commands::open_store_and_http(&mut std::io::stderr()) {
+        Ok(pair) => pair,
+        Err(code) => return code,
     };
     let repo = store::instances::InstanceRepository::new(store.conn());
     let is_tty = std::io::stdout().is_terminal() && std::io::stdin().is_terminal();
@@ -618,24 +599,4 @@ async fn dispatch_task_set(args: cli::TaskSetArgs) -> i32 {
         &mut std::io::stderr(),
     )
     .await
-}
-
-/// Invoke `git rev-parse --abbrev-ref HEAD` and return the branch name.
-/// Returns `None` when not in a git repo, on timeout, or when HEAD is detached.
-fn current_git_branch() -> Option<String> {
-    let output = std::process::Command::new("git")
-        .args(["rev-parse", "--abbrev-ref", "HEAD"])
-        .output()
-        .ok()?;
-
-    if !output.status.success() {
-        return None;
-    }
-
-    let branch = String::from_utf8(output.stdout).ok()?.trim().to_owned();
-    if branch == "HEAD" {
-        None
-    } else {
-        Some(branch)
-    }
 }
