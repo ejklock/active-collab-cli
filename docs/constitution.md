@@ -133,3 +133,7 @@ server-truth refresh ([ADR 0035](/adr/0035-server-truth-refresh-after-comment-mu
 explicitly out of scope: creating or deleting tasks, bulk edits, and full web-UI parity — each awaits
 its own recorded decision. The token-host-isolation and local-first non-negotiables are unchanged;
 local-first governs reads, and every write path must honor token host isolation.
+
+## Amendment 2 — 2026-11-11: the task list joins the editable task fields
+
+Per [ADR 0071](/adr/0071-task-list-joins-the-bounded-set-of-editable-task-fields.md), the bounded set of editable task fields of Amendment 1 grows by one: the task list (`task_list_id`), so a task can move between its project's workflow columns. The move reuses the same host-gated write seam, typed outcome and server-truth refresh. Creating or deleting tasks, bulk edits, moving tasks between projects and full web-UI parity stay out of scope.
