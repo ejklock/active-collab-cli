@@ -407,6 +407,15 @@ pub struct MineTableRow {
     pub due_on: Option<String>,
     #[serde(default)]
     pub project_name: Option<String>,
+    /// Estimated hours; `None` when the task has no estimate.
+    #[serde(default)]
+    pub estimate: Option<f64>,
+    /// The user's hours on the task this week; `None` when unknown.
+    #[serde(default)]
+    pub logged_week: Option<f64>,
+    /// All hours logged on the task; `None` when unknown.
+    #[serde(default)]
+    pub logged_total: Option<f64>,
 }
 
 /// Parity: render.py render_mine_table.
@@ -414,19 +423,29 @@ pub struct MineTableRow {
 /// Returns the formatted table as a String (header + separator + rows).
 pub fn render_mine_table(rows: &[MineTableRow]) -> String {
     let header = format!(
-        "{:<15} {:<10} {:<8} {:<10} {}",
+        "{:<15} {:<10} {:<8} {:<10} {:<8} {:<8} {:<8} {}",
         t("INSTANCE"),
         t("PROJECT"),
         t("TASK#"),
         t("TASK_ID"),
+        t("EST"),
+        t("WEEK"),
+        t("TOTAL"),
         t("NAME")
     );
     let separator = "-".repeat(80);
     let mut lines = vec![header, separator];
     for row in rows {
         lines.push(format!(
-            "{:<15} {:<10} {:<8} {:<10} {}",
-            row.instance, row.project_id, row.task_number, row.task_id, row.name
+            "{:<15} {:<10} {:<8} {:<10} {:<8} {:<8} {:<8} {}",
+            row.instance,
+            row.project_id,
+            row.task_number,
+            row.task_id,
+            fmt_hours_or_dash(row.estimate),
+            fmt_hours_or_dash(row.logged_week),
+            fmt_hours_or_dash(row.logged_total),
+            row.name
         ));
     }
     crate::sanitize::strip_control_chars(&lines.join("\n"))
@@ -487,6 +506,11 @@ pub fn normalize_due_to_ymd(value: &Value) -> Option<String> {
     } else {
         Some(s)
     }
+}
+
+/// Hours for a list cell: the `fmt_hours` text, or `–` when unknown.
+pub fn fmt_hours_or_dash(hours: Option<f64>) -> String {
+    hours.map_or_else(|| "–".to_owned(), |h| fmt_hours(&Value::from(h)))
 }
 
 /// Parity: render.py fmt_hours.

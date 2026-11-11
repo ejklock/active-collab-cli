@@ -448,6 +448,9 @@ fn write_mine_snapshot(model: &Model, targets: &[Instance], db_path: &Path) {
             name: t.name.clone(),
             due_on: t.due_on.clone(),
             project_name: t.project_name.clone(),
+            estimate: t.estimate,
+            logged_week: t.logged_week,
+            logged_total: t.logged_total,
         })
         .collect();
     let Ok(list_json) = serde_json::to_string(&rows) else {
@@ -1029,3 +1032,7 @@ fn platform_opener() -> &'static str {
         "xdg-open"
     }
 }
+
+#[cfg(test)]
+#[path = "../../tests/unit/tui_mine_snapshot.rs"]
+mod mine_snapshot_tests;

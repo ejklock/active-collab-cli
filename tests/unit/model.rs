@@ -2070,6 +2070,9 @@ fn sample_mine_rows() -> Vec<MineTableRow> {
             name: "Task Alpha".into(),
             due_on: None,
             project_name: None,
+            estimate: None,
+            logged_week: None,
+            logged_total: None,
         },
         MineTableRow {
             instance: "inst-b".into(),
@@ -2079,6 +2082,9 @@ fn sample_mine_rows() -> Vec<MineTableRow> {
             name: "Task Beta".into(),
             due_on: None,
             project_name: None,
+            estimate: None,
+            logged_week: None,
+            logged_total: None,
         },
     ]
 }
@@ -2178,6 +2184,9 @@ fn loaded_mine_tasks_replaces_rows_clears_revalidating_stamps_last_loaded() {
         name: "Task Gamma".into(),
         due_on: None,
         project_name: None,
+        estimate: None,
+        logged_week: None,
+        logged_total: None,
     }];
     let loaded_at = "2026-06-26T12:00:00Z".to_string();
     let (updated, cmds) = update(
@@ -2472,6 +2481,9 @@ fn mine_row_with_due(due_on: Option<&str>) -> MineTableRow {
         name: "Task".into(),
         due_on: due_on.map(str::to_owned),
         project_name: None,
+        estimate: None,
+        logged_week: None,
+        logged_total: None,
     }
 }
 
@@ -2502,6 +2514,9 @@ fn mine_table_row_serde_round_trip_preserves_due_on() {
         name: "Task".into(),
         due_on: Some("2026-07-15".into()),
         project_name: None,
+        estimate: None,
+        logged_week: None,
+        logged_total: None,
     };
     let json = serde_json::to_string(&row).unwrap();
     let decoded: MineTableRow = serde_json::from_str(&json).unwrap();
@@ -2533,6 +2548,9 @@ fn project_name_threads_mine_table_row_to_task_row_via_init_mine() {
             name: "Task A".into(),
             due_on: None,
             project_name: Some("My Project".into()),
+            estimate: None,
+            logged_week: None,
+            logged_total: None,
         },
         MineTableRow {
             instance: "inst".into(),
@@ -2542,6 +2560,9 @@ fn project_name_threads_mine_table_row_to_task_row_via_init_mine() {
             name: "Task B".into(),
             due_on: None,
             project_name: None,
+            estimate: None,
+            logged_week: None,
+            logged_total: None,
         },
     ];
     let (model, _) = init_mine(empty_header(), Some(rows));
@@ -2572,6 +2593,9 @@ fn mine_table_row_serde_round_trip_preserves_project_name() {
         name: "Task".into(),
         due_on: None,
         project_name: Some("Acme Corp".into()),
+        estimate: None,
+        logged_week: None,
+        logged_total: None,
     };
     let json = serde_json::to_string(&row).unwrap();
     let decoded: MineTableRow = serde_json::from_str(&json).unwrap();
@@ -8089,6 +8113,9 @@ fn report_pointer_tasks_model() -> Model {
             project_id: 1,
             due_on: None,
             project_name: None,
+            estimate: None,
+            logged_week: None,
+            logged_total: None,
         }],
         selected: 0,
         loading: false,
@@ -8153,4 +8180,86 @@ fn report_pointer_click_opens_the_row_again_after_the_modal_closes() {
         "{:?}",
         m.top()
     );
+}
+
+fn mine_snapshot_row(
+    task_id: i64,
+    estimate: Option<f64>,
+    logged_week: Option<f64>,
+    logged_total: Option<f64>,
+) -> MineTableRow {
+    MineTableRow {
+        instance: "inst".into(),
+        project_id: 1,
+        task_number: task_id,
+        task_id,
+        name: format!("Task {task_id}"),
+        due_on: None,
+        project_name: None,
+        estimate,
+        logged_week,
+        logged_total,
+    }
+}
+
+#[test]
+fn mine_snapshot_written_without_hour_fields_loads_with_hours_unknown() {
+    let json = r#"[{"instance":"inst","project_id":1,"task_number":1,"task_id":1,"name":"Task","due_on":"2026-07-15"}]"#;
+    let rows: Vec<MineTableRow> = serde_json::from_str(json).unwrap();
+    assert_eq!(rows[0].estimate, None);
+    assert_eq!(rows[0].logged_week, None);
+    assert_eq!(rows[0].logged_total, None);
+}
+
+#[test]
+fn mine_snapshot_round_trips_the_hours() {
+    let rows = vec![
+        mine_snapshot_row(1, Some(4.0), Some(1.5), Some(7.25)),
+        mine_snapshot_row(2, None, Some(0.0), None),
+    ];
+    let json = serde_json::to_string(&rows).unwrap();
+    let decoded: Vec<MineTableRow> = serde_json::from_str(&json).unwrap();
+    assert_eq!(decoded[0].estimate, Some(4.0));
+    assert_eq!(decoded[0].logged_week, Some(1.5));
+    assert_eq!(decoded[0].logged_total, Some(7.25));
+    assert_eq!(decoded[1].estimate, None);
+    assert_eq!(decoded[1].logged_week, Some(0.0));
+    assert_eq!(decoded[1].logged_total, None);
+}
+
+#[test]
+fn mine_snapshot_task_rows_ignore_unknown_hour_fields_of_older_readers() {
+    let json = r#"{"task_id":1,"task_number":1,"name":"T","instance":"i","project_id":1}"#;
+    let row: TaskRow = serde_json::from_str(json).unwrap();
+    assert_eq!(row.estimate, None);
+    assert_eq!(row.logged_week, None);
+    assert_eq!(row.logged_total, None);
+}
+
+#[test]
+fn mine_snapshot_cached_rows_paint_first_and_revalidated_rows_replace_their_hours() {
+    use crate::tui::model::init_mine;
+    let seed = vec![mine_snapshot_row(1, None, None, None)];
+    let (model, _) = init_mine(empty_header(), Some(seed));
+    match model.top() {
+        Some(Screen::Tasks { tasks, .. }) => {
+            assert_eq!(tasks[0].logged_total, None);
+        }
+        _ => panic!("expected Tasks screen"),
+    }
+    let (updated, _) = update(
+        model,
+        Msg::LoadedMineTasks {
+            rows: vec![mine_snapshot_row(1, Some(4.0), Some(1.5), Some(7.25))],
+            loaded_at: "2026-06-26T12:00:00Z".to_string(),
+        },
+    );
+    match updated.top() {
+        Some(Screen::Tasks { tasks, .. }) => {
+            assert_eq!(tasks[0].estimate, Some(4.0));
+            assert_eq!(tasks[0].logged_week, Some(1.5));
+            assert_eq!(tasks[0].logged_total, Some(7.25));
+        }
+        _ => panic!("expected Tasks screen"),
+    }
 }

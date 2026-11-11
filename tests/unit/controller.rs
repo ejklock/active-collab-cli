@@ -215,6 +215,7 @@ fn build_groups_uses_numeric_fallback_for_unknown_project() {
         project_id: Some(999),
         due_on: None,
         instance_name: "inst".into(),
+        estimate: None,
     };
     let groups = build_groups(vec![(task, "inst".into())], &HashMap::new());
     assert_eq!(groups.len(), 1);
@@ -233,6 +234,7 @@ fn build_groups_same_project_id_on_two_instances_produces_two_groups() {
         project_id: Some(100),
         due_on: None,
         instance_name: "alpha".into(),
+        estimate: None,
     };
     let task_b = MineTask {
         id: 20,
@@ -243,6 +245,7 @@ fn build_groups_same_project_id_on_two_instances_produces_two_groups() {
         project_id: Some(100),
         due_on: None,
         instance_name: "beta".into(),
+        estimate: None,
     };
     let mut names: HashMap<(String, i64), String> = HashMap::new();
     names.insert(("alpha".to_string(), 100i64), "Shared Project".to_string());
@@ -288,6 +291,7 @@ fn build_groups_instance_field_matches_task_instance() {
         project_id: Some(42),
         due_on: None,
         instance_name: "prod".into(),
+        estimate: None,
     };
     let mut names: HashMap<(String, i64), String> = HashMap::new();
     names.insert(
@@ -313,6 +317,7 @@ fn build_groups_sorted_by_project_name_then_instance() {
         project_id: Some(1),
         due_on: None,
         instance_name: "z-inst".into(),
+        estimate: None,
     };
     let task_b_a = MineTask {
         id: 2,
@@ -323,6 +328,7 @@ fn build_groups_sorted_by_project_name_then_instance() {
         project_id: Some(1),
         due_on: None,
         instance_name: "a-inst".into(),
+        estimate: None,
     };
     let task_a = MineTask {
         id: 3,
@@ -333,6 +339,7 @@ fn build_groups_sorted_by_project_name_then_instance() {
         project_id: Some(2),
         due_on: None,
         instance_name: "m-inst".into(),
+        estimate: None,
     };
     let mut names: HashMap<(String, i64), String> = HashMap::new();
     names.insert(("z-inst".to_string(), 1i64), "Beta Project".to_string());
@@ -1944,6 +1951,9 @@ fn make_mine_row(instance: &str, project_id: i64, task_id: i64) -> crate::render
         name: format!("Task {task_id}"),
         due_on: None,
         project_name: None,
+        estimate: None,
+        logged_week: None,
+        logged_total: None,
     }
 }
 

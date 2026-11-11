@@ -695,6 +695,9 @@ fn render_mine_table_row_left_aligns_integers() {
         name: "A task".to_owned(),
         due_on: None,
         project_name: None,
+        estimate: None,
+        logged_week: None,
+        logged_total: None,
     }];
     let s = render_mine_table(&rows);
     let data_line = s.lines().nth(2).unwrap();
@@ -721,6 +724,9 @@ fn render_mine_table_multi_row_body_order_preserved() {
             name: "First".to_owned(),
             due_on: None,
             project_name: None,
+            estimate: None,
+            logged_week: None,
+            logged_total: None,
         },
         MineTableRow {
             instance: "beta".to_owned(),
@@ -730,6 +736,9 @@ fn render_mine_table_multi_row_body_order_preserved() {
             name: "Second".to_owned(),
             due_on: None,
             project_name: None,
+            estimate: None,
+            logged_week: None,
+            logged_total: None,
         },
     ];
     let s = render_mine_table(&rows);
@@ -3145,10 +3154,101 @@ fn render_mine_table_raw_esc_in_row_name_produces_no_raw_esc_byte() {
         name: "evil\u{001b}[2J".to_owned(),
         due_on: None,
         project_name: None,
+        estimate: None,
+        logged_week: None,
+        logged_total: None,
     }];
     let s = render_mine_table(&rows);
     assert!(
         !s.contains('\u{001b}'),
         "raw ESC byte reached the mine table via row name: {s:?}"
+    );
+}
+
+fn mine_hours_row(
+    estimate: Option<f64>,
+    logged_week: Option<f64>,
+    logged_total: Option<f64>,
+) -> MineTableRow {
+    MineTableRow {
+        instance: "inst".to_owned(),
+        project_id: 5,
+        task_number: 7,
+        task_id: 100,
+        name: "Hours task".to_owned(),
+        due_on: None,
+        project_name: None,
+        estimate,
+        logged_week,
+        logged_total,
+    }
+}
+
+fn mine_hours_cells(table: &str) -> Vec<String> {
+    let line = table.lines().nth(2).unwrap();
+    let before_name = line.split("Hours task").next().unwrap();
+    before_name
+        .split_whitespace()
+        .skip(4)
+        .map(str::to_owned)
+        .collect()
+}
+
+static MINE_HOURS_LANG: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[test]
+fn mine_hours_display_table_shows_estimate_week_and_total() {
+    let _guard = MINE_HOURS_LANG.lock().unwrap();
+    crate::i18n::set_language("en");
+    let table = render_mine_table(&[mine_hours_row(Some(4.0), Some(1.5), Some(7.25))]);
+    let header = table.lines().next().unwrap();
+    assert!(
+        header.contains("EST") && header.contains("WEEK") && header.contains("TOTAL"),
+        "header: {header}"
+    );
+    assert_eq!(mine_hours_cells(&table), ["4", "1.5", "7.25"]);
+}
+
+#[test]
+fn mine_hours_display_table_marks_unknown_and_not_estimated_with_a_dash() {
+    let _guard = MINE_HOURS_LANG.lock().unwrap();
+    crate::i18n::set_language("en");
+    let table = render_mine_table(&[mine_hours_row(None, None, None)]);
+    assert_eq!(mine_hours_cells(&table), ["–", "–", "–"]);
+    let table = render_mine_table(&[mine_hours_row(Some(2.0), Some(0.0), None)]);
+    assert_eq!(mine_hours_cells(&table), ["2", "0", "–"]);
+}
+
+#[test]
+fn mine_hours_display_table_separator_covers_the_header_in_both_languages() {
+    let _guard = MINE_HOURS_LANG.lock().unwrap();
+    for lang in ["en", "pt_BR"] {
+        crate::i18n::set_language(lang);
+        let table = render_mine_table(&[mine_hours_row(Some(4.0), Some(1.5), Some(7.25))]);
+        crate::i18n::set_language("en");
+        let mut lines = table.lines();
+        let header = lines.next().unwrap();
+        let separator = lines.next().unwrap();
+        assert!(
+            separator.chars().all(|c| c == '-'),
+            "{lang}: separator: {separator}"
+        );
+        assert!(
+            separator.chars().count() >= header.trim_end().chars().count(),
+            "{lang}: separator narrower than header:\n{header}\n{separator}"
+        );
+    }
+}
+
+#[test]
+fn mine_hours_display_table_header_is_translated_in_pt_br() {
+    let _guard = MINE_HOURS_LANG.lock().unwrap();
+    crate::i18n::set_language("pt_BR");
+    let table = render_mine_table(&[mine_hours_row(Some(4.0), Some(1.5), Some(7.25))]);
+    crate::i18n::set_language("en");
+    let header = table.lines().next().unwrap();
+    assert!(
+        header.contains("EST") && header.contains("SEMANA") && header.contains("TOTAL"),
+        "header: {header}"
     );
 }

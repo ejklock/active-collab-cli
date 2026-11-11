@@ -91,6 +91,9 @@ pub struct MineTask {
     /// Normalized to `YYYY-MM-DD`; `None` when absent, null, or unparseable.
     #[serde(default)]
     pub due_on: Option<String>,
+    /// Estimated hours; `None` when the task has no estimate (absent, null or 0).
+    #[serde(default)]
+    pub estimate: Option<f64>,
     /// Set by the client from the instance name, not from the API payload.
     #[serde(skip)]
     pub instance_name: String,
@@ -127,6 +130,10 @@ impl MineTask {
             due_on: obj
                 .and_then(|o| o.get("due_on"))
                 .and_then(normalize_due_to_ymd),
+            estimate: obj
+                .and_then(|o| o.get("estimate"))
+                .and_then(|v| v.as_f64())
+                .filter(|hours| *hours > 0.0),
             instance_name: instance_name.to_string(),
         }
     }

@@ -65,8 +65,14 @@ ac get 665/75159 --json        # → the full task object for that ref
 
 ```json
 {"count":2,"tasks":[
-  {"ref":"665/75159","instance":"work","project_id":665,"task_number":75159,"task_id":75159,"name":"..."}]}
+  {"ref":"665/75159","instance":"work","project_id":665,"task_number":75159,"task_id":75159,"name":"...",
+   "due_on":"2026-11-13","estimate_hours":"4","logged_week_hours":"3.5","logged_total_hours":"7.25"}]}
 ```
+
+- `due_on` is `YYYY-MM-DD` or `null`.
+- `estimate_hours`, `logged_week_hours` (your hours on the task this Monday–Sunday,
+  rounded to 2 decimals) and `logged_total_hours` (the task's total logged hours) are
+  strings formatted like `get`'s hours; each is `null` when unknown or not estimated.
 
 ### `browse` — projects with their open tasks
 
