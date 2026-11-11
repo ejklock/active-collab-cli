@@ -1,7 +1,7 @@
 ---
 type: Issue
 title: Move a task between task lists from CLI, TUI and MCP
-description: ac task set --list, a TUI picker on key l and the set_task MCP tool move a task to another task list of its project.
+description: ac task set --list, a TUI picker on key l and the MCP ac_write set_task operation move a task to another task list of its project.
 status: open
 labels: [cli, tui, agent, write, slice]
 blocked_by: [0073]
@@ -22,7 +22,7 @@ Included:
 - `update_task` gains `task_list_id`.
 - `ac task set <ref> --list <id|name>`, the name matched case-insensitively against the project's task lists; combinable with the existing fields.
 - A TUI key, `l` (free today), in the task detail opens a searchable list picker like the assignee picker (issue 0070), marking the current list; confirming moves the task and refreshes from the server.
-- `set_task` MCP tool gains `list`.
+- The MCP `ac_write` `set_task` operation gains `list`.
 - `--json` and the human output report the new list; the `active-collab` skill documents `--list`.
 - The constitution already carries Amendment 2 for the widened field set; the change keeps it accurate.
 
