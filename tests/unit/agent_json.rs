@@ -322,6 +322,9 @@ fn sample_mine_rows() -> Vec<crate::render::MineTableRow> {
             name: "Fix the widget".to_owned(),
             due_on: None,
             project_name: None,
+            estimate: None,
+            logged_week: None,
+            logged_total: None,
         },
         crate::render::MineTableRow {
             instance: "personal".to_owned(),
@@ -331,6 +334,9 @@ fn sample_mine_rows() -> Vec<crate::render::MineTableRow> {
             name: "Another task".to_owned(),
             due_on: None,
             project_name: None,
+            estimate: None,
+            logged_week: None,
+            logged_total: None,
         },
     ]
 }
@@ -433,6 +439,9 @@ fn sample_task_row(
         project_id,
         due_on: None,
         project_name: None,
+        estimate: None,
+        logged_week: None,
+        logged_total: None,
     }
 }
 
@@ -734,4 +743,62 @@ fn time_result_is_single_minified_line() {
         !line.contains("  "),
         "time_result must not contain 2-space indent: {line:?}"
     );
+}
+
+fn mine_row_with_hours(
+    estimate: Option<f64>,
+    logged_week: Option<f64>,
+    logged_total: Option<f64>,
+    due_on: Option<&str>,
+) -> crate::render::MineTableRow {
+    crate::render::MineTableRow {
+        instance: "personal".to_owned(),
+        project_id: 5,
+        task_number: 1,
+        task_id: 10,
+        name: "A".to_owned(),
+        due_on: due_on.map(str::to_owned),
+        project_name: None,
+        estimate,
+        logged_week,
+        logged_total,
+    }
+}
+
+#[test]
+fn mine_json_hours_use_the_get_formatting() {
+    let obj = mine_object(&[mine_row_with_hours(
+        Some(4.0),
+        Some(1.5),
+        Some(7.25),
+        Some("2026-11-20"),
+    )]);
+    let task = &obj["tasks"][0];
+    assert_eq!(task["estimate_hours"], "4");
+    assert_eq!(task["logged_week_hours"], "1.5");
+    assert_eq!(task["logged_total_hours"], "7.25");
+    assert_eq!(task["due_on"], "2026-11-20");
+}
+
+#[test]
+fn mine_json_hours_are_null_when_unknown_and_zero_stays_zero() {
+    let obj = mine_object(&[mine_row_with_hours(None, Some(0.0), None, None)]);
+    let task = &obj["tasks"][0];
+    assert!(task["estimate_hours"].is_null());
+    assert_eq!(task["logged_week_hours"], "0");
+    assert!(task["logged_total_hours"].is_null());
+    assert!(task["due_on"].is_null());
+}
+
+#[test]
+fn mine_json_keeps_the_existing_task_keys() {
+    let obj = mine_object(&[mine_row_with_hours(None, None, None, None)]);
+    let task = &obj["tasks"][0];
+    assert_eq!(task["ref"], "5/10");
+    assert_eq!(task["instance"], "personal");
+    assert_eq!(task["project_id"], 5);
+    assert_eq!(task["task_number"], 1);
+    assert_eq!(task["task_id"], 10);
+    assert_eq!(task["name"], "A");
+    assert_eq!(task.as_object().unwrap().len(), 10);
 }

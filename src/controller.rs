@@ -194,6 +194,9 @@ fn build_groups(
             project_id: pid,
             due_on: None,
             project_name: None,
+            estimate: None,
+            logged_week: None,
+            logged_total: None,
         });
     }
 

@@ -173,7 +173,7 @@ fn render_cards(
 
 /// Render a single task card into `card_rect`.
 ///
-/// Builds top-border, content (line 1), due-date (line 2), and bottom-border
+/// Builds top-border, content (line 1), hours (line 2), due-date (line 3), and bottom-border
 /// lines as a `Text` block. The selected card carries the selection highlight
 /// base style on every row; the due-date fg color (red/yellow) is layered over
 /// the base so urgency color remains visible even on the selection background.
@@ -211,6 +211,11 @@ fn render_single_card(
         let content_text = format!("{}{}{}{}{}", BOX_V, hpad, fitted, hpad, BOX_V);
         lines.push(Line::styled(content_text, base_style));
     }
+    let hours_text = fit_to_card_width(&task_layout::hours_line(task), card_inner_w);
+    lines.push(Line::styled(
+        format!("{}{}{}{}{}", BOX_V, hpad, hours_text, hpad, BOX_V),
+        base_style,
+    ));
     lines.push(due_line(task, card_inner_w, &hpad, base_style, today));
     lines.push(Line::styled(bot_border, base_style));
 

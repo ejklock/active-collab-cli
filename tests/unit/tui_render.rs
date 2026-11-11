@@ -39,6 +39,9 @@ fn make_groups(names: &[&str]) -> Vec<ProjectGroup> {
                 project_id: i as i64,
                 due_on: None,
                 project_name: None,
+                estimate: None,
+                logged_week: None,
+                logged_total: None,
             }],
         })
         .collect()
@@ -60,6 +63,9 @@ fn make_groups_with_instance(names_and_instances: &[(&str, &str)]) -> Vec<Projec
                 project_id: i as i64,
                 due_on: None,
                 project_name: None,
+                estimate: None,
+                logged_week: None,
+                logged_total: None,
             }],
         })
         .collect()
@@ -77,6 +83,9 @@ fn make_tasks(names: &[&str]) -> Vec<TaskRow> {
             project_id: 0,
             due_on: None,
             project_name: None,
+            estimate: None,
+            logged_week: None,
+            logged_total: None,
         })
         .collect()
 }
@@ -1138,7 +1147,7 @@ fn draw_tasks_wide_terminal_short_name_no_ellipsis() {
 // top border + name line + due line + bottom border.
 // Derived from the REAL buffer: locate the first card, measure y_end - y_start.
 #[test]
-fn draw_tasks_single_line_card_height_is_four_rows() {
+fn draw_tasks_single_line_card_height_is_five_rows() {
     let tasks = make_tasks(&["Short"]);
     let backend = TestBackend::new(80, 20);
     let mut terminal = Terminal::new(backend).unwrap();
@@ -1167,8 +1176,8 @@ fn draw_tasks_single_line_card_height_is_four_rows() {
         .expect("click target for card 0 must be recorded");
     let height = card.y_end - card.y_start;
     assert_eq!(
-        height, 4,
-        "single-line card must be exactly 4 rows tall (D2c +1 row for due line): height={height}"
+        height, 5,
+        "single-line card must be exactly 5 rows tall (hours row and due row): height={height}"
     );
 }
 
@@ -1187,6 +1196,9 @@ fn draw_tasks_due_line_shows_relative_due_text() {
         project_id: 0,
         due_on: Some("2025-06-17".into()),
         project_name: None,
+        estimate: None,
+        logged_week: None,
+        logged_total: None,
     };
     let buf = render_tasks_to_buf_with_today(&[task], 0, 80, 10, today_fixed());
     set_language("en");
@@ -1212,6 +1224,9 @@ fn draw_tasks_overdue_task_due_cells_carry_red_fg() {
         project_id: 0,
         due_on: Some("2025-06-10".into()), // 5 days before today_fixed()
         project_name: None,
+        estimate: None,
+        logged_week: None,
+        logged_total: None,
     };
     let backend = TestBackend::new(80, 10);
     let mut terminal = Terminal::new(backend).unwrap();
@@ -1262,6 +1277,9 @@ fn draw_tasks_near_due_task_due_cells_carry_yellow_fg() {
         project_id: 0,
         due_on: Some("2025-06-16".into()), // 1 day after today_fixed() => Near
         project_name: None,
+        estimate: None,
+        logged_week: None,
+        logged_total: None,
     };
     let backend = TestBackend::new(80, 10);
     let mut terminal = Terminal::new(backend).unwrap();
@@ -1312,6 +1330,9 @@ fn draw_tasks_no_due_shows_sem_data_with_default_style() {
         project_id: 0,
         due_on: None,
         project_name: None,
+        estimate: None,
+        logged_week: None,
+        logged_total: None,
     };
     let backend = TestBackend::new(80, 10);
     let mut terminal = Terminal::new(backend).unwrap();
@@ -1368,6 +1389,9 @@ fn draw_tasks_selected_card_due_line_keeps_color_on_selection_bg() {
         project_id: 0,
         due_on: Some("2025-06-10".into()), // overdue: 5 days before today_fixed()
         project_name: None,
+        estimate: None,
+        logged_week: None,
+        logged_total: None,
     };
     let backend = TestBackend::new(80, 20);
     let mut terminal = Terminal::new(backend).unwrap();
@@ -1435,6 +1459,9 @@ fn draw_tasks_due_line_with_project_name_shows_due_separator_project() {
         project_id: 0,
         due_on: Some("2025-06-10".into()), // 5 days before today_fixed() => overdue
         project_name: Some("My Project".into()),
+        estimate: None,
+        logged_week: None,
+        logged_total: None,
     };
     let backend = TestBackend::new(80, 10);
     let mut terminal = Terminal::new(backend).unwrap();
@@ -1494,6 +1521,9 @@ fn draw_tasks_due_line_project_portion_has_default_style_not_due_color() {
         project_id: 0,
         due_on: Some("2025-06-10".into()), // overdue => red fg on due cells
         project_name: Some("Acme Corp".into()),
+        estimate: None,
+        logged_week: None,
+        logged_total: None,
     };
     let backend = TestBackend::new(80, 10);
     let mut terminal = Terminal::new(backend).unwrap();
@@ -1574,6 +1604,9 @@ fn draw_tasks_due_line_without_project_name_shows_no_separator() {
         project_id: 0,
         due_on: Some("2025-06-10".into()), // overdue
         project_name: None,
+        estimate: None,
+        logged_week: None,
+        logged_total: None,
     };
     let backend = TestBackend::new(80, 10);
     let mut terminal = Terminal::new(backend).unwrap();
@@ -2717,6 +2750,9 @@ mod v2b_click_targets {
             project_id: 0,
             due_on: None,
             project_name: None,
+            estimate: None,
+            logged_week: None,
+            logged_total: None,
         }
     }
 
@@ -3077,6 +3113,9 @@ mod footer_refresh_hint {
                         project_id: 0,
                         due_on: None,
                         project_name: None,
+                        estimate: None,
+                        logged_week: None,
+                        logged_total: None,
                     }],
                 }],
                 selected: 0,
@@ -10188,4 +10227,100 @@ mod report_render {
         assert!(open.contains("Hours report"), "{open}");
         assert_eq!(open.matches(MODAL_HINT).count(), 1, "{open}");
     }
+}
+
+fn mine_hours_task(
+    estimate: Option<f64>,
+    logged_week: Option<f64>,
+    logged_total: Option<f64>,
+) -> TaskRow {
+    TaskRow {
+        task_id: 1,
+        task_number: 1,
+        name: "Hours Task".into(),
+        instance: "inst".into(),
+        project_id: 0,
+        due_on: Some("2025-06-17".into()),
+        project_name: None,
+        estimate,
+        logged_week,
+        logged_total,
+    }
+}
+
+#[test]
+fn mine_hours_display_card_shows_estimate_week_and_total() {
+    let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+    set_language("en");
+    let task = mine_hours_task(Some(4.0), Some(1.5), Some(7.25));
+    let content = buf_to_string(&render_tasks_to_buf(&[task], 0, 80, 10));
+    assert!(content.contains("est 4"), "{content}");
+    assert!(content.contains("week 1.5"), "{content}");
+    assert!(content.contains("total 7.25"), "{content}");
+}
+
+#[test]
+fn mine_hours_display_card_marks_unknown_values_with_a_dash() {
+    let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+    set_language("en");
+    let task = mine_hours_task(None, None, None);
+    let content = buf_to_string(&render_tasks_to_buf(&[task], 0, 80, 10));
+    assert!(content.contains("est –"), "{content}");
+    assert!(content.contains("week –"), "{content}");
+    assert!(content.contains("total –"), "{content}");
+}
+
+#[test]
+fn mine_hours_display_card_labels_are_translated_in_pt_br() {
+    let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+    set_language("pt_BR");
+    let task = mine_hours_task(Some(4.0), Some(1.5), Some(7.25));
+    let content = buf_to_string(&render_tasks_to_buf(&[task], 0, 80, 10));
+    set_language("en");
+    assert!(content.contains("est 4"), "{content}");
+    assert!(content.contains("semana 1.5"), "{content}");
+    assert!(content.contains("total 7.25"), "{content}");
+}
+
+#[test]
+fn mine_hours_display_card_keeps_name_and_due_text_at_40_and_120_columns() {
+    let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+    set_language("en");
+    let (due_text, _) = crate::tui::model::relative_due(Some("2025-06-17"), today_fixed());
+    for width in [40u16, 120] {
+        let task = mine_hours_task(Some(4.0), Some(1.5), Some(7.25));
+        let content = buf_to_string(&render_tasks_to_buf(&[task], 0, width, 10));
+        assert!(
+            content.contains("#1 Hours Task"),
+            "width {width}: {content}"
+        );
+        assert!(content.contains(&due_text), "width {width}: {content}");
+    }
+}
+
+#[test]
+fn mine_hours_display_card_is_five_rows_tall() {
+    let task = mine_hours_task(Some(4.0), None, None);
+    let backend = TestBackend::new(80, 10);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut targets: Vec<crate::tui::model::ClickTarget> = vec![];
+    terminal
+        .draw(|frame| {
+            draw_tasks(
+                frame,
+                Rect::new(0, 0, 80, 10),
+                "Project A",
+                &[task],
+                0,
+                false,
+                false,
+                today_fixed(),
+                &mut targets,
+                &[],
+                &[],
+                usize::MAX,
+            );
+        })
+        .unwrap();
+    assert_eq!(targets[0].y_end - targets[0].y_start, 5);
 }

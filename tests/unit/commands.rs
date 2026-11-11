@@ -5,7 +5,7 @@ use crate::render;
 use crate::store::Store;
 use std::sync::Mutex;
 use tempfile::TempDir;
-use wiremock::matchers::{body_json, header, method, path};
+use wiremock::matchers::{body_json, header, method, path, path_regex};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 fn mine_outcome_code(outcome: MineOutcome) -> i32 {
@@ -2297,6 +2297,9 @@ async fn mine_core_non_tty_writes_render_mine_table_exactly_and_returns_done() {
         name: "Table row task".to_owned(),
         due_on: None,
         project_name: None,
+        estimate: None,
+        logged_week: None,
+        logged_total: None,
     }]);
     let s = output_str(&out);
     assert!(
@@ -5699,4 +5702,413 @@ fn hours_report_period_week_runs_monday_to_sunday() {
             "today {today:?}"
         );
     }
+}
+
+fn mine_hours_instance(server: &MockServer) -> Instance {
+    Instance {
+        name: "hours".to_owned(),
+        base_url: server.uri(),
+        email: "x@x.com".to_owned(),
+        token: "tok".to_owned(),
+        user_id: Some(42),
+    }
+}
+
+async fn mount_mine_tasks(server: &MockServer, tasks: serde_json::Value) {
+    Mock::given(method("GET"))
+        .and(path("/api/v1/users/42/tasks"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(tasks_response(tasks)))
+        .mount(server)
+        .await;
+}
+
+async fn mount_mine_records(server: &MockServer, response: ResponseTemplate) {
+    Mock::given(method("GET"))
+        .and(path("/api/v1/users/42/time-records/filtered-by-date"))
+        .respond_with(response)
+        .mount(server)
+        .await;
+}
+
+async fn mount_mine_total(
+    server: &MockServer,
+    project: i64,
+    task: i64,
+    response: ResponseTemplate,
+) {
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v1/projects/{project}/tasks/{task}")))
+        .respond_with(response)
+        .mount(server)
+        .await;
+}
+
+async fn mine_json_run(server: &MockServer) -> (i32, serde_json::Value) {
+    let (_dir, store) = make_store();
+    InstanceRepository::new(store.conn())
+        .save(&mine_hours_instance(server))
+        .unwrap();
+    let repo = InstanceRepository::new(store.conn());
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let outcome = mine_core(&repo, &make_http(), None, true, false, &mut out, &mut err).await;
+    let code = mine_outcome_code(outcome);
+    let value = serde_json::from_str(output_str(&out).trim()).unwrap_or(serde_json::Value::Null);
+    (code, value)
+}
+
+fn record(id: i64, value: f64, parent_type: &str, parent_id: i64) -> serde_json::Value {
+    serde_json::json!({
+        "id": id, "value": value, "record_date": 1_762_819_200,
+        "summary": "", "parent_type": parent_type, "parent_id": parent_id
+    })
+}
+
+fn two_open_tasks() -> serde_json::Value {
+    serde_json::json!([
+        { "id": 10, "task_number": 1, "name": "A", "project_id": 5, "estimate": 4.0 },
+        { "id": 11, "task_number": 2, "name": "B", "project_id": 5, "estimate": 0.0 }
+    ])
+}
+
+#[tokio::test]
+async fn mine_week_hours_sums_the_users_task_records_of_the_task() {
+    let server = MockServer::start().await;
+    mount_mine_tasks(&server, two_open_tasks()).await;
+    mount_mine_records(
+        &server,
+        ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "time_records": [
+                record(1, 1.5, "Task", 10),
+                record(2, 2.0, "Task", 10),
+                record(3, 9.0, "Task", 99),
+                record(4, 8.0, "Project", 11)
+            ],
+            "related": []
+        })),
+    )
+    .await;
+    let (code, v) = mine_json_run(&server).await;
+    assert_eq!(code, 0);
+    assert_eq!(v["tasks"][0]["logged_week_hours"], "3.5");
+    assert_eq!(v["tasks"][1]["logged_week_hours"], "0");
+}
+
+#[tokio::test]
+async fn mine_week_hours_is_unknown_when_the_records_request_fails() {
+    for status in [500u16, 401] {
+        let server = MockServer::start().await;
+        mount_mine_tasks(&server, two_open_tasks()).await;
+        mount_mine_records(&server, ResponseTemplate::new(status)).await;
+        let (code, v) = mine_json_run(&server).await;
+        assert_eq!(code, 0, "status {status}");
+        assert_eq!(v["count"], 2, "status {status}: list must survive");
+        for task in v["tasks"].as_array().unwrap() {
+            assert!(task["logged_week_hours"].is_null(), "status {status}");
+        }
+    }
+}
+
+#[tokio::test]
+async fn mine_week_hours_requests_this_weeks_range_once_per_instance() {
+    let (from, to) = resolve_period(PeriodPreset::Week, chrono::Local::now().date_naive());
+    let server = MockServer::start().await;
+    mount_mine_tasks(&server, two_open_tasks()).await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/users/42/time-records/filtered-by-date"))
+        .and(wiremock::matchers::query_param(
+            "from",
+            from.format("%Y-%m-%d").to_string(),
+        ))
+        .and(wiremock::matchers::query_param(
+            "to",
+            to.format("%Y-%m-%d").to_string(),
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "time_records": [record(1, 2.5, "Task", 10)],
+            "related": []
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let (_, v) = mine_json_run(&server).await;
+    assert_eq!(v["tasks"][0]["logged_week_hours"], "2.5");
+    server.verify().await;
+}
+
+#[tokio::test]
+async fn mine_total_hours_is_the_tracked_time_of_the_task_payload() {
+    let server = MockServer::start().await;
+    mount_mine_tasks(&server, two_open_tasks()).await;
+    mount_mine_total(
+        &server,
+        5,
+        10,
+        ResponseTemplate::new(200).set_body_json(serde_json::json!({ "tracked_time": 7.25 })),
+    )
+    .await;
+    mount_mine_total(
+        &server,
+        5,
+        11,
+        ResponseTemplate::new(200).set_body_json(serde_json::json!({ "tracked_time": 0 })),
+    )
+    .await;
+    let (_, v) = mine_json_run(&server).await;
+    assert_eq!(v["tasks"][0]["logged_total_hours"], "7.25");
+    assert_eq!(v["tasks"][1]["logged_total_hours"], "0");
+}
+
+#[tokio::test]
+async fn mine_total_hours_is_unknown_for_a_failing_task_and_filled_for_the_rest() {
+    for status in [500u16, 404, 401] {
+        let server = MockServer::start().await;
+        mount_mine_tasks(&server, two_open_tasks()).await;
+        mount_mine_total(&server, 5, 10, ResponseTemplate::new(status)).await;
+        mount_mine_total(
+            &server,
+            5,
+            11,
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({ "tracked_time": 3 })),
+        )
+        .await;
+        let (code, v) = mine_json_run(&server).await;
+        assert_eq!(code, 0, "status {status}");
+        assert_eq!(v["count"], 2, "status {status}: list must survive");
+        assert!(
+            v["tasks"][0]["logged_total_hours"].is_null(),
+            "status {status}"
+        );
+        assert_eq!(v["tasks"][1]["logged_total_hours"], "3", "status {status}");
+    }
+}
+
+#[tokio::test]
+async fn mine_total_hours_is_unknown_without_tracked_time_or_with_an_unreadable_payload() {
+    let server = MockServer::start().await;
+    mount_mine_tasks(&server, two_open_tasks()).await;
+    mount_mine_total(
+        &server,
+        5,
+        10,
+        ResponseTemplate::new(200).set_body_json(serde_json::json!({ "id": 10 })),
+    )
+    .await;
+    mount_mine_total(
+        &server,
+        5,
+        11,
+        ResponseTemplate::new(200).set_body_string("not json"),
+    )
+    .await;
+    let (_, v) = mine_json_run(&server).await;
+    assert_eq!(v["count"], 2);
+    assert!(v["tasks"][0]["logged_total_hours"].is_null());
+    assert!(v["tasks"][1]["logged_total_hours"].is_null());
+}
+
+#[tokio::test]
+async fn mine_json_keeps_existing_keys_and_adds_the_four_hour_keys() {
+    let server = MockServer::start().await;
+    mount_mine_tasks(
+        &server,
+        serde_json::json!([
+            { "id": 10, "task_number": 1, "name": "A", "project_id": 5, "estimate": 4.0, "due_on": 1_762_819_200 },
+            { "id": 11, "task_number": 2, "name": "B", "project_id": 5, "estimate": 0.0 },
+            { "id": 12, "task_number": 3, "name": "C", "project_id": 5 }
+        ]),
+    )
+    .await;
+    mount_mine_records(
+        &server,
+        ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "time_records": [record(1, 1.5, "Task", 10)], "related": []
+        })),
+    )
+    .await;
+    mount_mine_total(
+        &server,
+        5,
+        10,
+        ResponseTemplate::new(200).set_body_json(serde_json::json!({ "tracked_time": 7.25 })),
+    )
+    .await;
+    let (code, v) = mine_json_run(&server).await;
+    assert_eq!(code, 0);
+    let first = v["tasks"][0].as_object().unwrap();
+    let mut keys: Vec<&str> = first.keys().map(String::as_str).collect();
+    keys.sort_unstable();
+    assert_eq!(
+        keys,
+        [
+            "due_on",
+            "estimate_hours",
+            "instance",
+            "logged_total_hours",
+            "logged_week_hours",
+            "name",
+            "project_id",
+            "ref",
+            "task_id",
+            "task_number"
+        ]
+    );
+    assert_eq!(first["estimate_hours"], "4");
+    assert_eq!(first["due_on"], "2025-11-11");
+    assert_eq!(first["logged_week_hours"], "1.5");
+    assert_eq!(first["logged_total_hours"], "7.25");
+    for idx in [1, 2] {
+        assert!(v["tasks"][idx]["estimate_hours"].is_null(), "task {idx}");
+    }
+    assert!(v["tasks"][1]["due_on"].is_null());
+}
+
+fn mine_date(y: i32, m: u32, d: u32) -> chrono::NaiveDate {
+    chrono::NaiveDate::from_ymd_opt(y, m, d).unwrap()
+}
+
+#[tokio::test]
+async fn mine_week_hours_requests_the_monday_to_sunday_range_of_the_given_day() {
+    let cases = [
+        ((2026, 11, 11), "2026-11-09", "2026-11-15"),
+        ((2026, 11, 15), "2026-11-09", "2026-11-15"),
+        ((2026, 11, 16), "2026-11-16", "2026-11-22"),
+        ((2026, 12, 30), "2026-12-28", "2027-01-03"),
+    ];
+    for ((y, m, d), from, to) in cases {
+        let server = MockServer::start().await;
+        mount_mine_tasks(&server, two_open_tasks()).await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/users/42/time-records/filtered-by-date"))
+            .and(wiremock::matchers::query_param("from", from))
+            .and(wiremock::matchers::query_param("to", to))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "time_records": [record(1, 2.5, "Task", 10)],
+                "related": []
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let rows = super::mine::fetch_mine_rows_checked_on(
+            &[mine_hours_instance(&server)],
+            &make_http(),
+            mine_date(y, m, d),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            rows[0].logged_week,
+            Some(2.5),
+            "range {from}..{to} was not requested for {y}-{m}-{d}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn mine_week_hours_is_zero_without_records_and_unknown_for_an_unreadable_body() {
+    let server = MockServer::start().await;
+    mount_mine_tasks(&server, two_open_tasks()).await;
+    mount_mine_records(
+        &server,
+        ResponseTemplate::new(200)
+            .set_body_json(serde_json::json!({ "time_records": [], "related": [] })),
+    )
+    .await;
+    let (_, v) = mine_json_run(&server).await;
+    assert_eq!(v["tasks"][0]["logged_week_hours"], "0");
+
+    let broken = MockServer::start().await;
+    mount_mine_tasks(&broken, two_open_tasks()).await;
+    mount_mine_records(
+        &broken,
+        ResponseTemplate::new(200).set_body_string("<html>"),
+    )
+    .await;
+    let (code, v) = mine_json_run(&broken).await;
+    assert_eq!(code, 0);
+    assert_eq!(v["count"], 2);
+    assert!(v["tasks"][0]["logged_week_hours"].is_null());
+}
+
+#[tokio::test]
+async fn mine_week_hours_are_rounded_to_two_decimals() {
+    let cases: [(&[f64], &str); 7] = [
+        (&[0.1, 0.2], "0.3"),
+        (&[1.5, 2.0], "3.5"),
+        (&[0.125], "0.13"),
+        (&[0.124], "0.12"),
+        (&[0.004], "0"),
+        (&[7.333], "7.33"),
+        (&[], "0"),
+    ];
+    for (values, want) in cases {
+        let server = MockServer::start().await;
+        mount_mine_tasks(&server, two_open_tasks()).await;
+        let records: Vec<serde_json::Value> = values
+            .iter()
+            .enumerate()
+            .map(|(i, v)| record(i as i64 + 1, *v, "Task", 10))
+            .collect();
+        mount_mine_records(
+            &server,
+            ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({ "time_records": records, "related": [] })),
+        )
+        .await;
+        let (_, v) = mine_json_run(&server).await;
+        assert_eq!(
+            v["tasks"][0]["logged_week_hours"], want,
+            "records {values:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn mine_week_hours_are_unknown_without_a_user_id_and_the_list_is_kept() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path_regex("filtered-by-date"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(0)
+        .mount(&server)
+        .await;
+    let mut inst = mine_hours_instance(&server);
+    inst.user_id = None;
+    let rows = super::mine::fill_task_hours(
+        &inst,
+        &make_http(),
+        vec![crate::models::MineTask::from_api(
+            &serde_json::json!({ "id": 10, "project_id": 5, "estimate": 4.0 }),
+            "hours",
+        )],
+        mine_date(2026, 11, 11),
+    )
+    .await;
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].logged_week, None);
+    server.verify().await;
+}
+
+#[tokio::test]
+async fn mine_total_hours_is_unknown_when_the_server_is_unreachable() {
+    let dead = Instance {
+        name: "dead".to_owned(),
+        base_url: "http://127.0.0.1:1".to_owned(),
+        email: "x@x.com".to_owned(),
+        token: "tok".to_owned(),
+        user_id: Some(42),
+    };
+    let rows = super::mine::fill_task_hours(
+        &dead,
+        &make_http(),
+        vec![crate::models::MineTask::from_api(
+            &serde_json::json!({ "id": 10, "project_id": 5, "estimate": 4.0 }),
+            "dead",
+        )],
+        mine_date(2026, 11, 11),
+    )
+    .await;
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].logged_total, None);
+    assert_eq!(rows[0].logged_week, None);
+    assert_eq!(rows[0].estimate, Some(4.0));
 }

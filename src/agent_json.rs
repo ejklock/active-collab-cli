@@ -241,7 +241,19 @@ fn mine_task_object(row: &crate::render::MineTableRow) -> Value {
         "task_number": row.task_number,
         "task_id": row.task_id,
         "name": row.name,
+        "due_on": row.due_on,
+        "estimate_hours": hours_or_null(row.estimate),
+        "logged_week_hours": hours_or_null(row.logged_week),
+        "logged_total_hours": hours_or_null(row.logged_total),
     })
+}
+
+/// Hours formatted as in the task JSON (`fmt_hours`), or null when unknown.
+fn hours_or_null(hours: Option<f64>) -> Value {
+    match hours {
+        Some(h) => Value::String(fmt_hours(&json!(h))),
+        None => Value::Null,
+    }
 }
 
 #[cfg(test)]

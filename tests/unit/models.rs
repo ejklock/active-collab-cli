@@ -167,3 +167,20 @@ fn mine_task_from_api_due_on_missing_yields_none() {
     let mine = MineTask::from_api(&data, "inst");
     assert_eq!(mine.due_on, None);
 }
+
+#[test]
+fn mine_task_from_api_estimate_is_the_positive_number_or_none() {
+    for (estimate, want) in [
+        (json!(4), Some(4.0)),
+        (json!(2.5), Some(2.5)),
+        (json!(0.0), None),
+        (json!(null), None),
+    ] {
+        let data = json!({ "id": 14, "estimate": estimate });
+        assert_eq!(MineTask::from_api(&data, "inst").estimate, want);
+    }
+    assert_eq!(
+        MineTask::from_api(&json!({ "id": 15 }), "inst").estimate,
+        None
+    );
+}

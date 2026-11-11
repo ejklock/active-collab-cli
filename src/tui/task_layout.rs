@@ -5,7 +5,8 @@
 //! first-visible-card scroll math, all as pure functions over primitives.
 //! `screens::tasks` stays draw-only and calls into this module.
 
-use crate::render::{wrap_text, PANEL_HPAD};
+use crate::i18n::t;
+use crate::render::{fmt_hours_or_dash, wrap_text, PANEL_HPAD};
 use crate::tui::model::TaskRow;
 
 /// Width consumed by one card's left+right chrome: 2 border cols + 2×PANEL_HPAD.
@@ -19,12 +20,27 @@ pub(crate) fn card_content(task: &TaskRow) -> String {
     format!("#{}  {}", task.task_number, task.name)
 }
 
-/// Card height for a single task: 2 border rows + wrapped title rows + 1 due-date row.
+/// Build the hours content line of a task card: estimate, the user's hours
+/// this week and the task's total hours, each `–` when unknown.
+pub(crate) fn hours_line(task: &TaskRow) -> String {
+    format!(
+        "{} {} · {} {} · {} {}",
+        t("est"),
+        fmt_hours_or_dash(task.estimate),
+        t("week"),
+        fmt_hours_or_dash(task.logged_week),
+        t("total"),
+        fmt_hours_or_dash(task.logged_total),
+    )
+}
+
+/// Card height for a single task: 2 border rows + wrapped title rows + 1 hours row
+/// + 1 due-date row.
 pub(crate) fn card_height(task: &TaskRow, card_inner_w: usize) -> u16 {
     let content = card_content(task);
     let lines = wrap_text(&content, card_inner_w.max(1));
     let body_rows = if lines.is_empty() { 1 } else { lines.len() };
-    2 + body_rows as u16 + 1
+    2 + body_rows as u16 + 2
 }
 
 /// Compute the card inner width from the full terminal width.
