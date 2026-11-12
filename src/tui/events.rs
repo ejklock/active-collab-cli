@@ -63,7 +63,7 @@ fn map_action_key(code: KeyCode) -> Option<Msg> {
 /// they reach the editor. Every other key (printable chars, Enter, caret movement,
 /// Backspace/Delete, undo/redo, ...) converts to the backend-neutral
 /// `tui_textarea::Input` and is carried by `Msg::ComposeInput` for `update()` to
-/// apply via `TextArea::input` (ADR 0064).
+/// apply via `TextArea::input`.
 pub fn map_compose_key_event(key: crossterm::event::KeyEvent) -> Option<Msg> {
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
     match key.code {

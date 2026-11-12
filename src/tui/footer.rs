@@ -27,8 +27,8 @@ pub(crate) fn format_br_datetime(iso: &str) -> Option<String> {
     Some(format!("{}/{}/{} {}:{}", day, month, year, hour, minute))
 }
 
-/// Overlay-derived hint sources for the Detail footer's one-home suppression
-/// (ADR 0039 §5). Each field is `Some` only when its overlay is active AND does
+/// Overlay-derived hint sources for the Detail footer's one-home suppression.
+/// Each field is `Some` only when its overlay is active AND does
 /// not already own its own in-modal hint.
 pub(crate) struct DetailHintOverlays<'a> {
     pub(crate) compose: Option<&'a Compose>,
@@ -41,60 +41,25 @@ pub(crate) struct DetailHintOverlays<'a> {
 
 /// Footer hint for the given screen.
 ///
-/// When a compose modal is open the modal owns the compose hint (ADR 0039 §5).
+/// When a compose modal is open the modal owns the compose hint.
 /// When the confirm-delete modal is open the modal owns its hint; the footer
 /// shows no confirm hint (one-home rule). Falls through to own-focused or browse.
 pub(crate) fn hint_for_screen(screen: &Screen) -> String {
     match screen {
         Screen::Detail {
-            overlay,
             focused_comment,
             comments,
             current_user_id,
             ..
         } => {
+            // Every Detail overlay owns its own in-modal hint, so none feeds the footer.
             let overlays = DetailHintOverlays {
-                // The compose modal owns its hint when active; pass None to footer.
-                compose: if overlay.is_compose() {
-                    None
-                } else {
-                    overlay.compose()
-                },
-                // The log-time modal owns its hint when active; pass None to
-                // footer, same one-home rule as compose.
-                log_time: if overlay.is_log_time() {
-                    None
-                } else {
-                    overlay.log_time()
-                },
-                // The estimate-edit modal owns its hint when active; pass None
-                // to footer, same one-home rule as compose and log time.
-                estimate: if overlay.is_estimate_edit() {
-                    None
-                } else {
-                    overlay.estimate_edit()
-                },
-                // The status-confirm modal owns its hint when active; pass None
-                // to footer, same one-home rule as estimate.
-                status_confirm: if overlay.is_status_confirm() {
-                    None
-                } else {
-                    overlay.status_confirm()
-                },
-                // The assignee-picker modal owns its hint when active; pass None
-                // to footer, same one-home rule as status confirm.
-                assignee_picker: if overlay.is_assignee_picker() {
-                    None
-                } else {
-                    overlay.assignee_picker()
-                },
-                // The confirm modal owns its hint; pass None so the footer does
-                // not duplicate it (ADR 0039 §5 one-home suppression).
-                confirm_delete: if overlay.is_confirm() {
-                    None
-                } else {
-                    overlay.confirm_delete_id()
-                },
+                compose: None,
+                log_time: None,
+                estimate: None,
+                status_confirm: None,
+                assignee_picker: None,
+                confirm_delete: None,
             };
             detail_hint(&overlays, *focused_comment, comments, *current_user_id)
         }
@@ -104,7 +69,7 @@ pub(crate) fn hint_for_screen(screen: &Screen) -> String {
 
 /// Derive the context-aware instruction hint for the Detail screen.
 ///
-/// Priority order matches ADR 0038 §1: composing/logging-time/editing-estimate
+/// Priority order: composing/logging-time/editing-estimate
 /// beats confirming-delete beats own-comment-focused beats the browsing default.
 pub(crate) fn detail_hint(
     overlays: &DetailHintOverlays,
@@ -155,7 +120,7 @@ pub(crate) fn is_own_comment_focused(
 /// Derive the transient status string for the Detail footer status row.
 ///
 /// Priority (highest first): auth_error > attachment download > copied_feedback.
-/// When `compose` is `Some`, the modal overlay owns the compose hint/status (ADR 0039 §5).
+/// When `compose` is `Some`, the modal overlay owns the compose hint/status.
 /// The footer still shows auth_error or copied_feedback if either is set.
 pub(crate) fn detail_status_line(
     compose: Option<&Compose>,
@@ -288,7 +253,7 @@ impl FooterPlan {
 
 /// Compose the whole footer decision for the given screen + footer state + width.
 ///
-/// Single deep entry (ADR 0053): selects the hint, derives the transient status
+/// Single deep entry: selects the hint, derives the transient status
 /// line (the `Screen::Detail` destructuring lives here, not in `view()`), and
 /// computes the layout plan.
 pub(crate) fn plan(

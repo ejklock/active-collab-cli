@@ -4,7 +4,7 @@ use regex::Regex;
 use std::io::Write;
 use std::sync::OnceLock;
 
-/// Parity: Python _pick_instance — exported for reuse by R4/R5.
+/// Parity: Python _pick_instance — exported for reuse.
 ///
 /// Returns the single matching Instance or an i32 exit code (always 2) on failure.
 /// Error messages go to `err`.

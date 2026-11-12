@@ -166,7 +166,7 @@ impl<'a> ProjectNamesCache<'a> {
 
     /// Reads the cached entry and returns it only if still within
     /// `max_age_secs` of `now_epoch_secs()`; absent or stale entries yield
-    /// `None` (ADR 0052 — the cache owns freshness, not its callers).
+    /// `None` (the cache owns freshness, not its callers).
     pub fn read_fresh(
         &self,
         instance: &str,

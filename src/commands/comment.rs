@@ -4,11 +4,11 @@ use crate::i18n::t;
 use crate::store::instances::Instance;
 use std::io::Write;
 
-/// Non-interactive comment post (ADR 0040, BDR 0027).
+/// Non-interactive comment post.
 ///
 /// Resolves the task, guards against an empty body, posts via
 /// `client.create_comment` — as HTML-encoded plain text, or unchanged when
-/// `html` is set (issue 0071) — and writes the result to the injected
+/// `html` is set — and writes the result to the injected
 /// writers. Returns an exit code: 0 success, 2 usage error, non-zero runtime
 /// failure.
 #[allow(clippy::too_many_arguments)]

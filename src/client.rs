@@ -20,7 +20,7 @@ impl std::fmt::Display for Unauthorized {
 impl std::error::Error for Unauthorized {}
 
 /// Typed outcome of a comment-write call (create/update/delete), classified
-/// once by the client instead of by each caller (ADR 0054).
+/// once by the client instead of by each caller.
 #[derive(Debug)]
 pub enum CommentWriteOutcome {
     /// 2xx — carries the response body when present (`None` for delete).
@@ -32,7 +32,7 @@ pub enum CommentWriteOutcome {
 }
 
 /// Typed outcome of a time-record write call, classified the same way as
-/// `CommentWriteOutcome` (ADR 0054).
+/// `CommentWriteOutcome`.
 #[derive(Debug)]
 pub enum TimeWriteOutcome {
     /// 2xx — carries the response body when present.
@@ -120,7 +120,7 @@ fn classify_time_write(status: u16, body: Option<Value>) -> TimeWriteOutcome {
 }
 
 /// Typed outcome of a task-field write call (completion or field update),
-/// classified the same way as `CommentWriteOutcome` (ADR 0054).
+/// classified the same way as `CommentWriteOutcome`.
 #[derive(Debug)]
 pub enum TaskWriteOutcome {
     /// 2xx — carries the response body when present.
@@ -155,8 +155,7 @@ pub fn pick_default_job_type(job_types: &[JobType]) -> Option<i64> {
 
 /// How `create_comment` prepares a caller-supplied body before it is posted.
 /// `Text` runs it through `encode_comment_body`; `Html` sends it unchanged,
-/// so the caller who asks for raw HTML is responsible for its markup
-/// (issue 0071).
+/// so the caller who asks for raw HTML is responsible for its markup.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BodyFormat {
     Text,
@@ -167,7 +166,7 @@ pub enum BodyFormat {
 /// escaped, blank-line-separated paragraphs become `<p>...</p>` blocks, and a
 /// single in-paragraph newline becomes `<br>` — newlines carry no meaning in
 /// the rendered HTML, so without this the server flattens every paragraph
-/// break the user typed (issue 0066).
+/// break the user typed.
 fn encode_comment_body(body: &str) -> String {
     let escaped = html_escape::encode_text(body).into_owned();
     let mut paragraphs: Vec<String> = Vec::new();
@@ -498,7 +497,7 @@ impl ActiveCollabClient {
 
     /// POST /api/v1/comments/task/{task_id}. `format` controls whether `body`
     /// is run through `encode_comment_body` (`BodyFormat::Text`) or sent
-    /// unchanged (`BodyFormat::Html`, issue 0071). Classifies the response
+    /// unchanged (`BodyFormat::Html`). Classifies the response
     /// into a `CommentWriteOutcome`: (200..=299) -> Ok(Some(comment)), 401 ->
     /// Unauthorized, else -> Failed(status).
     pub async fn create_comment(

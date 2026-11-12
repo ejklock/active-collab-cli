@@ -203,7 +203,7 @@ pub enum Cmd {
         task_id: i64,
     },
     /// Fetch and decode the image bytes for an opened image-viewer asset.
-    /// Handled entirely by the shell (ADR 0065); the pure Model never sees bytes.
+    /// Handled entirely by the shell; the pure Model never sees bytes.
     LoadImage {
         asset: ImageAssetRef,
     },
@@ -262,7 +262,7 @@ pub enum ComposeStatus {
 ///
 /// `label` is the display filename (used for the modal title and the
 /// loading/error placeholder text); `url` is the source location the shell
-/// fetches bytes from (slice 0059). Carries no protocol/bytes state (ADR 0065).
+/// fetches bytes from. Carries no protocol/bytes state.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImageAssetRef {
     pub url: String,
@@ -273,7 +273,7 @@ pub struct ImageAssetRef {
 ///
 /// The pure Model tracks only this lifecycle; the decoded bytes and the
 /// `ratatui-image` `StatefulProtocol` live in a shell-owned side table,
-/// never here (ADR 0065).
+/// never here.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ImageStatus {
     Loading,
@@ -285,7 +285,7 @@ pub enum ImageStatus {
 ///
 /// `editor` carries caret position, selection, and undo/redo history alongside the
 /// text — `tui_textarea::TextArea` does not implement `PartialEq`, so `Compose` (and
-/// its ancestors `DetailOverlay`/`Screen`) drop that derive (ADR 0064).
+/// its ancestors `DetailOverlay`/`Screen`) drop that derive.
 #[derive(Debug, Clone)]
 pub struct Compose {
     pub kind: ComposeKind,
@@ -503,10 +503,10 @@ pub struct EstimateForm {
 /// Compose, the log-time form, the estimate-edit form, the delete prompt, and the
 /// image viewer are mutually exclusive by construction — only one overlay at a
 /// time. The combined state (more than one active) cannot be constructed with this
-/// enum, replacing the previous independent `Option` fields (ADR 0047).
+/// enum, replacing the previous independent `Option` fields.
 ///
 /// `Compose` is intentionally larger than the other variants: it carries a `TextArea`
-/// with caret/selection/undo history (ADR 0064). Construction happens only on
+/// with caret/selection/undo history. Construction happens only on
 /// open/edit, never per-keystroke, so boxing would add indirection with no practical
 /// benefit — same rationale as `Screen`'s `large_enum_variant` allow below.
 #[derive(Debug, Clone)]
@@ -830,7 +830,7 @@ pub enum Screen {
         /// Width at which the cache was last built; usize::MAX means "not yet built".
         rendered_width: usize,
         /// The active modal overlay: compose area or delete-confirm prompt.
-        /// Mutually exclusive by construction — only one overlay at a time (ADR 0047).
+        /// Mutually exclusive by construction — only one overlay at a time.
         overlay: DetailOverlay,
         /// Logged-in user's id for this instance; used to gate [editar]/[excluir] affordances.
         current_user_id: Option<i64>,
@@ -1059,7 +1059,7 @@ pub enum Msg {
     /// Carries everything but the shell-level Ctrl+S/Esc shortcuts: printable chars,
     /// Enter (newline), caret movement, Home/End, Backspace/Delete, undo/redo. The
     /// shell (events.rs) converts the crossterm `KeyEvent` to `tui_textarea::Input`.
-    /// `update()` applies it via `TextArea::input` (ADR 0064).
+    /// `update()` applies it via `TextArea::input`.
     ComposeInput(tui_textarea::Input),
     /// Submit the current compose buffer as a new comment.
     ComposeSubmit,
@@ -1181,14 +1181,14 @@ pub enum Msg {
     CancelDeleteComment,
     /// The shell finished fetching and decoding the open viewer's image.
     ///
-    /// Sent only by the shell wiring landing in slice 0059 (ADR 0065); this
+    /// Sent only by the shell wiring still to land; this
     /// slice's `update_image` handles the transition but nothing produces the
     /// message yet, so tests construct it directly.
     #[allow(dead_code)]
     ImageLoaded,
     /// The shell failed to fetch or decode the open viewer's image.
     ///
-    /// See `ImageLoaded` above — same slice-0059 wiring boundary.
+    /// See `ImageLoaded` above — same shell-wiring boundary.
     #[allow(dead_code)]
     ImageLoadErr(String),
     /// Start downloading every downloadable asset of the open task (`D`).
@@ -2708,7 +2708,7 @@ fn handle_confirm_delete(mut model: Model) -> (Model, Vec<Cmd>) {
 
 /// Clear the active overlay and emit `Cmd::LoadDetail { refresh: true }` for the
 /// current Detail screen — the server-truth refresh shared by every write path
-/// (comment mutation, time-record mutation) after a successful POST/PUT (ADR 0035).
+/// (comment mutation, time-record mutation) after a successful POST/PUT.
 fn refresh_detail_after_write(mut model: Model) -> (Model, Vec<Cmd>) {
     let detail_fields = match model.top() {
         Some(Screen::Detail {

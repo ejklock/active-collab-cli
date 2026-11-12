@@ -31,6 +31,7 @@ Excluded: any production behavior change; the `t(&format!(...))` defect (issue 0
 - The route and draw-order gaps close with tests through the real entry points (`route_key_event`, the render of a Detail screen), never by asserting a call.
 - A citation comment with no other content is deleted; one with a why keeps the why in the same words minus the citation.
 - The citation rule joins `tests/comment_policy.rs` as a violation kind checked on every comment, doc comments included, first over `src/` (S3), then over `tests/` (S4), so the comment gate keeps the tree clean instead of a one-time `rg`. Not taken: a CI grep, which would be a second comment gate beside the test.
+- S3 touches `src/tui/footer.rs`, so the complexity gate re-reads `hint_for_screen` (cognitive 19, ceiling 12). Its six `if overlay.is_x() { None } else { overlay.x() }` fields are always `None`, because each accessor returns `Some` only for its own variant; S3 builds them as `None` and a test proves the footer hint unchanged with each overlay open (owner, 2026-11-12). Not taken: a separate slice first; a baseline of the finding. The overlay branches of `detail_hint` that this call can no longer reach are tracked separately.
 
 ### Acceptance
 

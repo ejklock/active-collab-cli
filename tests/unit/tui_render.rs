@@ -4822,6 +4822,136 @@ fn hint_for_screen_detail_with_assets_has_no_ctrl_cmd_in_footer() {
     );
 }
 
+fn detail_screen_with_overlay(overlay: DetailOverlay) -> crate::tui::model::Screen {
+    crate::tui::model::Screen::Detail {
+        instance: "inst".into(),
+        project_id: 1,
+        task_id: 1,
+        task: json!({}),
+        comments: vec![],
+        user_map: HashMap::new(),
+        lines: vec![],
+        line_styles: vec![],
+        assets: vec![],
+        offset: 0,
+        loading: false,
+        rendered_width: usize::MAX,
+        overlay,
+        current_user_id: None,
+        affordances: vec![],
+        focused_comment: None,
+        auth_error: false,
+        download: None,
+        comment_spans: vec![],
+    }
+}
+
+// The footer hint for a Detail screen is the browsing hint whichever overlay is open:
+// every overlay owns its own in-modal hint, so none leaks into the footer.
+#[test]
+fn hint_for_screen_detail_shows_browsing_hint_for_every_overlay() {
+    use crate::tui::footer::hint_for_screen;
+    use crate::tui::model::{
+        ComposeKind, ComposeStatus, EditStatus, EstimateForm, ImageAssetRef, ImageStatus,
+        LogTimeField, LogTimeForm, LogTimeStatus, TaskListLoad, TaskListPicker,
+    };
+
+    set_language("en");
+    let browsing = "↑/↓ · j/k move · c comment · t log time · e estimate · s status · r refresh · D download · a assignee · l list · H report · Esc/b back · q quit";
+    let compose = |kind| {
+        DetailOverlay::Compose(crate::tui::model::Compose {
+            kind,
+            editor: tui_textarea::TextArea::default(),
+            status: ComposeStatus::Editing,
+        })
+    };
+    let cases: Vec<(&str, DetailOverlay)> = vec![
+        ("none", DetailOverlay::None),
+        ("compose new", compose(ComposeKind::New)),
+        ("compose edit", compose(ComposeKind::Edit { comment_id: 7 })),
+        (
+            "log time",
+            DetailOverlay::LogTime(LogTimeForm {
+                hours: String::new(),
+                summary: String::new(),
+                field: LogTimeField::Hours,
+                status: LogTimeStatus::Editing,
+            }),
+        ),
+        (
+            "estimate edit",
+            DetailOverlay::EstimateEdit(EstimateForm {
+                value: String::new(),
+                status: EditStatus::Editing,
+            }),
+        ),
+        (
+            "status confirm",
+            DetailOverlay::StatusConfirm {
+                completed_target: true,
+                status: EditStatus::Editing,
+            },
+        ),
+        (
+            "assignee picker",
+            DetailOverlay::AssigneePicker {
+                candidates: vec![(1, "Ana".into())],
+                filter: String::new(),
+                selected: 0,
+                status: EditStatus::Editing,
+            },
+        ),
+        (
+            "task-list picker",
+            DetailOverlay::TaskListPicker(TaskListPicker {
+                candidates: vec![(1, "Backlog".into())],
+                current_id: None,
+                filter: String::new(),
+                selected: 0,
+                status: EditStatus::Editing,
+                load: TaskListLoad::Ready,
+                error: None,
+            }),
+        ),
+        (
+            "confirm delete",
+            DetailOverlay::ConfirmDelete { comment_id: 3 },
+        ),
+        (
+            "image viewer",
+            DetailOverlay::ImageViewer {
+                asset: ImageAssetRef {
+                    url: "https://example.com/a.png".into(),
+                    label: "a.png".into(),
+                },
+                status: ImageStatus::Loading,
+            },
+        ),
+    ];
+    for (name, overlay) in cases {
+        let hint = hint_for_screen(&detail_screen_with_overlay(overlay));
+        assert_eq!(hint, browsing, "overlay {name}");
+    }
+}
+
+#[test]
+fn hint_for_screen_non_detail_screen_shows_the_list_browse_hint() {
+    use crate::tui::footer::hint_for_screen;
+    use crate::tui::model::Screen;
+
+    set_language("en");
+    let screen = Screen::Projects {
+        groups: vec![],
+        selected: 0,
+        loading: false,
+        revalidating: false,
+    };
+    assert_eq!(
+        hint_for_screen(&screen),
+        "↑/↓ navigate  Enter select  r refresh  H report  Esc/b back  q quit"
+    );
+}
+
 // AC1 (ADR 0053): footer::plan for a non-Detail screen yields the browse hint
 // with status_line None, matching hint_for_screen for the same screen.
 #[test]

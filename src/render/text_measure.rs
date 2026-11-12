@@ -5,7 +5,7 @@
 //! the boxed-line accessor (`box_inner_content`), the panel chrome constants
 //! (`PANEL_HPAD`, `BODY_LEFT_CHROME_COLS`, `panel_content_width`), and the
 //! box-drawing glyphs. It intentionally has no styled-text-model dependency
-//! (ADR 0049) so `wrap`/`cli_render`/`detail_render` — and later
+//! so `wrap`/`cli_render`/`detail_render` — and later
 //! `detail_geometry` and `task_layout` — can borrow width math without
 //! dragging that heavier dependency in.
 
@@ -15,8 +15,8 @@ use unicode_width::UnicodeWidthStr;
 /// padding on each side of a panel's content.
 pub(crate) const PANEL_HPAD: usize = 1;
 
-/// Box-drawing glyphs used by squared legend panels and cards (ADR 0049 single
-/// home, ADR 0061 squared corners).
+/// Box-drawing glyphs used by squared legend panels and cards (single
+/// home, squared corners).
 pub(crate) const BOX_TL: &str = "\u{250C}";
 pub(crate) const BOX_TR: &str = "\u{2510}";
 pub(crate) const BOX_BL: &str = "\u{2514}";
@@ -33,7 +33,7 @@ pub(crate) const BOX_V: &str = "\u{2502}";
 /// (e.g. a border row starting with `┌` or `└`).
 ///
 /// This is the single public interface for this primitive — the `_pub`
-/// pass-through wrapper that used to live in `render.rs` is retired (ADR 0049).
+/// pass-through wrapper that used to live in `render.rs` is retired.
 pub fn box_inner_content(s: &str) -> Option<&str> {
     const PREFIX_BYTES: usize = 4; // U+2502 = 3 UTF-8 bytes, then one HPAD space
     const SUFFIX_BYTES: usize = 4; // one HPAD space, then U+2502 = 3 UTF-8 bytes
