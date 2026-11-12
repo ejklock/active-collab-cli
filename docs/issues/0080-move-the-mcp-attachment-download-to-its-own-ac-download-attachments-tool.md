@@ -2,7 +2,7 @@
 type: Issue
 title: Move the MCP attachment download to its own ac_download_attachments tool
 description: ac mcp serves the attachment download as a third tool with honest annotations, and ac_read get no longer downloads.
-status: open
+status: closed
 labels: [agent, mcp]
 timestamp: 2026-11-12T00:34:15Z
 ---

@@ -35,7 +35,7 @@ flowchart TD
     screens --> theme
     main --> cli["cli (clap)"]
     cli --> commands
-    main --> mcp["mcp/mod.rs\nac mcp · rmcp stdio server\nac_read · ac_write (operation unions)"]
+    main --> mcp["mcp/mod.rs\nac mcp · rmcp stdio server\nac_read · ac_write (operation unions) · ac_download_attachments"]
     mcp --> commands
     subgraph commands["commands/ — three masters (ADR 0055)"]
         direction TB
@@ -133,9 +133,11 @@ flowchart TD
   (a unit test pins it), and `skill_output` takes no store/HTTP dependency.
 - **`ac mcp` is a driving adapter over the command cores**
   ([ADR 0070](/adr/0070-ac-mcp-serves-mcp-over-stdio-as-an-adapter-over-the-command-cores.md)):
-  `src/mcp/mod.rs` serves MCP over stdio with `rmcp` and exposes two tools, `ac_read`
-  (`readOnlyHint`: `get` · `current` · `mine`) and `ac_write` (`destructiveHint`: `comment` ·
-  `log_time` · `set_task` · `time_report`), each selecting a core by an `operation` field. An
+  `src/mcp/mod.rs` serves MCP over stdio with `rmcp` and exposes three tools, `ac_read`
+  (`readOnlyHint`: `get` · `current` · `mine`), `ac_write` (`destructiveHint`: `comment` ·
+  `log_time` · `set_task` · `time_report`), each selecting a core by an `operation` field, and
+  `ac_download_attachments` (writes files; neither read-only nor destructive, idempotent; `get`
+  never downloads, see [ADR 0072](/adr/0072-ac-mcp-exposes-downloads-as-a-third-tool-with-honest-annotations.md)). An
   operation calls the existing `*_core` with `json = true` and in-memory writers, returns `out`
   on exit 0 and `err` as an `isError` result otherwise; no tool builds JSON or an HTTP request,
   so the `--json` contract and the host-gated write seam have one home. The instance, store and
@@ -307,8 +309,8 @@ sequenceDiagram
     participant Cache as store (WAL)
     participant API as client/http
 
-    Agent->>Mcp: tools/call ac_read | ac_write {operation, ...}
-    alt unknown operation or missing field
+    Agent->>Mcp: tools/call ac_read | ac_write {operation, ...} | ac_download_attachments {ref, ...}
+    alt unknown operation, missing field or unknown parameter
         Mcp-->>Agent: JSON-RPC invalid_params
     else valid
         Mcp->>Core: setup_instance_client (mine: open_store_and_http), then *_core(json = true, Vec writers)

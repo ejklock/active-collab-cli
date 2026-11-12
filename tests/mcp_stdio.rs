@@ -22,6 +22,7 @@ impl Env {
     fn new(instances: &[(&str, &MockServer, i64)]) -> Env {
         let dir = TempDir::new().unwrap();
         let db = dir.path().join("ac.db");
+        std::fs::create_dir(dir.path().join("tmp")).unwrap();
         let env = Env { dir, db };
         let init = env.command().args(["setup", "list"]).output().unwrap();
         assert!(init.status.success(), "store init failed: {init:?}");
@@ -48,6 +49,7 @@ impl Env {
         cmd.env("ACTIVE_COLLAB_DB", &self.db)
             .env("ACTIVE_COLLAB_LANG", "en")
             .env("HOME", self.dir.path())
+            .env("TMPDIR", self.dir.path().join("tmp"))
             .current_dir(self.dir.path());
         cmd
     }
@@ -65,6 +67,7 @@ impl Env {
                 .env("ACTIVE_COLLAB_DB", &self.db)
                 .env("ACTIVE_COLLAB_LANG", "en")
                 .env("HOME", self.dir.path())
+                .env("TMPDIR", self.dir.path().join("tmp"))
                 .current_dir(self.dir.path());
         }))
         .unwrap();
@@ -259,24 +262,76 @@ fn expected_operations(tool: &str) -> Vec<(&'static str, BTreeSet<String>)> {
     }
 }
 
+async fn mount_task_with_attachments(server: &MockServer) {
+    let url = |name: &str| format!("{}/files/{name}", server.uri());
+    mount_json(
+        server,
+        "GET",
+        "/api/v1/projects/10/tasks/99",
+        200,
+        json!({
+            "single": {
+                "id": 99, "name": "Task with files", "project_id": 10, "task_number": 7,
+                "attachments": [
+                    { "name": "good.txt", "url": url("good.txt") },
+                    { "name": "bad.txt", "url": url("bad.txt") }
+                ]
+            },
+            "tracked_time": 0,
+            "comments": []
+        }),
+    )
+    .await;
+    Mock::given(method("GET"))
+        .and(path("/files/good.txt"))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(b"mocked bytes".to_vec()))
+        .mount(server)
+        .await;
+    mount_status(server, "/files/bad.txt", 500).await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
-async fn lists_every_tool_with_annotations_and_operation_unions() {
+async fn lists_three_tools_with_annotations_and_operation_unions() {
     let env = Env::new(&[]);
     let client = env.connect().await;
     let tools = client.list_all_tools().await.unwrap();
 
     let names: BTreeSet<String> = tools.iter().map(|t| t.name.to_string()).collect();
-    assert_eq!(names, set(&["ac_read", "ac_write"]));
+    assert_eq!(
+        names,
+        set(&["ac_read", "ac_write", "ac_download_attachments"])
+    );
 
     for tool in &tools {
         let annotations = tool.annotations.as_ref().expect("annotations");
-        if tool.name == "ac_read" {
-            assert_eq!(annotations.read_only_hint, Some(true));
-        } else {
-            assert_eq!(annotations.destructive_hint, Some(true));
+        match tool.name.as_ref() {
+            "ac_read" => assert_eq!(annotations.read_only_hint, Some(true)),
+            "ac_write" => assert_eq!(annotations.destructive_hint, Some(true)),
+            _ => {
+                assert_eq!(annotations.read_only_hint, Some(false));
+                assert_eq!(annotations.destructive_hint, Some(false));
+                assert_eq!(annotations.idempotent_hint, Some(true));
+                let schema = Value::Object((*tool.input_schema).clone());
+                assert_eq!(schema["required"], json!(["ref"]), "{schema}");
+                assert!(schema["properties"].get("attachments_dir").is_some());
+                assert!(schema["properties"].get("instance").is_some());
+                continue;
+            }
         }
 
         let variants = operation_schemas(tool);
+        if tool.name == "ac_read" {
+            let get = variants
+                .iter()
+                .find(|variant| operation_name(variant) == "get")
+                .expect("get variant");
+            for property in ["download_attachments", "attachments_dir"] {
+                assert!(
+                    get["properties"].get(property).is_none(),
+                    "get must not offer {property}: {get}"
+                );
+            }
+        }
         let mut found: Vec<(String, BTreeSet<String>)> = variants
             .iter()
             .map(|variant| (operation_name(variant), required_of(variant)))
@@ -518,6 +573,123 @@ async fn reports_core_failures_as_tool_errors_and_keeps_serving() {
         .await;
         assert!(next.contains("Fetched task"));
     }
+    client.cancel().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn download_tool_matches_the_cli_and_writes_the_files() {
+    let server = MockServer::start().await;
+    mount_task_with_attachments(&server).await;
+    let env = Env::new(&[("alpha", &server, 42)]);
+    let client = env.connect().await;
+    let dest = env.dir.path().join("downloads");
+    let dest_arg = dest.to_str().unwrap();
+
+    let text = ok_text(
+        &client,
+        "ac_download_attachments",
+        json!({ "ref": "10/99", "attachments_dir": dest_arg }),
+    )
+    .await;
+    assert_eq!(
+        text,
+        env.cli(&[
+            "get",
+            "10/99",
+            "--download-attachments",
+            "--attachments-dir",
+            dest_arg,
+            "--json"
+        ])
+    );
+    assert_eq!(
+        std::fs::read(dest.join("good.txt")).unwrap(),
+        b"mocked bytes"
+    );
+    assert!(text.contains("bad.txt"), "{text}");
+    assert!(text.contains("HTTP 500"), "{text}");
+
+    let default_dir = env
+        .dir
+        .path()
+        .join("tmp")
+        .join("ac-attachments")
+        .join("10-99");
+    let default_text = ok_text(
+        &client,
+        "ac_download_attachments",
+        json!({ "ref": "10/99" }),
+    )
+    .await;
+    assert_eq!(
+        default_text,
+        env.cli(&["get", "10/99", "--download-attachments", "--json"])
+    );
+    assert!(
+        default_text.contains(default_dir.join("good.txt").to_str().unwrap()),
+        "{default_text}"
+    );
+    assert!(default_dir.join("good.txt").is_file());
+
+    let ghost = call(
+        &client,
+        "ac_download_attachments",
+        json!({ "ref": "10/99", "instance": "ghost" }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(ghost.is_error, Some(true));
+    assert!(text_of(&ghost).contains("instance 'ghost' not found"));
+    client.cancel().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn download_params_are_validated_as_protocol_errors() {
+    let server = MockServer::start().await;
+    mount_api(&server, 42, "Fetched task").await;
+    let env = Env::new(&[("alpha", &server, 42)]);
+    let client = env.connect().await;
+
+    let invalid = [
+        (
+            "ac_read",
+            json!({ "operation": "get", "ref": "10/99", "download_attachments": true }),
+        ),
+        (
+            "ac_read",
+            json!({ "operation": "get", "ref": "10/99", "attachments_dir": "x" }),
+        ),
+        ("ac_download_attachments", json!({})),
+        ("ac_download_attachments", json!({ "ref": 99 })),
+        ("ac_read", json!({ "operation": "mine", "foo": 1 })),
+        (
+            "ac_read",
+            json!({ "operation": "current", "no_comments": true }),
+        ),
+        (
+            "ac_read",
+            json!({ "operation": "get", "ref": "10/99", "foo": 1 }),
+        ),
+        (
+            "ac_download_attachments",
+            json!({ "ref": "10/99", "download": true }),
+        ),
+    ];
+    for (tool, args) in invalid {
+        match call(&client, tool, args.clone()).await {
+            Err(ServiceError::McpError(error)) => {
+                assert_eq!(error.code, ErrorCode::INVALID_PARAMS, "{args}");
+            }
+            other => panic!("{tool} {args} should be invalid_params, got {other:?}"),
+        }
+    }
+    let plain = ok_text(
+        &client,
+        "ac_read",
+        json!({ "operation": "get", "ref": "10/99", "refresh": true }),
+    )
+    .await;
+    assert_eq!(plain, env.cli(&["get", "10/99", "--json", "--refresh"]));
     client.cancel().await.unwrap();
 }
 

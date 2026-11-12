@@ -352,6 +352,11 @@ exactly what the matching `--json` command prints.
 |---|---|
 | `ac_read` | `get`, `current`, `mine` |
 | `ac_write` | `comment`, `log_time`, `set_task`, `time_report` |
+| `ac_download_attachments` | downloads a task's attachments to a local directory (`ref`, `attachments_dir`, `instance`) |
+
+`ac_download_attachments` writes files on the machine running `ac mcp`, so it is
+marked neither read-only nor destructive; `ac_read` `get` does not download. See
+[ADR 0072](docs/adr/0072-ac-mcp-exposes-downloads-as-a-third-tool-with-honest-annotations.md).
 
 `ac_write` changes data on your ActiveCollab instance as the logged-in user and is
 marked destructive, so a harness that honours MCP tool hints asks before calling it.
