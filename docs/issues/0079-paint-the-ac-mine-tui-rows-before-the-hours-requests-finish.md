@@ -31,7 +31,7 @@ Excluded: the `ac mine` table, `--json` and the MCP `mine`, which keep waiting f
 ### Acceptance
 
 - AC1: after the task lists arrive, the TUI shows the refreshed rows before the hours requests finish. (`verify_by: test`)
-- AC2: the hours message fills week and total hours by instance and task; a row missing from it keeps unknown hours; a row that left the list is not revived. (`verify_by: test`)
+- AC2: the hours message fills week and total hours by instance and task; a row the message has no entry for keeps the hours it shows; an entry whose value is unknown sets that value unknown; an entry for a task no longer listed adds no row. (`verify_by: test`)
 - AC3: rows keep their earlier hours until the hours message lands. (`verify_by: test`)
 - AC4: the snapshot read after a restart carries the hours of the last hours message. (`verify_by: test`)
 - CC: no superfluous comments, banners or commented-out code. (`verify_by: inspection`)
