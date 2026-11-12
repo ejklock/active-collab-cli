@@ -9148,7 +9148,7 @@ async fn detail_download_outcome_writes_the_served_bytes_under_the_home_download
         name: "inst".into(),
         base_url: server.uri(),
         email: "a@example.com".into(),
-        token: "[MASKED by secret-mask: original value hidden for security]".into(),
+        token: "fixture-token".into(),
         user_id: Some(1),
     };
     let client =
@@ -9179,7 +9179,7 @@ fn download_asset_server_instance(base_url: String) -> Instance {
         name: "inst".into(),
         base_url,
         email: "a@example.com".into(),
-        token: "[MASKED by secret-mask: original value hidden for security]".into(),
+        token: "fixture-token".into(),
         user_id: Some(1),
     }
 }

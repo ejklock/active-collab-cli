@@ -230,7 +230,7 @@ The task detail view shows:
   Assignee, Start, Due, Estimate, and Logged.
 - **Description** — the task body; falls back to `(no description)` when empty.
 - **Artifacts panel** — lists each image / attachment / link as `[n] name` with
-  its URL. Press `1`–`9` to open the matching artifact in your browser.
+  its URL.
 - **Comments** — one panel per comment (author · date as the panel title).
 
 The detail view scrolls vertically when content exceeds the screen. The TUI
@@ -245,24 +245,8 @@ the detail view to bypass the cache and re-fetch from the API.
 
 | Screen | Keys |
 |---|---|
-| Projects / Tasks lists | `↑`/`↓` or `k`/`j` move · `Enter` select · `q` quit · `b` back · `s` settings |
-| Task detail | `↑`/`↓` or `k`/`j` scroll · `PgUp`/`PgDn` page · `a` assets · `r` refresh · `1`–`9` open artifact · `q`/`b` back |
-| Settings | `↑`/`↓` or `k`/`j` move · `Enter` select · `q`/`b` back |
-| Assets | `↑`/`↓` or `k`/`j` move · `o` open in browser · `d` download · `q`/`b` back |
-
-**Settings screen** — press `[s]` from any list screen to open the Settings panel.
-It offers two pickers:
-
-- **Language** — choose `en` (English) or `pt_BR` (Portuguese (Brazil)). The
-  selection persists to SQLite and takes effect immediately without restarting.
-- **Active instance** — choose which configured instance `browse` uses by default
-  when you have more than one. The selection persists to SQLite.
-
-- **Assets** — image, attachment, and link URLs extracted from the task body,
-  comments, and attachments. `o` opens the URL in your browser; `d` downloads
-  it. The `X-Angie-AuthApiToken` header is attached **only** when the asset
-  URL's scheme and host match the configured instance — foreign hosts are
-  fetched without credentials.
+| Projects / Tasks lists (including `mine`) | `↑`/`↓` move · `Enter` select · `r` refresh · `H` hours report · `q` quit · `Esc`/`b` back (quits from the first screen) · `Ctrl+C` quit |
+| Task detail | `↑`/`↓` or `k`/`j` move between comments · `PgUp`/`PgDn` page · `r` refresh · `c` new comment · `t` log time · `e` edit estimate · `s` toggle status · `a` assignee picker · `l` task list picker · `H` hours report · `D` download attachments · `Esc`/`b` back · `q` quit · `Ctrl+C` quit |
 
 ### Bare-invocation shortcuts
 
@@ -400,10 +384,6 @@ ACTIVE_COLLAB_LANG=pt_BR ac browse
 ```
 
 **Resolution order:** `ACTIVE_COLLAB_LANG` env var → SQLite setting → `en`.
-
-The language can also be changed interactively from inside `browse` — press `[s]`
-to open Settings and select a language; the change takes effect immediately without
-restarting.
 
 ---
 
