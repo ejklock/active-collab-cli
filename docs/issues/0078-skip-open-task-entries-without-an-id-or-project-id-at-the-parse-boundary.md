@@ -2,7 +2,7 @@
 type: Issue
 title: Skip open-task entries without an id or project id at the parse boundary
 description: ac mine and ac browse skip an API task entry without an integer id or project_id instead of showing it under project or task 0.
-status: open
+status: closed
 labels: [cli, tui, bug]
 timestamp: 2026-11-12T00:21:45Z
 ---
