@@ -30,6 +30,8 @@ TUI/UX work (V/R/ARCH slices), tracing to
 * [0074 — Show estimate and logged hours (this week and total) per task in ac mine](0074-show-estimate-and-logged-hours-this-week-and-total-per-task-in-ac-mine.md) - open
 * [0076 — Download comment attachments in the CLI and from a TUI key](0076-download-comment-attachments-in-the-cli-and-from-a-tui-key.md) - in-progress
 * [0077 — Move a task between task lists from CLI, TUI and MCP](0077-move-a-task-between-task-lists-from-cli-tui-and-mcp.md) - in-progress
+* [0082 — Messages filled with format! before t() are never translated](0082-messages-filled-with-format-before-t-are-never-translated.md) - open
+* [0083 — Follow-ups from the 0075-0077 reviews: README keys, fixture tokens, untested TUI routes, record citations](0083-follow-ups-from-the-0075-0077-reviews-readme-keys-fixture-tokens-untested-tui-routes-record-citations.md) - open
 
 ## Closed
 
