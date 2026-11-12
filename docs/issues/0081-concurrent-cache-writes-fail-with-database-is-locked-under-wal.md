@@ -24,6 +24,7 @@ Excluded: cross-process write ordering, the cache schema, retries above the stor
 ### Decision
 
 - Fix in the store's open and write path, using SQLite's own mechanisms (busy timeout, `BEGIN IMMEDIATE`), not a retry loop.
+- Measured 2026-11-11 (200 rounds × 4 threads per scenario, raw statements of `Store::open`): only `PRAGMA journal_mode=WAL` fails, plain `SQLITE_BUSY` (extended code 5) despite a 5000 ms busy timeout, 28/800 opens on a fresh file and 29/800 on a DELETE-mode file, 0/800 on a WAL file. So the open tolerates `SQLITE_BUSY` on that one pragma and continues: the lock holder is a peer doing the same switch, WAL persists in the file, and the later statements wait on the busy timeout. Rejected: a bounded retry of the pragma (a homegrown loop), an advisory lock file around the switch (a sidecar file for a one-time event), reading the mode first (does not close the race on a fresh or DELETE file).
 
 ### Acceptance
 
