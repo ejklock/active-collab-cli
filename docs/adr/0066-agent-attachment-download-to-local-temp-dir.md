@@ -2,12 +2,13 @@
 type: ADR
 title: "ac get/current --download-attachments: fetch task assets to a local temp dir for agent/LLM analysis"
 description: Add an opt-in --download-attachments flag (with --attachments-dir override) to `ac get`/`ac current`. When set, every downloadable task asset — real file attachments plus inline <img> sources from the body/comments — is fetched over the existing host-gated authenticated client seam and written to a local directory (default a per-task path under the OS temp dir), so an agent (e.g. Claude Code via the active-collab skill) can Read the files directly instead of only seeing a remote URL. Excludes arbitrary body hyperlinks (anchor-text links are not necessarily files) from the download set. Filenames are sanitized against path traversal before writing, downloads are size-capped, and one asset's failure never aborts the batch — each asset gets an independent success/error outcome. --json gains an additive downloaded_attachments[] field only when the flag is passed; the undecorated schema is untouched.
-status: Accepted
-supersedes:
-superseded_by:
-tags: [cli, attachments, assets, agent, llm, download, security]
+status: Superseded
+superseded_by: 0073
+tags: [agent, assets, attachments, cli, download, llm, security]
 timestamp: 2026-07-21T00:00:00Z
 ---
+
+> **SUPERSEDED — do not act on this record.** Replaced by [0073](0073-attachment-downloads-take-comment-attachments-and-the-tui-saves-to-downloads.md). Run `living-docs read` for what is in force.
 
 # 0066. `ac get`/`ac current --download-attachments`: local temp-dir download for agent analysis
 
