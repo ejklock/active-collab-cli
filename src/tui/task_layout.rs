@@ -1,13 +1,17 @@
 //! Pure layout math for the Tasks screen's stacked task cards.
 //!
 //! Mirrors the `detail_geometry` split: this module owns the card-content
-//! string, card-height arithmetic, card inner-width derivation, and the
-//! first-visible-card scroll math, all as pure functions over primitives.
+//! string, card-height arithmetic, card inner-width derivation, the
+//! first-visible-card scroll math, the due-date bucket starts, the slot heights
+//! (card height plus the header row of a bucket's first card) and the bucket
+//! header text, all as pure functions over primitives.
 //! `screens::tasks` stays draw-only and calls into this module.
 
 use crate::i18n::t;
+use crate::render::buckets::{bucket_sums, due_bucket, DueBucket};
 use crate::render::{fmt_hours_or_dash, wrap_text, PANEL_HPAD};
 use crate::tui::model::TaskRow;
+use chrono::NaiveDate;
 
 /// Width consumed by one card's left+right chrome: 2 border cols + 2×PANEL_HPAD.
 pub(crate) const CARD_CHROME: u16 = 2 + 2 * PANEL_HPAD as u16;
@@ -41,6 +45,65 @@ pub(crate) fn card_height(task: &TaskRow, card_inner_w: usize) -> u16 {
     let lines = wrap_text(&content, card_inner_w.max(1));
     let body_rows = if lines.is_empty() { 1 } else { lines.len() };
     2 + body_rows as u16 + 2
+}
+
+/// The bucket each task opens: `Some(bucket)` at the first task of every
+/// non-empty bucket, `None` elsewhere. A list without a grouping date has no
+/// buckets, so every entry is `None`. The tasks are already in bucket order.
+pub(crate) fn bucket_starts(tasks: &[TaskRow], today: Option<NaiveDate>) -> Vec<Option<DueBucket>> {
+    let Some(today) = today else {
+        return vec![None; tasks.len()];
+    };
+    let mut previous = None;
+    tasks
+        .iter()
+        .map(|task| {
+            let bucket = due_bucket(task.due_on.as_deref(), today);
+            let opens = previous != Some(bucket);
+            previous = Some(bucket);
+            opens.then_some(bucket)
+        })
+        .collect()
+}
+
+/// Rows each task occupies in the list: its card, plus the bucket header row
+/// above the first task of a bucket.
+pub(crate) fn slot_heights(
+    tasks: &[TaskRow],
+    card_inner_w: usize,
+    today: Option<NaiveDate>,
+) -> Vec<u16> {
+    tasks
+        .iter()
+        .zip(bucket_starts(tasks, today))
+        .map(|(task, opens)| card_height(task, card_inner_w) + u16::from(opens.is_some()))
+        .collect()
+}
+
+/// The header text of the bucket that starts at `start`, with the sums of the
+/// bucket's current tasks.
+pub(crate) fn bucket_header(
+    tasks: &[TaskRow],
+    start: usize,
+    bucket: DueBucket,
+    today: NaiveDate,
+) -> String {
+    let members: Vec<&TaskRow> = tasks[start..]
+        .iter()
+        .take_while(|task| due_bucket(task.due_on.as_deref(), today) == bucket)
+        .collect();
+    let sums = bucket_sums(&members);
+    format!(
+        "{} ({}) · {} {} · {} {} · {} {}",
+        bucket.label(),
+        members.len(),
+        t("est"),
+        fmt_hours_or_dash(sums.estimate),
+        t("week"),
+        fmt_hours_or_dash(sums.logged_week),
+        t("total"),
+        fmt_hours_or_dash(sums.logged_total),
+    )
 }
 
 /// Compute the card inner width from the full terminal width.

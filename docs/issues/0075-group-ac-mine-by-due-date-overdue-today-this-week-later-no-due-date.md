@@ -2,7 +2,7 @@
 type: Issue
 title: "Group ac mine by due date: overdue, today, this week, later, no due date"
 description: ac mine groups open tasks into due-date buckets with per-bucket counts and estimate and hour sums, in the table, the TUI, the JSON and MCP.
-status: in-progress
+status: closed
 labels: [cli, tui, agent, slice]
 blocked_by: [0074]
 timestamp: 2026-11-11T21:40:56Z
@@ -35,6 +35,8 @@ Excluded: grouping by start date or by an interval, a separate `ac week` command
 - A bucket's estimate sum adds the tasks that have an estimate (a task without one adds nothing). Its week and total sums are unknown when any task's value in the bucket is unknown, so a failed hours request never shows as a smaller sum.
 - `ac mine --json` keeps its task order; agents group by `due_bucket`. Only the table and the TUI reorder by bucket.
 - The bucket rule lives in one pure module next to `MineTableRow` (`src/render/buckets.rs`), used by the table, the JSON and the TUI.
+- The TUI counts a bucket header as one extra row in the slot of its bucket's first task, so the existing offset cache, scroll math and index-based selection stay unchanged; the browse list carries no due date and draws no header.
+- `view` (src/tui/view.rs) is over the gate's complexity ceiling already on the base commit (cognitive 20, cyclomatic 15); it is refactored inside this issue by extracting the selection highlight and the Detail overlays into `render_detail_overlays`, same draw order, following the owner's choice for the same case in issue 0079 (2026-11-11; the owner did not answer the question this time). Not taken: a named baseline entry plus a separate issue, or stopping the slice.
 
 ### Acceptance
 

@@ -4,8 +4,8 @@ use crate::render::{display_width, wrap_text};
 use crate::tui::detail_geometry::Selection;
 use crate::tui::footer::{self, FooterPlan};
 use crate::tui::model::{
-    filter_assignee_candidates, ClickTarget, Compose, ComposeKind, ComposeStatus, EditStatus,
-    EstimateForm, ImageAssetRef, ImageStatus, LogTimeField, LogTimeForm, LogTimeStatus,
+    filter_assignee_candidates, ClickTarget, Compose, ComposeKind, ComposeStatus, DetailOverlay,
+    EditStatus, EstimateForm, ImageAssetRef, ImageStatus, LogTimeField, LogTimeForm, LogTimeStatus,
     ModalButtonTarget, Model, ReportField, ReportForm, ReportPeriodChoice, ReportStatus, Screen,
 };
 use crate::tui::screens::{draw_detail, draw_projects, draw_tasks, DetailParams};
@@ -162,7 +162,7 @@ pub fn view(
             card_heights,
             card_offsets,
             rendered_width,
-            ..
+            due_today,
         } => {
             let today = chrono::Local::now().date_naive();
             draw_tasks(
@@ -178,6 +178,7 @@ pub fn view(
                 card_heights,
                 card_offsets,
                 *rendered_width,
+                *due_today,
             );
         }
         Screen::Detail {
@@ -209,30 +210,14 @@ pub fn view(
                     comment_spans,
                 },
             );
-            if let Some(ref sel) = model.selection {
-                draw_selection_highlight(frame, sel);
-            }
-            if let Some(cp) = overlay.compose() {
-                render_compose_modal(frame, area, cp);
-            }
-            if let Some(form) = overlay.log_time() {
-                render_log_time_modal(frame, area, form);
-            }
-            if let Some(form) = overlay.estimate_edit() {
-                render_estimate_modal(frame, area, form);
-            }
-            if let Some((completed_target, status)) = overlay.status_confirm() {
-                render_status_confirm_modal(frame, area, completed_target, status);
-            }
-            if let Some((candidates, filter, selected, status)) = overlay.assignee_picker() {
-                render_assignee_picker_modal(frame, area, candidates, filter, selected, status);
-            }
-            if overlay.is_confirm() {
-                render_confirm_modal(frame, area, modal_btn_targets);
-            }
-            if let Some((asset, status)) = overlay.image_viewer() {
-                render_image_viewer(frame, area, chunks[1], asset, status);
-            }
+            render_detail_overlays(
+                frame,
+                area,
+                chunks[1],
+                model.selection.as_ref(),
+                overlay,
+                modal_btn_targets,
+            );
         }
     }
 
@@ -241,6 +226,42 @@ pub fn view(
     }
 
     render_footer(frame, chunks[2], footer_plan, theme::footer_style());
+}
+
+/// Draw the Detail screen's text-selection highlight and whichever modal
+/// overlay is open, in that order so a modal covers the highlight.
+fn render_detail_overlays(
+    frame: &mut Frame,
+    area: Rect,
+    content_area: Rect,
+    selection: Option<&Selection>,
+    overlay: &DetailOverlay,
+    modal_btn_targets: &mut Vec<ModalButtonTarget>,
+) {
+    if let Some(sel) = selection {
+        draw_selection_highlight(frame, sel);
+    }
+    if let Some(cp) = overlay.compose() {
+        render_compose_modal(frame, area, cp);
+    }
+    if let Some(form) = overlay.log_time() {
+        render_log_time_modal(frame, area, form);
+    }
+    if let Some(form) = overlay.estimate_edit() {
+        render_estimate_modal(frame, area, form);
+    }
+    if let Some((completed_target, status)) = overlay.status_confirm() {
+        render_status_confirm_modal(frame, area, completed_target, status);
+    }
+    if let Some((candidates, filter, selected, status)) = overlay.assignee_picker() {
+        render_assignee_picker_modal(frame, area, candidates, filter, selected, status);
+    }
+    if overlay.is_confirm() {
+        render_confirm_modal(frame, area, modal_btn_targets);
+    }
+    if let Some((asset, status)) = overlay.image_viewer() {
+        render_image_viewer(frame, area, content_area, asset, status);
+    }
 }
 
 fn compose_modal_title(cp: &Compose) -> String {

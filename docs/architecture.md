@@ -24,6 +24,10 @@ flowchart TD
     tui --> events["tui/events.rs\ncrossterm Event → Msg mapping"]
     tui --> view["tui/view.rs\nview()\nframe Layout split: header + content + footer"]
     view --> screens["tui/screens/\nprojects.rs · tasks.rs · detail.rs\neach owns its draw_* fn\n(responsive Table · detail wraps text + assets panel)"]
+    screens --> task_layout["tui/task_layout.rs\npure Tasks card layout: card heights · first_visible\nbucket header rows (bucket_starts · slot_heights · bucket_header)"]
+    task_layout --> buckets
+    model --> task_layout
+    model --> buckets
     view --> drawer["tui/drawer.rs\nshared widget builders (render_table)"]
     view --> theme["tui/theme.rs\ncentralized Style / Color constants"]
     view --> widgets["tui/widgets/modal.rs\nreusable centered modal overlay\n(DIM backdrop + Clear + bordered box)\ncompose · delete-confirm · image-viewer · hours-report"]
@@ -156,6 +160,11 @@ flowchart TD
 - **mine and browse share one TEA core**: `run_app` (async) seeds from `mine_model`
   (rows already fetched, no init_cmds) or `init_browse` (LoadTasksByProject on start).
   Enter/click on the mine Tasks screen opens Detail through the same `update` path.
+- **the mine Tasks screen groups its cards under due-date bucket headers**: with
+  `Screen::Tasks.due_today` set (mine; browse leaves it `None`), `update` keeps the task
+  vector in `render/buckets::group_by_bucket` order, and one header row per non-empty bucket
+  (label, count, estimate, week and total sums) is counted inside the height of the bucket's
+  first task, so card offsets, `first_visible`, selection and clicks stay on task indices.
 - **the view layer is responsive and theme-centralized**: `view()` splits the frame
   vertically into three regions — a one-line identity header (`app_header_style`:
   white on cyan, bold), a variable-height content area, and a footer.  The footer

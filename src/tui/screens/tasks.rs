@@ -1,3 +1,4 @@
+use crate::render::buckets::DueBucket;
 use crate::render::{
     display_width, truncate_to_display_width, wrap_text, BOX_BL, BOX_BR, BOX_H, BOX_TL, BOX_TR,
     BOX_V, PANEL_HPAD,
@@ -32,6 +33,7 @@ pub fn draw_tasks(
     card_heights_cache: &[u16],
     card_offsets_cache: &[u32],
     cache_rendered_width: usize,
+    due_today: Option<chrono::NaiveDate>,
 ) {
     let title = if revalidating {
         format!(" {} ↻ ", project_name)
@@ -66,6 +68,7 @@ pub fn draw_tasks(
         card_heights_cache,
         card_offsets_cache,
         cache_rendered_width,
+        due_today,
     );
 
     let first_visible = task_layout::first_visible(
@@ -86,6 +89,7 @@ pub fn draw_tasks(
         selected,
         card_inner_w,
         today,
+        due_today,
         targets,
     );
 
@@ -108,6 +112,7 @@ fn resolve_heights<'a>(
     cache_heights: &'a [u16],
     cache_offsets: &[u32],
     cache_rendered_width: usize,
+    due_today: Option<chrono::NaiveDate>,
 ) -> (std::borrow::Cow<'a, [u16]>, u32) {
     let cache_valid = cache_rendered_width == card_inner_w
         && cache_heights.len() == tasks.len()
@@ -118,10 +123,7 @@ fn resolve_heights<'a>(
         return (std::borrow::Cow::Borrowed(cache_heights), total);
     }
 
-    let heights: Vec<u16> = tasks
-        .iter()
-        .map(|t| task_layout::card_height(t, card_inner_w))
-        .collect();
+    let heights = task_layout::slot_heights(tasks, card_inner_w, due_today);
     let total: u32 = heights.iter().map(|&h| h as u32).sum();
     (std::borrow::Cow::Owned(heights), total)
 }
@@ -137,21 +139,34 @@ fn render_cards(
     selected: usize,
     card_inner_w: usize,
     today: chrono::NaiveDate,
+    due_today: Option<chrono::NaiveDate>,
     targets: &mut Vec<ClickTarget>,
 ) {
     targets.clear();
 
     let mut y = area.y;
     let bottom = area.y + area.height;
+    let starts = task_layout::bucket_starts(tasks, due_today);
 
-    for (i, (task, &h)) in tasks
+    for (i, ((task, &slot), opens)) in tasks
         .iter()
         .zip(heights.iter())
+        .zip(starts)
         .enumerate()
         .skip(first_visible)
     {
         if y >= bottom {
             break;
+        }
+        let mut h = slot;
+        if let Some((due_today, bucket)) = due_today.zip(opens) {
+            let header_rect = ratatui::layout::Rect::new(area.x, y, area.width, 1);
+            render_bucket_header(frame, header_rect, tasks, i, bucket, due_today);
+            y += 1;
+            h -= 1;
+            if y >= bottom {
+                break;
+            }
         }
         let visible_rows = h.min(bottom.saturating_sub(y));
 
@@ -169,6 +184,23 @@ fn render_cards(
 
         y += h;
     }
+}
+
+/// Render the one-row header of the bucket that starts at task `start`.
+fn render_bucket_header(
+    frame: &mut Frame,
+    rect: ratatui::layout::Rect,
+    tasks: &[TaskRow],
+    start: usize,
+    bucket: DueBucket,
+    due_today: chrono::NaiveDate,
+) {
+    let text = task_layout::bucket_header(tasks, start, bucket, due_today);
+    let line = Line::styled(
+        fit_to_card_width(&text, rect.width as usize),
+        theme::column_header_style(),
+    );
+    frame.render_widget(Paragraph::new(line), rect);
 }
 
 /// Render a single task card into `card_rect`.

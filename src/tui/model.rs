@@ -699,13 +699,18 @@ pub enum Screen {
         /// True while an in-flight revalidation fetch is running on a warm-seeded mine list.
         /// Distinct from `loading`: revalidating keeps rows painted while the refresh runs.
         revalidating: bool,
-        /// Per-card heights (rows) computed by reflow_tasks; mirrors Detail's `lines` cache.
+        /// Per-slot heights (rows) computed by reflow_tasks; a slot is a card plus, for the
+        /// first card of a due-date bucket, the bucket header row above it. Mirrors Detail's
+        /// `lines` cache.
         card_heights: Vec<u16>,
-        /// Prefix-sum y-offsets: card_offsets[i] is the cumulative row start of card i;
-        /// card_offsets[n] is the total row count. u32 avoids the u16 saturation ceiling.
+        /// Prefix-sum y-offsets: card_offsets[i] is the row where slot i starts (the bucket
+        /// header row for the first card of a bucket); card_offsets[n] is the total row count. u32 avoids the u16 saturation ceiling.
         card_offsets: Vec<u32>,
         /// Width (card_inner_w) at which the cache was last built; usize::MAX means not-yet-built.
         rendered_width: usize,
+        /// `Some(today)` groups the tasks under due-date bucket headers, which use this
+        /// date; `None` is a plain list. The tasks are kept in bucket order when set.
+        due_today: Option<chrono::NaiveDate>,
     },
     Detail {
         instance: String,
@@ -1185,7 +1190,8 @@ impl Model {
     /// Guard clauses ensure this is a no-op when the top screen is not Tasks,
     /// is still loading, or the cache is already current for `card_inner_w`.
     ///
-    /// The cache depends only on `tasks` and `card_inner_w`, never on `selected`.
+    /// The cache depends on `tasks`, `card_inner_w` and `due_today` (which adds the bucket
+    /// header rows), never on `selected`.
     pub fn reflow_tasks(&mut self, card_inner_w: usize) {
         let Some(Screen::Tasks {
             tasks,
@@ -1193,6 +1199,7 @@ impl Model {
             card_heights,
             card_offsets,
             rendered_width,
+            due_today,
             ..
         }) = self.top_mut()
         else {
@@ -1203,10 +1210,7 @@ impl Model {
             return;
         }
 
-        *card_heights = tasks
-            .iter()
-            .map(|t| crate::tui::task_layout::card_height(t, card_inner_w))
-            .collect();
+        *card_heights = crate::tui::task_layout::slot_heights(tasks, card_inner_w, *due_today);
 
         let mut offsets = Vec::with_capacity(card_heights.len() + 1);
         let mut acc: u32 = 0;
@@ -1918,6 +1922,7 @@ fn handle_select(model: Model) -> (Model, Vec<Cmd>) {
                     card_heights: Vec::new(),
                     card_offsets: Vec::new(),
                     rendered_width: usize::MAX,
+                    due_today: None,
                 });
             }
             SelectAction::PushDetail {
@@ -2070,12 +2075,15 @@ fn handle_loaded_mine_tasks(mut model: Model, rows: Vec<MineTableRow>, loaded_at
         card_heights: ref mut ch,
         card_offsets: ref mut co,
         rendered_width: ref mut rw,
+        selected: ref mut sel,
+        due_today,
         ..
     }) = model.tasks_screen_mut()
     {
         let earlier = std::mem::take(t);
-        *t = rows_to_task_rows(rows);
+        *t = order_by_bucket(rows_to_task_rows(rows), *due_today);
         keep_earlier_hours(t, &earlier);
+        *sel = reselect(*sel, &earlier, t);
         *l = false;
         *rv = false;
         // Invalidate card cache so reflow_tasks rebuilds at current width.
@@ -2085,6 +2093,31 @@ fn handle_loaded_mine_tasks(mut model: Model, rows: Vec<MineTableRow>, loaded_at
     }
     model.last_loaded = Some(loaded_at);
     model
+}
+
+crate::render::buckets::impl_bucketed_task!(TaskRow);
+
+/// The tasks in due-date bucket order when a grouping date is set, else as given.
+fn order_by_bucket(tasks: Vec<TaskRow>, due_today: Option<chrono::NaiveDate>) -> Vec<TaskRow> {
+    let Some(today) = due_today else {
+        return tasks;
+    };
+    crate::render::buckets::group_by_bucket(&tasks, today)
+        .into_iter()
+        .flat_map(|bucket| bucket.items)
+        .cloned()
+        .collect()
+}
+
+/// The selection after a reload: the same task (by instance and id) wherever it
+/// moved, else the old index clamped to the new list.
+fn reselect(selected: usize, earlier: &[TaskRow], fresh: &[TaskRow]) -> usize {
+    let moved = earlier.get(selected).and_then(|prior| {
+        fresh
+            .iter()
+            .position(|r| r.instance == prior.instance && r.task_id == prior.task_id)
+    });
+    moved.unwrap_or_else(|| selected.min(fresh.len().saturating_sub(1)))
 }
 
 /// Rows arrive before their hours: a row without hours shows the hours the
@@ -3338,8 +3371,22 @@ pub fn init_browse(header: Header, seed: Option<Vec<ProjectGroup>>) -> (Model, V
 /// ALWAYS emits `Cmd::LoadMineTasks` so the mine list is revalidated on every
 /// entry, regardless of whether a snapshot was present.
 pub fn init_mine(header: Header, seed: Option<Vec<MineTableRow>>) -> (Model, Vec<Cmd>) {
+    init_mine_on(header, seed, chrono::Local::now().date_naive())
+}
+
+/// `init_mine` with an explicit "today" for the due-date buckets, so tests
+/// inject the date.
+pub fn init_mine_on(
+    header: Header,
+    seed: Option<Vec<MineTableRow>>,
+    today: chrono::NaiveDate,
+) -> (Model, Vec<Cmd>) {
     let (tasks, loading, revalidating) = match seed {
-        Some(rows) if !rows.is_empty() => (rows_to_task_rows(rows), false, true),
+        Some(rows) if !rows.is_empty() => (
+            order_by_bucket(rows_to_task_rows(rows), Some(today)),
+            false,
+            true,
+        ),
         _ => (vec![], true, false),
     };
     let model = Model {
@@ -3352,6 +3399,7 @@ pub fn init_mine(header: Header, seed: Option<Vec<MineTableRow>>) -> (Model, Vec
             card_heights: Vec::new(),
             card_offsets: Vec::new(),
             rendered_width: usize::MAX,
+            due_today: Some(today),
         }],
         should_quit: false,
         header,

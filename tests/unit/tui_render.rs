@@ -154,6 +154,7 @@ fn render_tasks_to_buf_with_today(
                 &[],
                 &[],
                 usize::MAX,
+                None,
             );
         })
         .unwrap();
@@ -367,6 +368,7 @@ fn draw_my_tasks_title_renders_in_pt_br() {
                 &[],
                 &[],
                 usize::MAX,
+                None,
             );
         })
         .unwrap();
@@ -572,6 +574,7 @@ fn draw_tasks_selected_card_all_rows_carry_selection_style() {
                 &[],
                 &[],
                 usize::MAX,
+                None,
             );
         })
         .unwrap();
@@ -620,6 +623,7 @@ fn draw_tasks_click_on_non_first_card_row_resolves_to_task_index() {
                 &[],
                 &[],
                 usize::MAX,
+                None,
             );
         })
         .unwrap();
@@ -745,6 +749,7 @@ fn draw_tasks_loading_shows_paragraph_not_table() {
                 &[],
                 &[],
                 usize::MAX,
+                None,
             );
         })
         .unwrap();
@@ -1167,6 +1172,7 @@ fn draw_tasks_single_line_card_height_is_five_rows() {
                 &[],
                 &[],
                 usize::MAX,
+                None,
             );
         })
         .unwrap();
@@ -1246,6 +1252,7 @@ fn draw_tasks_overdue_task_due_cells_carry_red_fg() {
                 &[],
                 &[],
                 usize::MAX,
+                None,
             );
         })
         .unwrap();
@@ -1299,6 +1306,7 @@ fn draw_tasks_near_due_task_due_cells_carry_yellow_fg() {
                 &[],
                 &[],
                 usize::MAX,
+                None,
             );
         })
         .unwrap();
@@ -1352,6 +1360,7 @@ fn draw_tasks_no_due_shows_sem_data_with_default_style() {
                 &[],
                 &[],
                 usize::MAX,
+                None,
             );
         })
         .unwrap();
@@ -1411,6 +1420,7 @@ fn draw_tasks_selected_card_due_line_keeps_color_on_selection_bg() {
                 &[],
                 &[],
                 usize::MAX,
+                None,
             );
         })
         .unwrap();
@@ -1481,6 +1491,7 @@ fn draw_tasks_due_line_with_project_name_shows_due_separator_project() {
                 &[],
                 &[],
                 usize::MAX,
+                None,
             );
         })
         .unwrap();
@@ -1543,6 +1554,7 @@ fn draw_tasks_due_line_project_portion_has_default_style_not_due_color() {
                 &[],
                 &[],
                 usize::MAX,
+                None,
             );
         })
         .unwrap();
@@ -1626,6 +1638,7 @@ fn draw_tasks_due_line_without_project_name_shows_no_separator() {
                 &[],
                 &[],
                 usize::MAX,
+                None,
             );
         })
         .unwrap();
@@ -2874,6 +2887,7 @@ mod v2b_click_targets {
                 card_heights: vec![],
                 card_offsets: vec![],
                 rendered_width: usize::MAX,
+                due_today: None,
             }],
             should_quit: false,
             header: empty_header(),
@@ -3023,6 +3037,7 @@ mod v2b_click_targets {
                 card_heights: vec![],
                 card_offsets: vec![],
                 rendered_width: usize::MAX,
+                due_today: None,
             }],
             should_quit: false,
             header: empty_header(),
@@ -10319,8 +10334,370 @@ fn mine_hours_display_card_is_five_rows_tall() {
                 &[],
                 &[],
                 usize::MAX,
+                None,
             );
         })
         .unwrap();
     assert_eq!(targets[0].y_end - targets[0].y_start, 5);
+}
+
+mod mine_bucket_drawing {
+    use super::{buf_to_string, set_language, LANG_MUTEX};
+    use crate::render::MineTableRow;
+    use crate::tui::model::{init_mine_on, update, Header, Model, Msg, Screen};
+    use crate::tui::screens::draw_tasks;
+    use crate::tui::task_layout::inner_w;
+    use crate::tui::view::view;
+    use crossterm::event::KeyModifiers;
+    use ratatui::{backend::TestBackend, layout::Rect, Terminal};
+
+    fn today() -> chrono::NaiveDate {
+        chrono::NaiveDate::from_ymd_opt(2026, 11, 11).unwrap()
+    }
+
+    fn row(
+        task_id: i64,
+        due_on: Option<&str>,
+        week: Option<f64>,
+        total: Option<f64>,
+    ) -> MineTableRow {
+        MineTableRow {
+            instance: "a".into(),
+            project_id: 1,
+            task_number: task_id,
+            task_id,
+            name: format!("Task {task_id}"),
+            due_on: due_on.map(str::to_owned),
+            project_name: None,
+            estimate: Some(3.0),
+            logged_week: week,
+            logged_total: total,
+        }
+    }
+
+    fn mine(rows: Vec<MineTableRow>, width: u16, height: u16) -> Model {
+        let mut model = init_mine_on(Header::from_instances(&[], None), Some(rows), today()).0;
+        model.viewport = (width, height);
+        model
+    }
+
+    fn draw(model: &mut Model, width: u16, height: u16) -> String {
+        model.reflow_tasks(inner_w(width));
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        let mut targets = vec![];
+        terminal
+            .draw(|frame| view(model, frame, &mut targets, &mut vec![]))
+            .unwrap();
+        model.set_click_targets(targets);
+        buf_to_string(terminal.backend().buffer())
+    }
+
+    fn line_with<'a>(screen: &'a str, needle: &str) -> &'a str {
+        screen
+            .lines()
+            .find(|l| l.contains(needle))
+            .unwrap_or_else(|| panic!("no line with {needle:?} in:\n{screen}"))
+    }
+
+    fn row_of(screen: &str, needle: &str) -> u16 {
+        screen
+            .lines()
+            .position(|l| l.contains(needle))
+            .unwrap_or_else(|| panic!("no line with {needle:?} in:\n{screen}")) as u16
+    }
+
+    #[test]
+    fn mine_list_bucket_headers_appear_only_for_non_empty_buckets() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let mut model = mine(
+            vec![
+                row(1, Some("2026-11-01"), None, None),
+                row(2, None, None, None),
+            ],
+            100,
+            30,
+        );
+        let screen = draw(&mut model, 100, 30);
+        assert!(screen.contains("Overdue (1)"), "{screen}");
+        assert!(screen.contains("No due date (1)"), "{screen}");
+        for absent in ["Today (", "This week (", "Later ("] {
+            assert!(!screen.contains(absent), "{absent}\n{screen}");
+        }
+    }
+
+    #[test]
+    fn mine_list_bucket_headers_show_dash_for_unknown_week_hours_then_the_sum() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let mut model = mine(vec![row(1, Some("2026-11-01"), None, Some(7.0))], 100, 30);
+        let screen = draw(&mut model, 100, 30);
+        assert!(
+            line_with(&screen, "Overdue (1)").contains("Overdue (1) · est 3 · week – · total 7"),
+            "{screen}"
+        );
+        let hours = vec![crate::commands::MineHours {
+            instance: "a".into(),
+            task_id: 1,
+            logged_week: Some(1.5),
+            logged_total: Some(7.0),
+        }];
+        model = update(model, Msg::LoadedMineHours { hours }).0;
+        let screen = draw(&mut model, 100, 30);
+        assert!(
+            line_with(&screen, "Overdue (1)").contains("Overdue (1) · est 3 · week 1.5 · total 7"),
+            "{screen}"
+        );
+    }
+
+    #[test]
+    fn mine_list_bucket_headers_use_the_portuguese_labels() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("pt_BR");
+        let mut model = mine(
+            vec![
+                row(1, Some("2026-11-01"), Some(1.0), Some(2.0)),
+                row(2, None, Some(1.0), Some(2.0)),
+            ],
+            100,
+            30,
+        );
+        let screen = draw(&mut model, 100, 30);
+        set_language("en");
+        assert!(
+            line_with(&screen, "Atrasadas (1)")
+                .contains("Atrasadas (1) · est 3 · semana 1 · total 2"),
+            "{screen}"
+        );
+        assert!(screen.contains("Sem prazo (1)"), "{screen}");
+    }
+
+    fn grouped_tasks() -> Vec<crate::tui::model::TaskRow> {
+        let model = mine(
+            vec![
+                row(1, Some("2026-11-01"), None, None),
+                row(2, None, None, None),
+            ],
+            100,
+            30,
+        );
+        match model.stack.last() {
+            Some(Screen::Tasks { tasks, .. }) => tasks.clone(),
+            _ => unreachable!("mine opens a Tasks screen"),
+        }
+    }
+
+    fn draw_grouped(
+        tasks: &[crate::tui::model::TaskRow],
+        heights: &[u16],
+        offsets: &[u32],
+        cache_width: usize,
+        width: u16,
+    ) -> (
+        String,
+        Vec<crate::tui::model::ClickTarget>,
+        Terminal<TestBackend>,
+    ) {
+        let mut terminal = Terminal::new(TestBackend::new(width, 30)).unwrap();
+        let mut targets = vec![];
+        terminal
+            .draw(|frame| {
+                draw_tasks(
+                    frame,
+                    Rect::new(0, 0, width, 30),
+                    "Proj",
+                    tasks,
+                    0,
+                    false,
+                    false,
+                    today(),
+                    &mut targets,
+                    heights,
+                    offsets,
+                    cache_width,
+                    Some(today()),
+                );
+            })
+            .unwrap();
+        let screen = buf_to_string(terminal.backend().buffer());
+        (screen, targets, terminal)
+    }
+
+    fn assert_headers_over_full_cards(
+        screen: &str,
+        targets: &[crate::tui::model::ClickTarget],
+        reference: &[crate::tui::model::ClickTarget],
+    ) {
+        let overdue = row_of(screen, "Overdue (1)");
+        let no_due = row_of(screen, "No due date (1)");
+        assert_eq!(targets.len(), 2, "{screen}");
+        assert_eq!(targets[0].y_start, overdue + 1, "{screen}");
+        assert_eq!(targets[1].y_start, no_due + 1, "{screen}");
+        for (got, want) in targets.iter().zip(reference) {
+            assert_eq!(
+                got.y_end - got.y_start,
+                want.y_end - want.y_start,
+                "{screen}"
+            );
+        }
+        assert_eq!(targets[0].y_end - targets[0].y_start, 5, "{screen}");
+    }
+
+    #[test]
+    fn mine_list_bucket_headers_keep_full_cards_without_a_fresh_height_cache() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let tasks = grouped_tasks();
+        let real_w = inner_w(100);
+        let real = crate::tui::task_layout::slot_heights(&tasks, real_w, Some(today()));
+        let prefix = |heights: &[u16]| {
+            let mut offsets = vec![0u32];
+            for h in heights {
+                offsets.push(offsets.last().unwrap() + u32::from(*h));
+            }
+            offsets
+        };
+
+        let (screen, reference, _) = draw_grouped(&tasks, &[], &[], usize::MAX, 100);
+        assert_headers_over_full_cards(&screen, &reference, &reference);
+
+        let tall: Vec<u16> = real.iter().map(|h| h + 2).collect();
+        let tall_offsets = prefix(&tall);
+        let (screen, used, _) = draw_grouped(&tasks, &tall, &tall_offsets, real_w, 100);
+        assert_eq!(used.len(), 2, "{screen}");
+        assert_eq!(used[0].y_end - used[0].y_start, 7, "{screen}");
+
+        let (screen, targets, _) = draw_grouped(&tasks, &real, &prefix(&real), real_w, 100);
+        assert_headers_over_full_cards(&screen, &targets, &reference);
+
+        let stale_heights = [tall[0]];
+        let stale_offsets = [0u32, u32::from(tall[0])];
+        let (screen, targets, _) =
+            draw_grouped(&tasks, &stale_heights, &stale_offsets, real_w, 100);
+        assert_headers_over_full_cards(&screen, &targets, &reference);
+
+        let (screen, targets, _) = draw_grouped(&tasks, &tall, &tall_offsets, real_w + 1, 100);
+        assert_headers_over_full_cards(&screen, &targets, &reference);
+
+        let (screen, targets, _) = draw_grouped(&tasks, &[], &[], real_w, 100);
+        assert_headers_over_full_cards(&screen, &targets, &reference);
+    }
+
+    #[test]
+    fn mine_list_bucket_headers_carry_the_column_header_style() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let tasks = grouped_tasks();
+        let (screen, _, terminal) = draw_grouped(&tasks, &[], &[], usize::MAX, 100);
+        let header_row = row_of(&screen, "Overdue (1)");
+        let buffer = terminal.backend().buffer();
+        let x = screen
+            .lines()
+            .nth(header_row as usize)
+            .unwrap()
+            .chars()
+            .position(|c| c == 'O')
+            .unwrap() as u16;
+        let want = crate::tui::theme::column_header_style();
+        for dx in 0.."Overdue (1)".len() as u16 {
+            let cell = &buffer[(x + dx, header_row)];
+            assert_eq!(cell.fg, want.fg.unwrap(), "col {dx}\n{screen}");
+            assert!(
+                cell.modifier.contains(ratatui::style::Modifier::BOLD),
+                "col {dx}\n{screen}"
+            );
+        }
+    }
+
+    #[test]
+    fn mine_list_bucket_headers_are_not_drawn_on_a_browse_list() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let tasks = super::make_tasks(&["First", "Second"]);
+        let mut terminal = Terminal::new(TestBackend::new(80, 20)).unwrap();
+        let mut targets = vec![];
+        terminal
+            .draw(|frame| {
+                draw_tasks(
+                    frame,
+                    Rect::new(0, 0, 80, 20),
+                    "Proj",
+                    &tasks,
+                    0,
+                    false,
+                    false,
+                    today(),
+                    &mut targets,
+                    &[],
+                    &[],
+                    usize::MAX,
+                    None,
+                );
+            })
+            .unwrap();
+        let screen = buf_to_string(terminal.backend().buffer());
+        let first_inner_row = screen.lines().nth(1).unwrap();
+        assert!(first_inner_row.contains('┌'), "{screen}");
+        assert!(!screen.contains("No due date ("), "{screen}");
+        assert_eq!(targets[0].y_start, 1);
+    }
+
+    #[test]
+    fn mine_list_bucket_layout_click_on_a_header_row_selects_nothing() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let mut model = mine(
+            vec![
+                row(1, Some("2026-11-01"), None, None),
+                row(2, None, None, None),
+            ],
+            100,
+            30,
+        );
+        let screen = draw(&mut model, 100, 30);
+        let header_row = row_of(&screen, "No due date (1)");
+        let (model, cmds) = update(
+            model,
+            Msg::Click {
+                column: 5,
+                row: header_row,
+                modifiers: KeyModifiers::NONE,
+            },
+        );
+        assert!(cmds.is_empty());
+        assert_eq!(model.stack.len(), 1);
+        assert!(matches!(
+            model.stack.last(),
+            Some(Screen::Tasks { selected: 0, .. })
+        ));
+    }
+
+    #[test]
+    fn mine_list_bucket_layout_click_on_the_card_under_a_header_opens_that_task() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let mut model = mine(
+            vec![
+                row(1, Some("2026-11-01"), None, None),
+                row(2, None, None, None),
+            ],
+            100,
+            30,
+        );
+        let screen = draw(&mut model, 100, 30);
+        let card_row = row_of(&screen, "Task 2");
+        let (model, cmds) = update(
+            model,
+            Msg::Click {
+                column: 5,
+                row: card_row,
+                modifiers: KeyModifiers::NONE,
+            },
+        );
+        assert_eq!(cmds.len(), 1, "Detail load must be requested");
+        assert!(matches!(
+            model.stack.last(),
+            Some(Screen::Detail { task_id: 2, .. })
+        ));
+    }
 }

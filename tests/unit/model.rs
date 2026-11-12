@@ -8123,6 +8123,7 @@ fn report_pointer_tasks_model() -> Model {
         card_heights: vec![],
         card_offsets: vec![],
         rendered_width: usize::MAX,
+        due_today: None,
     })
 }
 
@@ -8512,4 +8513,308 @@ fn mine_list_under_detail_changes_nothing_without_a_tasks_screen() {
     assert!(after_hours.stack.is_empty());
     let after_rows = apply_mine_rows(after_hours, vec![mine_row("a", 1, None, None)]);
     assert!(after_rows.stack.is_empty());
+}
+
+fn grouping_today() -> chrono::NaiveDate {
+    chrono::NaiveDate::from_ymd_opt(2026, 11, 11).unwrap()
+}
+
+fn dated_row(task_id: i64, due_on: Option<&str>) -> MineTableRow {
+    MineTableRow {
+        due_on: due_on.map(str::to_owned),
+        ..mine_row("a", task_id, None, None)
+    }
+}
+
+/// Wednesday 2026-11-11: ids 6 and 3 are overdue (out of due-date order in the
+/// input), 4 is today, 5 this week, 1 later, 2 has no due date.
+fn mixed_due_rows() -> Vec<MineTableRow> {
+    vec![
+        dated_row(1, Some("2026-11-20")),
+        dated_row(2, None),
+        dated_row(3, Some("2026-11-05")),
+        dated_row(4, Some("2026-11-11")),
+        dated_row(5, Some("2026-11-13")),
+        dated_row(6, Some("2026-11-01")),
+    ]
+}
+
+fn grouped_mine_model(rows: Vec<MineTableRow>) -> Model {
+    crate::tui::model::init_mine_on(empty_header(), Some(rows), grouping_today()).0
+}
+
+fn mine_task_ids(model: &Model) -> Vec<i64> {
+    mine_tasks_of(model).0.iter().map(|t| t.task_id).collect()
+}
+
+fn reload_mine(model: Model, rows: Vec<MineTableRow>) -> Model {
+    let (updated, cmds) = update(
+        model,
+        Msg::LoadedMineTasks {
+            rows,
+            loaded_at: "2026-11-11T12:00:00Z".into(),
+        },
+    );
+    assert!(cmds.is_empty());
+    updated
+}
+
+#[test]
+fn mine_list_groups_a_seed_in_bucket_order_with_earlier_due_first() {
+    let model = grouped_mine_model(mixed_due_rows());
+    assert_eq!(mine_task_ids(&model), [6, 3, 4, 5, 1, 2]);
+}
+
+#[test]
+fn mine_list_groups_a_reload_in_bucket_order() {
+    let model = grouped_mine_model(vec![dated_row(9, None)]);
+    let model = reload_mine(model, mixed_due_rows());
+    assert_eq!(mine_task_ids(&model), [6, 3, 4, 5, 1, 2]);
+}
+
+#[test]
+fn mine_list_groups_keeps_the_order_when_hours_arrive() {
+    let model = grouped_mine_model(mixed_due_rows());
+    let model = apply_mine_hours(
+        model,
+        vec![
+            mine_hours("a", 2, Some(1.0), Some(2.0)),
+            mine_hours("a", 6, Some(3.0), Some(4.0)),
+        ],
+    );
+    assert_eq!(mine_task_ids(&model), [6, 3, 4, 5, 1, 2]);
+    let (tasks, _) = mine_tasks_of(&model);
+    assert_eq!(tasks[0].logged_week, Some(3.0));
+    assert_eq!(tasks[5].logged_total, Some(2.0));
+}
+
+#[test]
+fn mine_list_groups_keeps_the_same_task_selected_when_a_reload_moves_it() {
+    let mut model = grouped_mine_model(mixed_due_rows());
+    model.top_mut().unwrap().set_selected(4);
+    assert_eq!(mine_tasks_of(&model).0[4].task_id, 1);
+    let model = reload_mine(
+        model,
+        vec![
+            dated_row(1, Some("2026-11-20")),
+            dated_row(7, Some("2026-11-02")),
+            dated_row(8, Some("2026-11-03")),
+        ],
+    );
+    let (tasks, selected) = mine_tasks_of(&model);
+    assert_eq!(selected, 2);
+    assert_eq!(tasks[selected].task_id, 1);
+}
+
+fn selected_instance_and_id(model: &Model) -> (String, i64) {
+    let (tasks, selected) = mine_tasks_of(model);
+    (tasks[selected].instance.clone(), tasks[selected].task_id)
+}
+
+#[test]
+fn mine_list_groups_keeps_the_instance_selected_when_two_share_a_task_id() {
+    let mut model = grouped_mine_model(vec![
+        mine_row("a", 1, None, None),
+        mine_row("b", 1, None, None),
+    ]);
+    model.top_mut().unwrap().set_selected(1);
+    assert_eq!(selected_instance_and_id(&model), ("b".to_string(), 1));
+    let model = reload_mine(
+        model,
+        vec![
+            mine_row("c", 0, None, None),
+            mine_row("a", 1, None, None),
+            mine_row("b", 1, None, None),
+        ],
+    );
+    assert_eq!(selected_instance_and_id(&model), ("b".to_string(), 1));
+    assert_eq!(mine_tasks_of(&model).1, 2);
+}
+
+#[test]
+fn mine_list_groups_keeps_the_instance_selected_when_a_reload_swaps_two_sharing_a_task_id() {
+    let mut model = grouped_mine_model(vec![
+        mine_row("a", 1, None, None),
+        mine_row("b", 1, None, None),
+    ]);
+    model.top_mut().unwrap().set_selected(0);
+    let model = reload_mine(
+        model,
+        vec![
+            mine_row("c", 0, None, None),
+            mine_row("b", 1, None, None),
+            mine_row("a", 1, None, None),
+        ],
+    );
+    assert_eq!(selected_instance_and_id(&model), ("a".to_string(), 1));
+    assert_eq!(mine_tasks_of(&model).1, 2);
+}
+
+#[test]
+fn mine_list_groups_clamps_the_selection_when_the_selected_task_is_gone() {
+    let mut model = grouped_mine_model(mixed_due_rows());
+    model.top_mut().unwrap().set_selected(4);
+    let model = reload_mine(
+        model,
+        vec![
+            dated_row(7, Some("2026-11-02")),
+            dated_row(8, Some("2026-11-03")),
+            dated_row(9, None),
+        ],
+    );
+    let (_, selected) = mine_tasks_of(&model);
+    assert_eq!(selected, 2);
+}
+
+#[test]
+fn mine_list_groups_a_gone_selection_inside_the_new_list_keeps_its_index() {
+    let mut model = grouped_mine_model(mixed_due_rows());
+    model.top_mut().unwrap().set_selected(1);
+    let model = reload_mine(
+        model,
+        vec![
+            dated_row(7, Some("2026-11-02")),
+            dated_row(8, Some("2026-11-03")),
+            dated_row(9, None),
+        ],
+    );
+    let (_, selected) = mine_tasks_of(&model);
+    assert_eq!(selected, 1);
+}
+
+fn browse_tasks_model(rows: Vec<TaskRow>) -> Model {
+    let model = Model {
+        stack: vec![Screen::Projects {
+            groups: vec![ProjectGroup {
+                project_id: 1,
+                project_name: "Proj".into(),
+                instance: "a".into(),
+                tasks: rows,
+            }],
+            selected: 0,
+            loading: false,
+            revalidating: false,
+        }],
+        should_quit: false,
+        header: empty_header(),
+        viewport: (80, 24),
+        click_targets: vec![],
+        modal_button_targets: vec![],
+        last_loaded: None,
+        selection: None,
+        copied_feedback: false,
+        report: None,
+    };
+    update(model, Msg::Select).0
+}
+
+fn browse_rows_in_api_order() -> Vec<TaskRow> {
+    [(1, Some("2026-11-20")), (2, None), (3, Some("2026-11-01"))]
+        .into_iter()
+        .map(|(id, due)| TaskRow {
+            task_id: id,
+            task_number: id,
+            name: format!("Task {id}"),
+            instance: "a".into(),
+            project_id: 1,
+            due_on: due.map(str::to_owned),
+            project_name: None,
+            estimate: None,
+            logged_week: None,
+            logged_total: None,
+        })
+        .collect()
+}
+
+#[test]
+fn mine_list_groups_leaves_a_browse_list_in_api_order_ungrouped() {
+    let model = browse_tasks_model(browse_rows_in_api_order());
+    match model.stack.last() {
+        Some(Screen::Tasks {
+            tasks, due_today, ..
+        }) => {
+            assert_eq!(*due_today, None);
+            let ids: Vec<i64> = tasks.iter().map(|t| t.task_id).collect();
+            assert_eq!(ids, [1, 2, 3]);
+        }
+        _ => panic!("expected Tasks screen"),
+    }
+}
+
+#[test]
+fn mine_list_groups_builds_a_grouped_screen_without_an_injected_date() {
+    let (model, _) = crate::tui::model::init_mine(empty_header(), Some(mixed_due_rows()));
+    match model.stack.last() {
+        Some(Screen::Tasks { due_today, .. }) => assert!(due_today.is_some()),
+        _ => panic!("expected Tasks screen"),
+    }
+}
+
+fn card_heights_of(model: &Model) -> Vec<u16> {
+    match model.stack.last() {
+        Some(Screen::Tasks { card_heights, .. }) => card_heights.clone(),
+        _ => panic!("expected Tasks screen"),
+    }
+}
+
+#[test]
+fn mine_list_bucket_layout_adds_one_row_to_the_first_task_of_each_bucket() {
+    let mut model = grouped_mine_model(mixed_due_rows());
+    model.reflow_tasks(60);
+    let (tasks, _) = mine_tasks_of(&model);
+    let base = crate::tui::task_layout::card_height(&tasks[0], 60);
+    // Order is 6,3 (overdue), 4 (today), 5 (this week), 1 (later), 2 (none).
+    assert_eq!(
+        card_heights_of(&model),
+        [base + 1, base, base + 1, base + 1, base + 1, base + 1]
+    );
+}
+
+#[test]
+fn mine_list_bucket_layout_leaves_a_browse_list_at_plain_card_heights() {
+    let mut model = browse_tasks_model(browse_rows_in_api_order());
+    model.reflow_tasks(60);
+    let (tasks, _) = mine_tasks_of(&model);
+    let expected: Vec<u16> = tasks
+        .iter()
+        .map(|t| crate::tui::task_layout::card_height(t, 60))
+        .collect();
+    assert_eq!(card_heights_of(&model), expected);
+}
+
+#[test]
+fn mine_list_bucket_layout_scrolls_a_lower_bucket_header_into_view_with_its_task() {
+    let mut model = grouped_mine_model(mixed_due_rows());
+    model.reflow_tasks(60);
+    let (offsets, heights) = match model.stack.last() {
+        Some(Screen::Tasks {
+            card_offsets,
+            card_heights,
+            ..
+        }) => (card_offsets.clone(), card_heights.clone()),
+        _ => panic!("expected Tasks screen"),
+    };
+    // Task index 2 opens the Today bucket: its slot is header row plus card.
+    let visible_h = heights[2];
+    let first = crate::tui::task_layout::first_visible(&offsets, 60, 60, &heights, 2, visible_h);
+    assert_eq!(first, 2);
+    assert_eq!(heights[2], heights[1] + 1);
+}
+
+#[test]
+fn mine_list_bucket_layout_moves_selection_across_buckets_on_tasks_only() {
+    let mut model = grouped_mine_model(mixed_due_rows());
+    model.top_mut().unwrap().set_selected(1);
+    model = update(model, Msg::Down).0;
+    assert_eq!(mine_tasks_of(&model).1, 2);
+    assert_eq!(mine_tasks_of(&model).0[2].task_id, 4);
+    model = update(model, Msg::Up).0;
+    assert_eq!(mine_tasks_of(&model).1, 1);
+    assert_eq!(mine_tasks_of(&model).0[1].task_id, 3);
+    model.top_mut().unwrap().set_selected(3);
+    assert_eq!(mine_tasks_of(&model).0[3].task_id, 5);
+    for page in [Msg::PageDown, Msg::PageUp] {
+        model = update(model, page).0;
+        assert_eq!(mine_tasks_of(&model).1, 3);
+    }
 }
