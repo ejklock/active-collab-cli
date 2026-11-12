@@ -989,7 +989,10 @@ async fn update_task_puts_assignee_only_body() {
         .await;
 
     let client = make_client(&server.uri());
-    let outcome = client.update_task(3, 42, Some(9), None).await.unwrap();
+    let outcome = client
+        .update_task(3, 42, Some(9), None, None)
+        .await
+        .unwrap();
     assert!(matches!(outcome, TaskWriteOutcome::Ok(_)));
     server.verify().await;
 }
@@ -1006,7 +1009,10 @@ async fn update_task_puts_estimate_only_body() {
         .await;
 
     let client = make_client(&server.uri());
-    let outcome = client.update_task(3, 42, None, Some(4.5)).await.unwrap();
+    let outcome = client
+        .update_task(3, 42, None, Some(4.5), None)
+        .await
+        .unwrap();
     assert!(matches!(outcome, TaskWriteOutcome::Ok(_)));
     server.verify().await;
 }
@@ -1027,7 +1033,10 @@ async fn update_task_puts_both_fields() {
         .await;
 
     let client = make_client(&server.uri());
-    let outcome = client.update_task(3, 42, Some(9), Some(4.5)).await.unwrap();
+    let outcome = client
+        .update_task(3, 42, Some(9), Some(4.5), None)
+        .await
+        .unwrap();
     match outcome {
         TaskWriteOutcome::Ok(payload) => assert_eq!(payload.unwrap(), task),
         other => panic!("expected Ok outcome, got {other:?}"),
@@ -1046,11 +1055,172 @@ async fn update_task_non_2xx_returns_failed_with_status() {
         .await;
 
     let client = make_client(&server.uri());
-    let outcome = client.update_task(3, 42, Some(9), None).await.unwrap();
+    let outcome = client
+        .update_task(3, 42, Some(9), None, None)
+        .await
+        .unwrap();
     match outcome {
         TaskWriteOutcome::Failed(status) => assert_eq!(status, 422),
         other => panic!("expected Failed(422), got {other:?}"),
     }
+}
+
+#[tokio::test]
+async fn task_lists_are_read_in_server_order_with_the_token() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/projects/3/task-lists"))
+        .and(header("x-angie-authapitoken", "test-token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            { "id": 12, "name": "In progress", "position": 2 },
+            { "id": 11, "name": "Revisão" }
+        ])))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = make_client(&server.uri());
+    let outcome = client.fetch_task_lists(3).await.unwrap();
+    match outcome {
+        TaskListsOutcome::Ok(lists) => {
+            let pairs: Vec<(i64, &str)> = lists.iter().map(|l| (l.id, l.name.as_str())).collect();
+            assert_eq!(pairs, vec![(12, "In progress"), (11, "Revisão")]);
+        }
+        other => panic!("expected Ok, got {other:?}"),
+    }
+    server.verify().await;
+}
+
+#[tokio::test]
+async fn task_lists_skip_entries_missing_id_or_name() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/projects/3/task-lists"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            { "name": "No id" },
+            { "id": 5 },
+            { "id": 6, "name": "Kept" }
+        ])))
+        .mount(&server)
+        .await;
+
+    let client = make_client(&server.uri());
+    match client.fetch_task_lists(3).await.unwrap() {
+        TaskListsOutcome::Ok(lists) => {
+            assert_eq!(lists.len(), 1);
+            assert_eq!((lists[0].id, lists[0].name.as_str()), (6, "Kept"));
+        }
+        other => panic!("expected Ok, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn task_lists_empty_array_is_an_empty_list() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/projects/3/task-lists"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+        .mount(&server)
+        .await;
+
+    let client = make_client(&server.uri());
+    match client.fetch_task_lists(3).await.unwrap() {
+        TaskListsOutcome::Ok(lists) => assert!(lists.is_empty()),
+        other => panic!("expected Ok, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn task_lists_401_is_unauthorized() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/projects/3/task-lists"))
+        .respond_with(ResponseTemplate::new(401))
+        .mount(&server)
+        .await;
+
+    let client = make_client(&server.uri());
+    let outcome = client.fetch_task_lists(3).await.unwrap();
+    assert!(
+        matches!(outcome, TaskListsOutcome::Unauthorized),
+        "expected Unauthorized, got {outcome:?}"
+    );
+}
+
+#[tokio::test]
+async fn task_lists_500_is_failed_with_the_status() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/projects/3/task-lists"))
+        .respond_with(ResponseTemplate::new(500))
+        .mount(&server)
+        .await;
+
+    let client = make_client(&server.uri());
+    match client.fetch_task_lists(3).await.unwrap() {
+        TaskListsOutcome::Failed(status) => assert_eq!(status, 500),
+        other => panic!("expected Failed(500), got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn task_lists_body_that_is_not_an_array_is_an_error_not_an_empty_list() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/projects/3/task-lists"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({ "task_lists": [] })),
+        )
+        .mount(&server)
+        .await;
+
+    let client = make_client(&server.uri());
+    assert!(client.fetch_task_lists(3).await.is_err());
+}
+
+#[tokio::test]
+async fn update_task_puts_task_list_only_body() {
+    let server = MockServer::start().await;
+    Mock::given(method("PUT"))
+        .and(path("/api/v1/projects/3/tasks/42"))
+        .and(header("x-angie-authapitoken", "test-token"))
+        .and(body_json(serde_json::json!({ "task_list_id": 21 })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({ "id": 42 })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = make_client(&server.uri());
+    let outcome = client
+        .update_task(3, 42, None, None, Some(21))
+        .await
+        .unwrap();
+    assert!(matches!(outcome, TaskWriteOutcome::Ok(_)));
+    server.verify().await;
+}
+
+#[tokio::test]
+async fn update_task_puts_assignee_estimate_and_task_list_in_one_request() {
+    let server = MockServer::start().await;
+    Mock::given(method("PUT"))
+        .and(path("/api/v1/projects/3/tasks/42"))
+        .and(body_json(serde_json::json!({
+            "assignee_id": 9,
+            "estimate": 4.5,
+            "task_list_id": 21
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({ "id": 42 })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = make_client(&server.uri());
+    let outcome = client
+        .update_task(3, 42, Some(9), Some(4.5), Some(21))
+        .await
+        .unwrap();
+    assert!(matches!(outcome, TaskWriteOutcome::Ok(_)));
+    server.verify().await;
 }
 
 #[tokio::test]

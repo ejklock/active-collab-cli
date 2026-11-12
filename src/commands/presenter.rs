@@ -1,4 +1,5 @@
 use crate::agent_json;
+use crate::client::TaskList;
 use crate::i18n::t;
 use std::io::Write;
 
@@ -68,6 +69,7 @@ fn task_changes_suffix(
     completed: Option<bool>,
     assignee_id: Option<i64>,
     estimate: Option<f64>,
+    task_list: Option<&TaskList>,
 ) -> String {
     let mut parts = Vec::new();
     if let Some(completed) = completed {
@@ -80,6 +82,9 @@ fn task_changes_suffix(
     if let Some(estimate) = estimate {
         parts.push(format!("estimate={estimate}"));
     }
+    if let Some(list) = task_list {
+        parts.push(format!("list={}", list.name));
+    }
     if parts.is_empty() {
         String::new()
     } else {
@@ -87,12 +92,14 @@ fn task_changes_suffix(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn write_task_success(
     task_id: i64,
     project_id: i64,
     completed: Option<bool>,
     assignee_id: Option<i64>,
     estimate: Option<f64>,
+    task_list: Option<&TaskList>,
     json: bool,
     out: &mut dyn Write,
 ) {
@@ -100,7 +107,14 @@ pub(crate) fn write_task_success(
         writeln!(
             out,
             "{}",
-            agent_json::task_result(task_id, project_id, completed, assignee_id, estimate)
+            agent_json::task_result(
+                task_id,
+                project_id,
+                completed,
+                assignee_id,
+                estimate,
+                task_list
+            )
         )
         .ok();
     } else {
@@ -111,7 +125,7 @@ pub(crate) fn write_task_success(
                 "Task updated (task {project_id}/{task_id}){changes}.",
                 project_id = project_id,
                 task_id = task_id,
-                changes = task_changes_suffix(completed, assignee_id, estimate),
+                changes = task_changes_suffix(completed, assignee_id, estimate, task_list),
             ))
         )
         .ok();

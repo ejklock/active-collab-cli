@@ -54,6 +54,32 @@ pub enum TimeRecordsOutcome {
     Failed(u16),
 }
 
+/// One of a project's open task lists: the workflow column a task sits in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskList {
+    pub id: i64,
+    pub name: String,
+}
+
+/// Typed outcome of the project task-lists read.
+#[derive(Debug)]
+pub enum TaskListsOutcome {
+    /// 200 — the lists in server order.
+    Ok(Vec<TaskList>),
+    /// HTTP 401.
+    Unauthorized,
+    /// Any other status.
+    Failed(u16),
+}
+
+/// A task-lists entry as the server sends it; entries missing a field are
+/// dropped when converted to `TaskList`.
+#[derive(serde::Deserialize)]
+struct RawTaskList {
+    id: Option<i64>,
+    name: Option<String>,
+}
+
 /// The three buckets every write response falls into, shared by every
 /// per-endpoint `classify_*_write` function so the (200..=299)/401/else
 /// logic lives in one place.
@@ -265,6 +291,36 @@ impl ActiveCollabClient {
             result.insert(uid, name);
         }
         Ok(result)
+    }
+
+    /// GET /api/v1/projects/{project_id}/task-lists. 200 -> the lists in
+    /// server order (entries without an id or name are skipped; a body that
+    /// is not an array is an error, never an empty list), 401 ->
+    /// Unauthorized, else -> Failed(status).
+    pub async fn fetch_task_lists(&self, project_id: i64) -> Result<TaskListsOutcome> {
+        let base = self.instance.base_url.trim_end_matches('/');
+        let url = format!("{}/api/v1/projects/{}/task-lists", base, project_id);
+        let (status, body) = self
+            .http
+            .authed_get(&url, &self.instance.base_url, &self.instance.token)
+            .await?;
+        match status {
+            200 => {
+                let raw: Vec<RawTaskList> = serde_json::from_slice(&body)?;
+                let lists = raw
+                    .into_iter()
+                    .filter_map(|entry| {
+                        Some(TaskList {
+                            id: entry.id?,
+                            name: entry.name?,
+                        })
+                    })
+                    .collect();
+                Ok(TaskListsOutcome::Ok(lists))
+            }
+            HTTP_UNAUTHORIZED => Ok(TaskListsOutcome::Unauthorized),
+            other => Ok(TaskListsOutcome::Failed(other)),
+        }
     }
 
     /// GET /api/v1/job-types. Returns an empty list on any non-200 response.
@@ -508,8 +564,8 @@ impl ActiveCollabClient {
     }
 
     /// PUT /api/v1/projects/{project_id}/tasks/{task_id}. Serializes only the
-    /// provided fields: `assignee_id` and/or `estimate`, each omitted when
-    /// `None`. Classifies the response into a `TaskWriteOutcome`: (200..=299)
+    /// provided fields: `assignee_id`, `estimate` and/or `task_list_id`, each
+    /// omitted when `None`. Classifies the response into a `TaskWriteOutcome`: (200..=299)
     /// -> Ok(Some(task)), 401 -> Unauthorized, else -> Failed(status).
     pub async fn update_task(
         &self,
@@ -517,6 +573,7 @@ impl ActiveCollabClient {
         task_id: i64,
         assignee_id: Option<i64>,
         estimate: Option<f64>,
+        task_list_id: Option<i64>,
     ) -> Result<TaskWriteOutcome> {
         let base = self.instance.base_url.trim_end_matches('/');
         let url = format!("{}/api/v1/projects/{}/tasks/{}", base, project_id, task_id);
@@ -526,6 +583,9 @@ impl ActiveCollabClient {
         }
         if let Some(estimate) = estimate {
             payload.insert("estimate".to_string(), Value::from(estimate));
+        }
+        if let Some(task_list_id) = task_list_id {
+            payload.insert("task_list_id".to_string(), Value::from(task_list_id));
         }
         let (status, body) = self.put_json_write(&url, &Value::Object(payload)).await?;
         Ok(classify_task_write(status, body))

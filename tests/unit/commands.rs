@@ -4034,6 +4034,7 @@ async fn task_set_core_status_done_puts_to_complete_endpoint() {
         Some("done"),
         None,
         None,
+        None,
         &client,
         false,
         &mut out,
@@ -4064,6 +4065,7 @@ async fn task_set_core_status_open_puts_to_open_endpoint() {
         Some("524/75346"),
         None,
         Some("open"),
+        None,
         None,
         None,
         &client,
@@ -4099,6 +4101,7 @@ async fn task_set_core_numeric_assignee_updates_task_without_directory_fetch() {
         None,
         None,
         Some("9"),
+        None,
         None,
         &client,
         false,
@@ -4142,6 +4145,7 @@ async fn task_set_core_named_assignee_resolves_via_user_directory() {
         None,
         Some("alice smith"),
         None,
+        None,
         &client,
         false,
         &mut out,
@@ -4175,6 +4179,7 @@ async fn task_set_core_estimate_only_updates_task_with_estimate_body() {
         None,
         None,
         Some(8.0),
+        None,
         &client,
         false,
         &mut out,
@@ -4216,6 +4221,7 @@ async fn task_set_core_combined_fields_issues_both_writes() {
         Some("completed"),
         Some("9"),
         Some(8.0),
+        None,
         &client,
         true,
         &mut out,
@@ -4247,6 +4253,7 @@ async fn task_set_core_no_field_given_returns_exit2_without_network_call() {
         None,
         None,
         None,
+        None,
         &client,
         false,
         &mut out,
@@ -4256,6 +4263,7 @@ async fn task_set_core_no_field_given_returns_exit2_without_network_call() {
 
     assert_eq!(code, 2, "no field given must return exit code 2");
     assert!(output_str(&err).contains("--status"));
+    assert!(output_str(&err).contains("--list"));
     assert!(output_str(&out).is_empty());
 }
 
@@ -4270,6 +4278,7 @@ async fn task_set_core_invalid_status_returns_exit2_without_network_call() {
         Some("524/75346"),
         None,
         Some("frozen"),
+        None,
         None,
         None,
         &client,
@@ -4306,6 +4315,7 @@ async fn task_set_core_unknown_assignee_name_returns_exit2_without_update() {
         None,
         Some("nobody"),
         None,
+        None,
         &client,
         false,
         &mut out,
@@ -4330,6 +4340,7 @@ async fn task_set_core_negative_estimate_returns_exit2_without_network_call() {
         None,
         None,
         Some(-1.0),
+        None,
         &client,
         false,
         &mut out,
@@ -4359,6 +4370,7 @@ async fn task_set_core_401_prints_reauth_message_and_returns_nonzero() {
         Some("524/75346"),
         None,
         Some("completed"),
+        None,
         None,
         None,
         &client,
@@ -4392,6 +4404,7 @@ async fn task_set_core_http_failure_with_json_flag_emits_error_object() {
         Some("524/75346"),
         None,
         Some("completed"),
+        None,
         None,
         None,
         &client,
@@ -4438,6 +4451,7 @@ async fn task_set_core_second_write_failure_stops_after_first_write() {
         Some("completed"),
         Some("9"),
         None,
+        None,
         &client,
         false,
         &mut out,
@@ -4450,6 +4464,343 @@ async fn task_set_core_second_write_failure_stops_after_first_write() {
         code, 0,
         "the second write's failure must surface as a non-zero exit"
     );
+}
+
+async fn mount_task_lists(server: &MockServer, status: u16, body: serde_json::Value) {
+    Mock::given(method("GET"))
+        .and(path("/api/v1/projects/524/task-lists"))
+        .respond_with(ResponseTemplate::new(status).set_body_json(body))
+        .expect(1)
+        .mount(server)
+        .await;
+}
+
+fn project_task_lists() -> serde_json::Value {
+    serde_json::json!([
+        { "id": 12, "name": "In progress" },
+        { "id": 11, "name": "Revisão" },
+        { "id": 13, "name": "Done" }
+    ])
+}
+
+async fn mount_task_put(server: &MockServer, route: &str) {
+    Mock::given(method("PUT"))
+        .and(path(route))
+        .respond_with(ResponseTemplate::new(200).set_body_json(task_write_response(75346)))
+        .mount(server)
+        .await;
+}
+
+async fn put_requests(server: &MockServer) -> Vec<(String, serde_json::Value)> {
+    server
+        .received_requests()
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|r| r.method.as_str() == "PUT")
+        .map(|r| {
+            let body = serde_json::from_slice(&r.body).unwrap();
+            (r.url.path().to_string(), body)
+        })
+        .collect()
+}
+
+struct TaskSetRun {
+    code: i32,
+    out: String,
+    err: String,
+}
+
+async fn run_task_set(
+    server: &MockServer,
+    status: Option<&str>,
+    assignee: Option<&str>,
+    estimate: Option<f64>,
+    list: Option<&str>,
+    json: bool,
+) -> TaskSetRun {
+    let inst = comment_inst(&server.uri());
+    let client = ActiveCollabClient::new(inst, make_http());
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    let code = task_set_core(
+        Some("524/75346"),
+        None,
+        status,
+        assignee,
+        estimate,
+        list,
+        &client,
+        json,
+        &mut out,
+        &mut err,
+    )
+    .await;
+    TaskSetRun {
+        code,
+        out: output_str(&out).to_string(),
+        err: output_str(&err).to_string(),
+    }
+}
+
+async fn assert_list_resolves_to(list: &str, expected_id: i64) {
+    let server = MockServer::start().await;
+    mount_task_lists(&server, 200, project_task_lists()).await;
+    mount_task_put(&server, "/api/v1/projects/524/tasks/75346").await;
+
+    let run = run_task_set(&server, None, None, None, Some(list), false).await;
+
+    assert_eq!(run.code, 0, "list {list:?}: {}", run.err);
+    assert_eq!(
+        put_requests(&server).await,
+        vec![(
+            "/api/v1/projects/524/tasks/75346".to_string(),
+            serde_json::json!({ "task_list_id": expected_id })
+        )],
+        "list {list:?}"
+    );
+    server.verify().await;
+}
+
+async fn assert_list_refused(list: &str, candidates: &[&str], absent: &[&str]) {
+    let server = MockServer::start().await;
+    mount_task_lists(&server, 200, project_task_lists()).await;
+
+    let run = run_task_set(&server, None, None, None, Some(list), false).await;
+
+    assert_eq!(run.code, 2, "list {list:?}: {}", run.err);
+    for candidate in candidates {
+        assert!(
+            run.err.contains(candidate),
+            "{candidate:?} in {:?}",
+            run.err
+        );
+    }
+    for other in absent {
+        assert!(!run.err.contains(other), "{other:?} in {:?}", run.err);
+    }
+    assert!(put_requests(&server).await.is_empty(), "list {list:?}");
+    server.verify().await;
+}
+
+#[tokio::test]
+async fn task_set_core_list_id_of_a_project_list_moves_the_task() {
+    assert_list_resolves_to("12", 12).await;
+}
+
+#[tokio::test]
+async fn task_set_core_list_id_outside_the_project_is_refused_with_candidates() {
+    assert_list_refused("99", &["12 In progress", "11 Revisão", "13 Done"], &[]).await;
+}
+
+#[tokio::test]
+async fn task_set_core_list_name_matches_case_insensitively_with_non_ascii_letters() {
+    assert_list_resolves_to("revisão", 11).await;
+    assert_list_resolves_to("REVISÃO", 11).await;
+    assert_list_resolves_to("  in PROGRESS \t", 12).await;
+}
+
+#[tokio::test]
+async fn task_set_core_list_partial_name_matches_nothing() {
+    assert_list_refused("prog", &["12 In progress"], &[]).await;
+}
+
+#[tokio::test]
+async fn task_set_core_list_unknown_name_lists_every_candidate() {
+    assert_list_refused(
+        "Backlog",
+        &["Backlog", "12 In progress", "11 Revisão", "13 Done"],
+        &[],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn task_set_core_list_name_shared_by_two_lists_is_ambiguous() {
+    let server = MockServer::start().await;
+    mount_task_lists(
+        &server,
+        200,
+        serde_json::json!([
+            { "id": 1, "name": "Review" },
+            { "id": 2, "name": "review" },
+            { "id": 3, "name": "Done" }
+        ]),
+    )
+    .await;
+
+    let run = run_task_set(&server, None, None, None, Some("REVIEW"), false).await;
+
+    assert_eq!(run.code, 2, "{}", run.err);
+    assert!(run.err.contains("1 Review"), "{}", run.err);
+    assert!(run.err.contains("2 review"), "{}", run.err);
+    assert!(!run.err.contains("3 Done"), "{}", run.err);
+    assert!(put_requests(&server).await.is_empty());
+}
+
+#[tokio::test]
+async fn task_set_core_list_read_unauthorized_prints_reauth_and_sends_no_write() {
+    let server = MockServer::start().await;
+    mount_task_lists(&server, 401, serde_json::json!({})).await;
+
+    let run = run_task_set(&server, None, None, None, Some("12"), false).await;
+
+    assert_eq!(run.code, 1, "{}", run.err);
+    assert!(run.err.contains("ac setup add"), "{}", run.err);
+    assert!(put_requests(&server).await.is_empty());
+}
+
+#[tokio::test]
+async fn task_set_core_list_read_server_error_fails_and_sends_no_write() {
+    let server = MockServer::start().await;
+    mount_task_lists(&server, 500, serde_json::json!({})).await;
+
+    let run = run_task_set(&server, None, None, None, Some("12"), false).await;
+
+    assert_eq!(run.code, 1, "{}", run.err);
+    assert!(run.err.contains("500"), "{}", run.err);
+    assert!(put_requests(&server).await.is_empty());
+}
+
+async fn assert_list_read_failure_is_json_error(
+    status: u16,
+    body: serde_json::Value,
+    reason_fragments: &[&str],
+) {
+    let server = MockServer::start().await;
+    mount_task_lists(&server, status, body).await;
+
+    let run = run_task_set(&server, None, None, None, Some("12"), true).await;
+
+    assert_eq!(run.code, 1, "{}", run.err);
+    let obj: serde_json::Value = serde_json::from_str(run.out.trim_end()).unwrap();
+    assert_eq!(obj["ok"], false, "{}", run.out);
+    let reason = obj["error"].to_string();
+    for fragment in reason_fragments {
+        assert!(reason.contains(fragment), "{fragment:?} in {reason}");
+    }
+    assert!(run.err.is_empty(), "{}", run.err);
+    assert!(put_requests(&server).await.is_empty());
+}
+
+#[tokio::test]
+async fn task_set_core_list_read_unauthorized_with_json_flag_emits_error_object() {
+    assert_list_read_failure_is_json_error(401, serde_json::json!({}), &["ac setup add"]).await;
+}
+
+#[tokio::test]
+async fn task_set_core_list_read_server_error_with_json_flag_emits_error_object() {
+    assert_list_read_failure_is_json_error(500, serde_json::json!({}), &["HTTP 500", "524"]).await;
+}
+
+#[tokio::test]
+async fn task_set_core_list_read_malformed_body_with_json_flag_emits_error_object() {
+    assert_list_read_failure_is_json_error(200, serde_json::json!({ "task_lists": [] }), &[]).await;
+}
+
+#[tokio::test]
+async fn task_set_core_list_read_malformed_body_fails_instead_of_matching_nothing() {
+    let server = MockServer::start().await;
+    mount_task_lists(&server, 200, serde_json::json!({ "task_lists": [] })).await;
+
+    let run = run_task_set(&server, None, None, None, Some("Review"), false).await;
+
+    assert_eq!(run.code, 1, "{}", run.err);
+    assert!(!run.err.contains("no task list matches"), "{}", run.err);
+    assert!(put_requests(&server).await.is_empty());
+}
+
+#[tokio::test]
+async fn task_set_core_status_and_list_send_completion_then_one_task_put() {
+    let server = MockServer::start().await;
+    mount_task_lists(&server, 200, project_task_lists()).await;
+    mount_task_put(&server, "/api/v1/complete/task/75346").await;
+    mount_task_put(&server, "/api/v1/projects/524/tasks/75346").await;
+
+    let run = run_task_set(&server, Some("done"), None, None, Some("Revisão"), false).await;
+
+    assert_eq!(run.code, 0, "{}", run.err);
+    assert_eq!(
+        put_requests(&server).await,
+        vec![
+            (
+                "/api/v1/complete/task/75346".to_string(),
+                serde_json::json!({})
+            ),
+            (
+                "/api/v1/projects/524/tasks/75346".to_string(),
+                serde_json::json!({ "task_list_id": 11 })
+            ),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn task_set_core_assignee_estimate_and_list_share_one_put() {
+    let server = MockServer::start().await;
+    mount_task_lists(&server, 200, project_task_lists()).await;
+    mount_task_put(&server, "/api/v1/projects/524/tasks/75346").await;
+
+    let run = run_task_set(&server, None, Some("9"), Some(2.0), Some("13"), false).await;
+
+    assert_eq!(run.code, 0, "{}", run.err);
+    assert_eq!(
+        put_requests(&server).await,
+        vec![(
+            "/api/v1/projects/524/tasks/75346".to_string(),
+            serde_json::json!({ "assignee_id": 9, "estimate": 2.0, "task_list_id": 13 })
+        )]
+    );
+}
+
+#[tokio::test]
+async fn task_set_core_unresolved_list_blocks_the_completion_write_too() {
+    let server = MockServer::start().await;
+    mount_task_lists(&server, 200, project_task_lists()).await;
+    mount_task_put(&server, "/api/v1/complete/task/75346").await;
+
+    let run = run_task_set(&server, Some("done"), None, None, Some("Backlog"), false).await;
+
+    assert_eq!(run.code, 2, "{}", run.err);
+    assert!(put_requests(&server).await.is_empty());
+}
+
+#[tokio::test]
+async fn task_set_core_list_move_is_reported_in_json_and_human_output() {
+    let server = MockServer::start().await;
+    mount_task_lists(&server, 200, project_task_lists()).await;
+    mount_task_put(&server, "/api/v1/projects/524/tasks/75346").await;
+    let run = run_task_set(&server, None, None, None, Some("12"), true).await;
+    assert_eq!(run.code, 0, "{}", run.err);
+    let obj: serde_json::Value = serde_json::from_str(run.out.trim_end()).unwrap();
+    assert_eq!(obj["task_list_id"], 12);
+    assert_eq!(obj["task_list"], "In progress");
+
+    let server = MockServer::start().await;
+    mount_task_lists(&server, 200, project_task_lists()).await;
+    mount_task_put(&server, "/api/v1/projects/524/tasks/75346").await;
+    let run = run_task_set(&server, None, None, None, Some("12"), false).await;
+    assert_eq!(run.code, 0, "{}", run.err);
+    assert!(run.out.contains("list=In progress"), "{}", run.out);
+}
+
+#[tokio::test]
+async fn task_set_core_without_list_never_reads_the_task_lists() {
+    let server = MockServer::start().await;
+    mount_task_put(&server, "/api/v1/projects/524/tasks/75346").await;
+
+    let run = run_task_set(&server, None, Some("9"), None, None, true).await;
+
+    assert_eq!(run.code, 0, "{}", run.err);
+    assert!(!run.out.contains("task_list"), "{}", run.out);
+    let gets = server
+        .received_requests()
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|r| r.method.as_str() == "GET")
+        .count();
+    assert_eq!(gets, 0);
 }
 
 const REPORT_BOM: &str = "\u{FEFF}";
