@@ -2106,6 +2106,7 @@ fn view_detail_footer_has_no_tab_switch_hint() {
             affordances: vec![],
             focused_comment: None,
             auth_error: false,
+            download: None,
             comment_spans: vec![],
         }],
         should_quit: false,
@@ -2171,6 +2172,7 @@ fn view_detail_footer_without_assets_has_no_tab_hint() {
             affordances: vec![],
             focused_comment: None,
             auth_error: false,
+            download: None,
             comment_spans: vec![],
         }],
         should_quit: false,
@@ -3219,6 +3221,7 @@ mod footer_refresh_hint {
                 affordances: vec![],
                 focused_comment: None,
                 auth_error: false,
+                download: None,
                 comment_spans: vec![],
             }],
             should_quit: false,
@@ -3267,6 +3270,7 @@ mod footer_refresh_hint {
                 affordances: vec![],
                 focused_comment: None,
                 auth_error: false,
+                download: None,
                 comment_spans: vec![],
             }],
             should_quit: false,
@@ -3560,6 +3564,7 @@ mod footer_refresh_hint {
                 affordances: vec![],
                 focused_comment: None,
                 auth_error: false,
+                download: None,
                 comment_spans: vec![],
             }],
             should_quit: false,
@@ -3732,6 +3737,7 @@ mod v6_view {
                 affordances: vec![],
                 focused_comment: None,
                 auth_error: false,
+                download: None,
                 comment_spans: vec![],
             }],
             should_quit: false,
@@ -4798,6 +4804,7 @@ fn hint_for_screen_detail_with_assets_has_no_ctrl_cmd_in_footer() {
         affordances: vec![],
         focused_comment: None,
         auth_error: false,
+        download: None,
         comment_spans: vec![],
     };
     let hint = hint_for_screen(&screen);
@@ -4870,6 +4877,7 @@ fn footer_plan_detail_auth_error_carries_reauth_status() {
         affordances: vec![],
         focused_comment: None,
         auth_error: true,
+        download: None,
         comment_spans: vec![],
     };
     let result = plan(&screen, None, true, 80);
@@ -5740,6 +5748,7 @@ mod compose_render {
                 affordances: vec![],
                 focused_comment: None,
                 auth_error: false,
+                download: None,
                 comment_spans: vec![],
             }],
             should_quit: false,
@@ -6085,6 +6094,7 @@ mod log_time_render {
                 affordances: vec![],
                 focused_comment: None,
                 auth_error: false,
+                download: None,
                 comment_spans: vec![],
             }],
             should_quit: false,
@@ -6233,6 +6243,7 @@ mod estimate_edit_render {
                 affordances: vec![],
                 focused_comment: None,
                 auth_error: false,
+                download: None,
                 comment_spans: vec![],
             }],
             should_quit: false,
@@ -6362,6 +6373,7 @@ mod status_confirm_render {
                 affordances: vec![],
                 focused_comment: None,
                 auth_error: false,
+                download: None,
                 comment_spans: vec![],
             }],
             should_quit: false,
@@ -6509,6 +6521,7 @@ mod assignee_picker_render {
                 affordances: vec![],
                 focused_comment: None,
                 auth_error: false,
+                download: None,
                 comment_spans: vec![],
             }],
             should_quit: false,
@@ -6856,6 +6869,7 @@ mod confirm_modal_buttons {
                 affordances: vec![],
                 focused_comment: None,
                 auth_error: false,
+                download: None,
                 comment_spans: vec![],
             }],
             should_quit: false,
@@ -7128,6 +7142,7 @@ mod yes_no_confirm_labels {
                 affordances: vec![],
                 focused_comment: None,
                 auth_error: false,
+                download: None,
                 comment_spans: vec![],
             }],
             should_quit: false,
@@ -7820,6 +7835,7 @@ mod contextual_footer {
                 affordances: content.affordances,
                 focused_comment,
                 auth_error: false,
+                download: None,
                 comment_spans: content.comment_spans,
             }],
             should_quit: false,
@@ -7954,6 +7970,7 @@ mod contextual_footer {
             affordances: vec![],
             focused_comment: None,
             auth_error: false,
+            download: None,
             comment_spans: vec![],
         };
         let hint = hint_for_screen(&screen);
@@ -8332,6 +8349,7 @@ mod contextual_footer {
                 affordances: vec![],
                 focused_comment: None,
                 auth_error: false,
+                download: None,
                 comment_spans: vec![],
             }],
             should_quit: false,
@@ -8472,6 +8490,7 @@ mod confirm_modal_render {
                 affordances: content.affordances,
                 focused_comment: None,
                 auth_error: false,
+                download: None,
                 comment_spans: content.comment_spans,
             }],
             should_quit: false,
@@ -8855,6 +8874,7 @@ fn ctrl_click_on_editar_cell_opens_compose_edit_regression() {
             affordances: content.affordances.clone(),
             focused_comment: None,
             auth_error: false,
+            download: None,
             comment_spans: content.comment_spans.clone(),
         }],
         should_quit: false,
@@ -8952,6 +8972,7 @@ mod auth_error_render {
                 affordances: content.affordances,
                 focused_comment: None,
                 auth_error,
+                download: None,
                 comment_spans: content.comment_spans,
             }],
             should_quit: false,
@@ -9585,6 +9606,7 @@ mod image_viewer_render {
                 affordances: vec![],
                 focused_comment: None,
                 auth_error: false,
+                download: None,
                 comment_spans: vec![],
             }],
             should_quit: false,
@@ -9976,6 +9998,7 @@ mod view_image_hit_test_resolve {
                 }],
                 focused_comment: None,
                 auth_error: false,
+                download: None,
                 comment_spans: vec![],
             }],
             should_quit: false,
@@ -10699,5 +10722,210 @@ mod mine_bucket_drawing {
             model.stack.last(),
             Some(Screen::Detail { task_id: 2, .. })
         ));
+    }
+}
+
+mod detail_download_footer {
+    use crate::i18n::set_language;
+    use crate::render::build_detail_content;
+    use crate::tui::model::{DetailOverlay, DownloadOutcome, DownloadState, Header, Model, Screen};
+    use crate::tui::view::view;
+    use ratatui::{backend::TestBackend, Terminal};
+    use serde_json::json;
+    use std::collections::HashMap;
+
+    fn detail(download: Option<DownloadState>, auth_error: bool, copied: bool) -> Model {
+        let task = json!({"name": "T", "id": 1, "project_id": 1, "is_completed": false});
+        let content = build_detail_content(&task, &[], &HashMap::new(), 78, None);
+        Model {
+            stack: vec![Screen::Detail {
+                instance: "inst".into(),
+                project_id: 1,
+                task_id: 1,
+                task,
+                comments: vec![],
+                user_map: HashMap::new(),
+                lines: content.lines,
+                line_styles: content.line_styles,
+                assets: vec![],
+                offset: 0,
+                loading: false,
+                rendered_width: 80,
+                overlay: DetailOverlay::None,
+                current_user_id: None,
+                affordances: content.affordances,
+                focused_comment: None,
+                auth_error,
+                download,
+                comment_spans: content.comment_spans,
+            }],
+            should_quit: false,
+            header: Header::from_instances(&[], None),
+            viewport: (0, 0),
+            click_targets: vec![],
+            modal_button_targets: vec![],
+            last_loaded: None,
+            selection: None,
+            copied_feedback: copied,
+            report: None,
+        }
+    }
+
+    fn screen_text(model: &Model) -> String {
+        let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+        terminal
+            .draw(|frame| view(model, frame, &mut vec![], &mut vec![]))
+            .unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let area = buf.area();
+        (0..area.height)
+            .map(|y| {
+                (0..area.width)
+                    .map(|x| buf.cell((x, y)).unwrap().symbol().to_string())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn rendered(download: Option<DownloadState>, auth_error: bool, copied: bool) -> String {
+        let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        screen_text(&detail(download, auth_error, copied))
+    }
+
+    fn done(saved: usize, total: usize) -> Option<DownloadState> {
+        Some(DownloadState::Finished(DownloadOutcome::Done {
+            saved,
+            total,
+            dir: "/h/dl".into(),
+        }))
+    }
+
+    #[test]
+    fn detail_download_footer_shows_running() {
+        let text = rendered(Some(DownloadState::Running), false, false);
+        assert!(text.contains("Downloading attachments…"), "{text}");
+    }
+
+    #[test]
+    fn detail_download_footer_shows_all_saved() {
+        let text = rendered(done(2, 2), false, false);
+        assert!(
+            text.contains("Downloaded 2 of 2 attachment(s) to /h/dl"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn detail_download_footer_shows_the_whole_tilde_destination_at_80_columns() {
+        let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let model = detail(
+            Some(DownloadState::Finished(DownloadOutcome::Done {
+                saved: 2,
+                total: 2,
+                dir: "~/Downloads/ac-attachments/665-75159".into(),
+            })),
+            false,
+            false,
+        );
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal
+            .draw(|frame| view(&model, frame, &mut vec![], &mut vec![]))
+            .unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let text = (0..buf.area().height)
+            .map(|y| {
+                (0..buf.area().width)
+                    .map(|x| buf.cell((x, y)).unwrap().symbol().to_string())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            text.contains(
+                "Downloaded 2 of 2 attachment(s) to ~/Downloads/ac-attachments/665-75159"
+            ),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn detail_download_footer_shows_a_directory_outside_home_unchanged() {
+        let text = rendered(done(2, 2), false, false);
+        assert!(text.contains("to /h/dl"), "{text}");
+    }
+
+    #[test]
+    fn detail_download_footer_shows_partial_save() {
+        let text = rendered(done(1, 2), false, false);
+        assert!(
+            text.contains("Downloaded 1 of 2 attachment(s) to /h/dl"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn detail_download_footer_shows_the_failure() {
+        let failed = Some(DownloadState::Finished(DownloadOutcome::Failed(
+            "disk full".into(),
+        )));
+        let text = rendered(failed, false, false);
+        assert!(text.contains("disk full"), "{text}");
+    }
+
+    #[test]
+    fn detail_download_footer_shows_the_no_attachments_note() {
+        let text = rendered(Some(DownloadState::NoAttachments), false, false);
+        assert!(text.contains("No attachments to download"), "{text}");
+    }
+
+    #[test]
+    fn detail_download_footer_auth_error_wins() {
+        let text = rendered(done(2, 2), true, false);
+        assert!(text.contains("Token invalid or revoked"), "{text}");
+        assert!(!text.contains("Downloaded 2 of 2"), "{text}");
+    }
+
+    #[test]
+    fn detail_download_footer_outcome_wins_over_the_copied_note() {
+        let text = rendered(done(2, 2), false, true);
+        assert!(text.contains("Downloaded 2 of 2 attachment(s)"), "{text}");
+        assert!(!text.contains("Copiado ✓"), "{text}");
+    }
+
+    #[test]
+    fn detail_download_footer_hint_names_the_key() {
+        let text = rendered(None, false, false);
+        assert!(text.contains("D download"), "{text}");
+    }
+
+    #[test]
+    fn detail_download_footer_is_translated_in_pt_br() {
+        let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        let shown = |download| {
+            set_language("pt_BR");
+            let text = screen_text(&detail(download, false, false));
+            set_language("en");
+            text
+        };
+        assert!(
+            shown(Some(DownloadState::Running)).contains("Baixando anexos…"),
+            "running"
+        );
+        assert!(
+            shown(done(1, 2)).contains("1 de 2 anexo(s) baixado(s) em /h/dl"),
+            "done"
+        );
+        assert!(
+            shown(Some(DownloadState::NoAttachments)).contains("Nenhum anexo para baixar"),
+            "no attachments"
+        );
+        assert!(shown(None).contains("D baixar"), "hint");
+        set_language("pt_BR");
+        let translated = crate::i18n::t("Could not find the home directory");
+        set_language("en");
+        assert_ne!(translated, "Could not find the home directory");
     }
 }

@@ -37,15 +37,23 @@ pub fn map_browse_key_event(key: crossterm::event::KeyEvent) -> Option<Msg> {
         KeyCode::Esc | KeyCode::Char('b') => Some(Msg::Back),
         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => Some(Msg::Quit),
         KeyCode::Char('c') => Some(Msg::ComposeOpen),
+        KeyCode::Char('r') => Some(Msg::Refresh),
+        KeyCode::Enter => Some(Msg::Select),
+        code => map_action_key(code),
+    })
+}
+
+/// The browse keys that open a modal or start an effect on the current screen.
+fn map_action_key(code: KeyCode) -> Option<Msg> {
+    match code {
         KeyCode::Char('t') => Some(Msg::LogTimeOpen),
         KeyCode::Char('e') => Some(Msg::EstimateOpen),
         KeyCode::Char('s') => Some(Msg::StatusToggleOpen),
         KeyCode::Char('a') => Some(Msg::AssigneePickerOpen),
-        KeyCode::Char('r') => Some(Msg::Refresh),
         KeyCode::Char('H') => Some(Msg::ReportOpen),
-        KeyCode::Enter => Some(Msg::Select),
+        KeyCode::Char('D') => Some(Msg::DownloadAttachments),
         _ => None,
-    })
+    }
 }
 
 /// Map a key event when compose mode is active.

@@ -435,6 +435,14 @@ sequenceDiagram
   → `Ready`, `Msg::ImageLoadErr` → `Error`, and `Esc`/`q` → `None`. The pure Model tracks only
   this lifecycle metadata; the byte fetch, decode, and `ratatui-image` render are the shell's
   (slice 0059), so the viewer currently draws a centered placeholder over the dimmed backdrop.
+- **`D` on a task detail downloads its attachments:** the pure `update()` builds the asset set with
+  `controller::downloadable_assets` (task and comment attachments, inline images) and emits one
+  `Cmd::DownloadAttachments`, setting `Screen::Detail.download` to `Running`; a task with no
+  downloadable asset sets `NoAttachments` and emits nothing, and `D` while a download runs does nothing.
+  The shell resolves the home directory, runs `controller::download_task_attachments` into
+  `~/Downloads/ac-attachments/<project_id>-<task_id>/` and answers `Msg::AttachmentsDownloaded`, which
+  the same asset-effects handler as the image viewer applies to the Detail of the same task only. The
+  footer status row shows the outcome below an auth error and above the copied note.
 - **No optimistic mutation:** the mutation arms construct no synthetic comment; the
   thread is always re-derived from the server after a 2xx
   ([ADR 0035](/adr/0035-server-truth-refresh-after-comment-mutation.md)). Gate-checked by

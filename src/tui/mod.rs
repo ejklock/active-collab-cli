@@ -35,6 +35,7 @@ use events::{
     map_compose_key_event, map_confirm_key_event, map_estimate_key_event, map_log_time_key_event,
     map_report_key_event, map_status_confirm_key_event,
 };
+use model::DownloadOutcome;
 use ratatui::{backend::CrosstermBackend, Terminal};
 use std::io;
 use std::path::{Path, PathBuf};
@@ -656,14 +657,34 @@ fn dispatch_cmds(
             // slice 0059 (ADR 0065); this slice only wires the pure overlay lifecycle,
             // so the viewer stays on its Loading placeholder until that slice lands.
             Cmd::LoadImage { .. } => {}
-            Cmd::ExportHoursReport {
-                instance,
-                period,
-                format,
-            } => {
-                spawn_hours_report(targets, http, &tx, instance, period, format);
+            cmd @ (Cmd::ExportHoursReport { .. } | Cmd::DownloadAttachments { .. }) => {
+                dispatch_file_export(cmd, targets, http, &tx);
             }
         }
+    }
+}
+
+/// Run an effect that writes files for the user: the hours report or a task's
+/// attachments.
+fn dispatch_file_export(
+    cmd: Cmd,
+    targets: &[Instance],
+    http: &Http,
+    tx: &mpsc::UnboundedSender<Msg>,
+) {
+    match cmd {
+        Cmd::ExportHoursReport {
+            instance,
+            period,
+            format,
+        } => spawn_hours_report(targets, http, tx, instance, period, format),
+        Cmd::DownloadAttachments {
+            instance,
+            project_id,
+            task_id,
+            assets,
+        } => spawn_attachment_download(targets, http, tx, (instance, project_id, task_id), assets),
+        _ => unreachable!("dispatch_file_export called with a non-export Cmd"),
     }
 }
 
@@ -968,6 +989,88 @@ fn spawn_hours_report(
             };
             let outcome = export_hours_report(&request, &client).await;
             let _ = tx.send(report_outcome_msg(outcome));
+        },
+    );
+}
+
+/// The folder a task's attachments are saved to: `Downloads/ac-attachments/<project_id>-<task_id>`
+/// under the home directory. No home directory means no destination, never a fallback path.
+pub(crate) fn attachments_destination(
+    home: Option<&Path>,
+    project_id: i64,
+    task_id: i64,
+) -> Option<PathBuf> {
+    home.map(|home| {
+        home.join("Downloads")
+            .join("ac-attachments")
+            .join(format!("{project_id}-{task_id}"))
+    })
+}
+
+/// Count the saved assets of a finished download. A download whose assets all
+/// failed is still a finished one: each asset carries its own error.
+pub(crate) fn download_summary(
+    dir: PathBuf,
+    results: &[controller::DownloadedAsset],
+) -> DownloadOutcome {
+    DownloadOutcome::Done {
+        saved: results.iter().filter(|r| r.path.is_some()).count(),
+        total: results.len(),
+        dir,
+    }
+}
+
+/// Download `assets` of one task into its folder under `home` through the same
+/// function `ac get --download-attachments` uses. The outcome names the folder
+/// with `home` shown as `~`, so the footer line stays short.
+pub(crate) async fn download_task_outcome(
+    client: &crate::client::ActiveCollabClient,
+    home: Option<&Path>,
+    project_id: i64,
+    task_id: i64,
+    assets: &[crate::render::Asset],
+) -> DownloadOutcome {
+    let Some(dir) = attachments_destination(home, project_id, task_id) else {
+        return DownloadOutcome::Failed(crate::i18n::t("Could not find the home directory"));
+    };
+    let results = controller::download_task_attachments(client, assets, &dir).await;
+    let shown = home.and_then(|home| dir.strip_prefix(home).ok());
+    let shown = shown.map_or_else(|| dir.clone(), |rest| Path::new("~").join(rest));
+    download_summary(shown, &results)
+}
+
+/// Spawn the attachment download of one task; the home directory is resolved on
+/// the spawned task and one `Msg` reports the outcome.
+fn spawn_attachment_download(
+    targets: &[Instance],
+    http: &Http,
+    tx: &mpsc::UnboundedSender<Msg>,
+    task_ref: (String, i64, i64),
+    assets: Vec<crate::render::Asset>,
+) {
+    let (instance, project_id, task_id) = task_ref;
+    let finished = move |instance: String, outcome| Msg::AttachmentsDownloaded {
+        instance,
+        project_id,
+        task_id,
+        outcome,
+    };
+    let missing = finished(
+        instance.clone(),
+        DownloadOutcome::Failed(crate::i18n::t("Unknown instance")),
+    );
+    let reply_instance = instance.clone();
+    spawn_with_client(
+        targets,
+        http,
+        tx,
+        &instance,
+        missing,
+        move |client, tx| async move {
+            let home = dirs::home_dir();
+            let outcome =
+                download_task_outcome(&client, home.as_deref(), project_id, task_id, &assets).await;
+            let _ = tx.send(finished(reply_instance, outcome));
         },
     );
 }

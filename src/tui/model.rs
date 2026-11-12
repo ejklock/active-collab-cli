@@ -200,6 +200,37 @@ pub enum Cmd {
     LoadImage {
         asset: ImageAssetRef,
     },
+    /// Download the open task's downloadable assets into the user's downloads
+    /// folder; the shell resolves the home directory and runs the download.
+    DownloadAttachments {
+        instance: String,
+        project_id: i64,
+        task_id: i64,
+        assets: Vec<Asset>,
+    },
+}
+
+/// How a finished attachment download ended.
+#[derive(Debug, Clone, PartialEq)]
+pub enum DownloadOutcome {
+    /// `saved` of `total` assets were written under `dir`; the per-asset
+    /// failures are not an error of the download as a whole.
+    Done {
+        saved: usize,
+        total: usize,
+        dir: std::path::PathBuf,
+    },
+    /// The download could not start or run; carries the translated message.
+    Failed(String),
+}
+
+/// The attachment download as the open Detail screen shows it.
+#[derive(Debug, Clone, PartialEq)]
+pub enum DownloadState {
+    Running,
+    /// The task has no downloadable asset, so no download was started.
+    NoAttachments,
+    Finished(DownloadOutcome),
 }
 
 /// What kind of comment compose operation is in progress.
@@ -752,6 +783,9 @@ pub enum Screen {
         /// Set when a 401 response is received from a detail load or comment mutation.
         /// Cleared on a subsequent successful (200) detail load.
         auth_error: bool,
+        /// The attachment download of this task; kept across a reload and gone
+        /// with the screen.
+        download: Option<DownloadState>,
     },
 }
 
@@ -1071,6 +1105,15 @@ pub enum Msg {
     /// See `ImageLoaded` above — same slice-0059 wiring boundary.
     #[allow(dead_code)]
     ImageLoadErr(String),
+    /// Start downloading every downloadable asset of the open task (`D`).
+    DownloadAttachments,
+    /// The shell finished the download started for this task.
+    AttachmentsDownloaded {
+        instance: String,
+        project_id: i64,
+        task_id: i64,
+        outcome: DownloadOutcome,
+    },
 }
 
 impl Model {
@@ -1297,23 +1340,100 @@ pub fn update(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
         | Msg::FocusPrevComment
         | Msg::ConfirmDeleteComment
         | Msg::CancelDeleteComment) => update_comment_focus(model, m),
-        m @ (Msg::ImageLoaded | Msg::ImageLoadErr(_)) => update_image(model, m),
+        m @ (Msg::ImageLoaded
+        | Msg::ImageLoadErr(_)
+        | Msg::DownloadAttachments
+        | Msg::AttachmentsDownloaded { .. }) => update_asset_effects(model, m),
     }
+}
+
+/// Route the image-viewer and attachment-download messages to their handlers.
+fn update_asset_effects(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
+    match msg {
+        Msg::ImageLoaded => (apply_image_status(model, ImageStatus::Ready), vec![]),
+        Msg::ImageLoadErr(reason) => (
+            apply_image_status(model, ImageStatus::Error(reason)),
+            vec![],
+        ),
+        Msg::DownloadAttachments => handle_download_start(model),
+        Msg::AttachmentsDownloaded {
+            instance,
+            project_id,
+            task_id,
+            outcome,
+        } => (
+            handle_download_finished(model, (&instance, project_id, task_id), outcome),
+            vec![],
+        ),
+        _ => (model, vec![]),
+    }
+}
+
+/// Start the attachment download of the open Detail: one effect carrying every
+/// downloadable asset of the task and its comments.
+///
+/// Does nothing off the Detail screen, while it is still loading, or while a
+/// download of the screen already runs; a task without a downloadable asset
+/// shows a note instead of starting one.
+fn handle_download_start(mut model: Model) -> (Model, Vec<Cmd>) {
+    let Some(Screen::Detail {
+        instance,
+        project_id,
+        task_id,
+        task,
+        comments,
+        loading,
+        download,
+        ..
+    }) = model.top_mut()
+    else {
+        return (model, vec![]);
+    };
+    if *loading || matches!(download, Some(DownloadState::Running)) {
+        return (model, vec![]);
+    }
+    let assets = crate::controller::downloadable_assets(task, comments);
+    if assets.is_empty() {
+        *download = Some(DownloadState::NoAttachments);
+        return (model, vec![]);
+    }
+    *download = Some(DownloadState::Running);
+    let cmd = Cmd::DownloadAttachments {
+        instance: instance.clone(),
+        project_id: *project_id,
+        task_id: *task_id,
+        assets,
+    };
+    (model, vec![cmd])
+}
+
+/// Record a finished download on the Detail it was started for; a result for
+/// another task, or after the screen was popped, is dropped.
+fn handle_download_finished(
+    mut model: Model,
+    task_ref: (&str, i64, i64),
+    outcome: DownloadOutcome,
+) -> Model {
+    if let Some(Screen::Detail {
+        instance,
+        project_id,
+        task_id,
+        download,
+        ..
+    }) = model.top_mut()
+    {
+        if (instance.as_str(), *project_id, *task_id) == task_ref {
+            *download = Some(DownloadState::Finished(outcome));
+        }
+    }
+    model
 }
 
 /// Apply the shell's image-fetch outcome to an open `ImageViewer` overlay.
 ///
 /// No-op when the overlay is not `ImageViewer` (e.g. the user already closed
 /// it before the fetch settled).
-fn update_image(mut model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
-    let new_status = match msg {
-        Msg::ImageLoaded => Some(ImageStatus::Ready),
-        Msg::ImageLoadErr(reason) => Some(ImageStatus::Error(reason)),
-        _ => None,
-    };
-    let Some(new_status) = new_status else {
-        return (model, vec![]);
-    };
+fn apply_image_status(mut model: Model, new_status: ImageStatus) -> Model {
     if let Some(Screen::Detail {
         ref mut overlay, ..
     }) = model.top_mut()
@@ -1322,7 +1442,7 @@ fn update_image(mut model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
             *status = new_status;
         }
     }
-    (model, vec![])
+    model
 }
 
 fn update_input(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
@@ -1955,6 +2075,7 @@ fn handle_select(model: Model) -> (Model, Vec<Cmd>) {
                     focused_comment: None,
                     comment_spans: vec![],
                     auth_error: false,
+                    download: None,
                 });
             }
         }
