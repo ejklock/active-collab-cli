@@ -8,23 +8,14 @@ use crate::render::{self, MineTableRow};
 use crate::store::instances::{Instance, InstanceRepository};
 use std::io::Write;
 
-/// Parity: Python _render_mine_table (aggregation loop).
-///
-/// For each target instance, builds a client and fetches open tasks. Maps each
-/// MineTask to a MineTableRow using task_number when present (else id as fallback),
-/// mirroring Python `t.task_number or t.id`.
-///
-/// Instance order is preserved deterministically via an indexed JoinSet.
-pub(crate) async fn collect_mine_rows(targets: &[Instance], http: &Http) -> Vec<MineTableRow> {
-    let t = std::time::Instant::now();
-    let today = chrono::Local::now().date_naive();
-    let rows = fan_out_instance_rows(targets, http, today)
-        .await
-        .into_iter()
-        .flat_map(Result::unwrap_or_default)
-        .collect();
-    crate::timing::record("mine_list_load", t.elapsed());
-    rows
+/// One task's hours as fetched after its row was listed; `None` marks a value
+/// the API did not give.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct MineHours {
+    pub instance: String,
+    pub task_id: i64,
+    pub logged_week: Option<f64>,
+    pub logged_total: Option<f64>,
 }
 
 /// Loads every target instance's rows concurrently, one result per target in
@@ -62,16 +53,92 @@ async fn fan_out_instance_rows(
 }
 
 /// Maps the instance's open tasks to rows and fills their hours.
-///
-/// One records request covers the user's week for every task; each task's
-/// total comes from its own payload, fetched concurrently. A failed request
-/// leaves the affected hours `None` and never drops a task.
 pub(super) async fn fill_task_hours(
     inst: &Instance,
     http: &Http,
     tasks: Vec<crate::models::MineTask>,
     today: chrono::NaiveDate,
 ) -> Vec<MineTableRow> {
+    let hours = fetch_task_hours(inst, http, &tasks, today).await;
+    tasks
+        .into_iter()
+        .zip(hours)
+        .map(|(task, hours)| MineTableRow {
+            logged_week: hours.logged_week,
+            logged_total: hours.logged_total,
+            ..mine_task_to_row(task)
+        })
+        .collect()
+}
+
+/// One instance's open tasks, as listed.
+pub(crate) type InstanceTasks = (Instance, Vec<crate::models::MineTask>);
+
+/// Lists every target instance's open tasks concurrently, in target order; an
+/// instance whose list fails is left out.
+pub(crate) async fn collect_mine_task_lists(
+    targets: &[Instance],
+    http: &Http,
+) -> Vec<InstanceTasks> {
+    let timer = std::time::Instant::now();
+    let mut set: tokio::task::JoinSet<(usize, Option<InstanceTasks>)> = tokio::task::JoinSet::new();
+    for (idx, inst) in targets.iter().enumerate() {
+        let inst = inst.clone();
+        let client = ActiveCollabClient::new(inst.clone(), http.clone());
+        set.spawn(async move {
+            let listed = client.fetch_open_tasks().await.ok().map(|t| (inst, t));
+            (idx, listed)
+        });
+    }
+    let mut per_index: Vec<Option<InstanceTasks>> = vec![None; targets.len()];
+    while let Some(joined) = set.join_next().await {
+        if let Ok((idx, listed)) = joined {
+            per_index[idx] = listed;
+        }
+    }
+    crate::timing::record("mine_list_load", timer.elapsed());
+    per_index.into_iter().flatten().collect()
+}
+
+/// The rows of the listed tasks, without hours.
+pub(crate) fn mine_rows_of(lists: &[InstanceTasks]) -> Vec<MineTableRow> {
+    lists
+        .iter()
+        .flat_map(|(_, tasks)| tasks.iter().cloned().map(mine_task_to_row))
+        .collect()
+}
+
+/// The hours of every listed task, fetched concurrently per instance, in
+/// list order.
+pub(crate) async fn collect_mine_hours(lists: &[InstanceTasks], http: &Http) -> Vec<MineHours> {
+    let timer = std::time::Instant::now();
+    let today = chrono::Local::now().date_naive();
+    let mut set: tokio::task::JoinSet<(usize, Vec<MineHours>)> = tokio::task::JoinSet::new();
+    for (idx, (inst, tasks)) in lists.iter().enumerate() {
+        let (inst, tasks, http) = (inst.clone(), tasks.clone(), http.clone());
+        set.spawn(async move { (idx, fetch_task_hours(&inst, &http, &tasks, today).await) });
+    }
+    let mut per_index: Vec<Vec<MineHours>> = vec![Vec::new(); lists.len()];
+    while let Some(joined) = set.join_next().await {
+        if let Ok((idx, hours)) = joined {
+            per_index[idx] = hours;
+        }
+    }
+    crate::timing::record("mine_hours_load", timer.elapsed());
+    per_index.into_iter().flatten().collect()
+}
+
+/// Each task's hours, in task order.
+///
+/// One records request covers the user's week for every task; each task's
+/// total comes from its own payload, fetched concurrently. A failed request
+/// leaves the affected hours `None` and never drops a task.
+async fn fetch_task_hours(
+    inst: &Instance,
+    http: &Http,
+    tasks: &[crate::models::MineTask],
+    today: chrono::NaiveDate,
+) -> Vec<MineHours> {
     if tasks.is_empty() {
         return Vec::new();
     }
@@ -81,21 +148,19 @@ pub(super) async fn fill_task_hours(
 
     let (week, totals) = tokio::join!(
         fetch_week_hours(inst, http, &from, &to),
-        fetch_total_hours(inst, http, &tasks)
+        fetch_total_hours(inst, http, tasks)
     );
 
     tasks
-        .into_iter()
+        .iter()
         .zip(totals)
-        .map(|(task, logged_total)| {
-            let logged_week = week
+        .map(|(task, logged_total)| MineHours {
+            instance: task.instance_name.clone(),
+            task_id: task.id,
+            logged_week: week
                 .as_ref()
-                .map(|per_task| per_task.get(&task.id).copied().unwrap_or(0.0));
-            MineTableRow {
-                logged_week,
-                logged_total,
-                ..mine_task_to_row(task)
-            }
+                .map(|per_task| per_task.get(&task.id).copied().unwrap_or(0.0)),
+            logged_total,
         })
         .collect()
 }
@@ -179,7 +244,7 @@ fn mine_task_to_row(task: crate::models::MineTask) -> MineTableRow {
 
 /// Auth-aware mine aggregation for the CLI path.
 ///
-/// Mirrors collect_mine_rows but propagates Unauthorized rather than swallowing it.
+/// Loads every target's rows with their hours, propagating Unauthorized rather than swallowing it.
 /// On 401 from any target instance, returns Err(Unauthorized). Other non-200 errors
 /// from an instance are silently skipped (unchanged behaviour for transient failures).
 async fn fetch_mine_rows_checked(

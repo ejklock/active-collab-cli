@@ -1,4 +1,4 @@
-use crate::commands::{validate_range, OwnedReportPeriod, PeriodPreset, ReportFormat};
+use crate::commands::{validate_range, MineHours, OwnedReportPeriod, PeriodPreset, ReportFormat};
 use crate::i18n::t;
 use crate::render::{Asset, MineTableRow, StyleRun};
 use crate::store::instances::Instance;
@@ -934,6 +934,10 @@ pub enum Msg {
         /// ISO wall-clock string stamped by the shell when the load completed.
         loaded_at: String,
     },
+    /// The week and total hours of the listed mine tasks arrived after their rows.
+    LoadedMineHours {
+        hours: Vec<MineHours>,
+    },
     /// Phase-1 load: structured data + cached (or empty) user_map.
     /// The shell calls reflow_detail before drawing to materialise lines.
     LoadedDetail(DetailLoad),
@@ -1120,6 +1124,20 @@ impl Model {
         self.stack.last_mut()
     }
 
+    /// The Tasks screen wherever it sits in the stack: background loads land
+    /// while a Detail screen is open above it.
+    pub fn tasks_screen(&self) -> Option<&Screen> {
+        self.stack
+            .iter()
+            .find(|s| matches!(s, Screen::Tasks { .. }))
+    }
+
+    fn tasks_screen_mut(&mut self) -> Option<&mut Screen> {
+        self.stack
+            .iter_mut()
+            .find(|s| matches!(s, Screen::Tasks { .. }))
+    }
+
     /// Rebuild the Detail screen's line cache if the width changed.
     ///
     /// Guard clauses ensure this is a no-op when the top screen is not Detail,
@@ -1216,13 +1234,14 @@ pub fn update(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
         | Msg::Down
         | Msg::ScrollDown
         | Msg::PageUp
-        | Msg::PageDown) => update_scroll(model, m),
-        m @ (Msg::Click { .. } | Msg::Drag { .. } | Msg::MouseUp { .. }) => {
-            update_pointer(model, m)
-        }
+        | Msg::PageDown
+        | Msg::Click { .. }
+        | Msg::Drag { .. }
+        | Msg::MouseUp { .. }) => update_input(model, m),
         m @ (Msg::Select | Msg::Back | Msg::Quit | Msg::Refresh) => update_navigation(model, m),
         m @ (Msg::LoadedTasksByProject { .. }
         | Msg::LoadedMineTasks { .. }
+        | Msg::LoadedMineHours { .. }
         | Msg::LoadedDetail(_)
         | Msg::UserMapResolved(_)
         | Msg::AssetActionResult
@@ -1258,22 +1277,22 @@ pub fn update(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
         | Msg::EstimateBackspace
         | Msg::EstimateSubmit
         | Msg::EstimateCancel
-        | Msg::TaskEditOk
-        | Msg::TaskEditErr(_)) => update_task_edit(model, m),
-        m @ (Msg::StatusToggleOpen | Msg::StatusToggleConfirm | Msg::StatusToggleCancel) => {
-            update_status_toggle(model, m)
-        }
-        m @ (Msg::AssigneePickerOpen
+        | Msg::StatusToggleOpen
+        | Msg::StatusToggleConfirm
+        | Msg::StatusToggleCancel
+        | Msg::AssigneePickerOpen
         | Msg::AssigneePickerUp
         | Msg::AssigneePickerDown
         | Msg::AssigneePickerChar(_)
         | Msg::AssigneePickerBackspace
         | Msg::AssigneePickerSubmit
-        | Msg::AssigneePickerCancel) => update_assignee_picker(model, m),
-        Msg::FocusNextComment => (handle_focus_next(model), vec![]),
-        Msg::FocusPrevComment => (handle_focus_prev(model), vec![]),
-        Msg::ConfirmDeleteComment => handle_confirm_delete(model),
-        Msg::CancelDeleteComment => (handle_cancel_delete(model), vec![]),
+        | Msg::AssigneePickerCancel
+        | Msg::TaskEditOk
+        | Msg::TaskEditErr(_)) => update_task_edit(model, m),
+        m @ (Msg::FocusNextComment
+        | Msg::FocusPrevComment
+        | Msg::ConfirmDeleteComment
+        | Msg::CancelDeleteComment) => update_comment_focus(model, m),
         m @ (Msg::ImageLoaded | Msg::ImageLoadErr(_)) => update_image(model, m),
     }
 }
@@ -1300,6 +1319,15 @@ fn update_image(mut model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
         }
     }
     (model, vec![])
+}
+
+fn update_input(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
+    match msg {
+        m @ (Msg::Click { .. } | Msg::Drag { .. } | Msg::MouseUp { .. }) => {
+            update_pointer(model, m)
+        }
+        m => update_scroll(model, m),
+    }
 }
 
 fn update_scroll(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
@@ -1359,6 +1387,7 @@ fn update_loaded(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
         Msg::LoadedMineTasks { rows, loaded_at } => {
             (handle_loaded_mine_tasks(model, rows, loaded_at), vec![])
         }
+        Msg::LoadedMineHours { hours } => (handle_loaded_mine_hours(model, hours), vec![]),
         Msg::LoadedDetail(load) => (handle_loaded_detail(model, load), vec![]),
         Msg::UserMapResolved(map) => (handle_user_map_resolved(model, map), vec![]),
         Msg::AssetActionResult => (model, vec![]),
@@ -1394,15 +1423,43 @@ fn update_log_time(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
     }
 }
 
+/// The estimate, status and assignee overlays all submit a task edit, so they
+/// share its outcome messages.
 fn update_task_edit(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
+    match msg {
+        m @ (Msg::StatusToggleOpen | Msg::StatusToggleConfirm | Msg::StatusToggleCancel) => {
+            update_status_toggle(model, m)
+        }
+        m @ (Msg::AssigneePickerOpen
+        | Msg::AssigneePickerUp
+        | Msg::AssigneePickerDown
+        | Msg::AssigneePickerChar(_)
+        | Msg::AssigneePickerBackspace
+        | Msg::AssigneePickerSubmit
+        | Msg::AssigneePickerCancel) => update_assignee_picker(model, m),
+        Msg::TaskEditOk => handle_task_edit_ok(model),
+        Msg::TaskEditErr(msg) => (handle_task_edit_err(model, msg), vec![]),
+        m => update_estimate(model, m),
+    }
+}
+
+fn update_estimate(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
     match msg {
         Msg::EstimateOpen => (handle_estimate_open(model), vec![]),
         Msg::EstimateChar(c) => (handle_estimate_char(model, c), vec![]),
         Msg::EstimateBackspace => (handle_estimate_backspace(model), vec![]),
         Msg::EstimateSubmit => handle_estimate_submit(model),
         Msg::EstimateCancel => (handle_estimate_cancel(model), vec![]),
-        Msg::TaskEditOk => handle_task_edit_ok(model),
-        Msg::TaskEditErr(msg) => (handle_task_edit_err(model, msg), vec![]),
+        _ => (model, vec![]),
+    }
+}
+
+fn update_comment_focus(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
+    match msg {
+        Msg::FocusNextComment => (handle_focus_next(model), vec![]),
+        Msg::FocusPrevComment => (handle_focus_prev(model), vec![]),
+        Msg::ConfirmDeleteComment => handle_confirm_delete(model),
+        Msg::CancelDeleteComment => (handle_cancel_delete(model), vec![]),
         _ => (model, vec![]),
     }
 }
@@ -2014,9 +2071,11 @@ fn handle_loaded_mine_tasks(mut model: Model, rows: Vec<MineTableRow>, loaded_at
         card_offsets: ref mut co,
         rendered_width: ref mut rw,
         ..
-    }) = model.top_mut()
+    }) = model.tasks_screen_mut()
     {
+        let earlier = std::mem::take(t);
         *t = rows_to_task_rows(rows);
+        keep_earlier_hours(t, &earlier);
         *l = false;
         *rv = false;
         // Invalidate card cache so reflow_tasks rebuilds at current width.
@@ -2025,6 +2084,49 @@ fn handle_loaded_mine_tasks(mut model: Model, rows: Vec<MineTableRow>, loaded_at
         *rw = usize::MAX;
     }
     model.last_loaded = Some(loaded_at);
+    model
+}
+
+/// Rows arrive before their hours: a row without hours shows the hours the
+/// same task (by instance and id) showed before the reload.
+fn keep_earlier_hours(fresh: &mut [TaskRow], earlier: &[TaskRow]) {
+    let by_task: HashMap<(&str, i64), &TaskRow> = earlier
+        .iter()
+        .map(|r| ((r.instance.as_str(), r.task_id), r))
+        .collect();
+    for row in fresh {
+        if let Some(prior) = by_task.get(&(row.instance.as_str(), row.task_id)) {
+            row.logged_week = row.logged_week.or(prior.logged_week);
+            row.logged_total = row.logged_total.or(prior.logged_total);
+        }
+    }
+}
+
+/// Sets week and total hours of each listed task named by an entry; an unknown
+/// entry value clears it, a row without an entry is untouched.
+fn handle_loaded_mine_hours(mut model: Model, hours: Vec<MineHours>) -> Model {
+    if let Some(Screen::Tasks {
+        tasks: ref mut t,
+        card_heights: ref mut ch,
+        card_offsets: ref mut co,
+        rendered_width: ref mut rw,
+        ..
+    }) = model.tasks_screen_mut()
+    {
+        let by_task: HashMap<(&str, i64), &MineHours> = hours
+            .iter()
+            .map(|h| ((h.instance.as_str(), h.task_id), h))
+            .collect();
+        for row in t.iter_mut() {
+            if let Some(entry) = by_task.get(&(row.instance.as_str(), row.task_id)) {
+                row.logged_week = entry.logged_week;
+                row.logged_total = entry.logged_total;
+            }
+        }
+        *ch = vec![];
+        *co = vec![];
+        *rw = usize::MAX;
+    }
     model
 }
 

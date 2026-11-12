@@ -2,7 +2,7 @@
 type: Issue
 title: Paint the ac mine TUI rows before the hours requests finish
 description: The ac mine TUI shows refreshed rows as soon as the task lists arrive and fills week and total hours in a second message.
-status: open
+status: closed
 labels: [tui, performance]
 timestamp: 2026-11-12T00:21:46Z
 ---
@@ -27,6 +27,8 @@ Excluded: the `ac mine` table, `--json` and the MCP `mine`, which keep waiting f
 
 - Two messages instead of one per task: one paint for the list, one for the hours, keeping `update` pure.
 - The estimate arrives with the rows, because it comes from the task list.
+- The mine handlers find the Tasks screen anywhere in the screen stack, so a message that lands while Detail is open still updates the list and the snapshot.
+- `update` (cyclomatic 16) and `dispatch_cmds` (12) exceed the gate's ceiling of 10 already on the base commit; the owner chose to refactor both inside this issue (2026-11-11), by grouping their arms into message and command families in the existing sub-handler pattern. Not taken: a named baseline entry plus a separate issue; leaving the issue uncommitted; splitting `Msg` into nested per-family enums.
 
 ### Acceptance
 

@@ -8263,3 +8263,253 @@ fn mine_snapshot_cached_rows_paint_first_and_revalidated_rows_replace_their_hour
         _ => panic!("expected Tasks screen"),
     }
 }
+
+fn mine_row(instance: &str, task_id: i64, week: Option<f64>, total: Option<f64>) -> MineTableRow {
+    MineTableRow {
+        instance: instance.into(),
+        project_id: 1,
+        task_number: task_id,
+        task_id,
+        name: format!("Task {task_id}"),
+        due_on: None,
+        project_name: None,
+        estimate: Some(3.0),
+        logged_week: week,
+        logged_total: total,
+    }
+}
+
+fn mine_hours(
+    instance: &str,
+    task_id: i64,
+    week: Option<f64>,
+    total: Option<f64>,
+) -> crate::commands::MineHours {
+    crate::commands::MineHours {
+        instance: instance.into(),
+        task_id,
+        logged_week: week,
+        logged_total: total,
+    }
+}
+
+fn mine_model(rows: Vec<MineTableRow>) -> Model {
+    crate::tui::model::init_mine(empty_header(), Some(rows)).0
+}
+
+fn mine_tasks_of(model: &Model) -> (&Vec<TaskRow>, usize) {
+    match model.stack.last() {
+        Some(Screen::Tasks {
+            tasks, selected, ..
+        }) => (tasks, *selected),
+        _ => panic!("expected Tasks screen"),
+    }
+}
+
+fn apply_mine_hours(model: Model, hours: Vec<crate::commands::MineHours>) -> Model {
+    let (updated, cmds) = update(model, Msg::LoadedMineHours { hours });
+    assert!(cmds.is_empty());
+    updated
+}
+
+#[test]
+fn mine_hours_message_fills_week_and_total_of_the_listed_task() {
+    let model = mine_model(vec![mine_row("a", 1, None, None)]);
+    let model = apply_mine_hours(model, vec![mine_hours("a", 1, Some(1.5), Some(7.0))]);
+    let (tasks, _) = mine_tasks_of(&model);
+    assert_eq!(tasks[0].logged_week, Some(1.5));
+    assert_eq!(tasks[0].logged_total, Some(7.0));
+}
+
+#[test]
+fn mine_hours_message_sets_an_unknown_value_unknown() {
+    let model = mine_model(vec![mine_row("a", 1, Some(2.0), Some(9.0))]);
+    let model = apply_mine_hours(model, vec![mine_hours("a", 1, None, Some(4.0))]);
+    let (tasks, _) = mine_tasks_of(&model);
+    assert_eq!(tasks[0].logged_week, None);
+    assert_eq!(tasks[0].logged_total, Some(4.0));
+}
+
+#[test]
+fn mine_hours_message_keeps_the_hours_of_a_row_without_an_entry() {
+    let model = mine_model(vec![
+        mine_row("a", 1, Some(2.0), Some(9.0)),
+        mine_row("a", 2, None, None),
+    ]);
+    let model = apply_mine_hours(model, vec![mine_hours("a", 2, Some(1.0), Some(1.0))]);
+    let (tasks, _) = mine_tasks_of(&model);
+    assert_eq!(tasks[0].logged_week, Some(2.0));
+    assert_eq!(tasks[0].logged_total, Some(9.0));
+}
+
+#[test]
+fn mine_hours_message_adds_no_row_for_an_unlisted_task() {
+    let model = mine_model(vec![mine_row("a", 1, None, None)]);
+    let model = apply_mine_hours(model, vec![mine_hours("a", 99, Some(1.0), Some(1.0))]);
+    let (tasks, _) = mine_tasks_of(&model);
+    assert_eq!(tasks.len(), 1);
+    assert_eq!(tasks[0].logged_week, None);
+}
+
+#[test]
+fn mine_hours_message_matches_the_same_task_id_per_instance() {
+    let model = mine_model(vec![
+        mine_row("a", 1, None, None),
+        mine_row("b", 1, None, None),
+    ]);
+    let model = apply_mine_hours(
+        model,
+        vec![
+            mine_hours("b", 1, Some(5.0), Some(50.0)),
+            mine_hours("a", 1, Some(2.0), Some(20.0)),
+        ],
+    );
+    let (tasks, _) = mine_tasks_of(&model);
+    assert_eq!(
+        (tasks[0].logged_week, tasks[0].logged_total),
+        (Some(2.0), Some(20.0))
+    );
+    assert_eq!(
+        (tasks[1].logged_week, tasks[1].logged_total),
+        (Some(5.0), Some(50.0))
+    );
+}
+
+#[test]
+fn mine_hours_message_leaves_estimate_order_and_selection() {
+    let mut model = mine_model(vec![
+        mine_row("a", 1, None, None),
+        mine_row("a", 2, None, None),
+    ]);
+    if let Some(Screen::Tasks { selected, .. }) = model.stack.last_mut() {
+        *selected = 1;
+    }
+    let model = apply_mine_hours(
+        model,
+        vec![
+            mine_hours("a", 2, Some(1.0), Some(2.0)),
+            mine_hours("a", 1, Some(3.0), Some(4.0)),
+        ],
+    );
+    let (tasks, selected) = mine_tasks_of(&model);
+    assert_eq!(selected, 1);
+    assert_eq!(
+        tasks.iter().map(|t| t.task_id).collect::<Vec<_>>(),
+        vec![1, 2]
+    );
+    assert!(tasks.iter().all(|t| t.estimate == Some(3.0)));
+}
+
+fn apply_mine_rows(model: Model, rows: Vec<MineTableRow>) -> Model {
+    update(
+        model,
+        Msg::LoadedMineTasks {
+            rows,
+            loaded_at: "2026-06-26T12:00:00Z".into(),
+        },
+    )
+    .0
+}
+
+#[test]
+fn mine_hours_message_survives_rows_message_keeps_the_earlier_hours_of_a_listed_task() {
+    let model = mine_model(vec![mine_row("a", 1, Some(2.0), Some(9.0))]);
+    let model = apply_mine_rows(model, vec![mine_row("a", 1, None, None)]);
+    let (tasks, _) = mine_tasks_of(&model);
+    assert_eq!(
+        (tasks[0].logged_week, tasks[0].logged_total),
+        (Some(2.0), Some(9.0))
+    );
+}
+
+#[test]
+fn mine_hours_message_survives_rows_message_shows_a_new_task_with_unknown_hours() {
+    let model = mine_model(vec![mine_row("a", 1, Some(2.0), Some(9.0))]);
+    let model = apply_mine_rows(
+        model,
+        vec![mine_row("a", 1, None, None), mine_row("a", 2, None, None)],
+    );
+    let (tasks, _) = mine_tasks_of(&model);
+    assert_eq!((tasks[1].logged_week, tasks[1].logged_total), (None, None));
+}
+
+#[test]
+fn mine_hours_message_survives_rows_message_drops_a_task_that_left_the_list() {
+    let model = mine_model(vec![
+        mine_row("a", 1, Some(2.0), Some(9.0)),
+        mine_row("a", 2, Some(1.0), Some(1.0)),
+    ]);
+    let model = apply_mine_rows(model, vec![mine_row("a", 2, None, None)]);
+    let (tasks, _) = mine_tasks_of(&model);
+    assert_eq!(tasks.len(), 1);
+    assert_eq!(tasks[0].task_id, 2);
+}
+
+#[test]
+fn mine_hours_message_survives_rows_message_takes_the_estimate_from_the_new_rows() {
+    let model = mine_model(vec![mine_row("a", 1, Some(2.0), Some(9.0))]);
+    let mut fresh = mine_row("a", 1, None, None);
+    fresh.estimate = Some(8.0);
+    let model = apply_mine_rows(model, vec![fresh]);
+    let (tasks, _) = mine_tasks_of(&model);
+    assert_eq!(tasks[0].estimate, Some(8.0));
+}
+
+fn detail_open_over_mine(rows: Vec<MineTableRow>) -> Model {
+    let (model, _) = update(mine_model(rows), Msg::Select);
+    assert!(matches!(model.stack.last(), Some(Screen::Detail { .. })));
+    model
+}
+
+fn tasks_below(model: &Model) -> &Vec<TaskRow> {
+    match model.stack.first() {
+        Some(Screen::Tasks { tasks, .. }) => tasks,
+        _ => panic!("expected Tasks screen at the bottom of the stack"),
+    }
+}
+
+fn top_detail_debug(model: &Model) -> String {
+    format!("{:?}", model.stack.last().expect("a screen"))
+}
+
+#[test]
+fn mine_list_under_detail_receives_the_hours_message() {
+    let model = detail_open_over_mine(vec![mine_row("a", 1, None, None)]);
+    let before = top_detail_debug(&model);
+    let model = apply_mine_hours(model, vec![mine_hours("a", 1, Some(1.5), Some(7.0))]);
+    assert_eq!(top_detail_debug(&model), before);
+    let (back, _) = update(model, Msg::Back);
+    let (tasks, _) = mine_tasks_of(&back);
+    assert_eq!(
+        (tasks[0].logged_week, tasks[0].logged_total),
+        (Some(1.5), Some(7.0))
+    );
+}
+
+#[test]
+fn mine_list_under_detail_receives_the_rows_message_and_keeps_earlier_hours() {
+    let model = detail_open_over_mine(vec![mine_row("a", 1, Some(2.0), Some(9.0))]);
+    let before = top_detail_debug(&model);
+    let model = apply_mine_rows(
+        model,
+        vec![mine_row("a", 1, None, None), mine_row("a", 2, None, None)],
+    );
+    assert_eq!(top_detail_debug(&model), before);
+    let tasks = tasks_below(&model);
+    assert_eq!(tasks.len(), 2);
+    assert_eq!(
+        (tasks[0].logged_week, tasks[0].logged_total),
+        (Some(2.0), Some(9.0))
+    );
+    assert_eq!((tasks[1].logged_week, tasks[1].logged_total), (None, None));
+}
+
+#[test]
+fn mine_list_under_detail_changes_nothing_without_a_tasks_screen() {
+    let mut model = mine_model(vec![mine_row("a", 1, None, None)]);
+    model.stack.clear();
+    let after_hours = apply_mine_hours(model, vec![mine_hours("a", 1, Some(1.0), Some(1.0))]);
+    assert!(after_hours.stack.is_empty());
+    let after_rows = apply_mine_rows(after_hours, vec![mine_row("a", 1, None, None)]);
+    assert!(after_rows.stack.is_empty());
+}
