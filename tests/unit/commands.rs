@@ -6079,7 +6079,8 @@ async fn mine_week_hours_are_unknown_without_a_user_id_and_the_list_is_kept() {
         vec![crate::models::MineTask::from_api(
             &serde_json::json!({ "id": 10, "project_id": 5, "estimate": 4.0 }),
             "hours",
-        )],
+        )
+        .unwrap()],
         mine_date(2026, 11, 11),
     )
     .await;
@@ -6103,7 +6104,8 @@ async fn mine_total_hours_is_unknown_when_the_server_is_unreachable() {
         vec![crate::models::MineTask::from_api(
             &serde_json::json!({ "id": 10, "project_id": 5, "estimate": 4.0 }),
             "dead",
-        )],
+        )
+        .unwrap()],
         mine_date(2026, 11, 11),
     )
     .await;

@@ -138,9 +138,7 @@ async fn fetch_total_hours(
 ) -> Vec<Option<f64>> {
     let mut set: tokio::task::JoinSet<(usize, Option<f64>)> = tokio::task::JoinSet::new();
     for (idx, task) in tasks.iter().enumerate() {
-        let Some(project_id) = task.project_id else {
-            continue;
-        };
+        let project_id = task.project_id;
         let task_id = task.id;
         let client = ActiveCollabClient::new(inst.clone(), http.clone());
         set.spawn(async move {
@@ -167,7 +165,7 @@ fn mine_task_to_row(task: crate::models::MineTask) -> MineTableRow {
     };
     MineTableRow {
         instance: task.instance_name,
-        project_id: task.project_id.unwrap_or(0),
+        project_id: task.project_id,
         task_number,
         task_id: task.id,
         name: task.name,

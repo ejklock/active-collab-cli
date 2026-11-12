@@ -508,13 +508,35 @@ async fn fetch_open_tasks_filters_completed_and_trashed() {
 }
 
 #[tokio::test]
+async fn open_task_list_skips_an_entry_without_a_project_id() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/users/7/tasks"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "tasks": [
+                { "id": 1, "name": "First",  "project_id": 3 },
+                { "id": 2, "name": "No project" },
+                { "id": 4, "name": "Third", "project_id": 3 }
+            ]
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = make_client(&server.uri());
+    let tasks = client.fetch_open_tasks().await.unwrap();
+    let listed: Vec<(i64, i64)> = tasks.iter().map(|t| (t.id, t.project_id)).collect();
+    assert_eq!(listed, vec![(1, 3), (4, 3)]);
+}
+
+#[tokio::test]
 async fn fetch_open_tasks_sets_instance_name() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/api/v1/users/7/tasks"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "tasks": [
-                { "id": 1, "name": "Task A", "is_completed": false, "is_trashed": false }
+                { "id": 1, "name": "Task A", "is_completed": false, "is_trashed": false, "project_id": 1 }
             ]
         })))
         .expect(1)
