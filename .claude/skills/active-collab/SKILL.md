@@ -119,6 +119,7 @@ ac get 665/75159 --download-attachments          # prints one summary line
 Without `--attachments-dir`, files land in a stable, predictable per-task path:
 `$TMPDIR/ac-attachments/<project_id>-<task_id>/`. One failed asset never blocks
 the others — each gets its own `path` (success) or `error` (failure) outcome.
+In the TUI, `D` on a task detail saves the same set to `~/Downloads/ac-attachments/<project_id>-<task_id>/`.
 See [ADR 0066](../../../docs/adr/0066-agent-attachment-download-to-local-temp-dir.md).
 
 ## Writing a comment — `ac comment`

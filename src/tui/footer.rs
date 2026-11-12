@@ -8,7 +8,8 @@
 use crate::i18n::t;
 use crate::render::{display_width, wrap_text};
 use crate::tui::model::{
-    AssigneePickerView, Compose, EditStatus, EstimateForm, LogTimeForm, Screen,
+    AssigneePickerView, Compose, DownloadOutcome, DownloadState, EditStatus, EstimateForm,
+    LogTimeForm, Screen,
 };
 
 /// Reformat a BRT timestamp `YYYY-MM-DDTHH:MM:SS` into `DD/MM/YYYY HH:MM`.
@@ -132,7 +133,7 @@ pub(crate) fn detail_hint(
     if is_own_comment_focused(focused_comment, comments, current_user_id) {
         return t("↑/↓ · j/k move · Ctrl+click edit/delete · c new");
     }
-    t("↑/↓ · j/k move · c comment · t log time · e estimate · s status · r refresh · a assignee · H report · Esc/b back · q quit")
+    t("↑/↓ · j/k move · c comment · t log time · e estimate · s status · r refresh · D download · a assignee · H report · Esc/b back · q quit")
 }
 
 pub(crate) fn is_own_comment_focused(
@@ -153,18 +154,22 @@ pub(crate) fn is_own_comment_focused(
 
 /// Derive the transient status string for the Detail footer status row.
 ///
-/// Priority (highest first): auth_error > copied_feedback.
+/// Priority (highest first): auth_error > attachment download > copied_feedback.
 /// When `compose` is `Some`, the modal overlay owns the compose hint/status (ADR 0039 §5).
 /// The footer still shows auth_error or copied_feedback if either is set.
 pub(crate) fn detail_status_line(
     compose: Option<&Compose>,
     copied_feedback: bool,
     auth_error: bool,
+    download: Option<&DownloadState>,
 ) -> Option<String> {
     if auth_error {
         return Some(t(
             "Token invalid or revoked — run `ac setup add` to re-authenticate.",
         ));
+    }
+    if let Some(state) = download {
+        return Some(download_status_text(state));
     }
     if compose.is_some() {
         return if copied_feedback {
@@ -177,6 +182,21 @@ pub(crate) fn detail_status_line(
         return Some(t("Copiado ✓"));
     }
     None
+}
+
+/// The footer status text of an attachment download.
+fn download_status_text(state: &DownloadState) -> String {
+    match state {
+        DownloadState::Running => t("Downloading attachments…"),
+        DownloadState::NoAttachments => t("No attachments to download"),
+        DownloadState::Finished(DownloadOutcome::Failed(message)) => message.clone(),
+        DownloadState::Finished(DownloadOutcome::Done { saved, total, dir }) => {
+            t("Downloaded {saved} of {total} attachment(s) to {dir}")
+                .replace("{saved}", &saved.to_string())
+                .replace("{total}", &total.to_string())
+                .replace("{dir}", &dir.display().to_string())
+        }
+    }
 }
 
 /// Number of wrapped lines a text occupies at the given display-column width.
@@ -281,10 +301,16 @@ pub(crate) fn plan(
     let status_line = if let Screen::Detail {
         overlay,
         auth_error,
+        download,
         ..
     } = screen
     {
-        detail_status_line(overlay.compose(), copied_feedback, *auth_error)
+        detail_status_line(
+            overlay.compose(),
+            copied_feedback,
+            *auth_error,
+            download.as_ref(),
+        )
     } else {
         None
     };

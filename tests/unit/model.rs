@@ -40,6 +40,7 @@ fn detail_model_with_assets_and_viewport(
             affordances: vec![],
             focused_comment: None,
             auth_error: false,
+            download: None,
             comment_spans: vec![],
         }],
         should_quit: false,
@@ -124,6 +125,7 @@ fn detail_model_scrollable(lines: Vec<String>, assets: Vec<Asset>, viewport: (u1
             affordances: vec![],
             focused_comment: None,
             auth_error: false,
+            download: None,
             comment_spans: vec![],
         }],
         should_quit: false,
@@ -400,6 +402,7 @@ fn detail_model_with_lines_assets_affs(
             affordances,
             focused_comment: None,
             auth_error: false,
+            download: None,
             comment_spans: vec![],
         }],
         should_quit: false,
@@ -657,6 +660,7 @@ fn detail_model_with_wrapped_url_lines(
             affordances: content.affordances,
             focused_comment: None,
             auth_error: false,
+            download: None,
             comment_spans: vec![],
         }],
         should_quit: false,
@@ -848,6 +852,7 @@ fn detail_model_for_selection(lines: Vec<String>, viewport: (u16, u16), offset: 
             affordances: vec![],
             focused_comment: None,
             auth_error: false,
+            download: None,
             comment_spans: vec![],
         }],
         should_quit: false,
@@ -1713,6 +1718,7 @@ fn detail_footer_hint_with_assets_has_no_ctrl_cmd_reference() {
         affordances: vec![],
         focused_comment: None,
         auth_error: false,
+        download: None,
         comment_spans: vec![],
     };
     let hint = hint_for_screen(&screen);
@@ -1778,6 +1784,7 @@ fn detail_model_with_boxed_lines(lines: Vec<String>, viewport: (u16, u16), offse
             affordances: vec![],
             focused_comment: None,
             auth_error: false,
+            download: None,
             comment_spans: vec![],
         }],
         should_quit: false,
@@ -2781,6 +2788,7 @@ fn detail_model_with_inline_assets(
             affordances,
             focused_comment: None,
             auth_error: false,
+            download: None,
             comment_spans: vec![],
         }],
         should_quit: false,
@@ -3326,6 +3334,7 @@ fn detail_model_for_compose(instance: &str, project_id: i64, task_id: i64) -> Mo
             affordances: vec![],
             focused_comment: None,
             auth_error: false,
+            download: None,
             comment_spans: vec![],
         }],
         should_quit: false,
@@ -4211,6 +4220,7 @@ fn detail_model_with_task(
             affordances: vec![],
             focused_comment: None,
             auth_error: false,
+            download: None,
             comment_spans: vec![],
         }],
         should_quit: false,
@@ -5418,6 +5428,7 @@ fn detail_model_with_comments_for_edit(
             affordances: vec![],
             focused_comment: None,
             auth_error: false,
+            download: None,
             comment_spans: vec![],
         }],
         should_quit: false,
@@ -6046,6 +6057,7 @@ fn detail_model_with_n_comments(n: usize) -> Model {
             affordances: vec![],
             focused_comment: None,
             auth_error: false,
+            download: None,
             comment_spans: vec![],
         }],
         should_quit: false,
@@ -6243,6 +6255,7 @@ fn detail_model_with_comment_spans(
             affordances: vec![],
             focused_comment: None,
             auth_error: false,
+            download: None,
             comment_spans,
         }],
         should_quit: false,
@@ -6690,6 +6703,7 @@ fn reflow_detail_with_compose_does_not_append_compose_lines() {
             affordances: vec![],
             focused_comment: None,
             auth_error: false,
+            download: None,
             comment_spans: vec![],
         }],
         should_quit: false,
@@ -6749,6 +6763,7 @@ fn ac7_regression_compose_enter_input_inserts_newline_not_submit_after_modal_mig
             affordances: vec![],
             focused_comment: None,
             auth_error: false,
+            download: None,
             comment_spans: vec![],
         }],
         should_quit: false,
@@ -6805,6 +6820,7 @@ fn ac7_regression_compose_cancel_clears_compose_emits_no_cmd_after_modal_migrati
             affordances: vec![],
             focused_comment: None,
             auth_error: false,
+            download: None,
             comment_spans: vec![],
         }],
         should_quit: false,
@@ -6856,6 +6872,7 @@ fn ac7_regression_compose_submit_emits_write_cmd_after_modal_migration() {
             affordances: vec![],
             focused_comment: None,
             auth_error: false,
+            download: None,
             comment_spans: vec![],
         }],
         should_quit: false,
@@ -6925,6 +6942,7 @@ fn detail_model_with_confirm_delete(comment_id: i64) -> Model {
             affordances: vec![],
             focused_comment: None,
             auth_error: false,
+            download: None,
             comment_spans: vec![],
         }],
         should_quit: false,
@@ -7246,6 +7264,7 @@ fn hit_test_model(lines: Vec<String>, affordances: Vec<LocalAffordance>) -> Mode
             affordances,
             focused_comment: None,
             auth_error: false,
+            download: None,
             comment_spans: vec![],
         }],
         should_quit: false,
@@ -8816,5 +8835,495 @@ fn mine_list_bucket_layout_moves_selection_across_buckets_on_tasks_only() {
     for page in [Msg::PageDown, Msg::PageUp] {
         model = update(model, page).0;
         assert_eq!(mine_tasks_of(&model).1, 3);
+    }
+}
+
+// ── Task attachment download from the detail ─────────────────────────────────
+
+use crate::tui::model::{DownloadOutcome, DownloadState};
+
+fn download_task() -> serde_json::Value {
+    serde_json::json!({
+        "id": 75159,
+        "project_id": 665,
+        "attachments": [{"name": "spec.pdf", "download_url": "https://x.test/spec.pdf"}]
+    })
+}
+
+fn download_comments() -> Vec<serde_json::Value> {
+    vec![serde_json::json!({
+        "id": 1,
+        "attachments": [{"name": "shot.png", "download_url": "https://x.test/shot.png"}]
+    })]
+}
+
+fn download_detail(task: serde_json::Value, comments: Vec<serde_json::Value>) -> Model {
+    let mut model = detail_model_with_assets_and_viewport(vec![], "inst", (80, 24));
+    if let Some(Screen::Detail {
+        task: t,
+        comments: c,
+        project_id,
+        task_id,
+        ..
+    }) = model.top_mut()
+    {
+        *t = task;
+        *c = comments;
+        *project_id = 665;
+        *task_id = 75159;
+    }
+    model
+}
+
+fn download_state(model: &Model) -> Option<DownloadState> {
+    match model.top() {
+        Some(Screen::Detail { download, .. }) => download.clone(),
+        _ => panic!("expected the Detail screen"),
+    }
+}
+
+fn download_done(saved: usize, total: usize) -> Msg {
+    Msg::AttachmentsDownloaded {
+        instance: "inst".into(),
+        project_id: 665,
+        task_id: 75159,
+        outcome: DownloadOutcome::Done {
+            saved,
+            total,
+            dir: "/h/Downloads/ac-attachments/665-75159".into(),
+        },
+    }
+}
+
+#[test]
+fn detail_download_key_starts_one_download_of_every_downloadable_asset() {
+    let model = download_detail(download_task(), download_comments());
+    let (model, cmds) = update(model, Msg::DownloadAttachments);
+    assert_eq!(
+        cmds,
+        vec![Cmd::DownloadAttachments {
+            instance: "inst".into(),
+            project_id: 665,
+            task_id: 75159,
+            assets: vec![
+                make_asset("spec.pdf", "https://x.test/spec.pdf"),
+                make_asset("shot.png", "https://x.test/shot.png"),
+            ],
+        }]
+    );
+    assert_eq!(download_state(&model), Some(DownloadState::Running));
+}
+
+#[test]
+fn detail_download_key_while_running_does_nothing() {
+    let model = download_detail(download_task(), download_comments());
+    let (model, _) = update(model, Msg::DownloadAttachments);
+    let (model, cmds) = update(model, Msg::DownloadAttachments);
+    assert!(cmds.is_empty());
+    assert_eq!(download_state(&model), Some(DownloadState::Running));
+}
+
+#[test]
+fn detail_download_key_without_downloadable_asset_shows_the_note() {
+    let task = serde_json::json!({"body": "<a href=\"https://x.test/page\">link</a>"});
+    let (model, cmds) = update(download_detail(task, vec![]), Msg::DownloadAttachments);
+    assert!(cmds.is_empty());
+    assert_eq!(download_state(&model), Some(DownloadState::NoAttachments));
+}
+
+#[test]
+fn detail_download_key_on_list_screens_changes_nothing() {
+    let projects = Model {
+        stack: vec![Screen::Projects {
+            groups: vec![],
+            selected: 0,
+            loading: false,
+            revalidating: false,
+        }],
+        ..download_detail(download_task(), vec![])
+    };
+    let (projects, cmds) = update(projects, Msg::DownloadAttachments);
+    assert!(cmds.is_empty());
+    assert!(matches!(projects.top(), Some(Screen::Projects { .. })));
+}
+
+#[test]
+fn detail_download_key_while_loading_emits_nothing() {
+    let mut model = download_detail(download_task(), download_comments());
+    if let Some(Screen::Detail { loading, .. }) = model.top_mut() {
+        *loading = true;
+    }
+    let (model, cmds) = update(model, Msg::DownloadAttachments);
+    assert!(cmds.is_empty());
+    assert_eq!(download_state(&model), None);
+}
+
+#[test]
+fn detail_download_key_with_a_modal_open_types_into_the_modal() {
+    let model = download_detail(download_task(), download_comments());
+    let (model, _) = update(model, Msg::ComposeOpen);
+    let key =
+        crossterm::event::KeyEvent::new(crossterm::event::KeyCode::Char('D'), KeyModifiers::SHIFT);
+    let msg = crate::tui::route_key_event(&model, key).expect("compose takes every key");
+    assert!(matches!(msg, Msg::ComposeInput(_)));
+    let (model, cmds) = update(model, msg);
+    assert!(cmds.is_empty());
+    assert_eq!(download_state(&model), None);
+}
+
+#[test]
+fn detail_download_key_maps_uppercase_d_only() {
+    use crate::tui::events::map_browse_key_event;
+    let press = |c| {
+        map_browse_key_event(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Char(c),
+            KeyModifiers::NONE,
+        ))
+    };
+    assert!(matches!(press('D'), Some(Msg::DownloadAttachments)));
+    assert!(press('d').is_none());
+}
+
+#[test]
+fn detail_download_result_for_the_open_task_sets_done() {
+    let model = download_detail(download_task(), download_comments());
+    let (model, _) = update(model, Msg::DownloadAttachments);
+    let (model, _) = update(model, download_done(2, 2));
+    assert_eq!(
+        download_state(&model),
+        Some(DownloadState::Finished(DownloadOutcome::Done {
+            saved: 2,
+            total: 2,
+            dir: "/h/Downloads/ac-attachments/665-75159".into(),
+        }))
+    );
+}
+
+#[test]
+fn detail_download_failure_result_sets_failed() {
+    let model = download_detail(download_task(), download_comments());
+    let (model, _) = update(
+        model,
+        Msg::AttachmentsDownloaded {
+            instance: "inst".into(),
+            project_id: 665,
+            task_id: 75159,
+            outcome: DownloadOutcome::Failed("no home".into()),
+        },
+    );
+    assert_eq!(
+        download_state(&model),
+        Some(DownloadState::Finished(DownloadOutcome::Failed(
+            "no home".into()
+        )))
+    );
+}
+
+#[test]
+fn detail_download_result_for_another_task_is_ignored() {
+    let model = download_detail(download_task(), download_comments());
+    let (model, _) = update(model, Msg::DownloadAttachments);
+    let other = Msg::AttachmentsDownloaded {
+        instance: "inst".into(),
+        project_id: 665,
+        task_id: 1,
+        outcome: DownloadOutcome::Failed("x".into()),
+    };
+    let (model, _) = update(model, other);
+    assert_eq!(download_state(&model), Some(DownloadState::Running));
+}
+
+#[test]
+fn detail_download_result_after_the_detail_was_popped_is_ignored() {
+    let mut model = download_detail(download_task(), download_comments());
+    model.stack.insert(
+        0,
+        Screen::Projects {
+            groups: vec![],
+            selected: 0,
+            loading: false,
+            revalidating: false,
+        },
+    );
+    let model = update(model, Msg::Back).0;
+    let (model, cmds) = update(model, download_done(1, 1));
+    assert!(cmds.is_empty());
+    assert!(matches!(model.top(), Some(Screen::Projects { .. })));
+}
+
+#[test]
+fn detail_download_outcome_survives_a_reload_of_the_same_task() {
+    let model = download_detail(download_task(), download_comments());
+    let (model, _) = update(model, download_done(2, 2));
+    let load = DetailLoad {
+        task: download_task(),
+        comments: download_comments(),
+        assets: vec![],
+        user_map: HashMap::new(),
+        loaded_at: "2025-01-01T00:00:00Z".into(),
+        current_user_id: None,
+        unauthorized: false,
+    };
+    let (model, _) = update(model, Msg::LoadedDetail(load));
+    assert!(matches!(
+        download_state(&model),
+        Some(DownloadState::Finished(DownloadOutcome::Done { .. }))
+    ));
+}
+
+fn downloaded(path: Option<&str>, error: Option<&str>) -> crate::controller::DownloadedAsset {
+    crate::controller::DownloadedAsset {
+        name: "a".into(),
+        url: "https://x.test/a".into(),
+        path: path.map(String::from),
+        error: error.map(String::from),
+    }
+}
+
+#[test]
+fn detail_download_outcome_destination_is_under_the_home_downloads() {
+    let dir = crate::tui::attachments_destination(Some(std::path::Path::new("/h")), 665, 75159);
+    assert_eq!(
+        dir,
+        Some(std::path::PathBuf::from(
+            "/h/Downloads/ac-attachments/665-75159"
+        ))
+    );
+}
+
+#[test]
+fn detail_download_outcome_without_home_is_a_failure_not_a_fallback_path() {
+    assert_eq!(crate::tui::attachments_destination(None, 665, 75159), None);
+}
+
+#[test]
+fn detail_download_outcome_counts_saved_over_total() {
+    let dir = std::path::PathBuf::from("/d");
+    let count = |results: &[crate::controller::DownloadedAsset]| {
+        crate::tui::download_summary(dir.clone(), results)
+    };
+    let done = |saved, total| DownloadOutcome::Done {
+        saved,
+        total,
+        dir: dir.clone(),
+    };
+    assert_eq!(
+        count(&[
+            downloaded(Some("/d/a"), None),
+            downloaded(Some("/d/b"), None)
+        ]),
+        done(2, 2)
+    );
+    assert_eq!(
+        count(&[
+            downloaded(Some("/d/a"), None),
+            downloaded(None, Some("404"))
+        ]),
+        done(1, 2)
+    );
+    assert_eq!(
+        count(&[downloaded(None, Some("x")), downloaded(None, Some("y"))]),
+        done(0, 2)
+    );
+}
+
+#[tokio::test]
+async fn detail_download_outcome_writes_the_served_bytes_under_the_home_downloads() {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/spec.pdf"))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(vec![7, 8, 9]))
+        .mount(&server)
+        .await;
+    let instance = Instance {
+        name: "inst".into(),
+        base_url: server.uri(),
+        email: "a@example.com".into(),
+        token: "[MASKED by secret-mask: original value hidden for security]".into(),
+        user_id: Some(1),
+    };
+    let client =
+        crate::client::ActiveCollabClient::new(instance, crate::http::Http::new().unwrap());
+    let home = tempfile::TempDir::new().unwrap();
+    let assets = vec![make_asset(
+        "spec.pdf",
+        &format!("{}/spec.pdf", server.uri()),
+    )];
+
+    let outcome =
+        crate::tui::download_task_outcome(&client, Some(home.path()), 665, 75159, &assets).await;
+
+    let dir = home.path().join("Downloads/ac-attachments/665-75159");
+    assert_eq!(
+        outcome,
+        DownloadOutcome::Done {
+            saved: 1,
+            total: 1,
+            dir: "~/Downloads/ac-attachments/665-75159".into()
+        }
+    );
+    assert_eq!(std::fs::read(dir.join("spec.pdf")).unwrap(), vec![7, 8, 9]);
+}
+
+fn download_asset_server_instance(base_url: String) -> Instance {
+    Instance {
+        name: "inst".into(),
+        base_url,
+        email: "a@example.com".into(),
+        token: "[MASKED by secret-mask: original value hidden for security]".into(),
+        user_id: Some(1),
+    }
+}
+
+#[tokio::test]
+async fn detail_download_outcome_without_home_fails_and_requests_nothing() {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/spec.pdf"))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(vec![1]))
+        .mount(&server)
+        .await;
+    let client = crate::client::ActiveCollabClient::new(
+        download_asset_server_instance(server.uri()),
+        crate::http::Http::new().unwrap(),
+    );
+    let assets = vec![make_asset(
+        "spec.pdf",
+        &format!("{}/spec.pdf", server.uri()),
+    )];
+    let stray = std::env::temp_dir().join("ac-attachments/665-75159/spec.pdf");
+    let _ = std::fs::remove_file(&stray);
+
+    let outcome = crate::tui::download_task_outcome(&client, None, 665, 75159, &assets).await;
+
+    assert_eq!(
+        outcome,
+        DownloadOutcome::Failed("Could not find the home directory".into())
+    );
+    assert!(server.received_requests().await.unwrap().is_empty());
+    assert!(!stray.exists());
+}
+
+fn download_result_msg(instance: &str, project_id: i64) -> Msg {
+    Msg::AttachmentsDownloaded {
+        instance: instance.into(),
+        project_id,
+        task_id: 75159,
+        outcome: DownloadOutcome::Failed("x".into()),
+    }
+}
+
+#[test]
+fn detail_download_result_for_another_instance_is_ignored() {
+    let model = download_detail(download_task(), download_comments());
+    let (model, _) = update(model, Msg::DownloadAttachments);
+    let (model, _) = update(model, download_result_msg("other", 665));
+    assert_eq!(download_state(&model), Some(DownloadState::Running));
+}
+
+#[test]
+fn detail_download_result_for_another_project_is_ignored() {
+    let model = download_detail(download_task(), download_comments());
+    let (model, _) = update(model, Msg::DownloadAttachments);
+    let (model, _) = update(model, download_result_msg("inst", 1));
+    assert_eq!(download_state(&model), Some(DownloadState::Running));
+}
+
+#[test]
+fn detail_download_result_for_the_same_instance_project_and_task_is_applied() {
+    let model = download_detail(download_task(), download_comments());
+    let (model, _) = update(model, Msg::DownloadAttachments);
+    let (model, _) = update(model, download_result_msg("inst", 665));
+    assert_eq!(
+        download_state(&model),
+        Some(DownloadState::Finished(DownloadOutcome::Failed("x".into())))
+    );
+}
+
+#[tokio::test]
+async fn detail_download_dispatch_of_an_unknown_instance_reports_a_failed_outcome() {
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut model = download_detail(download_task(), download_comments());
+    let cmd = Cmd::DownloadAttachments {
+        instance: "missing".into(),
+        project_id: 665,
+        task_id: 75159,
+        assets: vec![make_asset("spec.pdf", "https://x.test/spec.pdf")],
+    };
+    crate::tui::dispatch_cmds(
+        vec![cmd],
+        &mut model,
+        &[],
+        &crate::http::Http::new().unwrap(),
+        std::path::Path::new("/nonexistent/ac.db"),
+        tx,
+    );
+    let msg = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+        .await
+        .expect("the download path answers within the wait")
+        .expect("the channel stays open");
+    match msg {
+        Msg::AttachmentsDownloaded {
+            instance,
+            project_id,
+            task_id,
+            outcome: DownloadOutcome::Failed(_),
+        } => assert_eq!(
+            (instance.as_str(), project_id, task_id),
+            ("missing", 665, 75159)
+        ),
+        _ => panic!("expected a failed download result"),
+    }
+}
+
+#[test]
+fn detail_download_key_on_the_tasks_screen_changes_nothing() {
+    let mut model = download_detail(download_task(), download_comments());
+    model.stack = vec![Screen::Tasks {
+        project_name: "P".into(),
+        tasks: vec![],
+        selected: 0,
+        loading: false,
+        revalidating: false,
+        card_heights: vec![],
+        card_offsets: vec![],
+        rendered_width: usize::MAX,
+        due_today: None,
+    }];
+    let before = format!("{:?}", model.stack);
+    let key =
+        crossterm::event::KeyEvent::new(crossterm::event::KeyCode::Char('D'), KeyModifiers::SHIFT);
+    let msg = crate::tui::route_key_event(&model, key).expect("browse maps D");
+    let (model, cmds) = update(model, msg);
+    assert!(cmds.is_empty());
+    assert_eq!(format!("{:?}", model.stack), before);
+}
+
+#[test]
+fn detail_download_key_with_the_log_time_or_estimate_overlay_open_goes_to_the_overlay() {
+    let key =
+        crossterm::event::KeyEvent::new(crossterm::event::KeyCode::Char('D'), KeyModifiers::SHIFT);
+    let log_time = DetailOverlay::LogTime(LogTimeForm {
+        hours: String::new(),
+        summary: String::new(),
+        field: LogTimeField::Hours,
+        status: LogTimeStatus::Editing,
+    });
+    let estimate = DetailOverlay::EstimateEdit(EstimateForm {
+        value: String::new(),
+        status: EditStatus::Editing,
+    });
+    for overlay in [log_time, estimate] {
+        let model = detail_model_with_overlay(overlay);
+        let msg = crate::tui::route_key_event(&model, key).expect("the overlay takes every key");
+        assert!(!matches!(msg, Msg::DownloadAttachments));
+        let (_, cmds) = update(model, msg);
+        assert!(cmds.is_empty());
     }
 }

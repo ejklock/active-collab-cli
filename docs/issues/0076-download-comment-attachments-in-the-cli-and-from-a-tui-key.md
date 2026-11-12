@@ -33,7 +33,7 @@ Excluded: choosing the TUI destination, downloading a single asset from the TUI,
 - The download runs off the update core; the core receives its result as a `Msg`.
 - Comment attachments come from each comment's own `attachments` array through the existing `assets_from_attachments`, after the task's own attachments, deduplicated by URL in first-seen order as today.
 - The pure core builds the asset set with `controller::downloadable_assets(task, comments)` from the open Detail screen and emits one `Cmd` carrying it; the shell resolves the home directory and runs `download_task_attachments` (ADR 0066 safety unchanged). `update` sits at its complexity ceiling, so the new messages join the existing image-viewer family as one asset-effects family instead of a new arm.
-- The outcome lives on the Detail screen and shows in its footer status row, below an auth error and above the copied note: downloading, "Downloaded N of M attachment(s) to <dir>", or the failure. `D` while a download runs does nothing; a task with no downloadable asset shows a "no attachments" note and emits no `Cmd`; no home directory is a failure, never a fallback path.
+- The outcome lives on the Detail screen and shows in its footer status row, below an auth error and above the copied note: downloading, "Downloaded N of M attachment(s) to <dir>", or the failure. `D` while a download runs does nothing; a task with no downloadable asset shows a "no attachments" note and emits no `Cmd`; no home directory is a failure, never a fallback path. The footer row does not wrap, so the shown directory abbreviates the home directory to `~` (`~/Downloads/ac-attachments/<project_id>-<task_id>`), which keeps the whole path visible at 80 columns.
 
 ### Acceptance
 
