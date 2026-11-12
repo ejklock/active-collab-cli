@@ -32,6 +32,7 @@ TUI/UX work (V/R/ARCH slices), tracing to
 * [0076 — Download comment attachments in the CLI and from a TUI key](0076-download-comment-attachments-in-the-cli-and-from-a-tui-key.md) - open
 * [0077 — Move a task between task lists from CLI, TUI and MCP](0077-move-a-task-between-task-lists-from-cli-tui-and-mcp.md) - open
 * [0079 — Paint the ac mine TUI rows before the hours requests finish](0079-paint-the-ac-mine-tui-rows-before-the-hours-requests-finish.md) - open
+* [0081 — Concurrent cache writes fail with database is locked under WAL](0081-concurrent-cache-writes-fail-with-database-is-locked-under-wal.md) - open
 
 ## Closed
 
