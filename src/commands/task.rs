@@ -1,5 +1,5 @@
 use super::{presenter, resolve};
-use crate::client::{ActiveCollabClient, TaskWriteOutcome};
+use crate::client::{ActiveCollabClient, TaskList, TaskListsOutcome, TaskWriteOutcome};
 use crate::controller;
 use crate::http::HTTP_UNAUTHORIZED;
 use crate::i18n::t;
@@ -390,11 +390,259 @@ fn handle_task_outcome(
     }
 }
 
-/// Non-interactive task field edit (issue 0068 slice 2).
+/// The fields a `ac task set` call asked for, as given on the command line.
+struct TaskEditRequest<'a> {
+    status: Option<&'a str>,
+    assignee: Option<&'a str>,
+    estimate: Option<f64>,
+    list: Option<&'a str>,
+}
+
+/// A validated task edit with every field resolved to what the API takes.
+struct ResolvedTaskEdit {
+    project_id: i64,
+    task_id: i64,
+    completed: Option<bool>,
+    assignee_id: Option<i64>,
+    estimate: Option<f64>,
+    task_list: Option<TaskList>,
+}
+
+/// Outcome of matching a `--list` argument against a project's task lists.
+enum TaskListResolution {
+    /// The list the argument names.
+    Found(TaskList),
+    /// No list has that id or name.
+    NotFound,
+    /// More than one list has that name; carries the matching lists.
+    Ambiguous(Vec<TaskList>),
+}
+
+/// Match `arg` against a project's task lists. An all-digits argument is an
+/// id that must be one of the lists; any other argument is a name matched
+/// exactly, ignoring case (Unicode-aware) and surrounding whitespace. Pure so
+/// every outcome is unit-testable without a read.
+fn match_task_list(arg: &str, lists: &[TaskList]) -> TaskListResolution {
+    let arg = arg.trim();
+    if !arg.is_empty() && arg.chars().all(|c| c.is_ascii_digit()) {
+        let found = arg
+            .parse::<i64>()
+            .ok()
+            .and_then(|id| lists.iter().find(|list| list.id == id));
+        return found.map_or(TaskListResolution::NotFound, |list| {
+            TaskListResolution::Found(list.clone())
+        });
+    }
+    let wanted = arg.to_lowercase();
+    let mut matches: Vec<TaskList> = lists
+        .iter()
+        .filter(|list| list.name.trim().to_lowercase() == wanted)
+        .cloned()
+        .collect();
+    match matches.len() {
+        0 => TaskListResolution::NotFound,
+        1 => TaskListResolution::Found(matches.remove(0)),
+        _ => TaskListResolution::Ambiguous(matches),
+    }
+}
+
+fn write_list_candidates(lists: &[TaskList], err: &mut dyn Write) {
+    for list in lists {
+        writeln!(err, "  {} {}", list.id, list.name).ok();
+    }
+}
+
+/// Read the project's task lists, mapping a failed read to its exit code: a
+/// read that fails is never "no list matches". Failures go through the
+/// command's single failure printer, so `--json` gets the error object.
+async fn read_task_lists(
+    client: &ActiveCollabClient,
+    project_id: i64,
+    json: bool,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> std::result::Result<Vec<TaskList>, i32> {
+    let reason = match client.fetch_task_lists(project_id).await {
+        Ok(TaskListsOutcome::Ok(lists)) => return Ok(lists),
+        Ok(TaskListsOutcome::Unauthorized) => presenter::reauth_message(),
+        Ok(TaskListsOutcome::Failed(status)) => {
+            t("HTTP {status} reading the task lists of project {project_id}")
+                .replace("{status}", &status.to_string())
+                .replace("{project_id}", &project_id.to_string())
+        }
+        Err(e) => e.to_string(),
+    };
+    presenter::write_comment_failure(&reason, json, out, err);
+    Err(1)
+}
+
+/// Resolve `--list` against the project's task lists, read once. Exit code 2
+/// for an unknown or ambiguous list (the candidates are printed), 1 for a
+/// failed read.
+async fn resolve_task_list(
+    arg: &str,
+    project_id: i64,
+    client: &ActiveCollabClient,
+    json: bool,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> std::result::Result<TaskList, i32> {
+    let lists = read_task_lists(client, project_id, json, out, err).await?;
+    match match_task_list(arg, &lists) {
+        TaskListResolution::Found(list) => Ok(list),
+        TaskListResolution::NotFound => {
+            writeln!(
+                err,
+                "{}",
+                t(&format!(
+                    "Error: no task list matches '{list}'. Task lists of this project:",
+                    list = arg
+                ))
+            )
+            .ok();
+            write_list_candidates(&lists, err);
+            Err(2)
+        }
+        TaskListResolution::Ambiguous(matching) => {
+            writeln!(
+                err,
+                "{}",
+                t(&format!(
+                    "Error: task list '{list}' matches more than one list; \
+                     use the numeric id instead:",
+                    list = arg
+                ))
+            )
+            .ok();
+            write_list_candidates(&matching, err);
+            Err(2)
+        }
+    }
+}
+
+/// Resolve `--assignee` to a user id, printing the usage error (exit 2) when
+/// it names no user or several.
+async fn resolve_assignee_arg(
+    arg: &str,
+    client: &ActiveCollabClient,
+    err: &mut dyn Write,
+) -> std::result::Result<i64, i32> {
+    match resolve_assignee_id(arg, client).await {
+        AssigneeResolution::Id(id) => Ok(id),
+        AssigneeResolution::NotFound => {
+            writeln!(
+                err,
+                "{}",
+                t(&format!(
+                    "Error: no user matches assignee '{assignee}'.",
+                    assignee = arg
+                ))
+            )
+            .ok();
+            Err(2)
+        }
+        AssigneeResolution::Ambiguous => {
+            writeln!(
+                err,
+                "{}",
+                t(&format!(
+                    "Error: assignee '{assignee}' matches more than one user; \
+                     use the numeric id instead.",
+                    assignee = arg
+                ))
+            )
+            .ok();
+            Err(2)
+        }
+    }
+}
+
+/// Check the request's shape before any lookup: at least one field, a
+/// non-negative estimate and a recognized status. Returns the parsed status.
+fn check_task_edit_request(
+    request: &TaskEditRequest<'_>,
+    err: &mut dyn Write,
+) -> std::result::Result<Option<bool>, i32> {
+    if request.status.is_none()
+        && request.assignee.is_none()
+        && request.estimate.is_none()
+        && request.list.is_none()
+    {
+        writeln!(
+            err,
+            "{}",
+            t("Error: at least one of --status, --assignee, --estimate, or --list is required.")
+        )
+        .ok();
+        return Err(2);
+    }
+    if request.estimate.is_some_and(|value| value < 0.0) {
+        writeln!(
+            err,
+            "{}",
+            t("Error: estimate must be zero or a positive number.")
+        )
+        .ok();
+        return Err(2);
+    }
+    let Some(value) = request.status else {
+        return Ok(None);
+    };
+    match parse_completion(value) {
+        Some(completed) => Ok(Some(completed)),
+        None => {
+            writeln!(
+                err,
+                "{}",
+                t(&format!(
+                    "Error: unrecognized --status value '{status}'. Use complete, \
+                     completed, done, closed, open, reopen, or todo.",
+                    status = value
+                ))
+            )
+            .ok();
+            Err(2)
+        }
+    }
+}
+
+/// Validate the request and resolve every field (task ref, status, assignee,
+/// task list) before any write. Owns every usage error of `ac task set`;
+/// returns the resolved edit or the exit code to stop with.
+async fn resolve_task_edit(
+    task_ref: Option<&str>,
+    branch: Option<&str>,
+    request: &TaskEditRequest<'_>,
+    client: &ActiveCollabClient,
+    json: bool,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> std::result::Result<ResolvedTaskEdit, i32> {
+    let completed = check_task_edit_request(request, err)?;
+    let (project_id, task_id) = resolve::resolve_task_ref_for_comment(task_ref, branch, err)?;
+    let assignee_id = match request.assignee {
+        Some(arg) => Some(resolve_assignee_arg(arg, client, err).await?),
+        None => None,
+    };
+    let task_list = match request.list {
+        Some(arg) => Some(resolve_task_list(arg, project_id, client, json, out, err).await?),
+        None => None,
+    };
+    Ok(ResolvedTaskEdit {
+        project_id,
+        task_id,
+        completed,
+        assignee_id,
+        estimate: request.estimate,
+        task_list,
+    })
+}
+
+/// Non-interactive task field edit.
 ///
-/// Requires at least one of `status`/`assignee`/`estimate`; resolves the
-/// task ref, validates and resolves each given field, applies the writes
-/// (`set_task_completion` then `update_task`, stopping on the first
+/// Requires at least one of `status`/`assignee`/`estimate`/`list`; resolves
+/// the task ref and every given field before any write, applies the writes
+/// (`set_task_completion` then one `update_task`, stopping on the first
 /// failure), and writes the result to the injected writers. Returns an exit
 /// code: 0 success, 2 usage error, non-zero runtime failure.
 #[allow(clippy::too_many_arguments)]
@@ -404,98 +652,40 @@ pub(crate) async fn task_set_core(
     status: Option<&str>,
     assignee: Option<&str>,
     estimate: Option<f64>,
+    list: Option<&str>,
     client: &ActiveCollabClient,
     json: bool,
     out: &mut dyn Write,
     err: &mut dyn Write,
 ) -> i32 {
-    if status.is_none() && assignee.is_none() && estimate.is_none() {
-        writeln!(
-            err,
-            "{}",
-            t("Error: at least one of --status, --assignee, or --estimate is required.")
-        )
-        .ok();
-        return 2;
-    }
-
-    if estimate.is_some_and(|value| value < 0.0) {
-        writeln!(
-            err,
-            "{}",
-            t("Error: estimate must be zero or a positive number.")
-        )
-        .ok();
-        return 2;
-    }
-
-    let (project_id, task_id) = match resolve::resolve_task_ref_for_comment(task_ref, branch, err) {
-        Ok(ids) => ids,
+    let request = TaskEditRequest {
+        status,
+        assignee,
+        estimate,
+        list,
+    };
+    let edit = match resolve_task_edit(task_ref, branch, &request, client, json, out, err).await {
+        Ok(edit) => edit,
         Err(code) => return code,
     };
+    let (project_id, task_id) = (edit.project_id, edit.task_id);
 
-    let completed = match status {
-        Some(value) => match parse_completion(value) {
-            Some(completed) => Some(completed),
-            None => {
-                writeln!(
-                    err,
-                    "{}",
-                    t(&format!(
-                        "Error: unrecognized --status value '{status}'. Use complete, \
-                         completed, done, closed, open, reopen, or todo.",
-                        status = value
-                    ))
-                )
-                .ok();
-                return 2;
-            }
-        },
-        None => None,
-    };
-
-    let assignee_id = match assignee {
-        Some(arg) => match resolve_assignee_id(arg, client).await {
-            AssigneeResolution::Id(id) => Some(id),
-            AssigneeResolution::NotFound => {
-                writeln!(
-                    err,
-                    "{}",
-                    t(&format!(
-                        "Error: no user matches assignee '{assignee}'.",
-                        assignee = arg
-                    ))
-                )
-                .ok();
-                return 2;
-            }
-            AssigneeResolution::Ambiguous => {
-                writeln!(
-                    err,
-                    "{}",
-                    t(&format!(
-                        "Error: assignee '{assignee}' matches more than one user; \
-                         use the numeric id instead.",
-                        assignee = arg
-                    ))
-                )
-                .ok();
-                return 2;
-            }
-        },
-        None => None,
-    };
-
-    if let Some(completed) = completed {
+    if let Some(completed) = edit.completed {
         let outcome = client.set_task_completion(task_id, completed).await;
         if let Err(code) = handle_task_outcome(outcome, project_id, task_id, json, out, err) {
             return code;
         }
     }
 
-    if assignee_id.is_some() || estimate.is_some() {
+    if edit.assignee_id.is_some() || edit.estimate.is_some() || edit.task_list.is_some() {
         let outcome = client
-            .update_task(project_id, task_id, assignee_id, estimate)
+            .update_task(
+                project_id,
+                task_id,
+                edit.assignee_id,
+                edit.estimate,
+                edit.task_list.as_ref().map(|list| list.id),
+            )
             .await;
         if let Err(code) = handle_task_outcome(outcome, project_id, task_id, json, out, err) {
             return code;
@@ -505,9 +695,10 @@ pub(crate) async fn task_set_core(
     presenter::write_task_success(
         task_id,
         project_id,
-        completed,
-        assignee_id,
-        estimate,
+        edit.completed,
+        edit.assignee_id,
+        edit.estimate,
+        edit.task_list.as_ref(),
         json,
         out,
     );

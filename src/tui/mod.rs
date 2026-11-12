@@ -1129,7 +1129,7 @@ fn spawn_task_edit(
 
             if assignee_id.is_some() || estimate.is_some() {
                 let outcome = client
-                    .update_task(project_id, task_id, assignee_id, estimate)
+                    .update_task(project_id, task_id, assignee_id, estimate, None)
                     .await;
                 if let TaskEditStep::Stop(msg) = classify_task_edit_outcome(outcome) {
                     let _ = tx.send(msg);

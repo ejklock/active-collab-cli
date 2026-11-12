@@ -667,7 +667,7 @@ fn time_result_is_valid_json_with_ok_true() {
 
 #[test]
 fn task_result_status_only_carries_only_status() {
-    let line = task_result(75346, 524, Some(true), None, None);
+    let line = task_result(75346, 524, Some(true), None, None, None);
     assert_eq!(
         line, r#"{"ok":true,"task_id":75346,"project_id":524,"status":"completed"}"#,
         "task_result must carry only the applied status field"
@@ -676,7 +676,7 @@ fn task_result_status_only_carries_only_status() {
 
 #[test]
 fn task_result_open_status_renders_open_literal() {
-    let line = task_result(75346, 524, Some(false), None, None);
+    let line = task_result(75346, 524, Some(false), None, None, None);
     assert_eq!(
         line,
         r#"{"ok":true,"task_id":75346,"project_id":524,"status":"open"}"#,
@@ -685,7 +685,7 @@ fn task_result_open_status_renders_open_literal() {
 
 #[test]
 fn task_result_assignee_only_carries_only_assignee_id() {
-    let line = task_result(75346, 524, None, Some(9), None);
+    let line = task_result(75346, 524, None, Some(9), None, None);
     assert_eq!(
         line,
         r#"{"ok":true,"task_id":75346,"project_id":524,"assignee_id":9}"#,
@@ -694,7 +694,7 @@ fn task_result_assignee_only_carries_only_assignee_id() {
 
 #[test]
 fn task_result_estimate_only_carries_only_estimate() {
-    let line = task_result(75346, 524, None, None, Some(8.5));
+    let line = task_result(75346, 524, None, None, Some(8.5), None);
     assert_eq!(
         line,
         r#"{"ok":true,"task_id":75346,"project_id":524,"estimate":8.5}"#,
@@ -703,7 +703,7 @@ fn task_result_estimate_only_carries_only_estimate() {
 
 #[test]
 fn task_result_all_fields_present_when_all_applied() {
-    let line = task_result(75346, 524, Some(true), Some(9), Some(8.0));
+    let line = task_result(75346, 524, Some(true), Some(9), Some(8.0), None);
     let obj: serde_json::Value = serde_json::from_str(&line).expect("must be valid JSON");
     assert_eq!(obj["ok"], true);
     assert_eq!(obj["task_id"], 75346);
@@ -715,13 +715,13 @@ fn task_result_all_fields_present_when_all_applied() {
 
 #[test]
 fn task_result_no_fields_applied_omits_every_optional_key() {
-    let line = task_result(75346, 524, None, None, None);
+    let line = task_result(75346, 524, None, None, None, None);
     assert_eq!(line, r#"{"ok":true,"task_id":75346,"project_id":524}"#,);
 }
 
 #[test]
 fn task_result_is_single_minified_line() {
-    let line = task_result(75346, 524, Some(true), Some(9), Some(8.0));
+    let line = task_result(75346, 524, Some(true), Some(9), Some(8.0), None);
     assert!(
         !line.contains('\n'),
         "task_result must not contain newlines: {line:?}"
@@ -730,6 +730,31 @@ fn task_result_is_single_minified_line() {
         !line.contains("  "),
         "task_result must not contain 2-space indent: {line:?}"
     );
+}
+
+#[test]
+fn task_result_list_move_adds_id_and_name_after_the_other_keys() {
+    let list = TaskList {
+        id: 12,
+        name: "In progress".to_string(),
+    };
+    let line = task_result(75346, 524, Some(true), Some(9), Some(8.0), Some(&list));
+    assert_eq!(
+        line,
+        r#"{"ok":true,"task_id":75346,"project_id":524,"status":"completed","assignee_id":9,"estimate":8,"task_list_id":12,"task_list":"In progress"}"#,
+    );
+}
+
+#[test]
+fn task_result_list_name_with_quote_and_backslash_round_trips() {
+    let list = TaskList {
+        id: 7,
+        name: r#"Q "A" \ Revisão"#.to_string(),
+    };
+    let line = task_result(75346, 524, None, None, None, Some(&list));
+    let obj: serde_json::Value = serde_json::from_str(&line).expect("must be valid JSON");
+    assert_eq!(obj["task_list_id"], 7);
+    assert_eq!(obj["task_list"], list.name.as_str());
 }
 
 #[test]

@@ -1,3 +1,4 @@
+use crate::client::TaskList;
 use crate::controller::extract_assets;
 use crate::render::buckets::{due_bucket, group_by_bucket};
 use crate::render::{fmt_date, fmt_hours, fmt_ts, html_to_text};
@@ -162,13 +163,14 @@ pub fn time_result(time_record_id: i64, task_id: i64, project_id: i64, hours: f6
 ///
 /// Returns a minified single-line JSON string on success, carrying only the
 /// fields the caller actually applied:
-/// `{"ok":true,"task_id":N,"project_id":N[,"status":"completed"|"open"][,"assignee_id":N][,"estimate":H]}`
+/// `{"ok":true,"task_id":N,"project_id":N[,"status":"completed"|"open"][,"assignee_id":N][,"estimate":H][,"task_list_id":N,"task_list":"name"]}`
 pub fn task_result(
     task_id: i64,
     project_id: i64,
     completed: Option<bool>,
     assignee_id: Option<i64>,
     estimate: Option<f64>,
+    task_list: Option<&TaskList>,
 ) -> String {
     let mut line = format!(
         r#"{{"ok":true,"task_id":{task_id},"project_id":{project_id}"#,
@@ -187,6 +189,13 @@ pub fn task_result(
     }
     if let Some(estimate) = estimate {
         line.push_str(&format!(r#","estimate":{estimate}"#, estimate = estimate));
+    }
+    if let Some(list) = task_list {
+        line.push_str(&format!(
+            r#","task_list_id":{id},"task_list":{name}"#,
+            id = list.id,
+            name = Value::from(list.name.as_str()),
+        ));
     }
     line.push('}');
     line

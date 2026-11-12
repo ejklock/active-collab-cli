@@ -593,6 +593,7 @@ async fn dispatch_task_set(args: cli::TaskSetArgs) -> i32 {
         args.status.as_deref(),
         args.assignee.as_deref(),
         args.estimate,
+        args.list.as_deref(),
         &ac_client,
         args.json,
         &mut std::io::stdout(),

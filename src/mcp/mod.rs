@@ -174,7 +174,7 @@ enum WriteOperation {
         job_type: Option<String>,
         instance: Option<String>,
     },
-    /// Edit task fields; give at least one of status, assignee, estimate.
+    /// Edit task fields; give at least one of status, assignee, estimate, list.
     SetTask {
         /// Task URL or PROJECT_ID/TASK_ID.
         #[serde(rename = "ref")]
@@ -185,6 +185,8 @@ enum WriteOperation {
         assignee: Option<String>,
         /// Hours, zero or positive.
         estimate: Option<f64>,
+        /// A numeric task list id or a task list name of the task's project.
+        list: Option<String>,
         instance: Option<String>,
     },
     /// Write your hours report to a file in the server's working directory.
@@ -463,6 +465,7 @@ async fn run_write(operation: WriteOperation, period: Option<OwnedReportPeriod>)
             status,
             assignee,
             estimate,
+            list,
             instance,
         } => {
             let Some(ctx) = open_instance(instance.as_deref(), &mut run) else {
@@ -474,6 +477,7 @@ async fn run_write(operation: WriteOperation, period: Option<OwnedReportPeriod>)
                 status.as_deref(),
                 assignee.as_deref(),
                 estimate,
+                list.as_deref(),
                 &ctx.client,
                 true,
                 &mut run.out,

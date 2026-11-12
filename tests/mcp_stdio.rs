@@ -193,6 +193,14 @@ async fn mount_api(server: &MockServer, user_id: i64, task_title: &str) {
     .await;
     mount_json(
         server,
+        "GET",
+        "/api/v1/projects/10/task-lists",
+        200,
+        json!([{ "id": 5, "name": "In progress" }, { "id": 6, "name": "Revisão" }]),
+    )
+    .await;
+    mount_json(
+        server,
         "PUT",
         "/api/v1/projects/10/tasks/99",
         200,
@@ -344,6 +352,15 @@ async fn lists_three_tools_with_annotations_and_operation_unions() {
         expected.sort();
         assert_eq!(found, expected, "{} operations", tool.name);
 
+        if tool.name == "ac_write" {
+            let set_task = variants
+                .iter()
+                .find(|variant| operation_name(variant) == "set_task")
+                .expect("set_task variant");
+            assert!(set_task["properties"].get("list").is_some(), "{set_task}");
+            assert!(!required_of(set_task).contains("list"));
+        }
+
         for variant in &variants {
             assert!(
                 variant["properties"].get("instance").is_some(),
@@ -447,6 +464,18 @@ async fn each_operation_matches_the_json_command() {
         env.cli(&["task", "set", "10/99", "--estimate", "2.5", "--json"])
     );
 
+    let list_move = ok_text(
+        &client,
+        "ac_write",
+        json!({ "operation": "set_task", "ref": "10/99", "list": "revisão" }),
+    )
+    .await;
+    assert_eq!(
+        list_move,
+        env.cli(&["task", "set", "10/99", "--list", "revisão", "--json"])
+    );
+    assert!(list_move.contains(r#""task_list_id":6,"task_list":"Revisão""#));
+
     let report = ok_text(
         &client,
         "ac_write",
@@ -459,6 +488,45 @@ async fn each_operation_matches_the_json_command() {
         .unwrap_or_else(|| panic!("unexpected report text: {report}"));
     assert!(Path::new(written).starts_with(env.dir.path()), "{written}");
     assert!(Path::new(written).exists(), "{written}");
+    client.cancel().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn set_task_with_an_unknown_list_sends_no_write() {
+    let server = MockServer::start().await;
+    mount_json(
+        &server,
+        "GET",
+        "/api/v1/projects/10/task-lists",
+        200,
+        json!([{ "id": 5, "name": "In progress" }]),
+    )
+    .await;
+    let env = Env::new(&[("alpha", &server, 42)]);
+    let client = env.connect().await;
+
+    let result = call(
+        &client,
+        "ac_write",
+        json!({ "operation": "set_task", "ref": "10/99", "list": "Backlog" }),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(result.is_error, Some(true));
+    assert!(
+        text_of(&result).contains("5 In progress"),
+        "{}",
+        text_of(&result)
+    );
+    let writes = server
+        .received_requests()
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|r| r.method.as_str() == "PUT")
+        .count();
+    assert_eq!(writes, 0);
     client.cancel().await.unwrap();
 }
 
@@ -521,6 +589,11 @@ async fn reports_core_failures_as_tool_errors_and_keeps_serving() {
             "ac_write",
             json!({ "operation": "set_task", "ref": "10/99" }),
             "at least one of",
+        ),
+        (
+            "ac_write",
+            json!({ "operation": "set_task", "ref": "10/99", "list": "Backlog" }),
+            "no task list matches",
         ),
         (
             "ac_write",

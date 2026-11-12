@@ -181,8 +181,10 @@ every other operation needs `instance` only when several instances are configure
 | Tool | Hint | Operations (parameters) |
 |---|---|---|
 | `ac_read` | read-only | `get` (`ref`, `no_comments`, `refresh`) · `current` (optional `branch`, else the git branch of the server's working directory) · `mine` |
-| `ac_write` | destructive | `comment` (`ref`, `body`, `html`) · `log_time` (`ref`, `hours`, `date`, `summary`, `job_type`) · `set_task` (`ref`, `status`, `assignee`, `estimate`) · `time_report` (`period` or `start` + `end`, `format`) |
+| `ac_write` | destructive | `comment` (`ref`, `body`, `html`) · `log_time` (`ref`, `hours`, `date`, `summary`, `job_type`) · `set_task` (`ref`, `status`, `assignee`, `estimate`, `list`) · `time_report` (`period` or `start` + `end`, `format`) |
 | `ac_download_attachments` | writes files, idempotent | `ref`, `attachments_dir` (default: the per-task temp path), `instance`; no `operation` field. Fetches the attachments of the task and of its comments, plus inline images. Returns what `ac get --download-attachments --json` prints. `ac_read` `get` does not download. |
+
+`ac task set <ref> --list <id|name>` (and `set_task` `list`) moves a task to another task list of its project: an all-digits value is a list id, any other value a list name matched exactly, ignoring case. An unknown or ambiguous list exits 2, prints the candidates and sends no write. The `--json` result then carries `task_list_id` and `task_list` (the list name).
 
 `time_report` has no JSON form: it returns the human line and writes the file in
 the server's working directory. On `ac_read` and `ac_download_attachments`, an
