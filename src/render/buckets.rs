@@ -64,26 +64,34 @@ pub trait BucketedTask {
     fn logged_total(&self) -> Option<f64>;
 }
 
-impl BucketedTask for super::MineTableRow {
-    fn due_on(&self) -> Option<&str> {
-        self.due_on.as_deref()
-    }
-    fn project_id(&self) -> i64 {
-        self.project_id
-    }
-    fn task_number(&self) -> i64 {
-        self.task_number
-    }
-    fn estimate(&self) -> Option<f64> {
-        self.estimate
-    }
-    fn logged_week(&self) -> Option<f64> {
-        self.logged_week
-    }
-    fn logged_total(&self) -> Option<f64> {
-        self.logged_total
-    }
+/// Implements `BucketedTask` for a struct that has the six same-named fields.
+macro_rules! impl_bucketed_task {
+    ($row:ty) => {
+        impl $crate::render::buckets::BucketedTask for $row {
+            fn due_on(&self) -> Option<&str> {
+                self.due_on.as_deref()
+            }
+            fn project_id(&self) -> i64 {
+                self.project_id
+            }
+            fn task_number(&self) -> i64 {
+                self.task_number
+            }
+            fn estimate(&self) -> Option<f64> {
+                self.estimate
+            }
+            fn logged_week(&self) -> Option<f64> {
+                self.logged_week
+            }
+            fn logged_total(&self) -> Option<f64> {
+                self.logged_total
+            }
+        }
+    };
 }
+pub(crate) use impl_bucketed_task;
+
+impl_bucketed_task!(super::MineTableRow);
 
 /// One bucket with its tasks and sums.
 #[derive(Debug)]
