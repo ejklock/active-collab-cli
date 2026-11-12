@@ -66,10 +66,18 @@ ac get 665/75159 --json        # → the full task object for that ref
 ```json
 {"count":2,"tasks":[
   {"ref":"665/75159","instance":"work","project_id":665,"task_number":75159,"task_id":75159,"name":"...",
-   "due_on":"2026-11-13","estimate_hours":"4","logged_week_hours":"3.5","logged_total_hours":"7.25"}]}
+   "due_on":"2026-11-13","due_bucket":"this_week","estimate_hours":"4","logged_week_hours":"3.5","logged_total_hours":"7.25"}],
+ "buckets":[{"key":"overdue","count":0,"estimate_hours":null,"logged_week_hours":"0","logged_total_hours":"0"}]}
 ```
 
 - `due_on` is `YYYY-MM-DD` or `null`.
+- `due_bucket` is one of `overdue`, `today`, `this_week` (after today, up to Sunday of the
+  current Monday–Sunday week), `later` or `none` (no due date); `tasks` keep their order.
+- `buckets` always has five entries in the order `overdue`, `today`, `this_week`, `later`,
+  `none`, each `{key,count,estimate_hours,logged_week_hours,logged_total_hours}`.
+  `estimate_hours` is `null` when no task in the bucket has an estimate;
+  `logged_week_hours` and `logged_total_hours` are `null` when any task's value in the
+  bucket is unknown, and `"0"` for an empty bucket.
 - `estimate_hours`, `logged_week_hours` (your hours on the task this Monday–Sunday,
   rounded to 2 decimals) and `logged_total_hours` (the task's total logged hours) are
   strings formatted like `get`'s hours; each is `null` when unknown or not estimated.

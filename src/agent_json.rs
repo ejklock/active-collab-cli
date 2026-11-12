@@ -1,4 +1,5 @@
 use crate::controller::extract_assets;
+use crate::render::buckets::{due_bucket, group_by_bucket};
 use crate::render::{fmt_date, fmt_hours, fmt_ts, html_to_text};
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -226,15 +227,34 @@ fn browse_task_object(group_project_id: i64, row: &crate::tui::model::TaskRow) -
 /// Pure: no network, no I/O. Accepts the same `MineTableRow` slice the human
 /// renderer receives so JSON and table stay in sync.
 pub fn mine_object(rows: &[crate::render::MineTableRow]) -> Value {
+    mine_object_on(rows, chrono::Local::now().date_naive())
+}
+
+/// `mine_object` with an explicit "today" for the due-date buckets.
+pub fn mine_object_on(rows: &[crate::render::MineTableRow], today: chrono::NaiveDate) -> Value {
+    let buckets: Vec<Value> = group_by_bucket(rows, today)
+        .iter()
+        .map(|group| {
+            json!({
+                "key": group.bucket.key(),
+                "count": group.items.len(),
+                "estimate_hours": hours_or_null(group.sums.estimate),
+                "logged_week_hours": hours_or_null(group.sums.logged_week),
+                "logged_total_hours": hours_or_null(group.sums.logged_total),
+            })
+        })
+        .collect();
     json!({
         "count": rows.len(),
-        "tasks": rows.iter().map(mine_task_object).collect::<Vec<_>>(),
+        "tasks": rows.iter().map(|row| mine_task_object(row, today)).collect::<Vec<_>>(),
+        "buckets": buckets,
     })
 }
 
-fn mine_task_object(row: &crate::render::MineTableRow) -> Value {
+fn mine_task_object(row: &crate::render::MineTableRow, today: chrono::NaiveDate) -> Value {
     let ref_ = format!("{}/{}", row.project_id, row.task_id);
     json!({
+        "due_bucket": due_bucket(row.due_on.as_deref(), today).key(),
         "ref": ref_,
         "instance": row.instance,
         "project_id": row.project_id,

@@ -28,7 +28,7 @@ TUI/UX work (V/R/ARCH slices), tracing to
 * [0071 — Comment writes can send formatted bodies — add a raw HTML option and fix the stale skill text](0071-comment-writes-can-send-formatted-bodies-add-a-raw-html-option-and-fix-the-stale-skill-text.md) - open
 * [0073 — ac mcp: serve the CLI as MCP tools over stdio for parallel agent sessions](0073-ac-mcp-serve-the-cli-as-mcp-tools-over-stdio-for-parallel-agent-sessions.md) - open
 * [0074 — Show estimate and logged hours (this week and total) per task in ac mine](0074-show-estimate-and-logged-hours-this-week-and-total-per-task-in-ac-mine.md) - open
-* [0075 — Group ac mine by due date: overdue, today, this week, later, no due date](0075-group-ac-mine-by-due-date-overdue-today-this-week-later-no-due-date.md) - open
+* [0075 — Group ac mine by due date: overdue, today, this week, later, no due date](0075-group-ac-mine-by-due-date-overdue-today-this-week-later-no-due-date.md) - in-progress
 * [0076 — Download comment attachments in the CLI and from a TUI key](0076-download-comment-attachments-in-the-cli-and-from-a-tui-key.md) - open
 * [0077 — Move a task between task lists from CLI, TUI and MCP](0077-move-a-task-between-task-lists-from-cli-tui-and-mcp.md) - open
 

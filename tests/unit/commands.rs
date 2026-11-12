@@ -5969,6 +5969,7 @@ async fn mine_json_keeps_existing_keys_and_adds_the_four_hour_keys() {
     assert_eq!(
         keys,
         [
+            "due_bucket",
             "due_on",
             "estimate_hours",
             "instance",

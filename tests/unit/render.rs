@@ -700,7 +700,7 @@ fn render_mine_table_row_left_aligns_integers() {
         logged_total: None,
     }];
     let s = render_mine_table(&rows);
-    let data_line = s.lines().nth(2).unwrap();
+    let data_line = s.lines().nth(3).unwrap();
     // project_id 42 is left-aligned in a 10-wide column: "42        "
     assert!(
         data_line.contains("42        "),
@@ -743,11 +743,15 @@ fn render_mine_table_multi_row_body_order_preserved() {
     ];
     let s = render_mine_table(&rows);
     let lines: Vec<&str> = s.lines().collect();
-    assert_eq!(lines.len(), 4, "header + separator + 2 rows = 4 lines");
-    assert!(lines[2].contains("alpha"), "first row: {}", lines[2]);
-    assert!(lines[2].contains("First"), "first row name: {}", lines[2]);
-    assert!(lines[3].contains("beta"), "second row: {}", lines[3]);
-    assert!(lines[3].contains("Second"), "second row name: {}", lines[3]);
+    assert_eq!(
+        lines.len(),
+        5,
+        "header + separator + bucket header + 2 rows = 5 lines"
+    );
+    assert!(lines[3].contains("alpha"), "first row: {}", lines[3]);
+    assert!(lines[3].contains("First"), "first row name: {}", lines[3]);
+    assert!(lines[4].contains("beta"), "second row: {}", lines[4]);
+    assert!(lines[4].contains("Second"), "second row name: {}", lines[4]);
 }
 
 #[test]
@@ -3185,7 +3189,7 @@ fn mine_hours_row(
 }
 
 fn mine_hours_cells(table: &str) -> Vec<String> {
-    let line = table.lines().nth(2).unwrap();
+    let line = table.lines().nth(3).unwrap();
     let before_name = line.split("Hours task").next().unwrap();
     before_name
         .split_whitespace()
@@ -3251,4 +3255,109 @@ fn mine_hours_display_table_header_is_translated_in_pt_br() {
         header.contains("EST") && header.contains("SEMANA") && header.contains("TOTAL"),
         "header: {header}"
     );
+}
+
+fn bucket_row(
+    name: &str,
+    due_on: Option<&str>,
+    estimate: Option<f64>,
+    logged_week: Option<f64>,
+    logged_total: Option<f64>,
+) -> MineTableRow {
+    MineTableRow {
+        instance: "inst".to_owned(),
+        project_id: 5,
+        task_number: 7,
+        task_id: 100,
+        name: name.to_owned(),
+        due_on: due_on.map(str::to_owned),
+        project_name: None,
+        estimate,
+        logged_week,
+        logged_total,
+    }
+}
+
+fn bucket_today() -> chrono::NaiveDate {
+    chrono::NaiveDate::from_ymd_opt(2026, 11, 11).unwrap()
+}
+
+#[test]
+fn mine_table_buckets_show_only_the_non_empty_buckets_in_order() {
+    let _guard = MINE_HOURS_LANG.lock().unwrap();
+    crate::i18n::set_language("en");
+    let rows = [
+        bucket_row("No date", None, None, Some(1.0), Some(2.0)),
+        bucket_row("Late", Some("2026-11-01"), Some(2.0), Some(1.0), Some(3.0)),
+    ];
+    let table = render_mine_table_on(&rows, bucket_today());
+    let lines: Vec<&str> = table.lines().collect();
+    assert_eq!(lines.len(), 6, "table: {table}");
+    assert!(lines[0].contains("EST") && lines[0].contains("NAME"));
+    assert!(lines[1].chars().all(|c| c == '-'));
+    assert_eq!(lines[2], "Overdue (1) · EST 2 · WEEK 1 · TOTAL 3");
+    assert!(lines[3].ends_with("Late"));
+    assert_eq!(lines[4], "No due date (1) · EST – · WEEK 1 · TOTAL 2");
+    assert!(lines[5].ends_with("No date"));
+    for absent in ["Today", "This week", "Later"] {
+        assert!(!table.contains(absent), "unexpected {absent}: {table}");
+    }
+}
+
+#[test]
+fn mine_table_buckets_show_a_dash_for_an_unknown_week_sum() {
+    let _guard = MINE_HOURS_LANG.lock().unwrap();
+    crate::i18n::set_language("en");
+    let rows = [
+        bucket_row("A", Some("2026-11-11"), Some(1.5), None, Some(1.0)),
+        bucket_row("B", Some("2026-11-11"), None, Some(1.0), Some(1.0)),
+    ];
+    let table = render_mine_table_on(&rows, bucket_today());
+    assert_eq!(
+        table.lines().nth(2).unwrap(),
+        "Today (2) · EST 1.5 · WEEK – · TOTAL 2"
+    );
+}
+
+#[test]
+fn mine_table_buckets_without_rows_print_only_header_and_separator() {
+    let _guard = MINE_HOURS_LANG.lock().unwrap();
+    crate::i18n::set_language("en");
+    let table = render_mine_table_on(&[], bucket_today());
+    assert_eq!(table.lines().count(), 2, "table: {table}");
+}
+
+#[test]
+fn mine_table_buckets_use_the_pt_br_labels() {
+    let _guard = MINE_HOURS_LANG.lock().unwrap();
+    crate::i18n::set_language("pt_BR");
+    let rows = [
+        bucket_row("a", Some("2026-11-01"), None, None, None),
+        bucket_row("b", Some("2026-11-11"), None, None, None),
+        bucket_row("c", Some("2026-11-12"), None, None, None),
+        bucket_row("d", Some("2026-11-30"), None, None, None),
+        bucket_row("e", None, None, None, None),
+    ];
+    let table = render_mine_table_on(&rows, bucket_today());
+    crate::i18n::set_language("en");
+    let headers: Vec<&str> = table.lines().filter(|l| l.contains(" · ")).collect();
+    let labels: Vec<&str> = headers
+        .iter()
+        .map(|l| l.split(" (").next().unwrap())
+        .collect();
+    assert_eq!(
+        labels,
+        ["Atrasadas", "Hoje", "Esta semana", "Depois", "Sem prazo"]
+    );
+    assert!(headers[0].contains("SEMANA"), "header: {}", headers[0]);
+}
+
+#[test]
+fn mine_table_buckets_strip_control_characters() {
+    let _guard = MINE_HOURS_LANG.lock().unwrap();
+    crate::i18n::set_language("en");
+    let rows = [bucket_row("evil\u{001b}[2J", None, None, None, None)];
+    let table = render_mine_table_on(&rows, bucket_today());
+    assert!(!table.contains('\u{001b}'), "table: {table:?}");
+    assert!(table.contains("No due date (1)"));
 }

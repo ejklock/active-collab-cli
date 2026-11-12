@@ -73,6 +73,7 @@ flowchart TD
     cli_render --> richtext["richtext\nHTML → structured rich text\n(TUI detail: lists · headings · emphasis · links)"]
     detail_render --> richtext
     render_root["render/mod\nCLI stdout write seams"] --> sanitize["sanitize\nstrip_control_chars\n(untrusted text → terminal)"]
+    render_root --> buckets["render/buckets\npure due-date bucket core\n(due_bucket · bucket_sums · group_by_bucket)"]
     richtext --> sanitize
     cmd_task --> sanitize
     commands --> i18n["i18n (en · pt-BR)"]
