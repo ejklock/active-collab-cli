@@ -80,7 +80,7 @@ fn named_instance(server: &MockServer, name: &str) -> Instance {
         name: name.to_owned(),
         base_url: server.uri(),
         email: "x@x.com".to_owned(),
-        token: "[MASKED by secret-mask: original value hidden for security]".to_owned(),
+        token: "fixture-token".to_owned(),
         user_id: Some(42),
     }
 }
