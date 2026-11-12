@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 enum ViolationKind {
     Banner,
     CommentedOutCode,
+    RecordCitation,
 }
 
 impl std::fmt::Display for ViolationKind {
@@ -11,6 +12,7 @@ impl std::fmt::Display for ViolationKind {
         match self {
             ViolationKind::Banner => write!(f, "Banner"),
             ViolationKind::CommentedOutCode => write!(f, "CommentedOutCode"),
+            ViolationKind::RecordCitation => write!(f, "RecordCitation"),
         }
     }
 }
@@ -104,9 +106,22 @@ fn is_commented_out_code(body: &str) -> bool {
     false
 }
 
+fn cites_record(comment: &str) -> bool {
+    static CITATION: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    CITATION
+        .get_or_init(|| {
+            regex::Regex::new(r"\b(?:[Aa]DR|[Bb]DR|[Pp]RD|[Ii]ssue)s?[ #-]?[0-9]")
+                .expect("citation pattern is valid")
+        })
+        .is_match(comment)
+}
+
 fn classify_comment(line: &str) -> Option<ViolationKind> {
     let comment_start = find_line_comment(line)?;
     let comment_slice = &line[comment_start..];
+    if cites_record(comment_slice) {
+        return Some(ViolationKind::RecordCitation);
+    }
     if comment_slice.starts_with("///") || comment_slice.starts_with("//!") {
         return None;
     }
@@ -197,6 +212,69 @@ fn classify_doc_comment_triple_slash_returns_none() {
 #[test]
 fn classify_doc_comment_bang_returns_none() {
     assert_eq!(classify_comment("//! Module doc"), None);
+}
+
+#[test]
+fn classify_line_comment_citing_adr_returns_record_citation() {
+    assert_eq!(
+        classify_comment(concat!("// see ADR", " 0066")),
+        Some(ViolationKind::RecordCitation)
+    );
+}
+
+#[test]
+fn classify_doc_comment_citing_adr_and_issue_returns_record_citation() {
+    assert_eq!(
+        classify_comment(concat!("/// (ADR", " 0068, issue", " 0062 C1).")),
+        Some(ViolationKind::RecordCitation)
+    );
+}
+
+#[test]
+fn classify_module_doc_citing_issue_returns_record_citation() {
+    assert_eq!(
+        classify_comment(concat!("//! ... (issue", " 0062 C1).")),
+        Some(ViolationKind::RecordCitation)
+    );
+}
+
+#[test]
+fn classify_plural_adrs_citation_returns_record_citation() {
+    assert_eq!(
+        classify_comment(concat!("// ADRs", " 0033/0054")),
+        Some(ViolationKind::RecordCitation)
+    );
+}
+
+#[test]
+fn classify_control_character_range_names_return_none() {
+    assert_eq!(
+        classify_comment("/// C0 (U+0000-U+001F), DEL (U+007F)"),
+        None
+    );
+}
+
+#[test]
+fn classify_word_ending_in_issue_before_a_digit_returns_none() {
+    assert_eq!(classify_comment("// a tissue 3 mm thick"), None);
+}
+
+#[test]
+fn classify_url_with_issues_path_returns_none() {
+    assert_eq!(classify_comment("// https://example.com/issues/12"), None);
+}
+
+#[test]
+fn classify_citation_inside_string_literal_without_comment_returns_none() {
+    assert_eq!(
+        classify_comment(concat!(r#"let s = "ADR"#, r#" 0066";"#)),
+        None
+    );
+}
+
+#[test]
+fn classify_issue_without_digit_returns_none() {
+    assert_eq!(classify_comment("// the issue is a race"), None);
 }
 
 #[test]

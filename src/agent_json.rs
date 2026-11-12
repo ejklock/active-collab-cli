@@ -5,7 +5,7 @@ use crate::render::{fmt_date, fmt_hours, fmt_ts, html_to_text};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 
-/// Build the ADR 0011 get/current task object for agent/LLM consumption.
+/// Build the get/current task object for agent/LLM consumption.
 ///
 /// Pure: no network, no I/O.  All fields are derived from the same helpers
 /// used by the human renderer so JSON and text stay in sync.
@@ -123,7 +123,7 @@ fn shape_comment(c: &Value) -> Value {
     })
 }
 
-/// Build the ADR 0040 write-result for a newly posted comment.
+/// Build the write-result for a newly posted comment.
 ///
 /// Returns a minified single-line JSON string on success:
 /// `{"ok":true,"comment_id":N,"task_id":N,"project_id":N}`
@@ -136,7 +136,7 @@ pub fn comment_result(comment_id: i64, task_id: i64, project_id: i64) -> String 
     )
 }
 
-/// Build the ADR 0040 error object for a failed comment write.
+/// Build the error object for a failed comment write.
 ///
 /// Returns a minified single-line JSON string:
 /// `{"ok":false,"error":"<reason>"}`
@@ -159,7 +159,7 @@ pub fn time_result(time_record_id: i64, task_id: i64, project_id: i64, hours: f6
     )
 }
 
-/// Build the write-result for an applied task field edit (issue 0068 slice 2).
+/// Build the write-result for an applied task field edit.
 ///
 /// Returns a minified single-line JSON string on success, carrying only the
 /// fields the caller actually applied:
@@ -201,7 +201,7 @@ pub fn task_result(
     line
 }
 
-/// Build the ADR 0011 browse schema for agent/LLM consumption.
+/// Build the browse schema for agent/LLM consumption.
 ///
 /// Pure: no network, no I/O. Accepts the same `ProjectGroup` slice the TUI
 /// browser receives so JSON and TUI stay in sync.
@@ -231,7 +231,7 @@ fn browse_task_object(group_project_id: i64, row: &crate::tui::model::TaskRow) -
     })
 }
 
-/// Build the ADR 0011 mine schema for agent/LLM consumption.
+/// Build the mine schema for agent/LLM consumption.
 ///
 /// Pure: no network, no I/O. Accepts the same `MineTableRow` slice the human
 /// renderer receives so JSON and table stay in sync.

@@ -21,7 +21,7 @@ use ratatui::{
 
 /// Margin (cells) between the near-full image-viewer box and the detail
 /// content area it sits inside — distinguishes it from `render_modal`'s
-/// centered ~70% box (ADR 0065).
+/// centered ~70% box.
 const IMAGE_VIEWER_MARGIN: u16 = 1;
 
 const MIN_WIDTH: u16 = 24;
@@ -313,7 +313,7 @@ fn log_time_field_line(label: &str, value: &str, is_focused: bool) -> String {
 
 /// Render the log-time modal chrome via `render_modal`: the Hours and Summary
 /// fields as labeled rows, plus the hint/status line. Both fields are plain-text
-/// buffers (ADR 0064 does not apply — single-line, no caret/undo needs), so they
+/// buffers (single-line, no caret/undo needs), so they
 /// render as static rows rather than a `TextArea` widget.
 fn render_log_time_modal(frame: &mut Frame, frame_area: ratatui::layout::Rect, form: &LogTimeForm) {
     use crate::tui::widgets::modal::render_modal;
@@ -436,7 +436,7 @@ fn estimate_modal_hint(form: &EstimateForm) -> String {
 
 /// Render the estimate-edit modal chrome via `render_modal`: the estimate field as
 /// a single labeled row, plus the hint/status line. Single line, plain-text buffer
-/// (ADR 0064 does not apply — no caret/undo needs), so it renders as a static row
+/// (no caret/undo needs), so it renders as a static row
 /// rather than a `TextArea` widget.
 fn render_estimate_modal(
     frame: &mut Frame,
@@ -613,7 +613,7 @@ fn render_picker_modal(
 
 /// Render the delete-confirm modal overlay and register the two button click targets.
 ///
-/// Uses the shared `render_modal` primitive (ADR 0039) to dim the backdrop and draw a
+/// Uses the shared `render_modal` primitive to dim the backdrop and draw a
 /// centered bordered box. The button row in the hint line shows `[Sim]  [Não]`;
 /// their absolute cell Rects are derived from the body Rect `render_modal` returns so
 /// the hit-test geometry is single-sourced (never recomputed independently).
@@ -676,7 +676,7 @@ fn register_confirm_button_targets(
 /// Unlike `render_modal`'s centered ~70% box, this sizes the box to the
 /// near-full detail content area (`content_area` minus `IMAGE_VIEWER_MARGIN`)
 /// so a real image fills as much of the screen as possible once ratatui-image
-/// lands (slice 0059). `frame_area` (the whole frame) is what gets dimmed,
+/// lands. `frame_area` (the whole frame) is what gets dimmed,
 /// matching the other Detail overlays.
 fn render_image_viewer(
     frame: &mut Frame,
@@ -742,7 +742,7 @@ fn draw_image_viewer_box(
 ///
 /// Loading shows a status line + the filename; Error shows the failure message;
 /// Ready is a placeholder too in this slice — the real `ratatui-image` render
-/// replaces it in slice 0059.
+/// replaces it.
 fn draw_image_viewer_body(
     frame: &mut Frame,
     inner: Rect,

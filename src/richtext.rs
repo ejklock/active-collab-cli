@@ -18,20 +18,18 @@ pub enum RichStyle {
     /// Layout-emitted edit affordance: soft cyan + underlined.
     ///
     /// Applied structurally to the `[editar]` token span on own-comment card
-    /// headers — same coordinates as the hit-test span (single source of truth,
-    /// ADR 0032 / ADR 0041).
+    /// headers — same coordinates as the hit-test span (single source of truth).
     EditAffordance,
     /// Layout-emitted delete affordance: destructive red + underlined.
     ///
     /// Applied structurally to the `[excluir]` token span on own-comment card
-    /// headers — same coordinates as the hit-test span (single source of truth,
-    /// ADR 0032 / ADR 0041).
+    /// headers — same coordinates as the hit-test span (single source of truth).
     DeleteAffordance,
     /// Layout-emitted panel title: accent + bold.
     ///
     /// Applied structurally over a panel's top-border label span (the Details,
     /// Description and Comments section panels), never produced by the HTML
-    /// parser (ADR 0063).
+    /// parser.
     PanelTitle,
 }
 
@@ -158,8 +156,7 @@ struct TableRow {
 ///
 /// Task and comment bodies come from the ActiveCollab server unsanitized, so an
 /// entity like `&#27;` must not survive decoding as a raw ESC byte reaching the
-/// terminal backend, independent of whatever the render layer also does with it
-/// (ADR 0068, issue 0062 C1).
+/// terminal backend, independent of whatever the render layer also does with it.
 fn decode_text(raw: &str) -> String {
     crate::sanitize::strip_control_chars(&html_escape::decode_html_entities(raw))
 }

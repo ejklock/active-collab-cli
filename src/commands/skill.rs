@@ -36,7 +36,7 @@ fn write_body(skill: &SkillEntry, out: &mut impl Write) -> i32 {
     0
 }
 
-/// Print an embedded agent skill (or the registry listing) per BDR 0031.
+/// Print an embedded agent skill (or the registry listing).
 ///
 /// `name == Some("list")` lists the registry; a matching name prints that skill's
 /// body; an unmatched name errors to `err` and exits 2; `None` prints the single

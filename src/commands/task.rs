@@ -157,7 +157,7 @@ pub(crate) async fn do_get_task(
     0
 }
 
-/// Run the ADR 0066 attachment download when `flags.download_attachments` is
+/// Run the attachment download when `flags.download_attachments` is
 /// set: resolve the destination directory (`flags.attachments_dir` override,
 /// else `controller::default_attachments_dir`), then extract and fetch the
 /// downloadable asset set. Returns `None` (no-op, no side effect) otherwise.
@@ -182,7 +182,7 @@ async fn maybe_download_attachments(
     Some((dest_dir, downloaded))
 }
 
-/// Splice the ADR 0066 `downloaded_attachments` array into an already-built
+/// Splice the `downloaded_attachments` array into an already-built
 /// `task_object` `Value`. `task_object` itself stays pure and untouched.
 fn splice_downloaded_attachments(obj: &mut Value, downloaded: &[controller::DownloadedAsset]) {
     let Value::Object(map) = obj else {
@@ -208,7 +208,7 @@ fn splice_downloaded_attachments(obj: &mut Value, downloaded: &[controller::Down
 
 /// One human-readable summary line for a completed attachment download:
 /// success/total counts, the destination directory, and any per-asset
-/// failure reasons (ADR 0066).
+/// failure reasons.
 fn download_summary_line(dest_dir: &Path, downloaded: &[controller::DownloadedAsset]) -> String {
     let total = downloaded.len();
     let ok = downloaded.iter().filter(|d| d.error.is_none()).count();

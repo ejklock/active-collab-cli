@@ -128,7 +128,7 @@ pub(crate) fn setup_language(
 
 const THEMES: [&str; 3] = ["angie", "slate", "nord"];
 
-/// Parity: setup_language, adapted for the theme setting (ADR 0062).
+/// Parity: setup_language, adapted for the theme setting.
 pub(crate) fn setup_theme(
     settings: &SettingsRepository<'_>,
     code: Option<&str>,
