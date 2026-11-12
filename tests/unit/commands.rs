@@ -1869,7 +1869,7 @@ async fn collect_mine_rows_aggregates_across_two_instances() {
     };
 
     let http = make_http();
-    let rows = collect_mine_rows(&[inst_a, inst_b], &http).await;
+    let rows = mine_rows_of(&collect_mine_task_lists(&[inst_a, inst_b], &http).await);
 
     assert_eq!(rows.len(), 2, "should aggregate both instances");
     assert_eq!(rows[0].instance, "alpha");
@@ -1882,7 +1882,7 @@ async fn collect_mine_rows_aggregates_across_two_instances() {
     assert_eq!(rows[1].name, "Beta task");
 }
 
-// S5.3 tests: concurrent collect_mine_rows
+// S5.3 tests: concurrent mine task lists
 
 #[tokio::test]
 async fn collect_mine_rows_concurrent_aggregates_all_instances() {
@@ -1920,7 +1920,7 @@ async fn collect_mine_rows_concurrent_aggregates_all_instances() {
         user_id: Some(2),
     };
 
-    let rows = collect_mine_rows(&[inst_a, inst_b], &make_http()).await;
+    let rows = mine_rows_of(&collect_mine_task_lists(&[inst_a, inst_b], &make_http()).await);
 
     assert_eq!(rows.len(), 2, "must aggregate from both instances");
     let names: Vec<&str> = rows.iter().map(|r| r.name.as_str()).collect();
@@ -1970,7 +1970,8 @@ async fn collect_mine_rows_preserves_instance_order() {
         user_id: Some(2),
     };
 
-    let rows = collect_mine_rows(&[inst_first, inst_second], &make_http()).await;
+    let rows =
+        mine_rows_of(&collect_mine_task_lists(&[inst_first, inst_second], &make_http()).await);
 
     assert_eq!(rows.len(), 2);
     assert_eq!(
@@ -1980,6 +1981,34 @@ async fn collect_mine_rows_preserves_instance_order() {
     assert_eq!(rows[0].name, "First Instance Task");
     assert_eq!(rows[1].instance, "second", "instance[1] rows must follow");
     assert_eq!(rows[1].name, "Second Instance Task");
+}
+
+#[tokio::test]
+async fn collect_mine_task_lists_puts_the_first_instance_first() {
+    let first = MockServer::start().await;
+    let second = MockServer::start().await;
+    for (server, id, name) in [(&first, 1, "One"), (&second, 2, "Two")] {
+        Mock::given(method("GET"))
+            .and(path("/api/v1/users/42/tasks"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(tasks_response(
+                serde_json::json!([{ "id": id, "task_number": id, "name": name, "project_id": 1 }]),
+            )))
+            .mount(server)
+            .await;
+    }
+    let targets = [
+        mine_hours_instance(&first),
+        Instance {
+            name: "second".to_owned(),
+            ..mine_hours_instance(&second)
+        },
+    ];
+
+    let lists = collect_mine_task_lists(&targets, &make_http()).await;
+
+    let order: Vec<&str> = lists.iter().map(|(inst, _)| inst.name.as_str()).collect();
+    assert_eq!(order, vec!["hours", "second"]);
+    assert_eq!(mine_rows_of(&lists)[0].name, "One");
 }
 
 #[tokio::test]
@@ -2016,7 +2045,7 @@ async fn collect_mine_rows_failing_instance_yields_no_rows_for_it() {
         user_id: Some(2),
     };
 
-    let rows = collect_mine_rows(&[inst_ok, inst_err], &make_http()).await;
+    let rows = mine_rows_of(&collect_mine_task_lists(&[inst_ok, inst_err], &make_http()).await);
 
     assert_eq!(rows.len(), 1, "failing instance must yield no rows");
     assert_eq!(rows[0].name, "Healthy Task");
@@ -2042,7 +2071,7 @@ async fn collect_mine_rows_falls_back_task_number_to_id_when_absent() {
         token: "tok".to_owned(),
         user_id: Some(42),
     };
-    let rows = collect_mine_rows(&[inst], &make_http()).await;
+    let rows = mine_rows_of(&collect_mine_task_lists(&[inst], &make_http()).await);
     assert_eq!(rows.len(), 2);
     assert_eq!(
         rows[0].task_number, 55,
@@ -2823,11 +2852,11 @@ async fn collect_mine_rows_401_returns_empty_via_unwrap_or_default_seam() {
         token: "bad-token".to_owned(),
         user_id: Some(42),
     };
-    let rows = collect_mine_rows(&[inst], &make_http()).await;
+    let rows = mine_rows_of(&collect_mine_task_lists(&[inst], &make_http()).await);
 
     assert!(
         rows.is_empty(),
-        "collect_mine_rows on 401 must yield empty rows (TUI non-breaking seam)"
+        "a 401 task list must yield empty rows (TUI non-breaking seam)"
     );
 }
 

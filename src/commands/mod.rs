@@ -17,7 +17,9 @@ pub(crate) use hours_report::{
     export_hours_report, resolve_period, time_report_core, validate_range, ExportError,
     ExportedReport, OwnedReportPeriod, PeriodPreset, ReportFormat, ReportPeriod, ReportRequest,
 };
-pub(crate) use mine::{collect_mine_rows, mine_core, MineOutcome};
+pub(crate) use mine::{
+    collect_mine_hours, collect_mine_task_lists, mine_core, mine_rows_of, MineHours, MineOutcome,
+};
 pub(crate) use resolve::*;
 pub(crate) use setup::{
     setup_add, setup_language, setup_list, setup_remove, setup_test, setup_theme, SetupAddFields,

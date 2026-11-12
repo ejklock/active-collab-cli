@@ -230,7 +230,10 @@ fn handle_channel_msg_mine(
     db_path: &Path,
     tx: &mpsc::UnboundedSender<Msg>,
 ) -> Model {
-    let is_loaded_mine = matches!(msg, Msg::LoadedMineTasks { .. });
+    let is_loaded_mine = matches!(
+        msg,
+        Msg::LoadedMineTasks { .. } | Msg::LoadedMineHours { .. }
+    );
     let new_model = handle_channel_msg(msg, model, targets, http, db_path, tx);
     if is_loaded_mine {
         write_mine_snapshot(&new_model, targets, db_path);
@@ -398,8 +401,8 @@ fn read_browse_snapshot(
 /// On entry, reads the mine snapshot from TaskListCache and uses it as a seed
 /// so the task list paints immediately while the revalidation fetch runs in
 /// the background (SWR, scope="mine").  A cold cache falls back to the loading
-/// placeholder.  The caller must NOT block on a synchronous collect_mine_rows
-/// before this call — revalidation runs inside the TUI loop via Cmd::LoadMineTasks.
+/// placeholder.  The caller must NOT load the rows before this call —
+/// revalidation runs inside the TUI loop via Cmd::LoadMineTasks.
 pub async fn run_mine(targets: Vec<Instance>, http: Http, db_path: PathBuf) -> i32 {
     let seed = read_mine_snapshot(&targets, &db_path);
     let header = build_header(&targets, &db_path);
@@ -429,13 +432,29 @@ fn read_mine_snapshot(
     serde_json::from_str(&list_json).ok()
 }
 
+/// Loads the mine tasks: sends the rows as soon as the task lists arrive, then
+/// the hours once their requests finish.
+async fn load_mine_tasks(
+    targets: Vec<Instance>,
+    http: Http,
+    db_path: PathBuf,
+    tx: mpsc::UnboundedSender<Msg>,
+) {
+    let lists = crate::commands::collect_mine_task_lists(&targets, &http).await;
+    let rows = controller::attach_project_names(&db_path, crate::commands::mine_rows_of(&lists));
+    let loaded_at = crate::store::now_brt_iso();
+    let _ = tx.send(Msg::LoadedMineTasks { rows, loaded_at });
+    let hours = crate::commands::collect_mine_hours(&lists, &http).await;
+    let _ = tx.send(Msg::LoadedMineHours { hours });
+}
+
 /// Serialize the current mine tasks and write them to the task_list_cache.
 /// Silently ignores errors so a cache write failure never crashes the TUI.
 fn write_mine_snapshot(model: &Model, targets: &[Instance], db_path: &Path) {
     use crate::config::Config;
     use crate::store::Store;
     use crate::tui::model::Screen;
-    let Some(Screen::Tasks { tasks, .. }) = model.top() else {
+    let Some(Screen::Tasks { tasks, .. }) = model.tasks_screen() else {
         return;
     };
     let rows: Vec<MineTableRow> = tasks
@@ -531,6 +550,50 @@ fn dispatch_comment_write(
     }
 }
 
+fn dispatch_load(
+    cmd: Cmd,
+    targets: &[Instance],
+    http: &Http,
+    db_path: &Path,
+    tx: &mpsc::UnboundedSender<Msg>,
+) {
+    match cmd {
+        Cmd::LoadTasksByProject => {
+            let targets = targets.to_vec();
+            let http = http.clone();
+            let tx = tx.clone();
+            let db_path = db_path.to_path_buf();
+            tokio::spawn(async move {
+                let groups = controller::tasks_by_project(db_path, &targets, &http).await;
+                let loaded_at = crate::store::now_brt_iso();
+                let _ = tx.send(Msg::LoadedTasksByProject { groups, loaded_at });
+            });
+        }
+        Cmd::LoadMineTasks => {
+            let targets = targets.to_vec();
+            let http = http.clone();
+            let tx = tx.clone();
+            let db_path = db_path.to_path_buf();
+            tokio::spawn(load_mine_tasks(targets, http, db_path, tx));
+        }
+        Cmd::LoadDetail {
+            instance,
+            project_id,
+            task_id,
+            refresh,
+        } => {
+            let req = DetailRequest {
+                instance,
+                project_id,
+                task_id,
+                refresh,
+            };
+            spawn_load_detail(targets, http, db_path, tx, req);
+        }
+        _ => unreachable!("dispatch_load called with a non-load Cmd"),
+    }
+}
+
 fn dispatch_cmds(
     cmds: Vec<Cmd>,
     model: &mut Model,
@@ -541,42 +604,8 @@ fn dispatch_cmds(
 ) {
     for cmd in cmds {
         match cmd {
-            Cmd::LoadTasksByProject => {
-                let targets = targets.to_vec();
-                let http = http.clone();
-                let tx = tx.clone();
-                let db_path = db_path.to_path_buf();
-                tokio::spawn(async move {
-                    let groups = controller::tasks_by_project(db_path, &targets, &http).await;
-                    let loaded_at = crate::store::now_brt_iso();
-                    let _ = tx.send(Msg::LoadedTasksByProject { groups, loaded_at });
-                });
-            }
-            Cmd::LoadMineTasks => {
-                let targets = targets.to_vec();
-                let http = http.clone();
-                let tx = tx.clone();
-                let db_path = db_path.to_path_buf();
-                tokio::spawn(async move {
-                    let rows = crate::commands::collect_mine_rows(&targets, &http).await;
-                    let rows = controller::attach_project_names(&db_path, rows);
-                    let loaded_at = crate::store::now_brt_iso();
-                    let _ = tx.send(Msg::LoadedMineTasks { rows, loaded_at });
-                });
-            }
-            Cmd::LoadDetail {
-                instance,
-                project_id,
-                task_id,
-                refresh,
-            } => {
-                let req = DetailRequest {
-                    instance,
-                    project_id,
-                    task_id,
-                    refresh,
-                };
-                spawn_load_detail(targets, http, db_path, &tx, req);
+            cmd @ (Cmd::LoadTasksByProject | Cmd::LoadMineTasks | Cmd::LoadDetail { .. }) => {
+                dispatch_load(cmd, targets, http, db_path, &tx);
             }
             Cmd::OpenAsset { instance, url } => {
                 spawn_open_asset(targets, &tx, instance, url);

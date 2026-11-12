@@ -44,7 +44,7 @@ flowchart TD
         cmd_task["task.rs\nget · current"]
         cmd_comment["comment.rs\ncomment_core"]
         cmd_hours["hours_report.rs\nexport_hours_report · time_report_core · resolve_period · render_hours_report_csv · render_hours_report_xlsx"]
-        cmd_mine["mine.rs\nmine_core · collect_mine_rows"]
+        cmd_mine["mine.rs\nmine_core · collect_mine_task_lists · mine_rows_of · collect_mine_hours"]
         cmd_skill["skill.rs\nskill_output · SKILL registry\n(body = include_str! canonical SKILL.md)"]
         cmd_resolve["resolve.rs (master 1)\ninput resolution\nparse_task_ref · branch · pick_instance"]
         cmd_presenter["presenter.rs (master 3)\nuser-facing strings\nreauth_message · write_comment_*"]
