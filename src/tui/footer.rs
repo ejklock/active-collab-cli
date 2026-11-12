@@ -133,7 +133,7 @@ pub(crate) fn detail_hint(
     if is_own_comment_focused(focused_comment, comments, current_user_id) {
         return t("↑/↓ · j/k move · Ctrl+click edit/delete · c new");
     }
-    t("↑/↓ · j/k move · c comment · t log time · e estimate · s status · r refresh · D download · a assignee · H report · Esc/b back · q quit")
+    t("↑/↓ · j/k move · c comment · t log time · e estimate · s status · r refresh · D download · a assignee · l list · H report · Esc/b back · q quit")
 }
 
 pub(crate) fn is_own_comment_focused(

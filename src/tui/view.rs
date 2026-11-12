@@ -7,6 +7,7 @@ use crate::tui::model::{
     filter_assignee_candidates, ClickTarget, Compose, ComposeKind, ComposeStatus, DetailOverlay,
     EditStatus, EstimateForm, ImageAssetRef, ImageStatus, LogTimeField, LogTimeForm, LogTimeStatus,
     ModalButtonTarget, Model, ReportField, ReportForm, ReportPeriodChoice, ReportStatus, Screen,
+    TaskListLoad, TaskListPicker,
 };
 use crate::tui::screens::{draw_detail, draw_projects, draw_tasks, DetailParams};
 use crate::tui::theme;
@@ -253,9 +254,7 @@ fn render_detail_overlays(
     if let Some((completed_target, status)) = overlay.status_confirm() {
         render_status_confirm_modal(frame, area, completed_target, status);
     }
-    if let Some((candidates, filter, selected, status)) = overlay.assignee_picker() {
-        render_assignee_picker_modal(frame, area, candidates, filter, selected, status);
-    }
+    render_picker_overlays(frame, area, overlay);
     if overlay.is_confirm() {
         render_confirm_modal(frame, area, modal_btn_targets);
     }
@@ -498,7 +497,7 @@ fn render_status_confirm_modal(
     );
 }
 
-fn assignee_picker_modal_hint(status: &EditStatus) -> String {
+fn picker_modal_hint(status: &EditStatus) -> String {
     match assignee_picker_modal_status(status) {
         Some(status) => status,
         None => t("↑/↓ move · type to filter · Enter/Ctrl+S confirm · Esc cancel"),
@@ -506,62 +505,108 @@ fn assignee_picker_modal_hint(status: &EditStatus) -> String {
 }
 
 /// Mark the highlighted candidate row with a leading indicator, mirroring the
-/// focused-field marker convention used by the log-time modal.
-fn assignee_candidate_line(name: &str, is_selected: bool) -> String {
+/// focused-field marker convention used by the log-time modal, and tag the row of
+/// the value the task already has.
+fn picker_row_line(name: &str, is_selected: bool, is_current: bool) -> String {
     let marker = if is_selected { ">" } else { " " };
-    format!("{marker} {name}")
+    let current = if is_current {
+        format!(" ({})", t("current"))
+    } else {
+        String::new()
+    };
+    format!("{marker} {name}{current}")
 }
 
-/// Build the assignee-picker modal body: a search line reflecting the current
-/// filter, then either the filtered candidate rows (highlighted row marked), an
-/// empty-directory line when the user directory has no candidates at all, or a
-/// distinct empty-match line when the filter excludes every candidate.
-fn assignee_picker_modal_lines(
+/// The picker's search line, then either the filtered candidate rows (highlighted
+/// row marked, `current_id` tagged), the `empty` line when there are no candidates
+/// at all, or the `no_match` line when the filter excludes every candidate.
+fn picker_modal_lines(
     candidates: &[(i64, String)],
-    filter: &str,
-    selected: usize,
+    (filter, selected, current_id): (&str, usize, Option<i64>),
+    (empty, no_match): (String, String),
 ) -> Vec<String> {
-    let search_line = format!("{}: {}", t("Search"), filter);
-    let mut lines = vec![search_line];
+    let mut lines = vec![format!("{}: {}", t("Search"), filter)];
     if candidates.is_empty() {
-        lines.push(t("No assignable users"));
+        lines.push(empty);
         return lines;
     }
     let filtered = filter_assignee_candidates(candidates, filter);
     if filtered.is_empty() {
-        lines.push(t("No matching users"));
+        lines.push(no_match);
         return lines;
     }
     lines.extend(
         filtered
             .iter()
             .enumerate()
-            .map(|(i, (_, name))| assignee_candidate_line(name, i == selected)),
+            .map(|(i, (id, name))| picker_row_line(name, i == selected, current_id == Some(*id))),
     );
     lines
 }
 
-/// Render the assignee-picker modal chrome via `render_modal`: the search line,
-/// the filtered candidate list with the highlighted row marked, an empty-directory
-/// or empty-match line as appropriate, plus the hint/status line.
-fn render_assignee_picker_modal(
+/// Render whichever picker overlay is open: the assignee picker or the task-list
+/// picker.
+fn render_picker_overlays(frame: &mut Frame, area: Rect, overlay: &DetailOverlay) {
+    if let Some((candidates, filter, selected, status)) = overlay.assignee_picker() {
+        let lines = picker_modal_lines(
+            candidates,
+            (filter, selected, None),
+            (t("No assignable users"), t("No matching users")),
+        );
+        let hint = picker_modal_hint(status);
+        render_picker_modal(frame, area, (&t("Assign task"), &lines), &hint);
+    }
+    if let Some(picker) = overlay.task_list_picker() {
+        render_picker_modal(
+            frame,
+            area,
+            (&t("Move to list"), &task_list_picker_lines(picker)),
+            &task_list_picker_hint(picker),
+        );
+    }
+}
+
+/// The task-list picker body: its lists once loaded, otherwise the loading or
+/// failure line, followed by the last write error when there is one.
+fn task_list_picker_lines(picker: &TaskListPicker) -> Vec<String> {
+    let mut lines = match &picker.load {
+        TaskListLoad::Ready => picker_modal_lines(
+            &picker.candidates,
+            (&picker.filter, picker.selected, picker.current_id),
+            (t("No task lists"), t("No matching task lists")),
+        ),
+        TaskListLoad::Loading => vec![t("Loading task lists…")],
+        TaskListLoad::Failed(message) => vec![message.clone()],
+    };
+    lines.extend(picker.error.clone());
+    lines
+}
+
+/// The task-list picker's hint: only Esc while its lists load or failed to load,
+/// since nothing can be moved, filtered or confirmed yet.
+fn task_list_picker_hint(picker: &TaskListPicker) -> String {
+    match picker.load {
+        TaskListLoad::Ready => picker_modal_hint(&picker.status),
+        TaskListLoad::Loading | TaskListLoad::Failed(_) => t("Esc cancel"),
+    }
+}
+
+/// Render a picker modal chrome via `render_modal`: the body lines under the title
+/// plus the hint/status line.
+fn render_picker_modal(
     frame: &mut Frame,
-    frame_area: ratatui::layout::Rect,
-    candidates: &[(i64, String)],
-    filter: &str,
-    selected: usize,
-    status: &EditStatus,
+    frame_area: Rect,
+    (title, lines): (&str, &[String]),
+    hint: &str,
 ) {
     use crate::tui::widgets::modal::render_modal;
-    let hint = assignee_picker_modal_hint(status);
-    let lines = assignee_picker_modal_lines(candidates, filter, selected);
     render_modal(
         frame,
         frame_area,
         ModalContent {
-            title: &t("Assign task"),
-            lines: &lines,
-            hint: Some(&hint),
+            title,
+            lines,
+            hint: Some(hint),
         },
     );
 }

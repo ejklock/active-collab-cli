@@ -4353,7 +4353,9 @@ fn estimate_submit_valid_value_emits_submit_task_edit_cmd() {
             completion,
             assignee_id,
             estimate,
+            task_list_id,
         } => {
+            assert_eq!(*task_list_id, None);
             assert_eq!(instance, "myinst");
             assert_eq!(*project_id, 5);
             assert_eq!(*task_id, 99);
@@ -4636,7 +4638,9 @@ fn status_toggle_confirm_emits_submit_task_edit_cmd() {
             completion,
             assignee_id,
             estimate,
+            task_list_id,
         } => {
+            assert_eq!(*task_list_id, None);
             assert_eq!(instance, "myinst");
             assert_eq!(*project_id, 5);
             assert_eq!(*task_id, 99);
@@ -4996,7 +5000,9 @@ fn assignee_picker_submit_emits_submit_task_edit_cmd() {
             completion,
             assignee_id,
             estimate,
+            task_list_id,
         } => {
+            assert_eq!(*task_list_id, None);
             assert_eq!(instance, "myinst");
             assert_eq!(*project_id, 5);
             assert_eq!(*task_id, 99);
@@ -9326,4 +9332,752 @@ fn detail_download_key_with_the_log_time_or_estimate_overlay_open_goes_to_the_ov
         let (_, cmds) = update(model, msg);
         assert!(cmds.is_empty());
     }
+}
+
+fn task_list_model(current: Option<i64>) -> Model {
+    let task = match current {
+        Some(id) => serde_json::json!({ "task_list_id": id }),
+        None => serde_json::json!({}),
+    };
+    let mut model = detail_model_with_task("inst", 665, 75159, task);
+    model.viewport = (80, 24);
+    model
+}
+
+fn key_press(code: crossterm::event::KeyCode) -> crossterm::event::KeyEvent {
+    crossterm::event::KeyEvent::new(code, KeyModifiers::NONE)
+}
+
+fn press(model: Model, code: crossterm::event::KeyCode) -> (Model, Vec<Cmd>) {
+    let msg = crate::tui::route_key_event(&model, key_press(code)).expect("the key maps to a Msg");
+    update(model, msg)
+}
+
+fn type_text(mut model: Model, text: &str) -> Model {
+    for c in text.chars() {
+        model = press(model, crossterm::event::KeyCode::Char(c)).0;
+    }
+    model
+}
+
+fn task_lists_fixture() -> Vec<(i64, String)> {
+    vec![
+        (30, "Backlog".to_string()),
+        (10, "Revisão".to_string()),
+        (20, "Em andamento".to_string()),
+    ]
+}
+
+fn lists_loaded(
+    instance: &str,
+    project_id: i64,
+    task_id: i64,
+    lists: Result<Vec<(i64, String)>, String>,
+) -> Msg {
+    Msg::TaskListsLoaded {
+        instance: instance.into(),
+        project_id,
+        task_id,
+        lists,
+    }
+}
+
+fn open_task_list_picker(current: Option<i64>) -> Model {
+    let (model, _) = update(task_list_model(current), Msg::TaskListPickerOpen);
+    model
+}
+
+fn loaded_task_list_picker(current: Option<i64>) -> Model {
+    let model = open_task_list_picker(current);
+    let msg = lists_loaded("inst", 665, 75159, Ok(task_lists_fixture()));
+    update(model, msg).0
+}
+
+fn task_list_picker(model: &Model) -> Option<&TaskListPicker> {
+    match model.top() {
+        Some(Screen::Detail { overlay, .. }) => overlay.task_list_picker(),
+        _ => None,
+    }
+}
+
+fn picker_names(model: &Model) -> Vec<String> {
+    let picker = task_list_picker(model).expect("the picker is open");
+    filter_assignee_candidates(&picker.candidates, &picker.filter)
+        .into_iter()
+        .map(|(_, name)| name)
+        .collect()
+}
+
+#[test]
+fn task_list_picker_key_l_on_the_detail_opens_it_loading_and_reads_the_lists_once() {
+    let (model, cmds) = press(
+        task_list_model(Some(10)),
+        crossterm::event::KeyCode::Char('l'),
+    );
+    let picker = task_list_picker(&model).expect("l opens the picker");
+    assert_eq!(picker.load, TaskListLoad::Loading);
+    assert_eq!(
+        cmds,
+        vec![Cmd::LoadTaskLists {
+            instance: "inst".into(),
+            project_id: 665,
+            task_id: 75159,
+        }]
+    );
+}
+
+#[test]
+fn task_list_picker_open_while_open_changes_nothing() {
+    let model = open_task_list_picker(Some(10));
+    let before = format!("{:?}", model.stack);
+    let (model, cmds) = update(model, Msg::TaskListPickerOpen);
+    assert!(cmds.is_empty());
+    assert_eq!(format!("{:?}", model.stack), before);
+}
+
+#[test]
+fn task_list_picker_key_l_off_the_detail_changes_nothing() {
+    let mut model = task_list_model(Some(10));
+    model.stack = vec![Screen::Tasks {
+        project_name: "P".into(),
+        tasks: vec![],
+        selected: 0,
+        loading: false,
+        revalidating: false,
+        card_heights: vec![],
+        card_offsets: vec![],
+        rendered_width: usize::MAX,
+        due_today: None,
+    }];
+    let before = format!("{:?}", model.stack);
+    let (model, cmds) = press(model, crossterm::event::KeyCode::Char('l'));
+    assert!(cmds.is_empty());
+    assert_eq!(format!("{:?}", model.stack), before);
+}
+
+#[test]
+fn task_list_picker_key_l_with_another_overlay_open_goes_to_that_overlay() {
+    let compose_model = update(task_list_model(None), Msg::ComposeOpen).0;
+    let log_time = DetailOverlay::LogTime(LogTimeForm {
+        hours: String::new(),
+        summary: String::new(),
+        field: LogTimeField::Hours,
+        status: LogTimeStatus::Editing,
+    });
+    let estimate = DetailOverlay::EstimateEdit(EstimateForm {
+        value: String::new(),
+        status: EditStatus::Editing,
+    });
+    let status = DetailOverlay::StatusConfirm {
+        completed_target: true,
+        status: EditStatus::Editing,
+    };
+    let assignee = DetailOverlay::AssigneePicker {
+        candidates: vec![(1, "Alice".to_string())],
+        filter: String::new(),
+        selected: 0,
+        status: EditStatus::Editing,
+    };
+    let models = [
+        compose_model,
+        detail_model_with_overlay(log_time),
+        detail_model_with_overlay(estimate),
+        detail_model_with_overlay(status),
+        detail_model_with_overlay(assignee),
+    ];
+    for model in models {
+        let msg =
+            crate::tui::route_key_event(&model, key_press(crossterm::event::KeyCode::Char('l')));
+        let (model, cmds) = match msg {
+            Some(msg) => update(model, msg),
+            None => (model, vec![]),
+        };
+        assert!(cmds.is_empty());
+        assert!(task_list_picker(&model).is_none());
+    }
+}
+
+#[test]
+fn task_list_picker_key_l_typed_in_the_log_time_overlay_lands_in_the_buffer() {
+    let model = detail_model_with_overlay(DetailOverlay::LogTime(LogTimeForm {
+        hours: String::new(),
+        summary: String::new(),
+        field: LogTimeField::Summary,
+        status: LogTimeStatus::Editing,
+    }));
+    let (model, _) = press(model, crossterm::event::KeyCode::Char('l'));
+    match model.top() {
+        Some(Screen::Detail { overlay, .. }) => {
+            assert_eq!(overlay.log_time().expect("log time open").summary, "l");
+        }
+        _ => panic!("expected the Detail screen"),
+    }
+}
+
+#[test]
+fn task_list_picker_key_l_typed_in_the_estimate_overlay_lands_in_the_buffer() {
+    let model = detail_model_with_overlay(DetailOverlay::EstimateEdit(EstimateForm {
+        value: String::new(),
+        status: EditStatus::Editing,
+    }));
+    let (model, cmds) = press(model, crossterm::event::KeyCode::Char('l'));
+    assert!(cmds.is_empty());
+    match model.top() {
+        Some(Screen::Detail { overlay, .. }) => {
+            assert_eq!(overlay.estimate_edit().expect("estimate open").value, "l");
+        }
+        _ => panic!("expected the Detail screen"),
+    }
+}
+
+#[test]
+fn task_list_picker_key_l_typed_once_the_lists_loaded_filters_instead_of_reopening() {
+    let model = loaded_task_list_picker(Some(10));
+    let (model, cmds) = press(model, crossterm::event::KeyCode::Char('l'));
+    assert!(cmds.is_empty());
+    assert_eq!(task_list_picker(&model).expect("open").filter, "l");
+}
+
+#[test]
+fn task_list_picker_loaded_lists_keep_server_order_and_preselect_the_current_list() {
+    let model = loaded_task_list_picker(Some(10));
+    let picker = task_list_picker(&model).expect("open");
+    assert_eq!(picker.load, TaskListLoad::Ready);
+    assert_eq!(picker.candidates, task_lists_fixture());
+    assert_eq!(picker.current_id, Some(10));
+    assert_eq!(picker.selected, 1);
+}
+
+#[test]
+fn task_list_picker_loaded_lists_select_the_first_row_when_the_current_list_is_absent() {
+    let model = loaded_task_list_picker(Some(999));
+    assert_eq!(task_list_picker(&model).expect("open").selected, 0);
+    let model = loaded_task_list_picker(None);
+    assert_eq!(task_list_picker(&model).expect("open").selected, 0);
+}
+
+#[test]
+fn task_list_picker_ignores_a_result_for_another_instance_project_or_task() {
+    for msg in [
+        lists_loaded("other", 665, 75159, Ok(task_lists_fixture())),
+        lists_loaded("inst", 1, 75159, Ok(task_lists_fixture())),
+        lists_loaded("inst", 665, 2, Ok(task_lists_fixture())),
+    ] {
+        let model = open_task_list_picker(Some(10));
+        let before = format!("{:?}", model.stack);
+        let (model, cmds) = update(model, msg);
+        assert!(cmds.is_empty());
+        assert_eq!(format!("{:?}", model.stack), before);
+    }
+}
+
+#[test]
+fn task_list_picker_ignores_a_result_after_escape_closed_it() {
+    let model = open_task_list_picker(Some(10));
+    let (model, cmds) = press(model, crossterm::event::KeyCode::Esc);
+    assert!(cmds.is_empty());
+    let (model, _) = update(
+        model,
+        lists_loaded("inst", 665, 75159, Ok(task_lists_fixture())),
+    );
+    assert!(task_list_picker(&model).is_none());
+}
+
+#[test]
+fn task_list_picker_ignores_a_result_after_the_detail_was_popped() {
+    let mut model = open_task_list_picker(Some(10));
+    model.stack = vec![Screen::Projects {
+        groups: vec![],
+        selected: 0,
+        loading: false,
+        revalidating: false,
+    }];
+    let before = format!("{:?}", model.stack);
+    let (model, cmds) = update(
+        model,
+        lists_loaded("inst", 665, 75159, Ok(task_lists_fixture())),
+    );
+    assert!(cmds.is_empty());
+    assert_eq!(format!("{:?}", model.stack), before);
+}
+
+#[test]
+fn task_list_picker_with_no_lists_emits_nothing_on_enter() {
+    let model = open_task_list_picker(Some(10));
+    let (model, _) = update(model, lists_loaded("inst", 665, 75159, Ok(vec![])));
+    let picker = task_list_picker(&model).expect("open");
+    assert_eq!(picker.load, TaskListLoad::Ready);
+    assert!(picker.candidates.is_empty());
+    let (model, cmds) = press(model, crossterm::event::KeyCode::Enter);
+    assert!(cmds.is_empty());
+    assert!(task_list_picker(&model).is_some());
+}
+
+#[test]
+fn task_list_picker_failed_read_shows_the_failure_and_stays_closable() {
+    let model = open_task_list_picker(Some(10));
+    let (model, cmds) = update(model, lists_loaded("inst", 665, 75159, Err("boom".into())));
+    assert!(cmds.is_empty());
+    assert_eq!(
+        task_list_picker(&model).expect("open").load,
+        TaskListLoad::Failed("boom".into())
+    );
+    let (model, cmds) = press(model, crossterm::event::KeyCode::Enter);
+    assert!(cmds.is_empty());
+    let (model, _) = press(model, crossterm::event::KeyCode::Esc);
+    assert!(task_list_picker(&model).is_none());
+}
+
+fn detail_rendered_width(model: &Model) -> usize {
+    match model.top() {
+        Some(Screen::Detail { rendered_width, .. }) => *rendered_width,
+        _ => panic!("expected the Detail screen"),
+    }
+}
+
+fn set_detail_rendered_width(model: &mut Model, width: usize) {
+    if let Some(Screen::Detail { rendered_width, .. }) = model.top_mut() {
+        *rendered_width = width;
+    }
+}
+
+#[test]
+fn task_list_picker_ignores_a_second_result_once_ready() {
+    let model = type_text(loaded_task_list_picker(Some(10)), "e");
+    let model = press(model, crossterm::event::KeyCode::Down).0;
+    let before = format!("{:?}", model.stack);
+    let late = lists_loaded("inst", 665, 75159, Ok(vec![(99, "Late".to_string())]));
+    let (model, cmds) = update(model, late);
+    assert!(cmds.is_empty());
+    assert_eq!(format!("{:?}", model.stack), before);
+}
+
+#[test]
+fn task_list_picker_ignores_a_second_result_after_a_failed_read() {
+    let model = open_task_list_picker(Some(10));
+    let (model, _) = update(model, lists_loaded("inst", 665, 75159, Err("boom".into())));
+    let before = format!("{:?}", model.stack);
+    let late = lists_loaded("inst", 665, 75159, Ok(task_lists_fixture()));
+    let (model, cmds) = update(model, late);
+    assert!(cmds.is_empty());
+    assert_eq!(format!("{:?}", model.stack), before);
+}
+
+#[test]
+fn task_list_picker_ignores_a_stale_result_after_reopening() {
+    let model = open_task_list_picker(Some(10));
+    let (model, _) = press(model, crossterm::event::KeyCode::Esc);
+    let (model, _) = update(model, Msg::TaskListPickerOpen);
+    let (model, _) = update(
+        model,
+        lists_loaded("inst", 665, 75159, Ok(task_lists_fixture())),
+    );
+    let model = type_text(model, "e");
+    let before = format!("{:?}", model.stack);
+    let late = lists_loaded("inst", 665, 75159, Ok(vec![(99, "Late".to_string())]));
+    let (model, _) = update(model, late);
+    assert_eq!(format!("{:?}", model.stack), before);
+}
+
+#[test]
+fn task_list_picker_typed_l_while_loading_changes_nothing() {
+    let model = open_task_list_picker(Some(10));
+    let before = format!("{:?}", model.stack);
+    let (model, cmds) = press(model, crossterm::event::KeyCode::Char('l'));
+    assert!(cmds.is_empty());
+    assert_eq!(format!("{:?}", model.stack), before);
+}
+
+#[test]
+fn task_list_picker_typed_l_after_a_failed_read_changes_nothing() {
+    let model = open_task_list_picker(Some(10));
+    let (model, _) = update(model, lists_loaded("inst", 665, 75159, Err("boom".into())));
+    let before = format!("{:?}", model.stack);
+    let (model, cmds) = press(model, crossterm::event::KeyCode::Char('l'));
+    assert!(cmds.is_empty());
+    assert_eq!(format!("{:?}", model.stack), before);
+}
+
+#[test]
+fn task_list_picker_unauthorized_read_ends_loading_with_the_reauthentication_text() {
+    let reauth = "Token invalid or revoked — run `ac setup add` to re-authenticate.";
+    let model = open_task_list_picker(Some(10));
+    let (model, _) = update(model, Msg::AuthExpired);
+    let (model, cmds) = update(
+        model,
+        lists_loaded("inst", 665, 75159, Err(reauth.to_string())),
+    );
+    assert!(cmds.is_empty());
+    match model.top() {
+        Some(Screen::Detail { auth_error, .. }) => assert!(*auth_error),
+        _ => panic!("expected the Detail screen"),
+    }
+    assert_eq!(
+        task_list_picker(&model).expect("open").load,
+        TaskListLoad::Failed(reauth.to_string())
+    );
+    let (model, _) = press(model, crossterm::event::KeyCode::Esc);
+    assert!(task_list_picker(&model).is_none());
+}
+
+#[test]
+fn task_list_picker_unauthorized_read_takes_the_reauthentication_path() {
+    let model = open_task_list_picker(Some(10));
+    let (model, _) = update(model, Msg::AuthExpired);
+    match model.top() {
+        Some(Screen::Detail { auth_error, .. }) => assert!(*auth_error),
+        _ => panic!("expected the Detail screen"),
+    }
+}
+
+#[test]
+fn task_list_picker_filter_matches_case_insensitively_including_non_ascii() {
+    for text in ["revi", "REVI"] {
+        let model = type_text(loaded_task_list_picker(Some(10)), text);
+        assert_eq!(picker_names(&model), vec!["Revisão".to_string()], "{text}");
+    }
+}
+
+#[test]
+fn task_list_picker_backspace_widens_the_filter() {
+    let mut model = type_text(loaded_task_list_picker(Some(10)), "revi");
+    for _ in 0..4 {
+        model = press(model, crossterm::event::KeyCode::Backspace).0;
+    }
+    assert_eq!(picker_names(&model).len(), 3);
+}
+
+#[test]
+fn task_list_picker_up_and_down_saturate_within_the_filtered_rows() {
+    let mut model = loaded_task_list_picker(None);
+    for _ in 0..5 {
+        model = press(model, crossterm::event::KeyCode::Down).0;
+    }
+    assert_eq!(task_list_picker(&model).expect("open").selected, 2);
+    for _ in 0..5 {
+        model = press(model, crossterm::event::KeyCode::Up).0;
+    }
+    assert_eq!(task_list_picker(&model).expect("open").selected, 0);
+    let model = type_text(model, "e");
+    assert_eq!(picker_names(&model), vec!["Revisão", "Em andamento"]);
+    let model = press(model, crossterm::event::KeyCode::Down).0;
+    let model = press(model, crossterm::event::KeyCode::Down).0;
+    assert_eq!(task_list_picker(&model).expect("open").selected, 1);
+}
+
+#[test]
+fn task_list_picker_enter_with_no_filter_match_emits_nothing() {
+    let model = type_text(loaded_task_list_picker(Some(10)), "zzz");
+    let (model, cmds) = press(model, crossterm::event::KeyCode::Enter);
+    assert!(cmds.is_empty());
+    let picker = task_list_picker(&model).expect("open");
+    assert_eq!(picker.status, EditStatus::Editing);
+}
+
+#[test]
+fn task_list_picker_enter_on_another_list_submits_only_the_list() {
+    let model = press(
+        loaded_task_list_picker(Some(10)),
+        crossterm::event::KeyCode::Down,
+    )
+    .0;
+    let (model, cmds) = press(model, crossterm::event::KeyCode::Enter);
+    assert_eq!(
+        cmds,
+        vec![Cmd::SubmitTaskEdit {
+            instance: "inst".into(),
+            project_id: 665,
+            task_id: 75159,
+            completion: None,
+            assignee_id: None,
+            estimate: None,
+            task_list_id: Some(20),
+        }]
+    );
+    assert_eq!(
+        task_list_picker(&model).expect("open").status,
+        EditStatus::Submitting
+    );
+}
+
+#[test]
+fn task_list_picker_enter_on_the_current_list_closes_without_a_write() {
+    let (model, cmds) = press(
+        loaded_task_list_picker(Some(10)),
+        crossterm::event::KeyCode::Enter,
+    );
+    assert!(cmds.is_empty());
+    assert!(task_list_picker(&model).is_none());
+}
+
+#[test]
+fn task_list_picker_escape_closes_without_a_write() {
+    let (model, cmds) = press(
+        loaded_task_list_picker(Some(10)),
+        crossterm::event::KeyCode::Esc,
+    );
+    assert!(cmds.is_empty());
+    assert!(task_list_picker(&model).is_none());
+}
+
+#[test]
+fn task_list_picker_edit_ok_after_a_move_closes_it_and_refreshes_the_detail() {
+    let model = press(
+        loaded_task_list_picker(Some(10)),
+        crossterm::event::KeyCode::Down,
+    )
+    .0;
+    let (model, _) = press(model, crossterm::event::KeyCode::Enter);
+    let (model, cmds) = update(model, Msg::TaskEditOk);
+    assert!(task_list_picker(&model).is_none());
+    assert_eq!(
+        cmds,
+        vec![Cmd::LoadDetail {
+            instance: "inst".into(),
+            project_id: 665,
+            task_id: 75159,
+            refresh: true,
+        }]
+    );
+}
+
+#[test]
+fn task_list_picker_edit_err_shows_the_error_and_allows_another_try() {
+    let model = press(
+        loaded_task_list_picker(Some(10)),
+        crossterm::event::KeyCode::Down,
+    )
+    .0;
+    let (model, _) = press(model, crossterm::event::KeyCode::Enter);
+    let (model, cmds) = update(model, Msg::TaskEditErr("nope".into()));
+    assert!(cmds.is_empty());
+    let picker = task_list_picker(&model).expect("still open");
+    assert_eq!(picker.error.as_deref(), Some("nope"));
+    let (_, cmds) = press(model, crossterm::event::KeyCode::Enter);
+    assert!(matches!(
+        cmds.as_slice(),
+        [Cmd::SubmitTaskEdit {
+            task_list_id: Some(20),
+            ..
+        }]
+    ));
+}
+
+#[test]
+fn task_list_picker_retry_after_a_write_error_clears_the_old_error() {
+    let model = press(
+        loaded_task_list_picker(Some(10)),
+        crossterm::event::KeyCode::Down,
+    )
+    .0;
+    let (model, _) = press(model, crossterm::event::KeyCode::Enter);
+    let (model, _) = update(model, Msg::TaskEditErr("nope".into()));
+    let (model, cmds) = press(model, crossterm::event::KeyCode::Enter);
+    assert_eq!(cmds.len(), 1);
+    let picker = task_list_picker(&model).expect("still open");
+    assert_eq!(picker.status, EditStatus::Submitting);
+    assert_eq!(picker.error, None);
+}
+
+#[test]
+fn task_list_picker_write_error_forces_a_repaint_of_the_detail() {
+    let model = press(
+        loaded_task_list_picker(Some(10)),
+        crossterm::event::KeyCode::Down,
+    )
+    .0;
+    let (mut model, _) = press(model, crossterm::event::KeyCode::Enter);
+    set_detail_rendered_width(&mut model, 80);
+    let (model, _) = update(model, Msg::TaskEditErr("nope".into()));
+    assert_eq!(detail_rendered_width(&model), usize::MAX);
+}
+
+fn shell_instance(base_url: &str) -> Instance {
+    Instance {
+        name: "inst".into(),
+        base_url: base_url.into(),
+        email: "me@example.com".into(),
+        token: "tok".into(),
+        user_id: Some(1),
+    }
+}
+
+async fn dispatch_to_msgs(cmd: Cmd, targets: &[Instance], count: usize) -> Vec<Msg> {
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut model = task_list_model(None);
+    crate::tui::dispatch_cmds(
+        vec![cmd],
+        &mut model,
+        targets,
+        &crate::http::Http::new().unwrap(),
+        std::path::Path::new("/nonexistent/ac.db"),
+        tx,
+    );
+    let mut msgs = Vec::new();
+    for _ in 0..count {
+        let msg = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+            .await
+            .expect("the shell answers within the wait")
+            .expect("the channel stays open");
+        msgs.push(msg);
+    }
+    msgs
+}
+
+async fn dispatch_to_one_msg(cmd: Cmd, targets: &[Instance]) -> Msg {
+    dispatch_to_msgs(cmd, targets, 1)
+        .await
+        .pop()
+        .expect("one message")
+}
+
+fn read_task_lists_cmd(instance: &str) -> Cmd {
+    Cmd::LoadTaskLists {
+        instance: instance.into(),
+        project_id: 665,
+        task_id: 75159,
+    }
+}
+
+#[tokio::test]
+async fn task_list_picker_shell_read_yields_the_servers_lists_for_the_same_task() {
+    let server = wiremock::MockServer::start().await;
+    wiremock::Mock::given(wiremock::matchers::method("GET"))
+        .and(wiremock::matchers::path("/api/v1/projects/665/task-lists"))
+        .respond_with(
+            wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!([
+                {"id": 30, "name": "Backlog"},
+                {"id": 10, "name": "Revisão"}
+            ])),
+        )
+        .mount(&server)
+        .await;
+    let msg = dispatch_to_one_msg(
+        read_task_lists_cmd("inst"),
+        &[shell_instance(&server.uri())],
+    )
+    .await;
+    match msg {
+        Msg::TaskListsLoaded {
+            instance,
+            project_id,
+            task_id,
+            lists,
+        } => {
+            assert_eq!(
+                (instance.as_str(), project_id, task_id),
+                ("inst", 665, 75159)
+            );
+            assert_eq!(
+                lists,
+                Ok(vec![
+                    (30, "Backlog".to_string()),
+                    (10, "Revisão".to_string())
+                ])
+            );
+        }
+        _ => panic!("expected the loaded lists"),
+    }
+}
+
+#[tokio::test]
+async fn task_list_picker_shell_read_with_a_401_ends_the_picker_loading_with_reauthentication() {
+    let server = wiremock::MockServer::start().await;
+    wiremock::Mock::given(wiremock::matchers::method("GET"))
+        .and(wiremock::matchers::path("/api/v1/projects/665/task-lists"))
+        .respond_with(wiremock::ResponseTemplate::new(401))
+        .mount(&server)
+        .await;
+    let msgs = dispatch_to_msgs(
+        read_task_lists_cmd("inst"),
+        &[shell_instance(&server.uri())],
+        2,
+    )
+    .await;
+    let mut model = open_task_list_picker(Some(10));
+    for msg in msgs {
+        model = update(model, msg).0;
+    }
+    match model.top() {
+        Some(Screen::Detail { auth_error, .. }) => assert!(*auth_error),
+        _ => panic!("expected the Detail screen"),
+    }
+    match &task_list_picker(&model).expect("open").load {
+        TaskListLoad::Failed(text) => assert!(text.contains("ac setup add"), "{text}"),
+        other => panic!("expected the failed state, got {other:?}"),
+    }
+    let (model, _) = press(model, crossterm::event::KeyCode::Esc);
+    assert!(task_list_picker(&model).is_none());
+}
+
+#[tokio::test]
+async fn task_list_picker_shell_read_with_a_500_yields_a_failed_result() {
+    let server = wiremock::MockServer::start().await;
+    wiremock::Mock::given(wiremock::matchers::method("GET"))
+        .and(wiremock::matchers::path("/api/v1/projects/665/task-lists"))
+        .respond_with(wiremock::ResponseTemplate::new(500))
+        .mount(&server)
+        .await;
+    let msg = dispatch_to_one_msg(
+        read_task_lists_cmd("inst"),
+        &[shell_instance(&server.uri())],
+    )
+    .await;
+    match msg {
+        Msg::TaskListsLoaded {
+            instance,
+            project_id,
+            task_id,
+            lists: Err(_),
+        } => assert_eq!(
+            (instance.as_str(), project_id, task_id),
+            ("inst", 665, 75159)
+        ),
+        _ => panic!("expected a failed lists result"),
+    }
+}
+
+#[tokio::test]
+async fn task_list_picker_shell_read_of_an_unknown_instance_fails_without_the_network() {
+    let msg = dispatch_to_one_msg(read_task_lists_cmd("missing"), &[]).await;
+    match msg {
+        Msg::TaskListsLoaded {
+            instance,
+            project_id,
+            task_id,
+            lists: Err(_),
+        } => assert_eq!(
+            (instance.as_str(), project_id, task_id),
+            ("missing", 665, 75159)
+        ),
+        _ => panic!("expected a failed lists result"),
+    }
+}
+
+#[tokio::test]
+async fn task_list_picker_shell_write_sends_only_the_list_in_one_put() {
+    let server = wiremock::MockServer::start().await;
+    wiremock::Mock::given(wiremock::matchers::method("PUT"))
+        .and(wiremock::matchers::path("/api/v1/projects/665/tasks/75159"))
+        .and(wiremock::matchers::body_json(
+            serde_json::json!({"task_list_id": 20}),
+        ))
+        .respond_with(
+            wiremock::ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({"single": {"id": 75159}})),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    let cmd = Cmd::SubmitTaskEdit {
+        instance: "inst".into(),
+        project_id: 665,
+        task_id: 75159,
+        completion: None,
+        assignee_id: None,
+        estimate: None,
+        task_list_id: Some(20),
+    };
+    let msg = dispatch_to_one_msg(cmd, &[shell_instance(&server.uri())]).await;
+    assert!(matches!(msg, Msg::TaskEditOk));
 }
