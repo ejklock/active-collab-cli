@@ -30,6 +30,7 @@ Excluded: any production behavior change; the `t(&format!(...))` defect (issue 0
 - A fixture token becomes a plain placeholder such as `fixture-token`, a value no test reads for its content.
 - The route and draw-order gaps close with tests through the real entry points (`route_key_event`, the render of a Detail screen), never by asserting a call.
 - A citation comment with no other content is deleted; one with a why keeps the why in the same words minus the citation.
+- The citation rule joins `tests/comment_policy.rs` as a violation kind checked on every comment, doc comments included, first over `src/` (S3), then over `tests/` (S4), so the comment gate keeps the tree clean instead of a one-time `rg`. Not taken: a CI grep, which would be a second comment gate beside the test.
 
 ### Acceptance
 
