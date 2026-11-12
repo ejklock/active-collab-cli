@@ -260,3 +260,193 @@ fn existing_delete_mode_store_switches_to_wal_keeping_rows() {
         .unwrap();
     assert_eq!(value, "angie");
 }
+
+const CONCURRENT_ROUNDS: usize = 40;
+const WRITES_PER_THREAD: i64 = 5;
+
+fn open_at(db_path: &std::path::Path) -> Result<Store, String> {
+    Store::open(&Config {
+        db_path: db_path.to_path_buf(),
+        task_cache_ttl_hours: 24,
+    })
+    .map_err(|e| e.to_string())
+}
+
+fn open_and_write_together(
+    db_path: &std::path::Path,
+    threads: usize,
+    writes: i64,
+) -> Vec<Result<(), String>> {
+    let barrier = std::sync::Arc::new(std::sync::Barrier::new(threads));
+    let handles: Vec<_> = (0..threads)
+        .map(|worker| {
+            let db_path = db_path.to_path_buf();
+            let barrier = std::sync::Arc::clone(&barrier);
+            std::thread::spawn(move || -> Result<(), String> {
+                barrier.wait();
+                let store = open_at(&db_path)?;
+                let cache = cache::TaskCache::new(store.conn());
+                for i in 0..writes {
+                    cache
+                        .write(
+                            "inst",
+                            worker as i64,
+                            i,
+                            &serde_json::json!({ "name": "t" }),
+                            &serde_json::json!([]),
+                        )
+                        .map_err(|e| e.to_string())?;
+                }
+                Ok(())
+            })
+        })
+        .collect();
+    handles.into_iter().map(|h| h.join().unwrap()).collect()
+}
+
+fn count_cache_rows(db_path: &std::path::Path) -> i64 {
+    open_at(db_path)
+        .unwrap()
+        .conn()
+        .query_row("SELECT COUNT(*) FROM ticket_cache", [], |r| r.get(0))
+        .unwrap()
+}
+
+fn assert_concurrent_opens_succeed(threads: usize) {
+    for _ in 0..CONCURRENT_ROUNDS {
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join("shared.db");
+        let results = open_and_write_together(&db_path, threads, WRITES_PER_THREAD);
+        assert_eq!(results, vec![Ok(()); threads]);
+        assert_eq!(
+            count_cache_rows(&db_path),
+            threads as i64 * WRITES_PER_THREAD
+        );
+    }
+}
+
+#[test]
+fn concurrent_opens_by_two_threads_all_write() {
+    assert_concurrent_opens_succeed(2);
+}
+
+#[test]
+fn concurrent_opens_by_four_threads_all_write() {
+    assert_concurrent_opens_succeed(4);
+}
+
+#[test]
+fn concurrent_opens_of_a_delete_mode_store_end_in_wal_keeping_rows() {
+    for _ in 0..CONCURRENT_ROUNDS {
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join("legacy.db");
+        {
+            let conn = rusqlite::Connection::open(&db_path).unwrap();
+            let mode: String = conn
+                .query_row("PRAGMA journal_mode=DELETE", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(mode, "delete");
+            conn.execute_batch(
+                "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);\
+                 INSERT INTO settings (key, value) VALUES ('theme', 'angie');",
+            )
+            .unwrap();
+        }
+        let results = open_and_write_together(&db_path, 4, 5);
+        assert_eq!(results, vec![Ok(()); 4]);
+        let store = open_at(&db_path).unwrap();
+        assert_eq!(journal_mode(&store), "wal");
+        let theme: String = store
+            .conn()
+            .query_row("SELECT value FROM settings WHERE key='theme'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(theme, "angie");
+        assert_eq!(count_cache_rows(&db_path), 20);
+    }
+}
+
+fn sqlite_failure(code: i32) -> rusqlite::Error {
+    rusqlite::Error::SqliteFailure(rusqlite::ffi::Error::new(code), None)
+}
+
+#[test]
+fn wal_switch_succeeding_lets_the_open_continue() {
+    assert!(tolerate_busy_wal_switch(Ok("wal".to_string())).is_ok());
+}
+
+#[test]
+fn wal_switch_busy_failure_lets_the_open_continue() {
+    let busy = sqlite_failure(rusqlite::ffi::SQLITE_BUSY);
+    assert!(tolerate_busy_wal_switch(Err(busy)).is_ok());
+}
+
+#[test]
+fn wal_switch_failure_other_than_busy_fails_the_open_with_that_error() {
+    for (code, expected) in [
+        (
+            rusqlite::ffi::SQLITE_READONLY,
+            rusqlite::ErrorCode::ReadOnly,
+        ),
+        (
+            rusqlite::ffi::SQLITE_CANTOPEN,
+            rusqlite::ErrorCode::CannotOpen,
+        ),
+    ] {
+        let err = tolerate_busy_wal_switch(Err(sqlite_failure(code))).unwrap_err();
+        match err.downcast_ref::<rusqlite::Error>() {
+            Some(rusqlite::Error::SqliteFailure(failure, _)) => {
+                assert_eq!(failure.code, expected);
+            }
+            other => panic!("expected the sqlite failure to propagate, got {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn wal_switch_failure_that_is_not_a_sqlite_failure_fails_the_open() {
+    let err = tolerate_busy_wal_switch(Err(rusqlite::Error::QueryReturnedNoRows)).unwrap_err();
+    assert_eq!(err.to_string(), "Query returned no rows");
+}
+
+#[test]
+fn fresh_store_opened_concurrently_has_wal_timeout_and_schema() {
+    for _ in 0..CONCURRENT_ROUNDS {
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join("fresh.db");
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(4));
+        let handles: Vec<_> = (0..4)
+            .map(|_| {
+                let db_path = db_path.clone();
+                let barrier = std::sync::Arc::clone(&barrier);
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    open_at(&db_path)
+                })
+            })
+            .collect();
+        let stores: Vec<Store> = handles
+            .into_iter()
+            .map(|h| h.join().unwrap().unwrap())
+            .collect();
+        for store in &stores {
+            assert_eq!(journal_mode(store), "wal");
+            let timeout: i64 = store
+                .conn()
+                .query_row("PRAGMA busy_timeout", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(timeout, 5000);
+            let tables: i64 = store
+                .conn()
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN \
+                     ('instances','ticket_cache','settings','user_map_cache','project_names_cache','task_list_cache')",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(tables, 6);
+        }
+    }
+}

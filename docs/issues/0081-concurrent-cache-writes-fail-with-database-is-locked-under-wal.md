@@ -2,7 +2,7 @@
 type: Issue
 title: Concurrent cache writes fail with database is locked under WAL
 description: Two connections writing the shared SQLite cache at once sometimes fail with database is locked; the store must wait for the lock instead.
-status: open
+status: closed
 labels: [bug, store, mcp]
 timestamp: 2026-11-12T01:08:08Z
 ---
