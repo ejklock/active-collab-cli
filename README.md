@@ -173,6 +173,10 @@ open tasks aggregated across all configured instances. Select a task to view its
 detail or open/download its assets. When output is piped or redirected (non-TTY),
 `mine` falls back to a plain table suitable for scripts.
 
+Each task shows its estimate, the hours you logged on it this week (Monday to
+Sunday) and its total logged hours. An hour value the server does not return
+stays blank and never fails the list.
+
 ### time report — export your hours for a period as XLSX or CSV
 
 ```sh
@@ -334,8 +338,39 @@ installer directly in a terminal (not via `curl | sh`) prompts for project-vs-gl
 piped one-liner stays non-interactive and defaults to project. To install into a specific
 pi profile, use `--scope project --dir ~/.pi/agent-profiles/<name>`.
 
-> This tool only ever **reads** your ActiveCollab tasks over the `--json` contract; the
-> skill grants an agent no write access beyond the CLI commands you already run yourself.
+> The skill grants an agent no access beyond the CLI commands you already run
+> yourself, including the ones that write (`ac comment`, `ac time log`, `ac task set`).
+
+### MCP server — `ac mcp`
+
+`ac mcp` serves the same commands as MCP tools over stdio, so an agent calls them
+with typed parameters instead of composing shell commands. Each agent session
+starts its own `ac mcp` process; all of them share the local cache. Every result is
+exactly what the matching `--json` command prints.
+
+| Tool | Operations |
+|---|---|
+| `ac_read` | `get`, `current`, `mine` |
+| `ac_write` | `comment`, `log_time`, `set_task`, `time_report` |
+
+`ac_write` changes data on your ActiveCollab instance as the logged-in user and is
+marked destructive, so a harness that honours MCP tool hints asks before calling it.
+Register the server once per harness:
+
+```sh
+# Claude Code
+claude mcp add active-collab -- ac mcp
+```
+
+```toml
+# Codex, in ~/.codex/config.toml
+[mcp_servers.active-collab]
+command = "ac"
+args = ["mcp"]
+```
+
+The parameters of each operation are in `ac skill active-collab`. See
+[ADR 0070](docs/adr/0070-ac-mcp-serves-mcp-over-stdio-as-an-adapter-over-the-command-cores.md).
 
 ---
 
