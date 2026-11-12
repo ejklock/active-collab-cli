@@ -32,7 +32,6 @@ TUI/UX work (V/R/ARCH slices), tracing to
 * [0076 — Download comment attachments in the CLI and from a TUI key](0076-download-comment-attachments-in-the-cli-and-from-a-tui-key.md) - open
 * [0077 — Move a task between task lists from CLI, TUI and MCP](0077-move-a-task-between-task-lists-from-cli-tui-and-mcp.md) - open
 * [0079 — Paint the ac mine TUI rows before the hours requests finish](0079-paint-the-ac-mine-tui-rows-before-the-hours-requests-finish.md) - open
-* [0081 — Concurrent cache writes fail with database is locked under WAL](0081-concurrent-cache-writes-fail-with-database-is-locked-under-wal.md) - open
 
 ## Closed
 
@@ -89,3 +88,4 @@ TUI/UX work (V/R/ARCH slices), tracing to
 * [0072 — Export the hours report for a period as XLSX or CSV (ac time report and TUI modal)](0072-export-the-hours-report-for-a-period-as-xlsx-or-csv-ac-time-report-and-tui-modal.md) - closed
 * [0078 — Skip open-task entries without an id or project id at the parse boundary](0078-skip-open-task-entries-without-an-id-or-project-id-at-the-parse-boundary.md) - closed
 * [0080 — Move the MCP attachment download to its own ac_download_attachments tool](0080-move-the-mcp-attachment-download-to-its-own-ac-download-attachments-tool.md) - closed
+* [0081 — Concurrent cache writes fail with database is locked under WAL](0081-concurrent-cache-writes-fail-with-database-is-locked-under-wal.md) - closed
