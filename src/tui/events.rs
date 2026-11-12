@@ -50,6 +50,7 @@ fn map_action_key(code: KeyCode) -> Option<Msg> {
         KeyCode::Char('e') => Some(Msg::EstimateOpen),
         KeyCode::Char('s') => Some(Msg::StatusToggleOpen),
         KeyCode::Char('a') => Some(Msg::AssigneePickerOpen),
+        KeyCode::Char('l') => Some(Msg::TaskListPickerOpen),
         KeyCode::Char('H') => Some(Msg::ReportOpen),
         KeyCode::Char('D') => Some(Msg::DownloadAttachments),
         _ => None,
@@ -163,6 +164,21 @@ pub fn map_assignee_picker_key_event(key: crossterm::event::KeyEvent) -> Option<
         KeyCode::Char(c) => Some(Msg::AssigneePickerChar(c)),
         _ => None,
     }
+}
+
+/// Map a key event when the task-list picker is active.
+///
+/// The keys are the assignee picker's, addressed to the task-list picker.
+pub fn map_task_list_picker_key_event(key: crossterm::event::KeyEvent) -> Option<Msg> {
+    map_assignee_picker_key_event(key).map(|msg| match msg {
+        Msg::AssigneePickerSubmit => Msg::TaskListPickerSubmit,
+        Msg::AssigneePickerCancel => Msg::TaskListPickerCancel,
+        Msg::AssigneePickerDown => Msg::TaskListPickerDown,
+        Msg::AssigneePickerUp => Msg::TaskListPickerUp,
+        Msg::AssigneePickerBackspace => Msg::TaskListPickerBackspace,
+        Msg::AssigneePickerChar(c) => Msg::TaskListPickerChar(c),
+        other => other,
+    })
 }
 
 pub fn map_browse_mouse_event(mouse: crossterm::event::MouseEvent) -> Option<Msg> {

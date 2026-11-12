@@ -33,7 +33,7 @@ use crossterm::{
 use events::{
     map_assignee_picker_key_event, map_browse_key_event, map_browse_mouse_event,
     map_compose_key_event, map_confirm_key_event, map_estimate_key_event, map_log_time_key_event,
-    map_report_key_event, map_status_confirm_key_event,
+    map_report_key_event, map_status_confirm_key_event, map_task_list_picker_key_event,
 };
 use model::DownloadOutcome;
 use ratatui::{backend::CrosstermBackend, Terminal};
@@ -130,6 +130,14 @@ fn status_confirm_active(model: &Model) -> bool {
     )
 }
 
+/// Return true when the task-list picker is active on the top screen.
+fn task_list_picker_active(model: &Model) -> bool {
+    matches!(
+        model.top(),
+        Some(model::Screen::Detail { overlay, .. }) if overlay.task_list_picker().is_some()
+    )
+}
+
 /// Return true when the assignee-picker modal is active on the top screen.
 fn assignee_picker_active(model: &Model) -> bool {
     matches!(
@@ -148,25 +156,35 @@ fn assignee_picker_active(model: &Model) -> bool {
 ///   4. estimate-edit sub-mode (estimate modal open) — typed chars + Ctrl+S/Esc
 ///   5. status-confirm sub-mode (status-confirm modal open) — Enter/Ctrl+S/Esc only
 ///   6. assignee-picker sub-mode (assignee-picker modal open) — j/k/Enter/Ctrl+S/Esc only
-///   7. browse mode — navigation, shortcuts
+///   7. task-list picker sub-mode (task-list picker open) — same keys as the assignee picker
+///   8. browse mode — navigation, shortcuts
 pub(crate) fn route_key_event(model: &Model, key: crossterm::event::KeyEvent) -> Option<Msg> {
-    if model.report.is_some() {
-        map_report_key_event(key)
-    } else if confirm_active(model) {
-        map_confirm_key_event(key)
-    } else if compose_active(model) {
-        map_compose_key_event(key)
-    } else if log_time_active(model) {
-        map_log_time_key_event(key)
-    } else if estimate_active(model) {
-        map_estimate_key_event(key)
-    } else if status_confirm_active(model) {
-        map_status_confirm_key_event(key)
-    } else if assignee_picker_active(model) {
-        map_assignee_picker_key_event(key)
-    } else {
-        map_browse_key_event(key)
-    }
+    let map = KEY_ROUTES
+        .iter()
+        .find(|(active, _)| active(model))
+        .map_or(map_browse_key_event as KeyMapper, |(_, map)| *map);
+    map(key)
+}
+
+type KeyMapper = fn(crossterm::event::KeyEvent) -> Option<Msg>;
+type ModalActive = fn(&Model) -> bool;
+
+/// The modal owners of the keyboard, each with the mapper of its keys; at most one
+/// is active at a time, and no match leaves the browse map.
+const KEY_ROUTES: [(ModalActive, KeyMapper); 8] = [
+    (report_active, map_report_key_event),
+    (confirm_active, map_confirm_key_event),
+    (compose_active, map_compose_key_event),
+    (log_time_active, map_log_time_key_event),
+    (estimate_active, map_estimate_key_event),
+    (status_confirm_active, map_status_confirm_key_event),
+    (assignee_picker_active, map_assignee_picker_key_event),
+    (task_list_picker_active, map_task_list_picker_key_event),
+];
+
+/// Return true when the hours-report modal is open (on any screen).
+fn report_active(model: &Model) -> bool {
+    model.report.is_some()
 }
 
 /// Handle a crossterm input event: map to a Msg, run update, and dispatch commands.
@@ -591,6 +609,11 @@ fn dispatch_load(
             };
             spawn_load_detail(targets, http, db_path, tx, req);
         }
+        Cmd::LoadTaskLists {
+            instance,
+            project_id,
+            task_id,
+        } => spawn_task_lists_read(targets, http, tx, (instance, project_id, task_id)),
         _ => unreachable!("dispatch_load called with a non-load Cmd"),
     }
 }
@@ -605,7 +628,10 @@ fn dispatch_cmds(
 ) {
     for cmd in cmds {
         match cmd {
-            cmd @ (Cmd::LoadTasksByProject | Cmd::LoadMineTasks | Cmd::LoadDetail { .. }) => {
+            cmd @ (Cmd::LoadTasksByProject
+            | Cmd::LoadMineTasks
+            | Cmd::LoadDetail { .. }
+            | Cmd::LoadTaskLists { .. }) => {
                 dispatch_load(cmd, targets, http, db_path, &tx);
             }
             Cmd::OpenAsset { instance, url } => {
@@ -640,6 +666,7 @@ fn dispatch_cmds(
                 completion,
                 assignee_id,
                 estimate,
+                task_list_id,
             } => {
                 spawn_task_edit(
                     targets,
@@ -649,13 +676,11 @@ fn dispatch_cmds(
                     project_id,
                     task_id,
                     completion,
-                    assignee_id,
-                    estimate,
+                    (assignee_id, estimate, task_list_id),
                 );
             }
-            // The fetch/decode/StatefulProtocol handling for the image viewer is
-            // slice 0059 (ADR 0065); this slice only wires the pure overlay lifecycle,
-            // so the viewer stays on its Loading placeholder until that slice lands.
+            // Only the pure overlay lifecycle of the image viewer is wired; the
+            // fetch and decode are not, so the viewer stays on its Loading placeholder.
             Cmd::LoadImage { .. } => {}
             cmd @ (Cmd::ExportHoursReport { .. } | Cmd::DownloadAttachments { .. }) => {
                 dispatch_file_export(cmd, targets, http, &tx);
@@ -1094,11 +1119,60 @@ fn classify_task_edit_outcome(outcome: anyhow::Result<TaskWriteOutcome>) -> Task
     }
 }
 
+/// Read the project's task lists for the task-list picker and report them for the
+/// same instance, project and task; an unknown instance or a failed read reports
+/// the failure text, and a 401 asks for re-authentication and also ends the picker's
+/// loading with the re-authentication text.
+fn spawn_task_lists_read(
+    targets: &[Instance],
+    http: &Http,
+    tx: &mpsc::UnboundedSender<Msg>,
+    task_ref: (String, i64, i64),
+) {
+    let (instance, project_id, task_id) = task_ref;
+    let finished = move |instance: String, lists| Msg::TaskListsLoaded {
+        instance,
+        project_id,
+        task_id,
+        lists,
+    };
+    let failure = crate::i18n::t("Failed to load task lists");
+    let reauthentication =
+        crate::i18n::t("Token invalid or revoked — run `ac setup add` to re-authenticate.");
+    let missing = finished(instance.clone(), Err(failure.clone()));
+    let reply_instance = instance.clone();
+    spawn_with_client(
+        targets,
+        http,
+        tx,
+        &instance,
+        missing,
+        move |client, tx| async move {
+            let msgs = match client.fetch_task_lists(project_id).await {
+                Ok(crate::client::TaskListsOutcome::Ok(lists)) => vec![finished(
+                    reply_instance,
+                    Ok(lists.into_iter().map(|l| (l.id, l.name)).collect()),
+                )],
+                Ok(crate::client::TaskListsOutcome::Unauthorized) => vec![
+                    Msg::AuthExpired,
+                    finished(reply_instance, Err(reauthentication)),
+                ],
+                Ok(crate::client::TaskListsOutcome::Failed(_)) | Err(_) => {
+                    vec![finished(reply_instance, Err(failure))]
+                }
+            };
+            for msg in msgs {
+                let _ = tx.send(msg);
+            }
+        },
+    );
+}
+
 /// Spawn the task-field write: apply `set_task_completion` when `completion` is
-/// given, then `update_task` when `assignee_id` and/or `estimate` are given,
-/// stopping at the first non-Ok outcome. Written generally enough that a future
-/// status toggle or assignee picker reuses it unchanged (only their
-/// `Cmd::SubmitTaskEdit` fields differ).
+/// given, then `update_task` when an assignee, an estimate and/or a task list are
+/// given (`fields`, in that order), stopping at the first non-Ok outcome.
+/// Written generally enough that a future status toggle or picker reuses it
+/// unchanged (only their `Cmd::SubmitTaskEdit` fields differ).
 #[allow(clippy::too_many_arguments)]
 fn spawn_task_edit(
     targets: &[Instance],
@@ -1108,9 +1182,9 @@ fn spawn_task_edit(
     project_id: i64,
     task_id: i64,
     completion: Option<bool>,
-    assignee_id: Option<i64>,
-    estimate: Option<f64>,
+    fields: (Option<i64>, Option<f64>, Option<i64>),
 ) {
+    let (assignee_id, estimate, task_list_id) = fields;
     let missing = Msg::TaskEditErr(crate::i18n::t("Failed to update task"));
     spawn_with_client(
         targets,
@@ -1127,9 +1201,9 @@ fn spawn_task_edit(
                 }
             }
 
-            if assignee_id.is_some() || estimate.is_some() {
+            if assignee_id.is_some() || estimate.is_some() || task_list_id.is_some() {
                 let outcome = client
-                    .update_task(project_id, task_id, assignee_id, estimate, None)
+                    .update_task(project_id, task_id, assignee_id, estimate, task_list_id)
                     .await;
                 if let TaskEditStep::Stop(msg) = classify_task_edit_outcome(outcome) {
                     let _ = tx.send(msg);

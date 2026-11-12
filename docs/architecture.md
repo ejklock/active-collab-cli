@@ -416,9 +416,20 @@ sequenceDiagram
   with only `assignee_id: Some(selected)` set, reusing the overlay/effect pair unchanged. The
   shell (`spawn_task_edit`) calls
   `client.set_task_completion` when `completion` is given, then `client.update_task` when
-  `assignee_id` and/or `estimate` are given, stopping at the first non-Ok outcome; `TaskEditOk`
-  clears the overlay and emits the same `Cmd::LoadDetail { refresh: true }` via
-  `refresh_detail_after_write`.
+  `assignee_id`, `estimate` and/or `task_list_id` are given, stopping at the first non-Ok
+  outcome; `TaskEditOk` clears the overlay and emits the same `Cmd::LoadDetail { refresh: true }`
+  via `refresh_detail_after_write`.
+- **Moving a task between lists (issue 0077) adds a read effect to the same overlay family**: the
+  `l` key opens `TaskListPicker { candidates, current_id, filter, selected, status, load, error }`
+  in a loading state and emits `Cmd::LoadTaskLists { instance, project_id, task_id }`. The shell
+  (`spawn_task_lists_read`) calls `client.fetch_task_lists` and answers `Msg::TaskListsLoaded`
+  carrying the same instance, project id and task id (a 401 answers `AuthExpired`, any other
+  failure a failed result); the pure core applies it only while the open Detail is that task and
+  the picker still waits, then marks and pre-selects the current list. The picker shares its
+  filtering and navigation with the assignee picker through `PickerKind` accessors, which expose a
+  view only once the lists are loaded. Confirming another list emits `Cmd::SubmitTaskEdit` with only
+  `task_list_id` set; the current list closes the picker without a write; `TaskEditErr` keeps the
+  picker open with its `error` for a retry.
 - **the hours-report modal is a model-level overlay**, not a `DetailOverlay` variant, because it
   opens from Projects, Tasks and Detail: `Model.report: Option<ReportForm>`. `H` emits
   `Msg::ReportOpen`; while the form is open the shell's `route_key_event` sends every key to

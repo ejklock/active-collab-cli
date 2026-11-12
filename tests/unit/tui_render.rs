@@ -6501,7 +6501,7 @@ mod assignee_picker_render {
 
     use super::LANG_MUTEX;
 
-    fn make_detail_model(overlay: DetailOverlay) -> Model {
+    pub(super) fn make_detail_model(overlay: DetailOverlay) -> Model {
         Model {
             stack: vec![Screen::Detail {
                 instance: "inst".into(),
@@ -6536,7 +6536,11 @@ mod assignee_picker_render {
         }
     }
 
-    fn render_via_view(model: &Model, width: u16, height: u16) -> ratatui::buffer::Buffer {
+    pub(super) fn render_via_view(
+        model: &Model,
+        width: u16,
+        height: u16,
+    ) -> ratatui::buffer::Buffer {
         let backend = TestBackend::new(width, height);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal
@@ -6545,7 +6549,7 @@ mod assignee_picker_render {
         terminal.backend().buffer().clone()
     }
 
-    fn buf_text(buf: &ratatui::buffer::Buffer) -> String {
+    pub(super) fn buf_text(buf: &ratatui::buffer::Buffer) -> String {
         let area = buf.area();
         let mut out = String::new();
         for y in 0..area.height {
@@ -6766,6 +6770,176 @@ mod assignee_picker_render {
             !content.contains("Assign task"),
             "modal title must NOT appear when assignee-picker overlay is None: {content}"
         );
+    }
+}
+
+// The task-list picker modal renders its search line, the project's lists with the
+// highlighted row and the current list marked, and a line for each non-list state.
+
+mod task_list_picker_render {
+    use super::assignee_picker_render::{buf_text, make_detail_model, render_via_view};
+    use super::LANG_MUTEX;
+    use crate::i18n::set_language;
+    use crate::tui::footer::hint_for_screen;
+    use crate::tui::model::{DetailOverlay, EditStatus, TaskListLoad, TaskListPicker};
+
+    fn picker(load: TaskListLoad, candidates: Vec<(i64, String)>) -> TaskListPicker {
+        TaskListPicker {
+            candidates,
+            current_id: Some(2),
+            filter: String::new(),
+            selected: 0,
+            status: EditStatus::Editing,
+            load,
+            error: None,
+        }
+    }
+
+    fn lists() -> Vec<(i64, String)> {
+        vec![(1, "Backlog".to_string()), (2, "Revisão".to_string())]
+    }
+
+    fn rendered(picker: TaskListPicker, width: u16) -> String {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let model = make_detail_model(DetailOverlay::TaskListPicker(picker));
+        buf_text(&render_via_view(&model, width, 24))
+    }
+
+    #[test]
+    fn task_list_picker_render_shows_search_line_rows_highlight_and_current_marker() {
+        let mut open = picker(TaskListLoad::Ready, lists());
+        open.filter = "o".to_string();
+        let content = rendered(open, 80);
+        assert!(content.contains("Search: o"), "{content}");
+        assert!(content.contains("> Backlog"), "{content}");
+        assert!(content.contains("Revisão (current)"), "{content}");
+        assert!(!content.contains("> Revisão"), "{content}");
+        assert!(content.contains("type to filter"), "{content}");
+    }
+
+    #[test]
+    fn task_list_picker_render_shows_a_loading_line_while_loading() {
+        let content = rendered(picker(TaskListLoad::Loading, vec![]), 80);
+        assert!(content.contains("Loading task lists"), "{content}");
+    }
+
+    #[test]
+    fn task_list_picker_render_hint_names_only_escape_while_loading_or_failed() {
+        for load in [
+            TaskListLoad::Loading,
+            TaskListLoad::Failed("Could not read lists".into()),
+        ] {
+            let content = rendered(picker(load, vec![]), 80);
+            assert!(content.contains("Esc cancel"), "{content}");
+            assert!(!content.contains("type to filter"), "{content}");
+            assert!(!content.contains("Enter/Ctrl+S confirm"), "{content}");
+            assert!(!content.contains("↑/↓ move"), "{content}");
+        }
+    }
+
+    #[test]
+    fn task_list_picker_render_hint_names_only_escape_in_portuguese_while_loading() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("pt_BR");
+        let model = make_detail_model(DetailOverlay::TaskListPicker(picker(
+            TaskListLoad::Loading,
+            vec![],
+        )));
+        let content = buf_text(&render_via_view(&model, 80, 24));
+        set_language("en");
+        assert!(content.contains("Esc cancelar"), "{content}");
+        assert!(!content.contains("filtrar"), "{content}");
+        assert!(!content.contains("confirmar"), "{content}");
+    }
+
+    #[test]
+    fn task_list_picker_render_shows_the_empty_and_no_match_lines() {
+        let content = rendered(picker(TaskListLoad::Ready, vec![]), 80);
+        assert!(content.contains("No task lists"), "{content}");
+        let mut filtered = picker(TaskListLoad::Ready, lists());
+        filtered.filter = "zzz".to_string();
+        let content = rendered(filtered, 80);
+        assert!(content.contains("No matching task lists"), "{content}");
+        assert!(!content.contains("No task lists"), "{content}");
+    }
+
+    #[test]
+    fn task_list_picker_render_shows_the_failure_text() {
+        let content = rendered(
+            picker(TaskListLoad::Failed("Could not read lists".into()), vec![]),
+            80,
+        );
+        assert!(content.contains("Could not read lists"), "{content}");
+        let mut failed_write = picker(TaskListLoad::Ready, lists());
+        failed_write.error = Some("Failed to update task".into());
+        let content = rendered(failed_write, 80);
+        assert!(content.contains("Failed to update task"), "{content}");
+    }
+
+    #[test]
+    fn task_list_picker_render_keeps_a_thirty_character_name_and_the_hint_whole_at_80_columns() {
+        let name = "Lista com trinta caracteres ab".to_string();
+        assert_eq!(name.chars().count(), 30);
+        let mut open = picker(TaskListLoad::Ready, vec![(2, name.clone())]);
+        open.current_id = Some(2);
+        let content = rendered(open, 80);
+        assert!(
+            content.contains(&format!("> {name} (current)")),
+            "{content}"
+        );
+        assert!(
+            content.contains("↑/↓ move · type to filter · Enter/Ctrl+S confirm · Esc cancel"),
+            "{content}"
+        );
+    }
+
+    #[test]
+    fn task_list_picker_render_leaves_the_footer_to_the_modal() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let model = make_detail_model(DetailOverlay::TaskListPicker(picker(
+            TaskListLoad::Ready,
+            lists(),
+        )));
+        let hint = hint_for_screen(model.top().unwrap());
+        assert!(!hint.contains("type to filter"), "{hint}");
+        assert!(hint.contains("l list"), "{hint}");
+    }
+
+    #[test]
+    fn task_list_picker_render_detail_hint_names_the_key_in_english_and_portuguese() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        let model = make_detail_model(DetailOverlay::None);
+        set_language("en");
+        let english = hint_for_screen(model.top().unwrap());
+        set_language("pt_BR");
+        let portuguese = hint_for_screen(model.top().unwrap());
+        set_language("en");
+        assert!(english.contains("l list"), "{english}");
+        assert!(portuguese.contains("l lista"), "{portuguese}");
+    }
+
+    #[test]
+    fn task_list_picker_render_translates_its_lines_to_portuguese() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("pt_BR");
+        let model = make_detail_model(DetailOverlay::TaskListPicker(picker(
+            TaskListLoad::Loading,
+            vec![],
+        )));
+        let loading = buf_text(&render_via_view(&model, 80, 24));
+        let ready = make_detail_model(DetailOverlay::TaskListPicker(picker(
+            TaskListLoad::Ready,
+            lists(),
+        )));
+        let ready = buf_text(&render_via_view(&ready, 80, 24));
+        set_language("en");
+        assert!(
+            loading.contains("Carregando listas de tarefas"),
+            "{loading}"
+        );
+        assert!(ready.contains("Revisão (atual)"), "{ready}");
     }
 }
 

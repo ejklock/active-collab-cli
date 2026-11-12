@@ -194,6 +194,13 @@ pub enum Cmd {
         completion: Option<bool>,
         assignee_id: Option<i64>,
         estimate: Option<f64>,
+        task_list_id: Option<i64>,
+    },
+    /// Read the task lists of the open Detail task's project for the task-list picker.
+    LoadTaskLists {
+        instance: String,
+        project_id: i64,
+        task_id: i64,
     },
     /// Fetch and decode the image bytes for an opened image-viewer asset.
     /// Handled entirely by the shell (ADR 0065); the pure Model never sees bytes.
@@ -527,6 +534,7 @@ pub enum DetailOverlay {
         selected: usize,
         status: EditStatus,
     },
+    TaskListPicker(TaskListPicker),
     ConfirmDelete {
         comment_id: i64,
     },
@@ -534,6 +542,28 @@ pub enum DetailOverlay {
         asset: ImageAssetRef,
         status: ImageStatus,
     },
+}
+
+/// Whether the task-list picker has its lists yet.
+#[derive(Debug, Clone, PartialEq)]
+pub enum TaskListLoad {
+    Loading,
+    Failed(String),
+    Ready,
+}
+
+/// The task-list picker modal: the project's lists in server order, the task's
+/// current list, the typed filter, the highlighted row within the filtered lists,
+/// the write status, the lists read state and the last write error.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TaskListPicker {
+    pub candidates: Vec<(i64, String)>,
+    pub current_id: Option<i64>,
+    pub filter: String,
+    pub selected: usize,
+    pub status: EditStatus,
+    pub load: TaskListLoad,
+    pub error: Option<String>,
 }
 
 /// Borrowed view into an active `AssigneePicker` overlay: its full candidate list,
@@ -671,6 +701,41 @@ impl DetailOverlay {
 
     pub fn is_status_confirm(&self) -> bool {
         matches!(self, DetailOverlay::StatusConfirm { .. })
+    }
+
+    pub fn task_list_picker(&self) -> Option<&TaskListPicker> {
+        match self {
+            DetailOverlay::TaskListPicker(picker) => Some(picker),
+            _ => None,
+        }
+    }
+
+    fn task_list_picker_mut(&mut self) -> Option<&mut TaskListPicker> {
+        match self {
+            DetailOverlay::TaskListPicker(picker) => Some(picker),
+            _ => None,
+        }
+    }
+
+    /// The task-list picker's navigable state, available once its lists have loaded.
+    pub fn task_list_picker_view(&self) -> Option<AssigneePickerView<'_>> {
+        let picker = self.task_list_picker()?;
+        (picker.load == TaskListLoad::Ready).then_some((
+            picker.candidates.as_slice(),
+            picker.filter.as_str(),
+            picker.selected,
+            &picker.status,
+        ))
+    }
+
+    fn task_list_picker_view_mut(&mut self) -> Option<AssigneePickerViewMut<'_>> {
+        let picker = self.task_list_picker_mut()?;
+        (picker.load == TaskListLoad::Ready).then_some((
+            &mut picker.candidates,
+            &mut picker.filter,
+            &mut picker.selected,
+            &mut picker.status,
+        ))
     }
 
     pub fn is_assignee_picker(&self) -> bool {
@@ -1085,6 +1150,27 @@ pub enum Msg {
     AssigneePickerSubmit,
     /// Cancel the assignee-picker modal without submitting.
     AssigneePickerCancel,
+    /// Open the task-list picker on the current Detail screen and read the lists.
+    TaskListPickerOpen,
+    /// Move the task-list picker selection up by one row.
+    TaskListPickerUp,
+    /// Move the task-list picker selection down by one row.
+    TaskListPickerDown,
+    /// Append a printable character to the task-list picker filter.
+    TaskListPickerChar(char),
+    /// Remove the last character from the task-list picker filter.
+    TaskListPickerBackspace,
+    /// Move the task to the highlighted list.
+    TaskListPickerSubmit,
+    /// Close the task-list picker without a write.
+    TaskListPickerCancel,
+    /// The task lists read for one Detail task, or the failure text.
+    TaskListsLoaded {
+        instance: String,
+        project_id: i64,
+        task_id: i64,
+        lists: Result<Vec<(i64, String)>, String>,
+    },
     /// Move the comment-card focus cursor forward by one card (j / Down in Detail browse mode).
     FocusNextComment,
     /// Move the comment-card focus cursor backward by one card (k / Up in Detail browse mode).
@@ -1334,6 +1420,14 @@ pub fn update(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
         | Msg::AssigneePickerBackspace
         | Msg::AssigneePickerSubmit
         | Msg::AssigneePickerCancel
+        | Msg::TaskListPickerOpen
+        | Msg::TaskListPickerUp
+        | Msg::TaskListPickerDown
+        | Msg::TaskListPickerChar(_)
+        | Msg::TaskListPickerBackspace
+        | Msg::TaskListPickerSubmit
+        | Msg::TaskListPickerCancel
+        | Msg::TaskListsLoaded { .. }
         | Msg::TaskEditOk
         | Msg::TaskEditErr(_)) => update_task_edit(model, m),
         m @ (Msg::FocusNextComment
@@ -1525,7 +1619,7 @@ fn update_compose(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
         Msg::ComposeOpen => (handle_compose_open(model), vec![]),
         Msg::ComposeInput(input) => (handle_compose_input(model, input), vec![]),
         Msg::ComposeSubmit => handle_compose_submit(model),
-        Msg::ComposeCancel => (handle_compose_cancel(model), vec![]),
+        Msg::ComposeCancel => (close_detail_overlay(model), vec![]),
         Msg::CommentMutationOk => handle_comment_mutation_ok(model),
         Msg::CommentMutationErr(msg) => (handle_comment_mutation_err(model, msg), vec![]),
         Msg::AuthExpired => (handle_auth_expired(model), vec![]),
@@ -1540,7 +1634,7 @@ fn update_log_time(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
         Msg::LogTimeBackspace => (handle_log_time_backspace(model), vec![]),
         Msg::LogTimeToggleField => (handle_log_time_toggle_field(model), vec![]),
         Msg::LogTimeSubmit => handle_log_time_submit(model),
-        Msg::LogTimeCancel => (handle_log_time_cancel(model), vec![]),
+        Msg::LogTimeCancel => (close_detail_overlay(model), vec![]),
         Msg::TimeMutationOk => handle_time_mutation_ok(model),
         Msg::TimeMutationErr(msg) => (handle_time_mutation_err(model, msg), vec![]),
         _ => (model, vec![]),
@@ -1561,6 +1655,14 @@ fn update_task_edit(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
         | Msg::AssigneePickerBackspace
         | Msg::AssigneePickerSubmit
         | Msg::AssigneePickerCancel) => update_assignee_picker(model, m),
+        m @ (Msg::TaskListPickerOpen
+        | Msg::TaskListPickerUp
+        | Msg::TaskListPickerDown
+        | Msg::TaskListPickerChar(_)
+        | Msg::TaskListPickerBackspace
+        | Msg::TaskListPickerSubmit
+        | Msg::TaskListPickerCancel
+        | Msg::TaskListsLoaded { .. }) => update_task_list_picker(model, m),
         Msg::TaskEditOk => handle_task_edit_ok(model),
         Msg::TaskEditErr(msg) => (handle_task_edit_err(model, msg), vec![]),
         m => update_estimate(model, m),
@@ -1573,7 +1675,7 @@ fn update_estimate(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
         Msg::EstimateChar(c) => (handle_estimate_char(model, c), vec![]),
         Msg::EstimateBackspace => (handle_estimate_backspace(model), vec![]),
         Msg::EstimateSubmit => handle_estimate_submit(model),
-        Msg::EstimateCancel => (handle_estimate_cancel(model), vec![]),
+        Msg::EstimateCancel => (close_detail_overlay(model), vec![]),
         _ => (model, vec![]),
     }
 }
@@ -1583,7 +1685,7 @@ fn update_comment_focus(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
         Msg::FocusNextComment => (handle_focus_next(model), vec![]),
         Msg::FocusPrevComment => (handle_focus_prev(model), vec![]),
         Msg::ConfirmDeleteComment => handle_confirm_delete(model),
-        Msg::CancelDeleteComment => (handle_cancel_delete(model), vec![]),
+        Msg::CancelDeleteComment => (close_detail_overlay(model), vec![]),
         _ => (model, vec![]),
     }
 }
@@ -1592,7 +1694,7 @@ fn update_status_toggle(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
     match msg {
         Msg::StatusToggleOpen => (handle_status_toggle_open(model), vec![]),
         Msg::StatusToggleConfirm => handle_status_toggle_confirm(model),
-        Msg::StatusToggleCancel => (handle_status_toggle_cancel(model), vec![]),
+        Msg::StatusToggleCancel => (close_detail_overlay(model), vec![]),
         _ => (model, vec![]),
     }
 }
@@ -1600,12 +1702,34 @@ fn update_status_toggle(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
 fn update_assignee_picker(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
     match msg {
         Msg::AssigneePickerOpen => (handle_assignee_picker_open(model), vec![]),
-        Msg::AssigneePickerUp => (handle_assignee_picker_up(model), vec![]),
-        Msg::AssigneePickerDown => (handle_assignee_picker_down(model), vec![]),
-        Msg::AssigneePickerChar(c) => (handle_assignee_picker_char(model, c), vec![]),
-        Msg::AssigneePickerBackspace => (handle_assignee_picker_backspace(model), vec![]),
+        Msg::AssigneePickerUp => (handle_picker_up(model, ASSIGNEE_PICKER), vec![]),
+        Msg::AssigneePickerDown => (handle_picker_down(model, ASSIGNEE_PICKER), vec![]),
+        Msg::AssigneePickerChar(c) => (handle_picker_char(model, ASSIGNEE_PICKER, c), vec![]),
+        Msg::AssigneePickerBackspace => (handle_picker_backspace(model, ASSIGNEE_PICKER), vec![]),
         Msg::AssigneePickerSubmit => handle_assignee_picker_submit(model),
-        Msg::AssigneePickerCancel => (handle_assignee_picker_cancel(model), vec![]),
+        Msg::AssigneePickerCancel => (close_detail_overlay(model), vec![]),
+        _ => (model, vec![]),
+    }
+}
+
+fn update_task_list_picker(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
+    match msg {
+        Msg::TaskListPickerOpen => handle_task_list_picker_open(model),
+        Msg::TaskListPickerUp => (handle_picker_up(model, TASK_LIST_PICKER), vec![]),
+        Msg::TaskListPickerDown => (handle_picker_down(model, TASK_LIST_PICKER), vec![]),
+        Msg::TaskListPickerChar(c) => (handle_picker_char(model, TASK_LIST_PICKER, c), vec![]),
+        Msg::TaskListPickerBackspace => (handle_picker_backspace(model, TASK_LIST_PICKER), vec![]),
+        Msg::TaskListPickerSubmit => handle_task_list_picker_submit(model),
+        Msg::TaskListPickerCancel => (close_detail_overlay(model), vec![]),
+        Msg::TaskListsLoaded {
+            instance,
+            project_id,
+            task_id,
+            lists,
+        } => (
+            handle_task_lists_loaded(model, (&instance, project_id, task_id), lists),
+            vec![],
+        ),
         _ => (model, vec![]),
     }
 }
@@ -1851,7 +1975,7 @@ fn dispatch_confirm_modal_click(model: Model, column: u16, row: u16) -> (Model, 
         .cloned();
     match hit {
         Some(btn) if btn.is_confirm => handle_confirm_delete(model),
-        Some(_) => (handle_cancel_delete(model), vec![]),
+        Some(_) => (close_detail_overlay(model), vec![]),
         None => (model, vec![]),
     }
 }
@@ -2087,10 +2211,10 @@ fn handle_back(model: Model) -> Model {
     // When the delete-confirm modal is open, Esc cancels the delete (not Back).
     if let Some(Screen::Detail { overlay, .. }) = model.top() {
         if overlay.is_confirm() {
-            return handle_cancel_delete(model);
+            return close_detail_overlay(model);
         }
         if overlay.is_image_viewer() {
-            return handle_close_image_viewer(model);
+            return close_detail_overlay(model);
         }
     }
     let mut model = model;
@@ -2106,15 +2230,16 @@ fn handle_quit(mut model: Model) -> Model {
     // When the image viewer is open, q closes it instead of quitting the app.
     if let Some(Screen::Detail { overlay, .. }) = model.top() {
         if overlay.is_image_viewer() {
-            return handle_close_image_viewer(model);
+            return close_detail_overlay(model);
         }
     }
     model.should_quit = true;
     model
 }
 
-/// Set `overlay = None`, closing the image viewer (Esc/q).
-fn handle_close_image_viewer(mut model: Model) -> Model {
+/// Dismiss whatever overlay the Detail screen shows, without submitting (the image
+/// viewer's Esc/q, a picker's cancel).
+fn close_detail_overlay(mut model: Model) -> Model {
     if let Some(Screen::Detail {
         ref mut overlay,
         ref mut rendered_width,
@@ -2491,19 +2616,6 @@ fn extract_compose_submit_info(model: &Model) -> Option<(String, i64, i64, Compo
     }
 }
 
-fn handle_compose_cancel(mut model: Model) -> Model {
-    if let Some(Screen::Detail {
-        ref mut overlay,
-        ref mut rendered_width,
-        ..
-    }) = model.top_mut()
-    {
-        *overlay = DetailOverlay::None;
-        *rendered_width = usize::MAX;
-    }
-    model
-}
-
 /// Open the compose area pre-filled with the plain-text body of `comment_id`.
 ///
 /// No-op when the top screen is not Detail or the comment is not found. Sets
@@ -2592,20 +2704,6 @@ fn handle_confirm_delete(mut model: Model) -> (Model, Vec<Cmd>) {
             comment_id,
         }],
     )
-}
-
-/// Dismiss the confirm prompt without deleting.
-fn handle_cancel_delete(mut model: Model) -> Model {
-    if let Some(Screen::Detail {
-        ref mut overlay,
-        ref mut rendered_width,
-        ..
-    }) = model.top_mut()
-    {
-        *overlay = DetailOverlay::None;
-        *rendered_width = usize::MAX;
-    }
-    model
 }
 
 /// Clear the active overlay and emit `Cmd::LoadDetail { refresh: true }` for the
@@ -2734,20 +2832,6 @@ fn handle_log_time_toggle_field(mut model: Model) -> Model {
             };
             *rendered_width = usize::MAX;
         }
-    }
-    model
-}
-
-/// Dismiss the log-time modal without submitting.
-fn handle_log_time_cancel(mut model: Model) -> Model {
-    if let Some(Screen::Detail {
-        ref mut overlay,
-        ref mut rendered_width,
-        ..
-    }) = model.top_mut()
-    {
-        *overlay = DetailOverlay::None;
-        *rendered_width = usize::MAX;
     }
     model
 }
@@ -3009,20 +3093,6 @@ fn handle_estimate_backspace(mut model: Model) -> Model {
     model
 }
 
-/// Dismiss the estimate-edit modal without submitting.
-fn handle_estimate_cancel(mut model: Model) -> Model {
-    if let Some(Screen::Detail {
-        ref mut overlay,
-        ref mut rendered_width,
-        ..
-    }) = model.top_mut()
-    {
-        *overlay = DetailOverlay::None;
-        *rendered_width = usize::MAX;
-    }
-    model
-}
-
 /// Extract the fields needed to submit the estimate form, or None when the guard fails.
 ///
 /// Guard: overlay must be `EstimateEdit` and its status must be `Editing`.
@@ -3045,25 +3115,37 @@ fn extract_estimate_submit_info(model: &Model) -> Option<(String, i64, i64, Stri
     }
 }
 
-/// Set the active task-edit overlay's status to `Error(message)` — the estimate-edit
-/// form or the status-confirm modal, whichever is active. A no-op when neither is.
+/// Report a failed task write on whichever edit overlay is active: the estimate form,
+/// the status prompt or the assignee picker show the error status; the task-list picker
+/// returns to editing with the error text so another list can be tried. A no-op otherwise.
 fn set_task_edit_error(model: &mut Model, message: String) {
-    if let Some(Screen::Detail {
-        ref mut overlay,
-        ref mut rendered_width,
+    let Some(Screen::Detail {
+        overlay,
+        rendered_width,
         ..
     }) = model.top_mut()
-    {
-        if let Some(form) = overlay.estimate_edit_mut() {
+    else {
+        return;
+    };
+    let shown = match overlay {
+        DetailOverlay::EstimateEdit(form) => {
             form.status = EditStatus::Error(message);
-            *rendered_width = usize::MAX;
-        } else if let Some((_, status)) = overlay.status_confirm_mut() {
-            *status = EditStatus::Error(message);
-            *rendered_width = usize::MAX;
-        } else if let Some((_, _, _, status)) = overlay.assignee_picker_mut() {
-            *status = EditStatus::Error(message);
-            *rendered_width = usize::MAX;
+            true
         }
+        DetailOverlay::StatusConfirm { status, .. }
+        | DetailOverlay::AssigneePicker { status, .. } => {
+            *status = EditStatus::Error(message);
+            true
+        }
+        DetailOverlay::TaskListPicker(picker) => {
+            picker.status = EditStatus::Editing;
+            picker.error = Some(message);
+            true
+        }
+        _ => false,
+    };
+    if shown {
+        *rendered_width = usize::MAX;
     }
 }
 
@@ -3109,6 +3191,7 @@ fn handle_estimate_submit(mut model: Model) -> (Model, Vec<Cmd>) {
             completion: None,
             assignee_id: None,
             estimate: Some(estimate),
+            task_list_id: None,
         }],
     )
 }
@@ -3152,20 +3235,6 @@ fn handle_status_toggle_open(mut model: Model) -> Model {
             };
             *rendered_width = usize::MAX;
         }
-    }
-    model
-}
-
-/// Dismiss the status-confirm modal without submitting.
-fn handle_status_toggle_cancel(mut model: Model) -> Model {
-    if let Some(Screen::Detail {
-        ref mut overlay,
-        ref mut rendered_width,
-        ..
-    }) = model.top_mut()
-    {
-        *overlay = DetailOverlay::None;
-        *rendered_width = usize::MAX;
     }
     model
 }
@@ -3224,6 +3293,7 @@ fn handle_status_toggle_confirm(mut model: Model) -> (Model, Vec<Cmd>) {
             completion: Some(completed_target),
             assignee_id: None,
             estimate: None,
+            task_list_id: None,
         }],
     )
 }
@@ -3304,21 +3374,40 @@ fn handle_assignee_picker_open(mut model: Model) -> Model {
     model
 }
 
-/// Move the assignee-picker selection up by one row within the FILTERED candidate
-/// list, saturating at the top. No-op while not `Editing` or when no candidate
-/// matches the current filter.
-fn handle_assignee_picker_up(mut model: Model) -> Model {
+/// The accessors a picker overlay exposes so the assignee and task-list pickers
+/// share one navigation core. A view is `None` while the overlay is not open or,
+/// for the task-list picker, while its lists have not loaded.
+#[derive(Clone, Copy)]
+struct PickerKind {
+    view: for<'a> fn(&'a DetailOverlay) -> Option<AssigneePickerView<'a>>,
+    view_mut: for<'a> fn(&'a mut DetailOverlay) -> Option<AssigneePickerViewMut<'a>>,
+}
+
+const ASSIGNEE_PICKER: PickerKind = PickerKind {
+    view: DetailOverlay::assignee_picker,
+    view_mut: DetailOverlay::assignee_picker_mut,
+};
+
+const TASK_LIST_PICKER: PickerKind = PickerKind {
+    view: DetailOverlay::task_list_picker_view,
+    view_mut: DetailOverlay::task_list_picker_view_mut,
+};
+
+/// Run `edit` on a picker's navigable state and repaint when it reports a change.
+/// A no-op while the picker is not open or not yet loaded.
+fn edit_picker(
+    mut model: Model,
+    kind: PickerKind,
+    edit: impl FnOnce(AssigneePickerViewMut<'_>) -> bool,
+) -> Model {
     if let Some(Screen::Detail {
         ref mut overlay,
         ref mut rendered_width,
         ..
     }) = model.top_mut()
     {
-        if let Some((candidates, filter, selected, status)) = overlay.assignee_picker_mut() {
-            if *status == EditStatus::Editing
-                && !filter_assignee_candidates(candidates, filter).is_empty()
-            {
-                *selected = selected.saturating_sub(1);
+        if let Some(view) = (kind.view_mut)(overlay) {
+            if edit(view) {
                 *rendered_width = usize::MAX;
             }
         }
@@ -3326,89 +3415,67 @@ fn handle_assignee_picker_up(mut model: Model) -> Model {
     model
 }
 
-/// Move the assignee-picker selection down by one row within the FILTERED candidate
-/// list, saturating at the bottom. No-op while not `Editing` or when no candidate
-/// matches the current filter.
-fn handle_assignee_picker_down(mut model: Model) -> Model {
-    if let Some(Screen::Detail {
-        ref mut overlay,
-        ref mut rendered_width,
-        ..
-    }) = model.top_mut()
-    {
-        if let Some((candidates, filter, selected, status)) = overlay.assignee_picker_mut() {
-            let filtered_len = filter_assignee_candidates(candidates, filter).len();
-            if *status == EditStatus::Editing && filtered_len > 0 {
-                let max = filtered_len - 1;
-                *selected = (*selected + 1).min(max);
-                *rendered_width = usize::MAX;
-            }
+/// Move a picker's selection up by one row within the FILTERED candidate list,
+/// saturating at the top. No-op while not `Editing` or when no candidate matches
+/// the current filter.
+fn handle_picker_up(model: Model, kind: PickerKind) -> Model {
+    edit_picker(model, kind, |(candidates, filter, selected, status)| {
+        let movable = *status == EditStatus::Editing
+            && !filter_assignee_candidates(candidates, filter).is_empty();
+        if movable {
+            *selected = selected.saturating_sub(1);
         }
-    }
-    model
+        movable
+    })
 }
 
-/// Append `c` to the assignee-picker filter buffer while `Editing`, and reset the
+/// Move a picker's selection down by one row within the FILTERED candidate list,
+/// saturating at the bottom. No-op while not `Editing` or when no candidate
+/// matches the current filter.
+fn handle_picker_down(model: Model, kind: PickerKind) -> Model {
+    edit_picker(model, kind, |(candidates, filter, selected, status)| {
+        let filtered_len = filter_assignee_candidates(candidates, filter).len();
+        let movable = *status == EditStatus::Editing && filtered_len > 0;
+        if movable {
+            *selected = (*selected + 1).min(filtered_len - 1);
+        }
+        movable
+    })
+}
+
+/// Append `c` to a picker's filter buffer while `Editing`, and reset the
 /// highlighted row to the first match of the new filter.
-fn handle_assignee_picker_char(mut model: Model, c: char) -> Model {
-    if let Some(Screen::Detail {
-        ref mut overlay,
-        ref mut rendered_width,
-        ..
-    }) = model.top_mut()
-    {
-        if let Some((_, filter, selected, status)) = overlay.assignee_picker_mut() {
-            if *status == EditStatus::Editing {
-                filter.push(c);
-                *selected = 0;
-                *rendered_width = usize::MAX;
-            }
+fn handle_picker_char(model: Model, kind: PickerKind, c: char) -> Model {
+    edit_picker(model, kind, |(_, filter, selected, status)| {
+        let typing = *status == EditStatus::Editing;
+        if typing {
+            filter.push(c);
+            *selected = 0;
         }
-    }
-    model
+        typing
+    })
 }
 
-/// Remove the last character from the assignee-picker filter buffer while `Editing`,
-/// and reset the highlighted row to the first match of the new filter. No-op on an
+/// Remove the last character from a picker's filter buffer while `Editing`, and
+/// reset the highlighted row to the first match of the new filter. No-op on an
 /// already-empty filter.
-fn handle_assignee_picker_backspace(mut model: Model) -> Model {
-    if let Some(Screen::Detail {
-        ref mut overlay,
-        ref mut rendered_width,
-        ..
-    }) = model.top_mut()
-    {
-        if let Some((_, filter, selected, status)) = overlay.assignee_picker_mut() {
-            if *status == EditStatus::Editing && !filter.is_empty() {
-                filter.pop();
-                *selected = 0;
-                *rendered_width = usize::MAX;
-            }
+fn handle_picker_backspace(model: Model, kind: PickerKind) -> Model {
+    edit_picker(model, kind, |(_, filter, selected, status)| {
+        let erasing = *status == EditStatus::Editing && !filter.is_empty();
+        if erasing {
+            filter.pop();
+            *selected = 0;
         }
-    }
-    model
+        erasing
+    })
 }
 
-/// Dismiss the assignee-picker modal without submitting.
-fn handle_assignee_picker_cancel(mut model: Model) -> Model {
-    if let Some(Screen::Detail {
-        ref mut overlay,
-        ref mut rendered_width,
-        ..
-    }) = model.top_mut()
-    {
-        *overlay = DetailOverlay::None;
-        *rendered_width = usize::MAX;
-    }
-    model
-}
-
-/// Extract the fields needed to submit the assignee-picker's highlighted candidate,
-/// or None when the guard fails.
+/// Extract the fields needed to submit a picker's highlighted candidate, or None
+/// when the guard fails.
 ///
-/// Guard: overlay must be `AssigneePicker`, its status must be `Editing`, and the
-/// FILTERED candidate list must be non-empty.
-fn extract_assignee_picker_submit_info(model: &Model) -> Option<(String, i64, i64, i64)> {
+/// Guard: the picker must be open, its status must be `Editing`, and the FILTERED
+/// candidate list must be non-empty.
+fn picked_candidate(model: &Model, kind: PickerKind) -> Option<(String, i64, i64, i64)> {
     match model.top() {
         Some(Screen::Detail {
             instance,
@@ -3417,46 +3484,38 @@ fn extract_assignee_picker_submit_info(model: &Model) -> Option<(String, i64, i6
             overlay,
             ..
         }) => {
-            let (candidates, filter, selected, status) = overlay.assignee_picker()?;
+            let (candidates, filter, selected, status) = (kind.view)(overlay)?;
             if *status != EditStatus::Editing {
                 return None;
             }
             let filtered = filter_assignee_candidates(candidates, filter);
-            if filtered.is_empty() {
-                return None;
-            }
-            let (assignee_id, _) = filtered.get(selected)?;
-            Some((instance.clone(), *project_id, *task_id, *assignee_id))
+            let (picked_id, _) = filtered.get(selected)?;
+            Some((instance.clone(), *project_id, *task_id, *picked_id))
         }
         _ => None,
     }
+}
+
+/// Set a picker to `Submitting` once its highlighted candidate is sent.
+fn mark_picker_submitting(model: Model, kind: PickerKind) -> Model {
+    edit_picker(model, kind, |(_, _, _, status)| {
+        *status = EditStatus::Submitting;
+        true
+    })
 }
 
 /// Set the assignee-picker overlay to `Submitting` and emit `Cmd::SubmitTaskEdit`
 /// carrying `assignee_id: Some(the highlighted candidate id)` with `completion` and
 /// `estimate` both `None`. A no-op (no Cmd) when the overlay is absent, not `Editing`,
 /// or the candidate list is empty.
-fn handle_assignee_picker_submit(mut model: Model) -> (Model, Vec<Cmd>) {
+fn handle_assignee_picker_submit(model: Model) -> (Model, Vec<Cmd>) {
     let Some((instance, project_id, task_id, assignee_id)) =
-        extract_assignee_picker_submit_info(&model)
+        picked_candidate(&model, ASSIGNEE_PICKER)
     else {
         return (model, vec![]);
     };
-
-    if let Some(Screen::Detail {
-        ref mut overlay,
-        ref mut rendered_width,
-        ..
-    }) = model.top_mut()
-    {
-        if let Some((_, _, _, status)) = overlay.assignee_picker_mut() {
-            *status = EditStatus::Submitting;
-            *rendered_width = usize::MAX;
-        }
-    }
-
     (
-        model,
+        mark_picker_submitting(model, ASSIGNEE_PICKER),
         vec![Cmd::SubmitTaskEdit {
             instance,
             project_id,
@@ -3464,6 +3523,117 @@ fn handle_assignee_picker_submit(mut model: Model) -> (Model, Vec<Cmd>) {
             completion: None,
             assignee_id: Some(assignee_id),
             estimate: None,
+            task_list_id: None,
+        }],
+    )
+}
+
+/// Open the task-list picker on the Detail screen in its loading state and emit the
+/// read of the project's lists. A no-op off the Detail screen or while any overlay
+/// (including the picker itself) is already open.
+fn handle_task_list_picker_open(mut model: Model) -> (Model, Vec<Cmd>) {
+    let Some(Screen::Detail {
+        instance,
+        project_id,
+        task_id,
+        task,
+        overlay,
+        rendered_width,
+        ..
+    }) = model.top_mut()
+    else {
+        return (model, vec![]);
+    };
+    if !matches!(overlay, DetailOverlay::None) {
+        return (model, vec![]);
+    }
+    let cmd = Cmd::LoadTaskLists {
+        instance: instance.clone(),
+        project_id: *project_id,
+        task_id: *task_id,
+    };
+    *overlay = DetailOverlay::TaskListPicker(TaskListPicker {
+        candidates: vec![],
+        current_id: task.get("task_list_id").and_then(|v| v.as_i64()),
+        filter: String::new(),
+        selected: 0,
+        status: EditStatus::Editing,
+        load: TaskListLoad::Loading,
+        error: None,
+    });
+    *rendered_width = usize::MAX;
+    (model, vec![cmd])
+}
+
+/// Apply a task-lists read to the open picker when it still waits for the Detail
+/// task it was read for; any other result is stale and dropped.
+fn handle_task_lists_loaded(
+    mut model: Model,
+    (loaded_instance, loaded_project, loaded_task): (&str, i64, i64),
+    lists: Result<Vec<(i64, String)>, String>,
+) -> Model {
+    if let Some(Screen::Detail {
+        instance,
+        project_id,
+        task_id,
+        overlay,
+        rendered_width,
+        ..
+    }) = model.top_mut()
+    {
+        let same_task =
+            instance == loaded_instance && *project_id == loaded_project && *task_id == loaded_task;
+        let waiting = overlay
+            .task_list_picker_mut()
+            .filter(|picker| same_task && picker.load == TaskListLoad::Loading);
+        if let Some(picker) = waiting {
+            match lists {
+                Ok(candidates) => {
+                    picker.selected = assignee_candidate_index(&candidates, picker.current_id);
+                    picker.candidates = candidates;
+                    picker.load = TaskListLoad::Ready;
+                }
+                Err(message) => picker.load = TaskListLoad::Failed(message),
+            }
+            *rendered_width = usize::MAX;
+        }
+    }
+    model
+}
+
+/// Move the task to the highlighted list: set the picker to `Submitting` and emit
+/// `Cmd::SubmitTaskEdit` carrying only `task_list_id`. Choosing the task's current
+/// list closes the picker without a write.
+fn handle_task_list_picker_submit(model: Model) -> (Model, Vec<Cmd>) {
+    let Some((instance, project_id, task_id, list_id)) = picked_candidate(&model, TASK_LIST_PICKER)
+    else {
+        return (model, vec![]);
+    };
+    let current_id = match model.top() {
+        Some(Screen::Detail { overlay, .. }) => {
+            overlay.task_list_picker().and_then(|p| p.current_id)
+        }
+        _ => None,
+    };
+    if current_id == Some(list_id) {
+        return (close_detail_overlay(model), vec![]);
+    }
+    let mut model = mark_picker_submitting(model, TASK_LIST_PICKER);
+    if let Some(Screen::Detail { overlay, .. }) = model.top_mut() {
+        if let Some(picker) = overlay.task_list_picker_mut() {
+            picker.error = None;
+        }
+    }
+    (
+        model,
+        vec![Cmd::SubmitTaskEdit {
+            instance,
+            project_id,
+            task_id,
+            completion: None,
+            assignee_id: None,
+            estimate: None,
+            task_list_id: Some(list_id),
         }],
     )
 }
