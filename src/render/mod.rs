@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::io::Write;
 use std::sync::OnceLock;
 
+pub mod buckets;
 mod cli_render;
 mod detail_render;
 mod text_measure;
@@ -420,8 +421,14 @@ pub struct MineTableRow {
 
 /// Parity: render.py render_mine_table.
 ///
-/// Returns the formatted table as a String (header + separator + rows).
+/// Returns the formatted table as a String (header + separator, then each
+/// non-empty due bucket's header line followed by its rows).
 pub fn render_mine_table(rows: &[MineTableRow]) -> String {
+    render_mine_table_on(rows, chrono::Local::now().date_naive())
+}
+
+/// `render_mine_table` with an explicit "today" for the due-date buckets.
+pub fn render_mine_table_on(rows: &[MineTableRow], today: chrono::NaiveDate) -> String {
     let header = format!(
         "{:<15} {:<10} {:<8} {:<10} {:<8} {:<8} {:<8} {}",
         t("INSTANCE"),
@@ -435,18 +442,34 @@ pub fn render_mine_table(rows: &[MineTableRow]) -> String {
     );
     let separator = "-".repeat(80);
     let mut lines = vec![header, separator];
-    for row in rows {
+    for group in buckets::group_by_bucket(rows, today) {
+        if group.items.is_empty() {
+            continue;
+        }
         lines.push(format!(
-            "{:<15} {:<10} {:<8} {:<10} {:<8} {:<8} {:<8} {}",
-            row.instance,
-            row.project_id,
-            row.task_number,
-            row.task_id,
-            fmt_hours_or_dash(row.estimate),
-            fmt_hours_or_dash(row.logged_week),
-            fmt_hours_or_dash(row.logged_total),
-            row.name
+            "{} ({}) · {} {} · {} {} · {} {}",
+            group.bucket.label(),
+            group.items.len(),
+            t("EST"),
+            fmt_hours_or_dash(group.sums.estimate),
+            t("WEEK"),
+            fmt_hours_or_dash(group.sums.logged_week),
+            t("TOTAL"),
+            fmt_hours_or_dash(group.sums.logged_total),
         ));
+        for row in group.items {
+            lines.push(format!(
+                "{:<15} {:<10} {:<8} {:<10} {:<8} {:<8} {:<8} {}",
+                row.instance,
+                row.project_id,
+                row.task_number,
+                row.task_id,
+                fmt_hours_or_dash(row.estimate),
+                fmt_hours_or_dash(row.logged_week),
+                fmt_hours_or_dash(row.logged_total),
+                row.name
+            ));
+        }
     }
     crate::sanitize::strip_control_chars(&lines.join("\n"))
 }

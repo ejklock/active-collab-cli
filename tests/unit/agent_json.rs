@@ -800,5 +800,107 @@ fn mine_json_keeps_the_existing_task_keys() {
     assert_eq!(task["task_number"], 1);
     assert_eq!(task["task_id"], 10);
     assert_eq!(task["name"], "A");
-    assert_eq!(task.as_object().unwrap().len(), 10);
+    assert_eq!(task.as_object().unwrap().len(), 11);
+}
+
+fn bucket_today() -> chrono::NaiveDate {
+    chrono::NaiveDate::from_ymd_opt(2026, 11, 11).unwrap()
+}
+
+#[test]
+fn mine_json_buckets_of_no_rows_are_five_empty_buckets_in_order() {
+    let obj = mine_object_on(&[], bucket_today());
+    let buckets = obj["buckets"].as_array().unwrap();
+    let keys: Vec<&str> = buckets.iter().map(|b| b["key"].as_str().unwrap()).collect();
+    assert_eq!(keys, ["overdue", "today", "this_week", "later", "none"]);
+    for bucket in buckets {
+        assert_eq!(bucket["count"], 0);
+        assert!(bucket["estimate_hours"].is_null());
+        assert_eq!(bucket["logged_week_hours"], "0");
+        assert_eq!(bucket["logged_total_hours"], "0");
+    }
+}
+
+#[test]
+fn mine_json_buckets_carry_counts_and_hours_per_bucket() {
+    let rows = [
+        mine_row_with_hours(Some(2.0), None, Some(3.0), Some("2026-11-01")),
+        mine_row_with_hours(Some(1.5), Some(1.0), Some(0.5), Some("2026-11-02")),
+    ];
+    let obj = mine_object_on(&rows, bucket_today());
+    let overdue = &obj["buckets"][0];
+    assert_eq!(overdue["count"], 2);
+    assert_eq!(overdue["estimate_hours"], "3.5");
+    assert!(overdue["logged_week_hours"].is_null());
+    assert_eq!(overdue["logged_total_hours"], "3.5");
+    assert_eq!(obj["buckets"][1]["count"], 0);
+}
+
+#[test]
+fn mine_json_buckets_tag_each_task_and_keep_the_input_order() {
+    let rows = [
+        mine_row_with_hours(None, None, None, Some("2026-12-30")),
+        mine_row_with_hours(None, None, None, Some("2026-11-11")),
+        mine_row_with_hours(None, None, None, None),
+        mine_row_with_hours(None, None, None, Some("2026-11-12")),
+    ];
+    let obj = mine_object_on(&rows, bucket_today());
+    let tagged: Vec<&str> = obj["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["due_bucket"].as_str().unwrap())
+        .collect();
+    assert_eq!(tagged, ["later", "today", "none", "this_week"]);
+    let dues: Vec<&Value> = obj["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| &t["due_on"])
+        .collect();
+    assert_eq!(dues[0], "2026-12-30");
+    assert_eq!(dues[1], "2026-11-11");
+    assert_eq!(obj["count"], 4);
+}
+
+#[test]
+fn mine_json_buckets_add_only_the_buckets_key_and_the_due_bucket_key() {
+    let obj = mine_object_on(
+        &[mine_row_with_hours(None, None, None, None)],
+        bucket_today(),
+    );
+    let mut top: Vec<&String> = obj.as_object().unwrap().keys().collect();
+    top.sort();
+    assert_eq!(top, ["buckets", "count", "tasks"]);
+    let mut task: Vec<&String> = obj["tasks"][0].as_object().unwrap().keys().collect();
+    task.sort();
+    assert_eq!(
+        task,
+        [
+            "due_bucket",
+            "due_on",
+            "estimate_hours",
+            "instance",
+            "logged_total_hours",
+            "logged_week_hours",
+            "name",
+            "project_id",
+            "ref",
+            "task_id",
+            "task_number"
+        ]
+    );
+    let first = &obj["buckets"][0];
+    let mut bucket_keys: Vec<&String> = first.as_object().unwrap().keys().collect();
+    bucket_keys.sort();
+    assert_eq!(
+        bucket_keys,
+        [
+            "count",
+            "estimate_hours",
+            "key",
+            "logged_total_hours",
+            "logged_week_hours"
+        ]
+    );
 }
