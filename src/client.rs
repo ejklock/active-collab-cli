@@ -324,7 +324,8 @@ impl ActiveCollabClient {
     }
 
     /// Fetch open tasks assigned to this user. Returns empty on missing user_id
-    /// or non-200 response. Excludes is_completed and is_trashed tasks.
+    /// or non-200 response. Excludes is_completed and is_trashed tasks, and
+    /// entries without an integer id or project_id.
     pub async fn fetch_open_tasks(&self) -> Result<Vec<MineTask>> {
         let user_id = match self.instance.user_id {
             Some(uid) if uid != 0 => uid,
@@ -361,7 +362,7 @@ impl ActiveCollabClient {
                         .and_then(|v| v.as_bool())
                         .unwrap_or(false)
             })
-            .map(|t| MineTask::from_api(t, &self.instance.name))
+            .filter_map(|t| MineTask::from_api(t, &self.instance.name))
             .collect();
         Ok(tasks)
     }

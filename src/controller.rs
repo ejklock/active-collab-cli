@@ -172,7 +172,7 @@ fn build_groups(
     let mut groups: HashMap<(String, i64), ProjectGroup> = HashMap::new();
 
     for (task, instance_name) in tasks {
-        let pid = task.project_id.unwrap_or(0);
+        let pid = task.project_id;
         let project_name = project_names
             .get(&(instance_name.clone(), pid))
             .cloned()
