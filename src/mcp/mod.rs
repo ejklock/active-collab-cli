@@ -1,6 +1,7 @@
 //! MCP server over stdio. Two tools, `ac_read` and `ac_write`, select a
 //! command core by `operation` and return the core's `--json` output, so the
-//! agent contract stays the one in `agent_json`. While the server runs, stdout
+//! agent contract stays the one in `agent_json`; a third, `ac_download_attachments`,
+//! saves a task's attachments to disk. While the server runs, stdout
 //! belongs to the protocol: every core writes to in-memory buffers.
 
 use crate::commands::{
@@ -66,6 +67,22 @@ impl AcServer {
         let period = operation.report_period()?;
         run_isolated(move || run_write(operation, period)).await
     }
+
+    #[tool(
+        description = "Download the attachments and inline images of one task into a local \
+                       directory and return the task as `ac get --json` prints it, with \
+                       `downloaded_attachments` listing each file's path or error. Writes \
+                       files on the server's machine; it changes nothing in ActiveCollab.",
+        input_schema = input_schema::<DownloadArguments>(),
+        annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = true)
+    )]
+    async fn ac_download_attachments(
+        &self,
+        arguments: JsonObject,
+    ) -> Result<CallToolResult, McpError> {
+        let arguments: DownloadArguments = parse_operation(arguments)?;
+        run_isolated(move || run_download(arguments)).await
+    }
 }
 
 /// The tool's input schema: the operation union with its root as an object.
@@ -86,7 +103,7 @@ fn parse_operation<T: DeserializeOwned>(arguments: JsonObject) -> Result<T, McpE
 /// `instance` lists every configured instance; `get` and `current` need
 /// `instance` only when several instances are configured.
 #[derive(Deserialize, JsonSchema)]
-#[serde(tag = "operation", rename_all = "snake_case")]
+#[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
 #[schemars(extend("type" = "object"))]
 enum ReadOperation {
     /// Fetch one task with its comments.
@@ -99,10 +116,6 @@ enum ReadOperation {
         /// Ignore the cache and re-fetch.
         #[serde(default)]
         refresh: bool,
-        #[serde(default)]
-        download_attachments: bool,
-        /// Destination directory for `download_attachments`.
-        attachments_dir: Option<String>,
         instance: Option<String>,
     },
     /// Fetch the task of a git branch named like feature/PROJECT_ID-TASK_ID.
@@ -113,6 +126,20 @@ enum ReadOperation {
     },
     /// List open tasks assigned to you, across instances unless one is named.
     Mine { instance: Option<String> },
+}
+
+/// Download the attachments and inline images of one task.
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct DownloadArguments {
+    /// Task URL or PROJECT_ID/TASK_ID.
+    #[serde(rename = "ref")]
+    task_ref: String,
+    /// Destination directory; defaults to a per-task directory under the OS
+    /// temp directory.
+    attachments_dir: Option<String>,
+    /// Needed only when several instances are configured.
+    instance: Option<String>,
 }
 
 /// `comment`, `log_time` and `set_task` act on one task; `time_report` writes a
@@ -290,6 +317,34 @@ fn json_flags() -> DisplayFlags {
     }
 }
 
+async fn run_get(task_ref: &str, instance: Option<&str>, flags: &DisplayFlags) -> CoreRun {
+    let mut run = CoreRun::default();
+    let Some(ctx) = open_instance(instance, &mut run) else {
+        return run;
+    };
+    let cache = TaskCache::new(ctx.store.conn());
+    run.code = get_core(
+        task_ref,
+        &ctx.instance,
+        &cache,
+        &ctx.client,
+        flags,
+        &mut run.out,
+        &mut run.err,
+    )
+    .await;
+    run
+}
+
+async fn run_download(arguments: DownloadArguments) -> CoreRun {
+    let flags = DisplayFlags {
+        download_attachments: true,
+        attachments_dir: arguments.attachments_dir,
+        ..json_flags()
+    };
+    run_get(&arguments.task_ref, arguments.instance.as_deref(), &flags).await
+}
+
 async fn run_read(operation: ReadOperation) -> CoreRun {
     let mut run = CoreRun::default();
     match operation {
@@ -297,31 +352,14 @@ async fn run_read(operation: ReadOperation) -> CoreRun {
             task_ref,
             no_comments,
             refresh,
-            download_attachments,
-            attachments_dir,
             instance,
         } => {
-            let Some(ctx) = open_instance(instance.as_deref(), &mut run) else {
-                return run;
-            };
-            let cache = TaskCache::new(ctx.store.conn());
             let flags = DisplayFlags {
                 refresh,
                 no_comments,
-                download_attachments,
-                attachments_dir,
                 ..json_flags()
             };
-            run.code = get_core(
-                &task_ref,
-                &ctx.instance,
-                &cache,
-                &ctx.client,
-                &flags,
-                &mut run.out,
-                &mut run.err,
-            )
-            .await;
+            return run_get(&task_ref, instance.as_deref(), &flags).await;
         }
         ReadOperation::Current { branch, instance } => {
             let Some(ctx) = open_instance(instance.as_deref(), &mut run) else {
