@@ -31,6 +31,8 @@ TUI/UX work (V/R/ARCH slices), tracing to
 * [0075 — Group ac mine by due date: overdue, today, this week, later, no due date](0075-group-ac-mine-by-due-date-overdue-today-this-week-later-no-due-date.md) - open
 * [0076 — Download comment attachments in the CLI and from a TUI key](0076-download-comment-attachments-in-the-cli-and-from-a-tui-key.md) - open
 * [0077 — Move a task between task lists from CLI, TUI and MCP](0077-move-a-task-between-task-lists-from-cli-tui-and-mcp.md) - open
+* [0078 — Skip open-task entries without an id or project id at the parse boundary](0078-skip-open-task-entries-without-an-id-or-project-id-at-the-parse-boundary.md) - open
+* [0079 — Paint the ac mine TUI rows before the hours requests finish](0079-paint-the-ac-mine-tui-rows-before-the-hours-requests-finish.md) - open
 
 ## Closed
 
