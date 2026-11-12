@@ -2,7 +2,7 @@
 type: Issue
 title: Download comment attachments in the CLI and from a TUI key
 description: Comment attachments join the downloadable and listed assets, and a TUI key D saves a task's attachments to ~/Downloads/ac-attachments.
-status: open
+status: in-progress
 labels: [cli, tui, attachments, agent, slice]
 blocked_by: [0073]
 timestamp: 2026-11-11T21:40:56Z
@@ -31,6 +31,9 @@ Excluded: choosing the TUI destination, downloading a single asset from the TUI,
 - CLI plus a TUI key, as the owner chose (over the CLI only).
 - The TUI writes to `~/Downloads/ac-attachments/<project_id>-<task_id>/`, as the owner chose; the CLI keeps its temp-dir default.
 - The download runs off the update core; the core receives its result as a `Msg`.
+- Comment attachments come from each comment's own `attachments` array through the existing `assets_from_attachments`, after the task's own attachments, deduplicated by URL in first-seen order as today.
+- The pure core builds the asset set with `controller::downloadable_assets(task, comments)` from the open Detail screen and emits one `Cmd` carrying it; the shell resolves the home directory and runs `download_task_attachments` (ADR 0066 safety unchanged). `update` sits at its complexity ceiling, so the new messages join the existing image-viewer family as one asset-effects family instead of a new arm.
+- The outcome lives on the Detail screen and shows in its footer status row, below an auth error and above the copied note: downloading, "Downloaded N of M attachment(s) to <dir>", or the failure. `D` while a download runs does nothing; a task with no downloadable asset shows a "no attachments" note and emits no `Cmd`; no home directory is a failure, never a fallback path.
 
 ### Acceptance
 
@@ -46,3 +49,8 @@ Excluded: choosing the TUI destination, downloading a single asset from the TUI,
 - `docker compose run --rm dev cargo clippy --all-targets -- -D warnings`
 - `docker compose run --rm dev cargo fmt --check`
 - `docker compose run --rm dev cargo test --test comment_policy`
+
+### Plan
+
+- S1: comment attachments join `downloadable_assets` and `extract_assets` (so `ac get --download-attachments`, the TUI asset panel and the MCP `ac_download_attachments` see them) | files: src/controller.rs, tests/unit/controller.rs, tests/unit/commands.rs, .claude/skills/active-collab/SKILL.md | after: none
+- S2: `D` in the TUI detail downloads the open task's downloadable assets to `~/Downloads/ac-attachments/<project_id>-<task_id>/` and the footer status row shows the outcome | files: src/tui/model.rs, src/tui/events.rs, src/tui/mod.rs, src/tui/footer.rs, locales/pt_BR.json, tests/unit/model.rs, tests/unit/tui_render.rs, .claude/skills/active-collab/SKILL.md, docs/architecture.md | after: S1 (both edit SKILL.md)

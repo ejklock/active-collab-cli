@@ -1449,6 +1449,92 @@ async fn do_get_task_json_mode_includes_downloaded_attachments_when_flag_set() {
     assert!(downloaded[0]["error"].is_null());
 }
 
+async fn get_task_json_with_comment_attachment(
+    comment_status: u16,
+) -> (serde_json::Value, TempDir, String) {
+    let server = MockServer::start().await;
+    let task_url = format!("{}/task-note.txt", server.uri());
+    let comment_url = format!("{}/comment-note.txt", server.uri());
+    Mock::given(method("GET"))
+        .and(path("/api/v1/projects/5/tasks/10"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "single": task_with_attachment(10, "Attachment task", &task_url),
+            "tracked_time": 0,
+            "comments": [{
+                "id": 1,
+                "body": "see file",
+                "created_by_id": 1,
+                "created_on": 1700000000,
+                "attachments": [{
+                    "name": "comment-note.txt",
+                    "download_url": comment_url,
+                    "mime_type": "text/plain",
+                    "size": 7
+                }]
+            }]
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/task-note.txt"))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(b"task-bytes".to_vec()))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/comment-note.txt"))
+        .respond_with(
+            ResponseTemplate::new(comment_status).set_body_bytes(b"comment-bytes".to_vec()),
+        )
+        .mount(&server)
+        .await;
+
+    let (_dir, store) = make_store();
+    let cache = TaskCache::new(store.conn());
+    let inst = make_inst(&server.uri());
+    let client = ActiveCollabClient::new(inst.clone(), make_http());
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    let dest = TempDir::new().unwrap();
+    let flags = DisplayFlags {
+        json: true,
+        download_attachments: true,
+        attachments_dir: Some(dest.path().to_string_lossy().to_string()),
+        ..default_flags()
+    };
+
+    let code = do_get_task(&inst, &cache, &client, 5, 10, &flags, &mut out, &mut err).await;
+    assert_eq!(code, 0);
+    let obj: serde_json::Value = serde_json::from_str(output_str(&out).trim_end()).unwrap();
+    (obj, dest, comment_url)
+}
+
+#[tokio::test]
+async fn comment_attachments_are_downloaded_next_to_task_attachments() {
+    let (obj, dest, comment_url) = get_task_json_with_comment_attachment(200).await;
+    let downloaded = obj["downloaded_attachments"].as_array().unwrap();
+    assert_eq!(downloaded.len(), 2, "{downloaded:?}");
+    assert_eq!(downloaded[0]["name"], "note.txt");
+    assert_eq!(downloaded[1]["url"], comment_url);
+    let expected = [b"task-bytes".to_vec(), b"comment-bytes".to_vec()];
+    for (entry, bytes) in downloaded.iter().zip(expected) {
+        let file = std::path::PathBuf::from(entry["path"].as_str().unwrap());
+        assert!(file.starts_with(dest.path()), "{file:?}");
+        assert_eq!(std::fs::read(&file).unwrap(), bytes);
+    }
+}
+
+#[tokio::test]
+async fn comment_attachments_download_failure_keeps_task_attachment() {
+    let (obj, dest, _) = get_task_json_with_comment_attachment(404).await;
+    let downloaded = obj["downloaded_attachments"].as_array().unwrap();
+    assert_eq!(downloaded.len(), 2, "{downloaded:?}");
+    let task_file = std::path::PathBuf::from(downloaded[0]["path"].as_str().unwrap());
+    assert!(task_file.starts_with(dest.path()));
+    assert_eq!(std::fs::read(&task_file).unwrap(), b"task-bytes");
+    assert!(downloaded[1]["path"].is_null(), "{downloaded:?}");
+    assert!(downloaded[1]["error"].as_str().is_some(), "{downloaded:?}");
+}
+
 #[tokio::test]
 async fn do_get_task_json_mode_omits_downloaded_attachments_when_flag_absent() {
     let server = MockServer::start().await;

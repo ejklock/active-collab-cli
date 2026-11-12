@@ -98,7 +98,7 @@ ac get 665/75159 --json        # → the full task object for that ref
 | `--no-comments` | omit the `comments` array (emits `[]`) | `get`, `current` |
 | `--refresh` | ignore the cache and re-fetch | `get`, `current` |
 | `--instance <name>` | limit to one configured instance | `mine`, `browse`, `get`, `current` |
-| `--download-attachments` | fetch every task attachment + inline image to a local directory | `get`, `current` |
+| `--download-attachments` | fetch every task attachment, comment attachment and inline image to a local directory | `get`, `current` |
 | `--attachments-dir <DIR>` | override the download destination (default: a per-task path under the OS temp dir) | `get`, `current` |
 
 The `get`/`current` JSON path is **cache-aware** and honours `--refresh` and
@@ -107,7 +107,7 @@ The `get`/`current` JSON path is **cache-aware** and honours `--refresh` and
 ### Downloading attachments for local analysis
 
 `--download-attachments` fetches every downloadable task asset (real file
-attachments plus inline `<img>` sources — never arbitrary body hyperlinks) over
+attachments of the task and of its comments, plus inline `<img>` sources — never arbitrary body hyperlinks) over
 the CLI's own authenticated seam and writes each one to disk, so an agent can
 `Read` the file directly instead of only seeing a remote URL:
 
@@ -181,7 +181,7 @@ every other operation needs `instance` only when several instances are configure
 |---|---|---|
 | `ac_read` | read-only | `get` (`ref`, `no_comments`, `refresh`) · `current` (optional `branch`, else the git branch of the server's working directory) · `mine` |
 | `ac_write` | destructive | `comment` (`ref`, `body`, `html`) · `log_time` (`ref`, `hours`, `date`, `summary`, `job_type`) · `set_task` (`ref`, `status`, `assignee`, `estimate`) · `time_report` (`period` or `start` + `end`, `format`) |
-| `ac_download_attachments` | writes files, idempotent | `ref`, `attachments_dir` (default: the per-task temp path), `instance`; no `operation` field. Returns what `ac get --download-attachments --json` prints. `ac_read` `get` does not download. |
+| `ac_download_attachments` | writes files, idempotent | `ref`, `attachments_dir` (default: the per-task temp path), `instance`; no `operation` field. Fetches the attachments of the task and of its comments, plus inline images. Returns what `ac get --download-attachments --json` prints. `ac_read` `get` does not download. |
 
 `time_report` has no JSON form: it returns the human line and writes the file in
 the server's working directory. On `ac_read` and `ac_download_attachments`, an

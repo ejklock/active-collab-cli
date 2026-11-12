@@ -360,18 +360,25 @@ pub fn extract_assets(task: &Value, comments: &[Value]) -> Vec<Asset> {
         }
     }
 
-    if let Some(attachments) = task.get("attachments") {
-        for asset in assets_from_attachments(attachments) {
-            add(asset);
-        }
+    for asset in attachment_assets(task, comments) {
+        add(asset);
     }
 
     result
 }
 
+/// Attachment entries of the task, then of each comment in comment order.
+fn attachment_assets(task: &Value, comments: &[Value]) -> Vec<Asset> {
+    std::iter::once(task)
+        .chain(comments)
+        .filter_map(|source| source.get("attachments"))
+        .flat_map(assets_from_attachments)
+        .collect()
+}
+
 /// Extract the narrower set of assets worth downloading as files: real
-/// `task.attachments` entries plus inline `<img src>` sources from the task
-/// body and comments. Never includes anchor-hyperlink assets — a comment
+/// `task.attachments` and comment `attachments` entries plus inline
+/// `<img src>` sources from the task body and comments. Never includes anchor-hyperlink assets — a comment
 /// author's link is not necessarily a file ActiveCollab is hosting (ADR 0066).
 ///
 /// Deduplicates by URL, preserving first-seen order.
@@ -397,10 +404,8 @@ pub fn downloadable_assets(task: &Value, comments: &[Value]) -> Vec<Asset> {
         }
     }
 
-    if let Some(attachments) = task.get("attachments") {
-        for asset in assets_from_attachments(attachments) {
-            add(asset);
-        }
+    for asset in attachment_assets(task, comments) {
+        add(asset);
     }
 
     result

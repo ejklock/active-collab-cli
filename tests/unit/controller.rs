@@ -2414,3 +2414,127 @@ async fn download_task_attachments_dest_dir_creation_failure_errors_every_asset(
         );
     }
 }
+
+fn urls_of(assets: &[Asset]) -> Vec<&str> {
+    assets.iter().map(|a| a.url.as_str()).collect()
+}
+
+#[test]
+fn comment_attachments_follow_task_attachments_in_comment_order() {
+    let task = serde_json::json!({
+        "id": 1,
+        "attachments": [{ "name": "task.pdf", "url": "https://example.com/task.pdf" }]
+    });
+    let comments = vec![
+        serde_json::json!({ "attachments": [
+            { "name": "a.png", "download_url": "https://example.com/a.png" },
+            { "name": "b.png", "download_url": "https://example.com/b.png" }
+        ]}),
+        serde_json::json!({ "attachments": [
+            { "name": "c.png", "download_url": "https://example.com/c.png" }
+        ]}),
+    ];
+    let expected = vec![
+        "https://example.com/task.pdf",
+        "https://example.com/a.png",
+        "https://example.com/b.png",
+        "https://example.com/c.png",
+    ];
+    assert_eq!(urls_of(&downloadable_assets(&task, &comments)), expected);
+    assert_eq!(urls_of(&extract_assets(&task, &comments)), expected);
+}
+
+#[test]
+fn comment_attachments_dedup_against_task_comments_and_images() {
+    let task = serde_json::json!({
+        "id": 1,
+        "attachments": [{ "name": "task-name.pdf", "url": "https://example.com/shared.pdf" }]
+    });
+    let comments = vec![
+        serde_json::json!({
+            "body": r#"<img src="https://example.com/inline.png">"#,
+            "attachments": [
+                { "name": "comment-name.pdf", "download_url": "https://example.com/shared.pdf" },
+                { "name": "inline-copy.png", "download_url": "https://example.com/inline.png" },
+                { "name": "twice.zip", "download_url": "https://example.com/twice.zip" }
+            ]
+        }),
+        serde_json::json!({ "attachments": [
+            { "name": "twice-again.zip", "download_url": "https://example.com/twice.zip" }
+        ]}),
+    ];
+    for assets in [
+        downloadable_assets(&task, &comments),
+        extract_assets(&task, &comments),
+    ] {
+        assert_eq!(
+            urls_of(&assets),
+            vec![
+                "https://example.com/inline.png",
+                "https://example.com/shared.pdf",
+                "https://example.com/twice.zip",
+            ]
+        );
+        let shared = assets
+            .iter()
+            .find(|a| a.url == "https://example.com/shared.pdf")
+            .unwrap();
+        assert_eq!(shared.name, "task-name.pdf");
+    }
+}
+
+#[test]
+fn comment_attachments_skip_entries_without_url_and_name_falls_back_to_basename() {
+    let task = serde_json::json!({ "id": 1 });
+    let comments = vec![serde_json::json!({ "attachments": [
+        { "name": "no-url.txt" },
+        { "download_url": "https://example.com/files/unnamed.bin" },
+        { "name": "kept.txt", "url": "https://example.com/kept.txt" }
+    ]})];
+    for assets in [
+        downloadable_assets(&task, &comments),
+        extract_assets(&task, &comments),
+    ] {
+        let pairs: Vec<(&str, &str)> = assets
+            .iter()
+            .map(|a| (a.name.as_str(), a.url.as_str()))
+            .collect();
+        assert_eq!(
+            pairs,
+            vec![
+                ("unnamed.bin", "https://example.com/files/unnamed.bin"),
+                ("kept.txt", "https://example.com/kept.txt"),
+            ]
+        );
+    }
+}
+
+#[test]
+fn comment_attachments_absent_null_or_non_array_yield_nothing() {
+    let task = serde_json::json!({ "id": 1 });
+    let comments = vec![
+        serde_json::json!({ "body": "" }),
+        serde_json::json!({ "attachments": null }),
+        serde_json::json!({ "attachments": "oops" }),
+        serde_json::json!({ "attachments": { "url": "https://example.com/x" } }),
+    ];
+    assert!(downloadable_assets(&task, &comments).is_empty());
+    assert!(extract_assets(&task, &comments).is_empty());
+}
+
+#[test]
+fn comment_attachments_with_anchor_only_body_split_by_function() {
+    let task = serde_json::json!({ "id": 1 });
+    let comments = vec![serde_json::json!({
+        "body": r#"<a href="https://example.com/doc">a doc link</a>"#,
+        "attachments": [{ "name": "f.txt", "download_url": "https://example.com/f.txt" }]
+    })];
+    assert_eq!(
+        urls_of(&downloadable_assets(&task, &comments)),
+        vec!["https://example.com/f.txt"]
+    );
+    assert_eq!(
+        urls_of(&extract_assets(&task, &comments)),
+        vec!["https://example.com/doc", "https://example.com/f.txt"]
+    );
+}
