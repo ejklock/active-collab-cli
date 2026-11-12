@@ -3,9 +3,12 @@ type: ADR
 title: ac mcp serves MCP over stdio as an adapter over the command cores
 description: An ac mcp subcommand serves MCP over stdio with rmcp through two tools grouped by operation type, ac_read and ac_write, whose operations call the existing command cores with json output, so the --json contract is the only agent contract; both always exposed with read-only and destructive annotations; the store moves to WAL.
 owner: Evaldo Klock
-status: Accepted
+status: Superseded
+superseded_by: 0072
 timestamp: 2026-11-11T21:40:48Z
 ---
+
+> **SUPERSEDED — do not act on this record.** Replaced by [0072](0072-ac-mcp-exposes-downloads-as-a-third-tool-with-honest-annotations.md). Run `living-docs read records` for what is in force.
 
 # 0070. ac mcp serves MCP over stdio as an adapter over the command cores
 

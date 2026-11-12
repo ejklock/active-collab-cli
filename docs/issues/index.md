@@ -33,6 +33,7 @@ TUI/UX work (V/R/ARCH slices), tracing to
 * [0077 — Move a task between task lists from CLI, TUI and MCP](0077-move-a-task-between-task-lists-from-cli-tui-and-mcp.md) - open
 * [0078 — Skip open-task entries without an id or project id at the parse boundary](0078-skip-open-task-entries-without-an-id-or-project-id-at-the-parse-boundary.md) - open
 * [0079 — Paint the ac mine TUI rows before the hours requests finish](0079-paint-the-ac-mine-tui-rows-before-the-hours-requests-finish.md) - open
+* [0080 — Move the MCP attachment download to its own ac_download_attachments tool](0080-move-the-mcp-attachment-download-to-its-own-ac-download-attachments-tool.md) - open
 
 ## Closed
 

@@ -35,6 +35,7 @@ Excluded: an HTTP transport, MCP resources and prompts, the `browse` TUI, `setup
 - A non-zero core exit maps to `isError: true` with the core's `err` text; a 401 keeps the CLI's re-auth message.
 - The server's working directory resolves the `current` operation's branch, as the CLI does.
 - Order: this issue first, as the owner chose; each later issue adds its parameters or operations to these two tools.
+- Downloads move to a third tool, `ac_download_attachments` (not read-only, not destructive, idempotent), as the owner chose on 2026-11-11, because MCP annotations are per tool and `ac_read`'s `readOnlyHint` was false for `get` with `download_attachments`; over an operation in `ac_read` (same false hint) and an operation in `ac_write` (a destructive warning for a download). See [ADR 0072](/adr/0072-ac-mcp-exposes-downloads-as-a-third-tool-with-honest-annotations.md) and [issue 0080](/issues/0080-move-the-mcp-attachment-download-to-its-own-ac-download-attachments-tool.md).
 
 ### Acceptance
 
