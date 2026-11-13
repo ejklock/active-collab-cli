@@ -60,7 +60,7 @@ fn setup_list_empty_prints_no_instances_message() {
         "got: {}",
         output_str(&out)
     );
-    assert!(output_str(&out).contains("active_collab.py setup add"));
+    assert!(output_str(&out).contains("ac setup add"));
 }
 
 #[test]
@@ -2411,7 +2411,7 @@ async fn mine_core_empty_instances_returns_exit2_with_message() {
     assert_eq!(code, 2);
     let e = output_str(&err);
     assert!(e.contains("no instances configured"), "err: {e}");
-    assert!(e.contains("active_collab.py setup add"), "err: {e}");
+    assert!(e.contains("ac setup add"), "err: {e}");
 }
 
 #[tokio::test]
@@ -2671,7 +2671,7 @@ fn setup_list_empty_emits_pt_br_message_when_language_is_pt_br() {
         "expected pt-BR message, got: {s}"
     );
     assert!(
-        s.contains("Execute: active_collab.py setup add"),
+        s.contains("Execute: ac setup add"),
         "expected pt-BR command hint, got: {s}"
     );
 }

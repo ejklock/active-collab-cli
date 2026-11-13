@@ -39,7 +39,7 @@ flowchart TD
     screens --> theme
     main --> cli["cli (clap)"]
     cli --> commands
-    main --> mcp["mcp/mod.rs\nac mcp · rmcp stdio server\nac_read · ac_write (operation unions) · ac_download_attachments"]
+    main --> mcp["mcp/mod.rs\nac mcp · rmcp stdio server\nac_read · ac_write (flat schema, operation enum) · ac_download_attachments"]
     mcp --> commands
     subgraph commands["commands/ — three masters (ADR 0055)"]
         direction TB

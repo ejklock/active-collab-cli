@@ -31,6 +31,7 @@ TUI/UX work (V/R/ARCH slices), tracing to
 * [0076 — Download comment attachments in the CLI and from a TUI key](0076-download-comment-attachments-in-the-cli-and-from-a-tui-key.md) - in-progress
 * [0077 — Move a task between task lists from CLI, TUI and MCP](0077-move-a-task-between-task-lists-from-cli-tui-and-mcp.md) - in-progress
 * [0090 — Install ac in Claude Code, Codex, OpenCode and Pi as a plugin](0090-install-ac-in-claude-code-codex-opencode-and-pi-as-a-plugin.md) - in-progress
+* [0091 — Claude Code drops ac_read and ac_write because their schema is a top-level oneOf](0091-claude-code-drops-ac-read-and-ac-write-because-their-schema-is-a-top-level-oneof.md) - open
 
 ## Closed
 
