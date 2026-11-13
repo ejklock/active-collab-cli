@@ -61,7 +61,7 @@ pub(crate) fn setup_remove(
         writeln!(
             err,
             "{}",
-            t(&format!("Error: instance '{name}' not found.", name = name))
+            t("Error: instance '{name}' not found.").replace("{name}", name)
         )
         .ok();
         return 2;
@@ -69,7 +69,7 @@ pub(crate) fn setup_remove(
     writeln!(
         out,
         "{}",
-        t(&format!("Instance '{name}' removed.", name = name))
+        t("Instance '{name}' removed.").replace("{name}", name)
     )
     .ok();
     0
@@ -91,7 +91,7 @@ pub(crate) fn setup_language(
             writeln!(
                 out,
                 "{}",
-                t(&format!("Current language: {code}", code = current))
+                t("Current language: {code}").replace("{code}", &current)
             )
             .ok();
             0
@@ -102,11 +102,9 @@ pub(crate) fn setup_language(
                 writeln!(
                     err,
                     "{}",
-                    t(&format!(
-                        "Error: unsupported language '{code}'. Supported: {supported}.",
-                        code = c,
-                        supported = supported
-                    ))
+                    t("Error: unsupported language '{code}'. Supported: {supported}.")
+                        .replace("{supported}", &supported)
+                        .replace("{code}", c)
                 )
                 .ok();
                 return 2;
@@ -118,7 +116,7 @@ pub(crate) fn setup_language(
             writeln!(
                 out,
                 "{}",
-                t(&format!("Language set to '{code}'.", code = c))
+                t("Language set to '{code}'.").replace("{code}", c)
             )
             .ok();
             0
@@ -144,7 +142,7 @@ pub(crate) fn setup_theme(
             writeln!(
                 out,
                 "{}",
-                t(&format!("Current theme: {code}", code = current))
+                t("Current theme: {code}").replace("{code}", &current)
             )
             .ok();
             0
@@ -156,11 +154,9 @@ pub(crate) fn setup_theme(
                 writeln!(
                     err,
                     "{}",
-                    t(&format!(
-                        "Error: unsupported theme '{code}'. Supported: {list}.",
-                        code = c,
-                        list = list
-                    ))
+                    t("Error: unsupported theme '{code}'. Supported: {list}.")
+                        .replace("{list}", &list)
+                        .replace("{code}", &c)
                 )
                 .ok();
                 return 2;
@@ -169,7 +165,7 @@ pub(crate) fn setup_theme(
                 writeln!(err, "Error saving theme: {e}").ok();
                 return 1;
             }
-            writeln!(out, "{}", t(&format!("Theme set to '{code}'.", code = c))).ok();
+            writeln!(out, "{}", t("Theme set to '{code}'.").replace("{code}", &c)).ok();
             0
         }
     }
@@ -198,7 +194,7 @@ pub(crate) async fn setup_test_core(
                 writeln!(
                     out,
                     "  {name}: {}",
-                    t(&format!("OK ({status})", status = 200))
+                    t("OK ({status})").replace("{status}", "200")
                 )
                 .ok();
             }
@@ -206,7 +202,7 @@ pub(crate) async fn setup_test_core(
                 writeln!(
                     out,
                     "  {name}: {}",
-                    t(&format!("FAILED (HTTP {status})", status = status))
+                    t("FAILED (HTTP {status})").replace("{status}", &status.to_string())
                 )
                 .ok();
                 exit_code = 1;
@@ -215,7 +211,7 @@ pub(crate) async fn setup_test_core(
                 writeln!(
                     out,
                     "  {name}: {}",
-                    t(&format!("FAILED ({exc})", exc = exc))
+                    t("FAILED ({exc})").replace("{exc}", &exc.to_string())
                 )
                 .ok();
                 exit_code = 1;
@@ -248,7 +244,7 @@ pub(crate) async fn setup_test(
                 writeln!(
                     err,
                     "{}",
-                    t(&format!("Error: instance '{name}' not found.", name = n))
+                    t("Error: instance '{name}' not found.").replace("{name}", n)
                 )
                 .ok();
                 return 2;
@@ -274,6 +270,30 @@ pub(crate) struct SetupAddFields {
     pub email: Option<String>,
 }
 
+struct AddInput {
+    name: String,
+    url: String,
+    email: String,
+    password: String,
+}
+
+fn parse_add_input(fields: SetupAddFields, password: Option<String>) -> Result<AddInput, String> {
+    let (name, url, email) = match (fields.name, fields.url, fields.email) {
+        (Some(n), Some(u), Some(e)) if !n.is_empty() && !u.is_empty() && !e.is_empty() => (n, u, e),
+        _ => return Err(t("Error: --name, --url and --email are required.")),
+    };
+    let password = match password {
+        Some(p) if !p.is_empty() => p,
+        _ => return Err(t("Error: password is required.")),
+    };
+    Ok(AddInput {
+        name,
+        url,
+        email,
+        password,
+    })
+}
+
 /// Parity: Python cmd_setup_add (the testable core without stdin/rpassword).
 ///
 /// `check_connectivity`: when true (interactive TTY), run connectivity check after save.
@@ -287,23 +307,15 @@ pub(crate) async fn setup_add(
     out: &mut dyn Write,
     err: &mut dyn Write,
 ) -> i32 {
-    let (name, url, email) = match (fields.name, fields.url, fields.email) {
-        (Some(n), Some(u), Some(e)) if !n.is_empty() && !u.is_empty() && !e.is_empty() => (n, u, e),
-        _ => {
-            writeln!(
-                err,
-                "{}",
-                t("Error: --name, --url and --email are required.")
-            )
-            .ok();
-            return 2;
-        }
-    };
-
-    let password = match password {
-        Some(p) if !p.is_empty() => p,
-        _ => {
-            writeln!(err, "{}", t("Error: password is required.")).ok();
+    let AddInput {
+        name,
+        url,
+        email,
+        password,
+    } = match parse_add_input(fields, password) {
+        Ok(input) => input,
+        Err(message) => {
+            writeln!(err, "{message}").ok();
             return 2;
         }
     };
@@ -322,7 +334,12 @@ pub(crate) async fn setup_add(
     let (token_opt, response) = match client.exchange_token(&base_url, &email, &password).await {
         Ok(pair) => pair,
         Err(exc) => {
-            writeln!(err, "{}", t(&format!("Error: {exc}", exc = exc))).ok();
+            writeln!(
+                err,
+                "{}",
+                t("Error: {exc}").replace("{exc}", &exc.to_string())
+            )
+            .ok();
             return 1;
         }
     };
@@ -338,7 +355,7 @@ pub(crate) async fn setup_add(
                 .and_then(|v| v.as_str())
                 .unwrap_or("token exchange failed")
                 .to_owned();
-            writeln!(err, "{}", t(&format!("Error: {detail}", detail = detail))).ok();
+            writeln!(err, "{}", t("Error: {detail}").replace("{detail}", &detail)).ok();
             return 1;
         }
     };
@@ -373,7 +390,7 @@ pub(crate) async fn setup_add(
     writeln!(
         out,
         "{}",
-        t(&format!("Instance '{name}' saved.", name = name))
+        t("Instance '{name}' saved.").replace("{name}", &name)
     )
     .ok();
 
@@ -394,10 +411,7 @@ pub(crate) async fn run_connectivity_check(client: &ActiveCollabClient, out: &mu
             writeln!(
                 out,
                 "{}",
-                t(&format!(
-                    "Connectivity: FAILED (HTTP {status})",
-                    status = status
-                ))
+                t("Connectivity: FAILED (HTTP {status})").replace("{status}", &status.to_string())
             )
             .ok();
         }
@@ -405,7 +419,7 @@ pub(crate) async fn run_connectivity_check(client: &ActiveCollabClient, out: &mu
             writeln!(
                 out,
                 "{}",
-                t(&format!("Connectivity: FAILED ({exc})", exc = exc))
+                t("Connectivity: FAILED ({exc})").replace("{exc}", &exc.to_string())
             )
             .ok();
         }

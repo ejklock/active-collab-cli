@@ -6581,3 +6581,1075 @@ async fn mine_total_hours_is_unknown_when_the_server_is_unreachable() {
     assert_eq!(rows[0].logged_week, None);
     assert_eq!(rows[0].estimate, Some(4.0));
 }
+
+/// Switches the process-wide language to pt_BR and restores en on drop, so an
+/// assertion failure cannot leak pt_BR into a later test.
+struct PtBrLanguage;
+
+impl PtBrLanguage {
+    fn on() -> Self {
+        set_language("pt_BR");
+        PtBrLanguage
+    }
+}
+
+impl Drop for PtBrLanguage {
+    fn drop(&mut self) {
+        set_language("en");
+    }
+}
+
+type Captured = (i32, String, String);
+
+fn captured(status: i32, out: &[u8], err: &[u8]) -> Captured {
+    (
+        status,
+        output_str(out).to_owned(),
+        output_str(err).to_owned(),
+    )
+}
+
+fn run_setup_language(code: Option<&str>) -> Captured {
+    let (_dir, store) = make_store();
+    let settings = SettingsRepository::new(store.conn());
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let status = setup_language(&settings, code, &mut out, &mut err);
+    captured(status, &out, &err)
+}
+
+fn run_setup_theme(code: Option<&str>) -> Captured {
+    let (_dir, store) = make_store();
+    let settings = SettingsRepository::new(store.conn());
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let status = setup_theme(&settings, code, &mut out, &mut err);
+    captured(status, &out, &err)
+}
+
+fn run_setup_remove(name: &str, existing: bool) -> Captured {
+    let (_dir, store) = make_store();
+    if existing {
+        sample_instance(&store, name);
+    }
+    let repo = InstanceRepository::new(store.conn());
+    let cache = TaskCache::new(store.conn());
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let status = setup_remove(&repo, &cache, name, &mut out, &mut err);
+    captured(status, &out, &err)
+}
+
+async fn run_setup_test_named(name: &str) -> Captured {
+    let (_dir, store) = make_store();
+    let repo = InstanceRepository::new(store.conn());
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let status = setup_test(&repo, Some(name), make_http(), &mut out, &mut err).await;
+    captured(status, &out, &err)
+}
+
+async fn run_connectivity_rows(base_url: &str) -> String {
+    let (_dir, store) = make_store();
+    let inst = Instance {
+        name: "inst".to_owned(),
+        base_url: base_url.to_owned(),
+        email: String::new(),
+        token: "tok".to_owned(),
+        user_id: None,
+    };
+    InstanceRepository::new(store.conn()).save(&inst).unwrap();
+    let repo = InstanceRepository::new(store.conn());
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    setup_test(&repo, None, make_http(), &mut out, &mut err).await;
+    output_str(&out).to_owned()
+}
+
+async fn mount_token_exchange(server: &MockServer, body: serde_json::Value) {
+    Mock::given(method("POST"))
+        .and(path("/api/v1/issue-token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(body))
+        .mount(server)
+        .await;
+}
+
+async fn mount_users_and_projects(server: &MockServer, projects_status: u16) {
+    Mock::given(method("GET"))
+        .and(path("/api/v1/users"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+        .mount(server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/projects"))
+        .respond_with(ResponseTemplate::new(projects_status).set_body_json(serde_json::json!([])))
+        .mount(server)
+        .await;
+}
+
+async fn run_setup_add(name: &str, url: &str, check_connectivity: bool) -> Captured {
+    let (_dir, store) = make_store();
+    let repo = InstanceRepository::new(store.conn());
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let status = setup_add(
+        SetupAddFields {
+            name: Some(name.to_owned()),
+            url: Some(url.to_owned()),
+            email: Some("u@u.com".to_owned()),
+        },
+        Some("pw".to_owned()),
+        &repo,
+        make_http(),
+        check_connectivity,
+        &mut out,
+        &mut err,
+    )
+    .await;
+    captured(status, &out, &err)
+}
+
+#[tokio::test]
+async fn setup_add_empty_name_url_or_email_each_return_exit2_with_required_message() {
+    let cases = [
+        ("", "https://x.com", "a@b.com"),
+        ("work", "", "a@b.com"),
+        ("work", "https://x.com", ""),
+    ];
+    for (name, url, email) in cases {
+        let (_dir, store) = make_store();
+        let repo = InstanceRepository::new(store.conn());
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        let code = setup_add(
+            SetupAddFields {
+                name: Some(name.to_owned()),
+                url: Some(url.to_owned()),
+                email: Some(email.to_owned()),
+            },
+            Some("pw".to_owned()),
+            &repo,
+            make_http(),
+            false,
+            &mut out,
+            &mut err,
+        )
+        .await;
+        assert_eq!(code, 2, "case {name:?} {url:?} {email:?}");
+        assert_eq!(
+            output_str(&err),
+            "Error: --name, --url and --email are required.\n",
+            "case {name:?} {url:?} {email:?}"
+        );
+        assert_eq!(output_str(&out), "");
+    }
+}
+
+#[tokio::test]
+async fn setup_add_missing_password_prints_exact_message() {
+    let (status, _, err) = run_setup_add_with_password("n", "https://x.com", None).await;
+    assert_eq!(status, 2);
+    assert_eq!(err, "Error: password is required.\n");
+}
+
+async fn run_setup_add_with_password(name: &str, url: &str, password: Option<&str>) -> Captured {
+    let (_dir, store) = make_store();
+    let repo = InstanceRepository::new(store.conn());
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let status = setup_add(
+        SetupAddFields {
+            name: Some(name.to_owned()),
+            url: Some(url.to_owned()),
+            email: Some("u@u.com".to_owned()),
+        },
+        password.map(str::to_owned),
+        &repo,
+        make_http(),
+        false,
+        &mut out,
+        &mut err,
+    )
+    .await;
+    captured(status, &out, &err)
+}
+
+const UNREACHABLE_URL: &str = "http://127.0.0.1:1";
+
+fn client_for(base_url: &str) -> ActiveCollabClient {
+    let inst = Instance {
+        name: "inst".to_owned(),
+        base_url: base_url.to_owned(),
+        email: "u@u.com".to_owned(),
+        token: "tok".to_owned(),
+        user_id: None,
+    };
+    ActiveCollabClient::new(inst, make_http())
+}
+
+/// The Display text of the transport error the real client reports for an
+/// unroutable loopback port; the expected value for every printed error line.
+async fn unreachable_projects_error() -> String {
+    let err = client_for(UNREACHABLE_URL).test_connectivity().await;
+    err.expect_err("port 1 refuses connections").to_string()
+}
+
+async fn unreachable_exchange_error() -> String {
+    let result = client_for(UNREACHABLE_URL)
+        .exchange_token(UNREACHABLE_URL, "u@u.com", "pw")
+        .await;
+    result.expect_err("port 1 refuses connections").to_string()
+}
+
+async fn run_connectivity_check_output(base_url: &str) -> String {
+    let mut out = Vec::new();
+    setup::run_connectivity_check(&client_for(base_url), &mut out).await;
+    output_str(&out).to_owned()
+}
+
+fn ok_token() -> serde_json::Value {
+    serde_json::json!({ "is_ok": true, "token": "tok" })
+}
+
+#[test]
+fn setup_remove_message_is_translated_with_value_filled() {
+    let _lang = PtBrLanguage::on();
+    let (status, out, _) = run_setup_remove("{code}", true);
+    assert_eq!(status, 0);
+    assert_eq!(out, "Instância '{code}' removida.\n");
+}
+
+#[test]
+fn setup_remove_message_stays_english_under_en() {
+    let (status, out, _) = run_setup_remove("work", true);
+    assert_eq!(status, 0);
+    assert_eq!(out, "Instance 'work' removed.\n");
+}
+
+#[test]
+fn setup_remove_not_found_is_translated_and_keeps_non_ascii_name() {
+    let _lang = PtBrLanguage::on();
+    let (status, _, err) = run_setup_remove("ação", false);
+    assert_eq!(status, 2);
+    assert_eq!(err, "Erro: instância 'ação' não encontrada.\n");
+}
+
+#[test]
+fn setup_remove_not_found_stays_english_under_en() {
+    let (status, _, err) = run_setup_remove("ação", false);
+    assert_eq!(status, 2);
+    assert_eq!(err, "Error: instance 'ação' not found.\n");
+}
+
+#[test]
+fn setup_language_messages_are_translated_with_values_filled() {
+    let _lang = PtBrLanguage::on();
+    assert_eq!(run_setup_language(None).1, "Idioma atual: en\n");
+    assert_eq!(
+        run_setup_language(Some("pt_BR")).1,
+        "Idioma definido como 'pt_BR'.\n"
+    );
+}
+
+#[test]
+fn setup_language_unsupported_is_translated_and_value_is_not_refilled() {
+    let _lang = PtBrLanguage::on();
+    let (status, _, err) = run_setup_language(Some("{supported}"));
+    assert_eq!(status, 2);
+    assert_eq!(
+        err,
+        "Erro: idioma não suportado '{supported}'. Suportados: en, pt_BR.\n"
+    );
+}
+
+#[test]
+fn setup_language_unsupported_prints_placeholder_like_code_literally_under_en() {
+    let (status, _, err) = run_setup_language(Some("{supported}"));
+    assert_eq!(status, 2);
+    assert_eq!(
+        err,
+        "Error: unsupported language '{supported}'. Supported: en, pt_BR.\n"
+    );
+}
+
+#[test]
+fn setup_theme_unsupported_prints_placeholder_like_code_literally_under_en() {
+    let (status, _, err) = run_setup_theme(Some("{list}"));
+    assert_eq!(status, 2);
+    assert_eq!(
+        err,
+        "Error: unsupported theme '{list}'. Supported: angie, slate, nord.\n"
+    );
+}
+
+#[test]
+fn setup_language_messages_stay_english_under_en() {
+    assert_eq!(run_setup_language(None).1, "Current language: en\n");
+    assert_eq!(
+        run_setup_language(Some("pt_BR")).1,
+        "Language set to 'pt_BR'.\n"
+    );
+    assert_eq!(
+        run_setup_language(Some("xx")).2,
+        "Error: unsupported language 'xx'. Supported: en, pt_BR.\n"
+    );
+}
+
+#[test]
+fn setup_theme_messages_are_translated_with_values_filled() {
+    let _lang = PtBrLanguage::on();
+    assert_eq!(run_setup_theme(None).1, "Tema atual: angie\n");
+    assert_eq!(
+        run_setup_theme(Some("slate")).1,
+        "Tema definido para 'slate'.\n"
+    );
+}
+
+#[test]
+fn setup_theme_unsupported_is_translated_and_value_is_not_refilled() {
+    let _lang = PtBrLanguage::on();
+    let (status, _, err) = run_setup_theme(Some("{list}"));
+    assert_eq!(status, 2);
+    assert_eq!(
+        err,
+        "Erro: tema '{list}' não suportado. Suportados: angie, slate, nord.\n"
+    );
+}
+
+#[test]
+fn setup_theme_messages_stay_english_under_en() {
+    assert_eq!(run_setup_theme(None).1, "Current theme: angie\n");
+    assert_eq!(run_setup_theme(Some("nord")).1, "Theme set to 'nord'.\n");
+    assert_eq!(
+        run_setup_theme(Some("neon")).2,
+        "Error: unsupported theme 'neon'. Supported: angie, slate, nord.\n"
+    );
+}
+
+#[tokio::test]
+async fn setup_test_not_found_is_translated_with_placeholder_like_name_literal() {
+    let _lang = PtBrLanguage::on();
+    let (status, _, err) = run_setup_test_named("{name}").await;
+    assert_eq!(status, 2);
+    assert_eq!(err, "Erro: instância '{name}' não encontrada.\n");
+}
+
+#[tokio::test]
+async fn setup_test_not_found_stays_english_under_en() {
+    let (_, _, err) = run_setup_test_named("ação").await;
+    assert_eq!(err, "Error: instance 'ação' not found.\n");
+}
+
+#[tokio::test]
+async fn setup_test_results_are_translated_under_pt_br() {
+    let ok = MockServer::start().await;
+    mount_users_and_projects(&ok, 200).await;
+    let denied = MockServer::start().await;
+    mount_users_and_projects(&denied, 403).await;
+
+    let _lang = PtBrLanguage::on();
+    assert_eq!(run_connectivity_rows(&ok.uri()).await, "  inst: OK (200)\n");
+    assert_eq!(
+        run_connectivity_rows(&denied.uri()).await,
+        "  inst: FALHOU (HTTP 403)\n"
+    );
+    let exc = unreachable_projects_error().await;
+    assert_eq!(
+        run_connectivity_rows(UNREACHABLE_URL).await,
+        format!("  inst: FALHOU ({exc})\n")
+    );
+}
+
+#[tokio::test]
+async fn setup_test_results_stay_english_under_en() {
+    let ok = MockServer::start().await;
+    mount_users_and_projects(&ok, 200).await;
+    let denied = MockServer::start().await;
+    mount_users_and_projects(&denied, 403).await;
+
+    assert_eq!(run_connectivity_rows(&ok.uri()).await, "  inst: OK (200)\n");
+    assert_eq!(
+        run_connectivity_rows(&denied.uri()).await,
+        "  inst: FAILED (HTTP 403)\n"
+    );
+    let exc = unreachable_projects_error().await;
+    assert_eq!(
+        run_connectivity_rows(UNREACHABLE_URL).await,
+        format!("  inst: FAILED ({exc})\n")
+    );
+}
+
+#[tokio::test]
+async fn setup_add_saved_message_is_translated_with_placeholder_like_name_literal() {
+    let server = MockServer::start().await;
+    mount_token_exchange(&server, ok_token()).await;
+    mount_users_and_projects(&server, 200).await;
+
+    let _lang = PtBrLanguage::on();
+    let (status, out, _) = run_setup_add("{code}", &server.uri(), false).await;
+    assert_eq!(status, 0);
+    assert_eq!(out, "Instância '{code}' salva.\n");
+}
+
+#[tokio::test]
+async fn setup_add_saved_message_stays_english_under_en() {
+    let server = MockServer::start().await;
+    mount_token_exchange(&server, ok_token()).await;
+    mount_users_and_projects(&server, 200).await;
+
+    let (status, out, _) = run_setup_add("ação", &server.uri(), false).await;
+    assert_eq!(status, 0);
+    assert_eq!(out, "Instance 'ação' saved.\n");
+}
+
+#[tokio::test]
+async fn setup_add_token_failure_detail_is_translated_and_kept_literal() {
+    let server = MockServer::start().await;
+    mount_token_exchange(
+        &server,
+        serde_json::json!({ "is_ok": false, "message": "bad {status} ação" }),
+    )
+    .await;
+
+    let _lang = PtBrLanguage::on();
+    let (status, _, err) = run_setup_add("n", &server.uri(), false).await;
+    assert_eq!(status, 1);
+    assert_eq!(err, "Erro: bad {status} ação\n");
+}
+
+#[tokio::test]
+async fn setup_add_token_failure_detail_stays_english_under_en() {
+    let server = MockServer::start().await;
+    mount_token_exchange(
+        &server,
+        serde_json::json!({ "is_ok": false, "message": "bad" }),
+    )
+    .await;
+
+    let (_, _, err) = run_setup_add("n", &server.uri(), false).await;
+    assert_eq!(err, "Error: bad\n");
+}
+
+#[tokio::test]
+async fn setup_add_exchange_transport_error_is_translated_under_pt_br() {
+    let _lang = PtBrLanguage::on();
+    let (status, _, err) = run_setup_add("n", UNREACHABLE_URL, false).await;
+    assert_eq!(status, 1);
+    assert_eq!(
+        err,
+        format!("Erro: {}\n", unreachable_exchange_error().await)
+    );
+}
+
+#[tokio::test]
+async fn setup_add_exchange_transport_error_stays_english_under_en() {
+    let (status, _, err) = run_setup_add("n", UNREACHABLE_URL, false).await;
+    assert_eq!(status, 1);
+    assert_eq!(
+        err,
+        format!("Error: {}\n", unreachable_exchange_error().await)
+    );
+}
+
+#[tokio::test]
+async fn setup_connectivity_check_transport_error_is_translated_under_pt_br() {
+    let _lang = PtBrLanguage::on();
+    let exc = unreachable_projects_error().await;
+    assert_eq!(
+        run_connectivity_check_output(UNREACHABLE_URL).await,
+        format!("Conectividade: FALHOU ({exc})\n")
+    );
+}
+
+#[tokio::test]
+async fn setup_connectivity_check_transport_error_stays_english_under_en() {
+    let exc = unreachable_projects_error().await;
+    assert_eq!(
+        run_connectivity_check_output(UNREACHABLE_URL).await,
+        format!("Connectivity: FAILED ({exc})\n")
+    );
+}
+
+#[tokio::test]
+async fn setup_add_connectivity_failure_is_translated_under_pt_br() {
+    let denied = MockServer::start().await;
+    mount_token_exchange(&denied, ok_token()).await;
+    mount_users_and_projects(&denied, 403).await;
+
+    let _lang = PtBrLanguage::on();
+    let (_, out, _) = run_setup_add("n", &denied.uri(), true).await;
+    assert!(
+        out.ends_with("Conectividade: FALHOU (HTTP 403)\n"),
+        "got: {out}"
+    );
+}
+
+#[tokio::test]
+async fn setup_add_connectivity_failure_stays_english_under_en() {
+    let denied = MockServer::start().await;
+    mount_token_exchange(&denied, ok_token()).await;
+    mount_users_and_projects(&denied, 403).await;
+
+    let (_, out, _) = run_setup_add("n", &denied.uri(), true).await;
+    assert!(
+        out.ends_with("Connectivity: FAILED (HTTP 403)\n"),
+        "got: {out}"
+    );
+}
+
+fn instance_named(name: &str) -> Instance {
+    Instance {
+        name: name.to_owned(),
+        base_url: format!("https://{name}.example.com"),
+        email: "u@u.com".to_owned(),
+        token: "[MASKED by secret-mask: original value hidden for security]".to_owned(),
+        user_id: None,
+    }
+}
+
+fn first_line(text: &str) -> &str {
+    text.lines().next().unwrap_or("")
+}
+
+#[test]
+fn pick_instance_unknown_name_is_translated_and_keeps_placeholder_text_literal() {
+    let _lang = PtBrLanguage::on();
+    let instances = vec![instance_named("alpha"), instance_named("{name}")];
+    let mut err = Vec::new();
+    assert_eq!(pick_instance(&instances, Some("{known}"), &mut err), Err(2));
+    assert_eq!(
+        output_str(&err),
+        "Erro: instância '{known}' não encontrada. Conhecidas: alpha, {name}\n"
+    );
+}
+
+#[test]
+fn pick_instance_unknown_name_stays_english_under_en() {
+    let instances = vec![instance_named("alpha"), instance_named("{name}")];
+    let mut err = Vec::new();
+    assert_eq!(pick_instance(&instances, Some("{known}"), &mut err), Err(2));
+    assert_eq!(
+        output_str(&err),
+        "Error: instance '{known}' not found. Known: alpha, {name}\n"
+    );
+}
+
+#[test]
+fn pick_instance_multiple_without_name_is_translated_with_names_filled() {
+    let _lang = PtBrLanguage::on();
+    let instances = vec![instance_named("{names}"), instance_named("b")];
+    let mut err = Vec::new();
+    assert_eq!(pick_instance(&instances, None, &mut err), Err(2));
+    assert_eq!(
+        output_str(&err),
+        "Erro: múltiplas instâncias configuradas ({names}, b). Use --instance NOME.\n"
+    );
+}
+
+#[test]
+fn pick_instance_multiple_without_name_stays_english_under_en() {
+    let instances = vec![instance_named("{names}"), instance_named("b")];
+    let mut err = Vec::new();
+    assert_eq!(pick_instance(&instances, None, &mut err), Err(2));
+    assert_eq!(
+        output_str(&err),
+        "Error: multiple instances configured ({names}, b). Use --instance NAME.\n"
+    );
+}
+
+#[test]
+fn parse_task_ref_failure_is_translated_with_ref_kept_literal() {
+    let _lang = PtBrLanguage::on();
+    let mut err = Vec::new();
+    assert_eq!(parse_task_ref("{branch}", &mut err), Err(2));
+    assert_eq!(
+        output_str(&err),
+        "Erro: não foi possível interpretar a referência de tarefa '{branch}'. Use URL ou PROJECT_ID/TASK_ID (ex: 665/75159).\n"
+    );
+}
+
+#[test]
+fn parse_task_ref_failure_stays_english_under_en() {
+    let mut err = Vec::new();
+    assert_eq!(parse_task_ref("ação", &mut err), Err(2));
+    assert_eq!(
+        output_str(&err),
+        "Error: cannot parse task ref 'ação'. Use URL or PROJECT_ID/TASK_ID (e.g. 665/75159).\n"
+    );
+}
+
+#[test]
+fn comment_ref_from_unmatched_branch_is_translated_with_branch_kept_literal() {
+    let _lang = PtBrLanguage::on();
+    let mut err = Vec::new();
+    assert_eq!(
+        resolve_task_ref_for_comment(None, Some("{ref}"), &mut err),
+        Err(2)
+    );
+    assert_eq!(
+        output_str(&err),
+        "Erro: nenhuma referência de tarefa informada e a branch '{ref}' não corresponde ao padrão esperado (feature|hotfix|fix)/PROJECT_ID-TASK_ID.\n"
+    );
+}
+
+#[test]
+fn comment_ref_from_unmatched_branch_stays_english_under_en() {
+    let mut err = Vec::new();
+    assert_eq!(
+        resolve_task_ref_for_comment(None, Some("main"), &mut err),
+        Err(2)
+    );
+    assert_eq!(
+        output_str(&err),
+        "Error: no task ref given and branch 'main' does not match expected pattern (feature|hotfix|fix)/PROJECT_ID-TASK_ID.\n"
+    );
+}
+
+async fn run_mine_with_instance_filter(filter: &str) -> Captured {
+    let (_dir, store) = make_store();
+    sample_instance(&store, "work");
+    sample_instance(&store, "{name}");
+    let repo = InstanceRepository::new(store.conn());
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let outcome = mine_core(
+        &repo,
+        &make_http(),
+        Some(filter),
+        false,
+        false,
+        &mut out,
+        &mut err,
+    )
+    .await;
+    captured(mine_outcome_code(outcome), &out, &err)
+}
+
+#[tokio::test]
+async fn mine_unknown_instance_is_translated_and_keeps_placeholder_text_literal() {
+    let _lang = PtBrLanguage::on();
+    let (status, _, err) = run_mine_with_instance_filter("{known}").await;
+    assert_eq!(status, 2);
+    assert_eq!(
+        err,
+        "Erro: instância '{known}' não encontrada. Conhecidas: work, {name}\n"
+    );
+}
+
+#[tokio::test]
+async fn mine_unknown_instance_stays_english_under_en() {
+    let (status, _, err) = run_mine_with_instance_filter("{known}").await;
+    assert_eq!(status, 2);
+    assert_eq!(
+        err,
+        "Error: instance '{known}' not found. Known: work, {name}\n"
+    );
+}
+
+#[test]
+fn instance_not_found_message_is_translated_and_keeps_placeholder_text_literal() {
+    let _lang = PtBrLanguage::on();
+    let instances = vec![instance_named("work"), instance_named("{name}")];
+    assert_eq!(
+        instance_not_found_message("{known}", &instances),
+        "Erro: instância '{known}' não encontrada. Conhecidas: work, {name}"
+    );
+}
+
+#[test]
+fn load_targets_with_a_name_keeps_only_that_instance() {
+    let (_dir, store) = make_store();
+    sample_instance(&store, "work");
+    sample_instance(&store, "personal");
+    let repo = InstanceRepository::new(store.conn());
+    let targets = load_targets(&repo, Some("work"))
+        .ok()
+        .expect("a configured name is a target");
+    let names: Vec<&str> = targets.iter().map(|i| i.name.as_str()).collect();
+    assert_eq!(names, vec!["work"]);
+}
+
+#[test]
+fn load_targets_unreadable_store_exits_1_with_the_load_error() {
+    let (_dir, store) = make_store();
+    store.conn().execute("DROP TABLE instances", []).unwrap();
+    let repo = InstanceRepository::new(store.conn());
+    let failure = load_targets(&repo, None)
+        .err()
+        .expect("a missing instances table fails the load");
+    assert_eq!(failure.code, 1);
+    assert!(
+        failure.message.starts_with("Error loading instances: "),
+        "message: {}",
+        failure.message
+    );
+}
+
+#[test]
+fn instance_not_found_message_stays_english_under_en() {
+    let instances = vec![instance_named("work"), instance_named("{name}")];
+    assert_eq!(
+        instance_not_found_message("{known}", &instances),
+        "Error: instance '{known}' not found. Known: work, {name}"
+    );
+}
+
+#[test]
+fn presenter_success_lines_are_translated_with_values_filled() {
+    let _lang = PtBrLanguage::on();
+    let mut out = Vec::new();
+    presenter::write_comment_success(7, 75346, 524, false, &mut out);
+    presenter::write_time_success(8, 75346, 524, 1.5, false, &mut out);
+    presenter::write_task_success(75346, 524, None, None, None, None, false, &mut out);
+    assert_eq!(
+        output_str(&out),
+        "Comentário publicado (comment_id=7, tarefa 524/75346).\n\
+         Tempo registrado (time_record_id=8, 1.5 horas, tarefa 524/75346).\n\
+         Tarefa atualizada (tarefa 524/75346).\n"
+    );
+}
+
+#[test]
+fn presenter_success_lines_stay_english_under_en() {
+    let mut out = Vec::new();
+    presenter::write_comment_success(7, 75346, 524, false, &mut out);
+    presenter::write_time_success(8, 75346, 524, 1.5, false, &mut out);
+    presenter::write_task_success(75346, 524, None, None, None, None, false, &mut out);
+    assert_eq!(
+        output_str(&out),
+        "Comment posted (comment_id=7, task 524/75346).\n\
+         Time logged (time_record_id=8, 1.5 hours, task 524/75346).\n\
+         Task updated (task 524/75346).\n"
+    );
+}
+
+#[test]
+fn presenter_task_changes_are_filled_as_a_value_and_never_refilled() {
+    let list = crate::client::TaskList {
+        id: 3,
+        name: "{project_id}".to_owned(),
+    };
+    let mut en = Vec::new();
+    presenter::write_task_success(
+        75346,
+        524,
+        Some(true),
+        Some(9),
+        Some(2.5),
+        Some(&list),
+        false,
+        &mut en,
+    );
+    assert_eq!(
+        output_str(&en),
+        "Task updated (task 524/75346): status=completed, assignee_id=9, estimate=2.5, list={project_id}.\n"
+    );
+
+    let _lang = PtBrLanguage::on();
+    let mut pt = Vec::new();
+    presenter::write_task_success(
+        75346,
+        524,
+        Some(true),
+        Some(9),
+        Some(2.5),
+        Some(&list),
+        false,
+        &mut pt,
+    );
+    assert_eq!(
+        output_str(&pt),
+        "Tarefa atualizada (tarefa 524/75346): status=completed, assignee_id=9, estimate=2.5, list={project_id}.\n"
+    );
+}
+
+async fn run_current_with_branch(branch: &str) -> Captured {
+    let (_dir, store) = make_store();
+    let cache = TaskCache::new(store.conn());
+    let inst = make_inst("http://127.0.0.1:1");
+    let client = ActiveCollabClient::new(inst.clone(), make_http());
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let status = current_core(
+        Some(branch),
+        &inst,
+        &cache,
+        &client,
+        &default_flags(),
+        &mut out,
+        &mut err,
+    )
+    .await;
+    captured(status, &out, &err)
+}
+
+#[tokio::test]
+async fn current_unmatched_branch_is_translated_with_branch_kept_literal() {
+    let _lang = PtBrLanguage::on();
+    let (status, _, err) = run_current_with_branch("{ref}").await;
+    assert_eq!(status, 2);
+    assert_eq!(
+        err,
+        "Erro: branch '{ref}' não corresponde ao padrão esperado (feature|hotfix|fix)/PROJECT_ID-TASK_ID (ex: feature/665-75159).\n"
+    );
+}
+
+#[tokio::test]
+async fn current_unmatched_branch_stays_english_under_en() {
+    let (status, _, err) = run_current_with_branch("{ref}").await;
+    assert_eq!(status, 2);
+    assert_eq!(
+        err,
+        "Error: branch '{ref}' does not match expected pattern (feature|hotfix|fix)/PROJECT_ID-TASK_ID (e.g. feature/665-75159).\n"
+    );
+}
+
+async fn run_load_task_not_found() -> String {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/projects/10/tasks/99"))
+        .respond_with(ResponseTemplate::new(404).set_body_string("missing"))
+        .mount(&server)
+        .await;
+    let (_dir, store) = make_store();
+    let cache = TaskCache::new(store.conn());
+    let client = ActiveCollabClient::new(make_inst(&server.uri()), make_http());
+    let mut err = Vec::new();
+    let result = load_task(&cache, &client, "inst", 10, 99, false, false, &mut err).await;
+    assert!(result.is_none());
+    output_str(&err).to_owned()
+}
+
+#[tokio::test]
+async fn load_task_not_found_is_translated_with_values_filled() {
+    let _lang = PtBrLanguage::on();
+    assert_eq!(
+        run_load_task_not_found().await,
+        "Erro: tarefa 10/99 não encontrada (HTTP 404).\n"
+    );
+}
+
+#[tokio::test]
+async fn load_task_not_found_stays_english_under_en() {
+    assert_eq!(
+        run_load_task_not_found().await,
+        "Error: task 10/99 not found (HTTP 404).\n"
+    );
+}
+
+async fn run_download_summary(failing: bool, dir_name: &str) -> (String, String) {
+    let server = MockServer::start().await;
+    let attachment_url = format!("{}/note.txt", server.uri());
+    Mock::given(method("GET"))
+        .and(path("/api/v1/projects/5/tasks/10"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "single": task_with_attachment(10, "Attachment task", &attachment_url),
+            "tracked_time": 0,
+            "comments": []
+        })))
+        .mount(&server)
+        .await;
+    let note = if failing {
+        ResponseTemplate::new(404).set_body_string("not found")
+    } else {
+        ResponseTemplate::new(200).set_body_bytes(b"hello".to_vec())
+    };
+    Mock::given(method("GET"))
+        .and(path("/note.txt"))
+        .respond_with(note)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/users"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+        .mount(&server)
+        .await;
+
+    let (_dir, store) = make_store();
+    let cache = TaskCache::new(store.conn());
+    let inst = make_inst(&server.uri());
+    let client = ActiveCollabClient::new(inst.clone(), make_http());
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let dest_root = TempDir::new().unwrap();
+    let dest = dest_root
+        .path()
+        .join(dir_name)
+        .to_string_lossy()
+        .to_string();
+    let flags = DisplayFlags {
+        download_attachments: true,
+        attachments_dir: Some(dest.clone()),
+        ..default_flags()
+    };
+    let code = do_get_task(&inst, &cache, &client, 5, 10, &flags, &mut out, &mut err).await;
+    assert_eq!(code, 0);
+    let line = output_str(&out)
+        .lines()
+        .find(|l| l.starts_with("Downloaded") || l.starts_with("Baixado"))
+        .unwrap_or_default()
+        .to_owned();
+    (line, dest)
+}
+
+#[tokio::test]
+async fn download_summary_is_translated_with_counts_and_directory_filled() {
+    let _lang = PtBrLanguage::on();
+    let (line, dest) = run_download_summary(false, "{failures}").await;
+    assert_eq!(line, format!("Baixado(s) 1 de 1 anexo(s) para {dest}"));
+}
+
+#[tokio::test]
+async fn download_summary_stays_english_under_en() {
+    let (line, dest) = run_download_summary(false, "{failures}").await;
+    assert_eq!(line, format!("Downloaded 1 of 1 attachment(s) to {dest}"));
+}
+
+#[tokio::test]
+async fn download_summary_fills_the_failure_suffix_as_a_value() {
+    let (en, dest) = run_download_summary(true, "{ok}").await;
+    let suffix = en
+        .strip_prefix(&format!("Downloaded 0 of 1 attachment(s) to {dest}"))
+        .unwrap_or_else(|| panic!("unexpected english line: {en}"))
+        .to_owned();
+    assert!(suffix.starts_with(" (failed: note.txt: "), "{suffix}");
+
+    let _lang = PtBrLanguage::on();
+    let (pt, dest) = run_download_summary(true, "{ok}").await;
+    assert_eq!(
+        pt,
+        format!("Baixado(s) 0 de 1 anexo(s) para {dest}{suffix}")
+    );
+}
+
+#[tokio::test]
+async fn task_set_unrecognized_status_is_translated_with_value_kept_literal() {
+    let server = MockServer::start().await;
+    let _lang = PtBrLanguage::on();
+    let run = run_task_set(&server, Some("{list}"), None, None, None, false).await;
+    assert_eq!(run.code, 2);
+    assert_eq!(
+        run.err,
+        "Erro: valor de --status não reconhecido '{list}'. Use complete, completed, done, closed, open, reopen ou todo.\n"
+    );
+}
+
+#[tokio::test]
+async fn task_set_unrecognized_status_stays_english_under_en() {
+    let server = MockServer::start().await;
+    let run = run_task_set(&server, Some("{list}"), None, None, None, false).await;
+    assert_eq!(run.code, 2);
+    assert_eq!(
+        run.err,
+        "Error: unrecognized --status value '{list}'. Use complete, completed, done, closed, open, reopen, or todo.\n"
+    );
+}
+
+#[tokio::test]
+async fn task_set_unknown_list_is_translated_with_value_kept_literal() {
+    let server = MockServer::start().await;
+    mount_task_lists(&server, 200, project_task_lists()).await;
+    let _lang = PtBrLanguage::on();
+    let run = run_task_set(&server, None, None, None, Some("{status}"), false).await;
+    assert_eq!(run.code, 2);
+    assert_eq!(
+        first_line(&run.err),
+        "Erro: nenhuma lista de tarefas corresponde a '{status}'. Listas de tarefas deste projeto:"
+    );
+}
+
+#[tokio::test]
+async fn task_set_unknown_list_stays_english_under_en() {
+    let server = MockServer::start().await;
+    mount_task_lists(&server, 200, project_task_lists()).await;
+    let run = run_task_set(&server, None, None, None, Some("{status}"), false).await;
+    assert_eq!(run.code, 2);
+    assert_eq!(
+        first_line(&run.err),
+        "Error: no task list matches '{status}'. Task lists of this project:"
+    );
+}
+
+async fn run_task_set_with_duplicate_list_names() -> TaskSetRun {
+    let server = MockServer::start().await;
+    mount_task_lists(
+        &server,
+        200,
+        serde_json::json!([
+            { "id": 1, "name": "{status}" },
+            { "id": 2, "name": "{STATUS}" }
+        ]),
+    )
+    .await;
+    run_task_set(&server, None, None, None, Some("{status}"), false).await
+}
+
+#[tokio::test]
+async fn task_set_ambiguous_list_is_translated_with_value_kept_literal() {
+    let _lang = PtBrLanguage::on();
+    let run = run_task_set_with_duplicate_list_names().await;
+    assert_eq!(run.code, 2);
+    assert_eq!(
+        first_line(&run.err),
+        "Erro: a lista de tarefas '{status}' corresponde a mais de uma lista; use o id numérico:"
+    );
+}
+
+#[tokio::test]
+async fn task_set_ambiguous_list_stays_english_under_en() {
+    let run = run_task_set_with_duplicate_list_names().await;
+    assert_eq!(run.code, 2);
+    assert_eq!(
+        first_line(&run.err),
+        "Error: task list '{status}' matches more than one list; use the numeric id instead:"
+    );
+}
+
+async fn run_task_set_with_assignee_directory(users: serde_json::Value) -> TaskSetRun {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/users"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(users))
+        .mount(&server)
+        .await;
+    run_task_set(&server, None, Some("{list}"), None, None, false).await
+}
+
+fn alice_directory() -> serde_json::Value {
+    serde_json::json!([user_directory_response(9, "Alice Smith")])
+}
+
+fn duplicate_assignee_directory() -> serde_json::Value {
+    serde_json::json!([
+        user_directory_response(1, "{list}"),
+        user_directory_response(2, "{LIST}")
+    ])
+}
+
+#[tokio::test]
+async fn task_set_unknown_assignee_is_translated_with_value_kept_literal() {
+    let _lang = PtBrLanguage::on();
+    let run = run_task_set_with_assignee_directory(alice_directory()).await;
+    assert_eq!(run.code, 2);
+    assert_eq!(
+        run.err,
+        "Erro: nenhum usuário corresponde ao responsável '{list}'.\n"
+    );
+}
+
+#[tokio::test]
+async fn task_set_unknown_assignee_stays_english_under_en() {
+    let run = run_task_set_with_assignee_directory(alice_directory()).await;
+    assert_eq!(run.code, 2);
+    assert_eq!(run.err, "Error: no user matches assignee '{list}'.\n");
+}
+
+#[tokio::test]
+async fn task_set_ambiguous_assignee_is_translated_with_value_kept_literal() {
+    let _lang = PtBrLanguage::on();
+    let run = run_task_set_with_assignee_directory(duplicate_assignee_directory()).await;
+    assert_eq!(run.code, 2);
+    assert_eq!(
+        run.err,
+        "Erro: o responsável '{list}' corresponde a mais de um usuário; use o id numérico.\n"
+    );
+}
+
+#[tokio::test]
+async fn task_set_ambiguous_assignee_stays_english_under_en() {
+    let run = run_task_set_with_assignee_directory(duplicate_assignee_directory()).await;
+    assert_eq!(run.code, 2);
+    assert_eq!(
+        run.err,
+        "Error: assignee '{list}' matches more than one user; use the numeric id instead.\n"
+    );
+}

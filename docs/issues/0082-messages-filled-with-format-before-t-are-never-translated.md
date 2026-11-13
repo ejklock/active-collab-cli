@@ -2,7 +2,7 @@
 type: Issue
 title: Messages filled with format! before t() are never translated
 description: 34 call sites pass already-filled text to t(), so pt_BR never matches the catalog template; translate the template first, then fill it, and forbid the pattern with a policy test.
-status: open
+status: closed
 labels: [i18n, cli, tech-debt]
 timestamp: 2026-11-12T11:51:34Z
 ---
@@ -28,6 +28,7 @@ Excluded: the English text of any message; the `t()` signature and the catalog f
 - Fix at the call sites, not in `t()`: a `t()` that guessed the template back from filled text would need the values, and the catalog already stores templates.
 - Placeholder names stay the ones the catalog already uses, so no catalog key changes meaning.
 - The policy test lives beside `tests/comment_policy.rs` as a source scan, the same instrument the project already runs.
+- A message with two or more values a user controls (an instance name and the list of known names, a task list name and the lists of a project) fills them in one pass with `i18n::fill(template, &[(placeholder, value)])`, so a value holding placeholder text is never substituted again; a message with one user value keeps the chained `.replace` the tree already uses (session, 2026-11-12, from the S1 review). Not taken: chained `.replace` everywhere, which re-substitutes when both values are user text; a formatting crate, a new dependency for one function.
 
 ### Acceptance
 
@@ -42,3 +43,8 @@ Excluded: the English text of any message; the `t()` signature and the catalog f
 - `docker compose run --rm dev cargo clippy --all-targets -- -D warnings`
 - `docker compose run --rm dev cargo fmt --check`
 - `docker compose run --rm dev cargo test --test comment_policy`
+
+### Plan
+
+- S1: the 17 `ac setup` messages translate their template first and then fill it, so pt_BR renders them in Portuguese and en stays byte-identical | files: src/commands/setup.rs, locales/pt_BR.json, tests/unit/commands.rs | after: none
+- S2: the other 17 call sites (task, resolve, presenter, mine, main) translate first, and a source-scan policy test beside tests/comment_policy.rs fails on any `t(&format!` in src/ | files: src/i18n.rs, src/commands/task.rs, src/commands/resolve.rs, src/commands/presenter.rs, src/commands/mine.rs, src/main.rs, locales/pt_BR.json, tests/unit/i18n.rs, tests/unit/commands.rs, tests/i18n_policy.rs | after: S1 (shares locales/pt_BR.json and tests/unit/commands.rs)

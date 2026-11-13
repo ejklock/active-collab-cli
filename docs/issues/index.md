@@ -30,7 +30,6 @@ TUI/UX work (V/R/ARCH slices), tracing to
 * [0074 — Show estimate and logged hours (this week and total) per task in ac mine](0074-show-estimate-and-logged-hours-this-week-and-total-per-task-in-ac-mine.md) - open
 * [0076 — Download comment attachments in the CLI and from a TUI key](0076-download-comment-attachments-in-the-cli-and-from-a-tui-key.md) - in-progress
 * [0077 — Move a task between task lists from CLI, TUI and MCP](0077-move-a-task-between-task-lists-from-cli-tui-and-mcp.md) - in-progress
-* [0082 — Messages filled with format! before t() are never translated](0082-messages-filled-with-format-before-t-are-never-translated.md) - open
 * [0086 — The comment gate applies every rule to tests and rejects every artifact citation](0086-the-comment-gate-applies-every-rule-to-tests-and-rejects-every-artifact-citation.md) - open
 * [0087 — Remove the TUI leftovers: redundant overlay-close reset, stale dead-code allows, unreachable footer hint branches](0087-remove-the-tui-leftovers-redundant-overlay-close-reset-stale-dead-code-allows-unreachable-footer-hint-branches.md) - open
 * [0088 — The mock ActiveCollab fixtures are the single source of the automated end-to-end tests](0088-the-mock-activecollab-fixtures-are-the-single-source-of-the-automated-end-to-end-tests.md) - open
@@ -93,5 +92,6 @@ TUI/UX work (V/R/ARCH slices), tracing to
 * [0079 — Paint the ac mine TUI rows before the hours requests finish](0079-paint-the-ac-mine-tui-rows-before-the-hours-requests-finish.md) - closed
 * [0080 — Move the MCP attachment download to its own ac_download_attachments tool](0080-move-the-mcp-attachment-download-to-its-own-ac-download-attachments-tool.md) - closed
 * [0081 — Concurrent cache writes fail with database is locked under WAL](0081-concurrent-cache-writes-fail-with-database-is-locked-under-wal.md) - closed
+* [0082 — Messages filled with format! before t() are never translated](0082-messages-filled-with-format-before-t-are-never-translated.md) - closed
 * [0083 — Follow-ups from the 0075-0077 reviews: README keys, fixture tokens, untested TUI routes, record citations](0083-follow-ups-from-the-0075-0077-reviews-readme-keys-fixture-tokens-untested-tui-routes-record-citations.md) - closed
 * [0084 — Replay the live acceptance criteria as terminal walkthroughs against a mock ActiveCollab](0084-replay-the-live-acceptance-criteria-as-terminal-walkthroughs-against-a-mock-activecollab.md) - closed

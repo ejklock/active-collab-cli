@@ -429,37 +429,12 @@ async fn dispatch_browse(args: cli::BrowseArgs) -> i32 {
         }
     };
     let repo = store::instances::InstanceRepository::new(store.conn());
-    let instances = match repo.load_all() {
-        Ok(v) => v,
-        Err(e) => {
-            render::print_error(&format!("Error loading instances: {e}"));
-            return 1;
+    let targets = match commands::load_targets(&repo, args.instance.as_deref()) {
+        Ok(targets) => targets,
+        Err(failure) => {
+            render::print_error(&failure.message);
+            return failure.code;
         }
-    };
-    if instances.is_empty() {
-        render::print_error(&crate::i18n::t(
-            "Error: no instances configured. Run: active_collab.py setup add",
-        ));
-        return 2;
-    }
-    let targets: Vec<store::instances::Instance> = if let Some(name) = args.instance.as_deref() {
-        let matches: Vec<_> = instances
-            .iter()
-            .filter(|i| i.name == name)
-            .cloned()
-            .collect();
-        if matches.is_empty() {
-            let known: Vec<&str> = instances.iter().map(|i| i.name.as_str()).collect();
-            render::print_error(&crate::i18n::t(&format!(
-                "Error: instance '{name}' not found. Known: {known}",
-                name = name,
-                known = known.join(", ")
-            )));
-            return 2;
-        }
-        matches
-    } else {
-        instances
     };
     if args.json {
         let groups = controller::tasks_by_project(db_path.clone(), &targets, &http).await;

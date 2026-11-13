@@ -1,5 +1,5 @@
-use crate::i18n::t;
-use crate::store::instances::Instance;
+use crate::i18n::{fill, t};
+use crate::store::instances::{Instance, InstanceRepository};
 use regex::Regex;
 use std::io::Write;
 use std::sync::OnceLock;
@@ -29,18 +29,7 @@ pub(crate) fn pick_instance(
         match pos {
             Some(idx) => return Ok(idx),
             None => {
-                let known: Vec<&str> = instances.iter().map(|i| i.name.as_str()).collect();
-                let known_str = known.join(", ");
-                writeln!(
-                    err,
-                    "{}",
-                    t(&format!(
-                        "Error: instance '{name}' not found. Known: {known}",
-                        name = n,
-                        known = known_str
-                    ))
-                )
-                .ok();
+                writeln!(err, "{}", instance_not_found_message(n, instances)).ok();
                 return Err(2);
             }
         }
@@ -55,13 +44,62 @@ pub(crate) fn pick_instance(
     writeln!(
         err,
         "{}",
-        t(&format!(
-            "Error: multiple instances configured ({names}). Use --instance NAME.",
-            names = names_str
-        ))
+        t("Error: multiple instances configured ({names}). Use --instance NAME.")
+            .replace("{names}", &names_str)
     )
     .ok();
     Err(2)
+}
+
+pub(crate) fn instance_not_found_message(name: &str, instances: &[Instance]) -> String {
+    let known = instances
+        .iter()
+        .map(|i| i.name.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    fill(
+        &t("Error: instance '{name}' not found. Known: {known}"),
+        &[("{name}", name), ("{known}", &known)],
+    )
+}
+
+/// Why no instances could be targeted: the message to print and the exit status.
+pub(crate) struct TargetFailure {
+    pub code: i32,
+    pub message: String,
+}
+
+/// Every configured instance, or only the one named; failing when none is
+/// configured, the store cannot be read, or the name matches none.
+pub(crate) fn load_targets(
+    repo: &InstanceRepository<'_>,
+    name: Option<&str>,
+) -> Result<Vec<Instance>, TargetFailure> {
+    let instances = repo.load_all().map_err(|e| TargetFailure {
+        code: 1,
+        message: format!("Error loading instances: {e}"),
+    })?;
+    if instances.is_empty() {
+        return Err(TargetFailure {
+            code: 2,
+            message: t("Error: no instances configured. Run: active_collab.py setup add"),
+        });
+    }
+    let Some(name) = name else {
+        return Ok(instances);
+    };
+    let matches: Vec<Instance> = instances
+        .iter()
+        .filter(|i| i.name == name)
+        .cloned()
+        .collect();
+    if matches.is_empty() {
+        return Err(TargetFailure {
+            code: 2,
+            message: instance_not_found_message(name, &instances),
+        });
+    }
+    Ok(matches)
 }
 
 fn task_url_re() -> &'static Regex {
@@ -99,10 +137,8 @@ pub(crate) fn parse_task_ref(ref_: &str, err: &mut dyn Write) -> Result<(i64, i6
     writeln!(
         err,
         "{}",
-        t(&format!(
-            "Error: cannot parse task ref '{ref}'. Use URL or PROJECT_ID/TASK_ID (e.g. 665/75159).",
-            ref = ref_
-        ))
+        t("Error: cannot parse task ref '{ref}'. Use URL or PROJECT_ID/TASK_ID (e.g. 665/75159).")
+            .replace("{ref}", ref_)
     )
     .ok();
     Err(2)
@@ -145,11 +181,11 @@ pub(crate) fn resolve_task_ref_for_comment(
             writeln!(
                 err,
                 "{}",
-                t(&format!(
+                t(
                     "Error: no task ref given and branch '{branch}' does not match \
-                     expected pattern (feature|hotfix|fix)/PROJECT_ID-TASK_ID.",
-                    branch = branch
-                ))
+                     expected pattern (feature|hotfix|fix)/PROJECT_ID-TASK_ID."
+                )
+                .replace("{branch}", branch)
             )
             .ok();
             Err(2)
