@@ -1,0 +1,9 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "active-collab",
+  "version": "0.11.0",
+  "description": "Read ActiveCollab tasks, assignments, comments and projects through the ac CLI: the ac MCP server and the active-collab skill.",
+  "author": { "name": "Evaldo Klock" },
+  "license": "MIT",
+  "homepage": "https://github.com/ejklock/active-collab-cli"
+}
