@@ -31,6 +31,9 @@ TUI/UX work (V/R/ARCH slices), tracing to
 * [0076 — Download comment attachments in the CLI and from a TUI key](0076-download-comment-attachments-in-the-cli-and-from-a-tui-key.md) - in-progress
 * [0077 — Move a task between task lists from CLI, TUI and MCP](0077-move-a-task-between-task-lists-from-cli-tui-and-mcp.md) - in-progress
 * [0082 — Messages filled with format! before t() are never translated](0082-messages-filled-with-format-before-t-are-never-translated.md) - open
+* [0086 — The comment gate applies every rule to tests and rejects every artifact citation](0086-the-comment-gate-applies-every-rule-to-tests-and-rejects-every-artifact-citation.md) - open
+* [0087 — Remove the TUI leftovers: redundant overlay-close reset, stale dead-code allows, unreachable footer hint branches](0087-remove-the-tui-leftovers-redundant-overlay-close-reset-stale-dead-code-allows-unreachable-footer-hint-branches.md) - open
+* [0088 — The mock ActiveCollab fixtures are the single source of the automated end-to-end tests](0088-the-mock-activecollab-fixtures-are-the-single-source-of-the-automated-end-to-end-tests.md) - open
 
 ## Closed
 
