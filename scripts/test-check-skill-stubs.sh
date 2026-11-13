@@ -25,7 +25,7 @@ fresh_tree() {
   cp "${repo}/install-skill.sh" "${repo}/Cargo.toml" "${tree}/"
   cp -R "${repo}/plugins" "${repo}/.claude-plugin" "${repo}/.agents" "${tree}/"
   mkdir -p "${tree}/packages"
-  cp -R "${repo}/packages/opencode" "${tree}/packages/"
+  cp -R "${repo}/packages/opencode" "${repo}/packages/pi" "${tree}/packages/"
   echo "${tree}"
 }
 
@@ -158,6 +158,27 @@ test_opencode_name_drift_fails() {
   expect_red opencode_name_drift_fails "packages/opencode/package.json: .name is 'other'"
 }
 
+test_pi_skill_stub_change_fails() {
+  t="$(fresh_tree)"
+  printf 'x\n' >>"${t}/packages/pi/skills/active-collab/SKILL.md"
+  run_check "${t}"
+  expect_red pi_skill_stub_change_fails "pi SKILL.md differs from the install-skill.sh stub"
+}
+
+test_pi_version_drift_fails() {
+  t="$(fresh_tree)"
+  edit "${t}" packages/pi/package.json '.version = "99.0.0"'
+  run_check "${t}"
+  expect_red pi_version_drift_fails "packages/pi/package.json: .version is '99.0.0'"
+}
+
+test_pi_name_drift_fails() {
+  t="$(fresh_tree)"
+  edit "${t}" packages/pi/package.json '.name = "other"'
+  run_check "${t}"
+  expect_red pi_name_drift_fails "packages/pi/package.json: .name is 'other'"
+}
+
 test_failing_installer_fails() {
   t="$(fresh_tree)"
   printf 'exit 7\n' >"${t}/install-skill.sh"
@@ -188,6 +209,9 @@ for t in \
   test_opencode_skill_stub_change_fails \
   test_opencode_version_drift_fails \
   test_opencode_name_drift_fails \
+  test_pi_skill_stub_change_fails \
+  test_pi_version_drift_fails \
+  test_pi_name_drift_fails \
   test_failing_installer_fails \
   test_unrelated_root_variable_is_ignored; do
   "$t"

@@ -1,7 +1,7 @@
 #!/bin/sh
-# The plugin and OpenCode package copies of the skill stub must equal what install-skill.sh writes,
+# The plugin, OpenCode and Pi package copies of the skill stub must equal what install-skill.sh writes,
 # because install-skill.sh runs as `curl | sh` and cannot read a repo file.
-# The plugin and marketplace names and versions must equal Cargo.toml's.
+# The plugin, marketplace, OpenCode and Pi package names and versions must equal Cargo.toml's.
 # CHECK_STUBS_ROOT overrides the checked tree (used to test the checks on a copy).
 set -eu
 
@@ -9,6 +9,7 @@ root="${CHECK_STUBS_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 plugin_dir="${root}/plugins/active-collab"
 plugin_skill="${plugin_dir}/skills/active-collab/SKILL.md"
 opencode_skill="${root}/packages/opencode/skills/active-collab/SKILL.md"
+pi_skill="${root}/packages/pi/skills/active-collab/SKILL.md"
 tmp="$(mktemp -d)"
 trap 'rm -rf "${tmp}"' EXIT INT TERM
 
@@ -26,6 +27,11 @@ fi
 
 if ! diff -u "${tmp}/.claude/skills/active-collab/SKILL.md" "${opencode_skill}"; then
   echo "opencode SKILL.md differs from the install-skill.sh stub" >&2
+  status=1
+fi
+
+if ! diff -u "${tmp}/.claude/skills/active-collab/SKILL.md" "${pi_skill}"; then
+  echo "pi SKILL.md differs from the install-skill.sh stub" >&2
   status=1
 fi
 
@@ -48,6 +54,8 @@ done
 
 expect packages/opencode/package.json '.name' "opencode-${name}"
 expect packages/opencode/package.json '.version' "${version}"
+expect packages/pi/package.json '.name' "pi-${name}"
+expect packages/pi/package.json '.version' "${version}"
 
 # expect_entries FILE: every marketplace entry carries the plugin name and no
 # version, and one entry's source points at the plugin directory.
@@ -67,4 +75,4 @@ expect_entries .agents/plugins/marketplace.json
 if [ "${status}" -ne 0 ]; then
   exit 1
 fi
-echo "plugin and opencode SKILL.md match the install-skill.sh stub; plugin names and versions match Cargo.toml"
+echo "plugin, opencode and pi SKILL.md match the install-skill.sh stub; plugin names and versions match Cargo.toml"
