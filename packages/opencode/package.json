@@ -1,0 +1,16 @@
+{
+  "name": "opencode-active-collab",
+  "version": "0.11.0",
+  "description": "Registers the ac MCP server and the active-collab skill in OpenCode",
+  "license": "MIT",
+  "type": "module",
+  "main": "./index.ts",
+  "exports": {
+    ".": "./index.ts",
+    "./server": "./index.ts"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "files": ["index.ts", "skills"]
+}
