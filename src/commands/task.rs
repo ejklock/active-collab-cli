@@ -2,7 +2,7 @@ use super::{presenter, resolve};
 use crate::client::{ActiveCollabClient, TaskList, TaskListsOutcome, TaskWriteOutcome};
 use crate::controller;
 use crate::http::HTTP_UNAUTHORIZED;
-use crate::i18n::t;
+use crate::i18n::{fill, t};
 use crate::render;
 use crate::store::cache::TaskCache;
 use crate::store::instances::Instance;
@@ -58,12 +58,10 @@ pub(crate) async fn load_task(
         writeln!(
             err,
             "{}",
-            t(&format!(
-                "Error: task {p}/{t} not found (HTTP {status}).",
-                p = pid,
-                t = tid,
-                status = status
-            ))
+            t("Error: task {p}/{t} not found (HTTP {status}).")
+                .replace("{p}", &pid.to_string())
+                .replace("{t}", &tid.to_string())
+                .replace("{status}", &status.to_string())
         )
         .ok();
         return None;
@@ -212,13 +210,15 @@ fn splice_downloaded_attachments(obj: &mut Value, downloaded: &[controller::Down
 fn download_summary_line(dest_dir: &Path, downloaded: &[controller::DownloadedAsset]) -> String {
     let total = downloaded.len();
     let ok = downloaded.iter().filter(|d| d.error.is_none()).count();
-    t(&format!(
-        "Downloaded {ok} of {total} attachment(s) to {dir}{failures}",
-        ok = ok,
-        total = total,
-        dir = dest_dir.display(),
-        failures = download_failures_suffix(downloaded),
-    ))
+    fill(
+        &t("Downloaded {ok} of {total} attachment(s) to {dir}{failures}"),
+        &[
+            ("{ok}", &ok.to_string()),
+            ("{total}", &total.to_string()),
+            ("{dir}", &dest_dir.display().to_string()),
+            ("{failures}", &download_failures_suffix(downloaded)),
+        ],
+    )
 }
 
 /// Render `" (failed: name: reason, ...)"` for every asset with an `error`,
@@ -289,11 +289,9 @@ pub(crate) async fn current_core(
             writeln!(
                 err,
                 "{}",
-                t(&format!(
-                    "Error: branch '{branch}' does not match expected pattern \
-                     (feature|hotfix|fix)/PROJECT_ID-TASK_ID (e.g. feature/665-75159).",
-                    branch = branch
-                ))
+                t("Error: branch '{branch}' does not match expected pattern \
+                     (feature|hotfix|fix)/PROJECT_ID-TASK_ID (e.g. feature/665-75159).")
+                .replace("{branch}", branch)
             )
             .ok();
             return 2;
@@ -494,10 +492,8 @@ async fn resolve_task_list(
             writeln!(
                 err,
                 "{}",
-                t(&format!(
-                    "Error: no task list matches '{list}'. Task lists of this project:",
-                    list = arg
-                ))
+                t("Error: no task list matches '{list}'. Task lists of this project:")
+                    .replace("{list}", arg)
             )
             .ok();
             write_list_candidates(&lists, err);
@@ -507,11 +503,9 @@ async fn resolve_task_list(
             writeln!(
                 err,
                 "{}",
-                t(&format!(
-                    "Error: task list '{list}' matches more than one list; \
-                     use the numeric id instead:",
-                    list = arg
-                ))
+                t("Error: task list '{list}' matches more than one list; \
+                     use the numeric id instead:")
+                .replace("{list}", arg)
             )
             .ok();
             write_list_candidates(&matching, err);
@@ -533,10 +527,7 @@ async fn resolve_assignee_arg(
             writeln!(
                 err,
                 "{}",
-                t(&format!(
-                    "Error: no user matches assignee '{assignee}'.",
-                    assignee = arg
-                ))
+                t("Error: no user matches assignee '{assignee}'.").replace("{assignee}", arg)
             )
             .ok();
             Err(2)
@@ -545,11 +536,9 @@ async fn resolve_assignee_arg(
             writeln!(
                 err,
                 "{}",
-                t(&format!(
-                    "Error: assignee '{assignee}' matches more than one user; \
-                     use the numeric id instead.",
-                    assignee = arg
-                ))
+                t("Error: assignee '{assignee}' matches more than one user; \
+                     use the numeric id instead.")
+                .replace("{assignee}", arg)
             )
             .ok();
             Err(2)
@@ -594,11 +583,11 @@ fn check_task_edit_request(
             writeln!(
                 err,
                 "{}",
-                t(&format!(
+                t(
                     "Error: unrecognized --status value '{status}'. Use complete, \
-                     completed, done, closed, open, reopen, or todo.",
-                    status = value
-                ))
+                     completed, done, closed, open, reopen, or todo."
+                )
+                .replace("{status}", value)
             )
             .ok();
             Err(2)

@@ -41,6 +41,7 @@
   "Error: --name, --url and --email are required.": "Erro: --name, --url e --email são obrigatórios.",
   "Error: password is required.": "Erro: a senha é obrigatória.",
   "Error: {detail}": "Erro: {detail}",
+  "Error: {exc}": "Erro: {exc}",
   "Error: instance '{name}' not found.": "Erro: instância '{name}' não encontrada.",
   "Error: not in a git repository or HEAD is detached.": "Erro: não está em um repositório git ou HEAD está desanexado.",
   "Error: branch '{branch}' does not match expected pattern (feature|hotfix|fix)/PROJECT_ID-TASK_ID (e.g. feature/665-75159).": "Erro: branch '{branch}' não corresponde ao padrão esperado (feature|hotfix|fix)/PROJECT_ID-TASK_ID (ex: feature/665-75159).",

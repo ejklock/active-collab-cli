@@ -21,12 +21,10 @@ pub(crate) fn write_comment_success(
         writeln!(
             out,
             "{}",
-            t(&format!(
-                "Comment posted (comment_id={comment_id}, task {project_id}/{task_id}).",
-                comment_id = comment_id,
-                project_id = project_id,
-                task_id = task_id
-            ))
+            t("Comment posted (comment_id={comment_id}, task {project_id}/{task_id}).")
+                .replace("{comment_id}", &comment_id.to_string())
+                .replace("{project_id}", &project_id.to_string())
+                .replace("{task_id}", &task_id.to_string())
         )
         .ok();
     }
@@ -51,13 +49,11 @@ pub(crate) fn write_time_success(
         writeln!(
             out,
             "{}",
-            t(&format!(
-                "Time logged (time_record_id={time_record_id}, {hours} hours, task {project_id}/{task_id}).",
-                time_record_id = time_record_id,
-                hours = hours,
-                project_id = project_id,
-                task_id = task_id
-            ))
+            t("Time logged (time_record_id={time_record_id}, {hours} hours, task {project_id}/{task_id}).")
+                .replace("{time_record_id}", &time_record_id.to_string())
+                .replace("{hours}", &hours.to_string())
+                .replace("{project_id}", &project_id.to_string())
+                .replace("{task_id}", &task_id.to_string())
         )
         .ok();
     }
@@ -121,12 +117,13 @@ pub(crate) fn write_task_success(
         writeln!(
             out,
             "{}",
-            t(&format!(
-                "Task updated (task {project_id}/{task_id}){changes}.",
-                project_id = project_id,
-                task_id = task_id,
-                changes = task_changes_suffix(completed, assignee_id, estimate, task_list),
-            ))
+            t("Task updated (task {project_id}/{task_id}){changes}.")
+                .replace("{project_id}", &project_id.to_string())
+                .replace("{task_id}", &task_id.to_string())
+                .replace(
+                    "{changes}",
+                    &task_changes_suffix(completed, assignee_id, estimate, task_list)
+                )
         )
         .ok();
     }

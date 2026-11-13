@@ -1,5 +1,6 @@
 use super::hours_report::{resolve_period, PeriodPreset};
 use super::presenter;
+use super::resolve::load_targets;
 use crate::agent_json;
 use crate::client::{ActiveCollabClient, TimeRecordsOutcome, Unauthorized};
 use crate::http::Http;
@@ -301,48 +302,12 @@ pub(crate) async fn mine_core(
     out: &mut dyn Write,
     err: &mut dyn Write,
 ) -> MineOutcome {
-    let instances = match repo.load_all() {
-        Ok(v) => v,
-        Err(e) => {
-            writeln!(err, "Error loading instances: {e}").ok();
-            return MineOutcome::Done(1);
+    let targets = match load_targets(repo, instance_filter) {
+        Ok(targets) => targets,
+        Err(failure) => {
+            writeln!(err, "{}", failure.message).ok();
+            return MineOutcome::Done(failure.code);
         }
-    };
-
-    if instances.is_empty() {
-        writeln!(
-            err,
-            "{}",
-            t("Error: no instances configured. Run: active_collab.py setup add")
-        )
-        .ok();
-        return MineOutcome::Done(2);
-    }
-
-    let targets: Vec<Instance> = if let Some(name) = instance_filter {
-        let matches: Vec<Instance> = instances
-            .iter()
-            .filter(|i| i.name == name)
-            .cloned()
-            .collect();
-        if matches.is_empty() {
-            let known: Vec<&str> = instances.iter().map(|i| i.name.as_str()).collect();
-            let known_str = known.join(", ");
-            writeln!(
-                err,
-                "{}",
-                t(&format!(
-                    "Error: instance '{name}' not found. Known: {known}",
-                    name = name,
-                    known = known_str
-                ))
-            )
-            .ok();
-            return MineOutcome::Done(2);
-        }
-        matches
-    } else {
-        instances
     };
 
     if is_tty && !json {

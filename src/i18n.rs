@@ -76,6 +76,24 @@ pub fn t(s: &str) -> String {
     }
 }
 
+/// Fill `template` placeholders in one pass: each `(placeholder, value)` pair is
+/// substituted where it appears, and a value is never scanned again, so a value that
+/// contains placeholder text stays literal. Unlisted `{x}` text is copied as is.
+pub fn fill(template: &str, pairs: &[(&str, &str)]) -> String {
+    let mut out = String::with_capacity(template.len());
+    let mut rest = template;
+    while let Some(c) = rest.chars().next() {
+        if let Some((placeholder, value)) = pairs.iter().find(|(p, _)| rest.starts_with(p)) {
+            out.push_str(value);
+            rest = &rest[placeholder.len()..];
+        } else {
+            out.push(c);
+            rest = &rest[c.len_utf8()..];
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 #[path = "../tests/unit/i18n.rs"]
 mod tests;
