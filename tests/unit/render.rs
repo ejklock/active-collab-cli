@@ -1447,7 +1447,7 @@ fn build_header_lines_project_row_shows_fallback_when_project_name_absent() {
 
 #[test]
 fn build_header_lines_long_title_wraps_within_panel() {
-    // BDR 0016 Sc.4: a value wider than the panel content width must wrap to continuation
+    // A value wider than the panel content width must wrap to continuation
     // lines with a hanging indent. No U+2026 ellipsis may appear anywhere in the meta rows.
     let long_title = "A very long task title that exceeds the narrow panel inner width for sure";
     let task = json!({
@@ -2336,7 +2336,7 @@ fn url_at_plain_text_returns_none() {
     );
 }
 
-// --- S4 / ADR 0063: layout-emitted PanelTitle StyleRun on section panel headers ---
+// --- layout-emitted PanelTitle StyleRun on section panel headers ---
 
 #[test]
 fn description_panel_top_border_carries_panel_title_run() {
@@ -2417,7 +2417,7 @@ fn panel_title_run_start_and_len_match_fit_panel_header() {
 
 #[test]
 fn comment_card_header_has_no_panel_title_run() {
-    // ADR 0063 constraint: the title run is emitted only at the three build_* sites,
+    // The title run is emitted only at the three build_* sites,
     // NOT inside panel_box_rich — comment-card headers keep only their own affordance
     // runs, never PanelTitle.
     use crate::richtext::RichStyle;
@@ -2587,7 +2587,7 @@ fn build_detail_content_comment_with_list_body_produces_bullet_lines() {
     );
 }
 
-// --- R3a-A4 / BDR 0003: CLI path unchanged ——————————————————————————————
+// --- CLI path unchanged ——————————————————————————————
 
 #[test]
 fn render_task_to_str_uses_html_to_text_not_richtext_for_list_body() {
@@ -2656,7 +2656,7 @@ fn url_at_inside_bracketed_url_in_bordered_padded_line() {
     );
 }
 
-// --- D1b: asset_link_line with pre-derived labels (BDR 0017) ---
+// --- D1b: asset_link_line with pre-derived labels ---
 
 // D1b-A1: asset with host label (from derive_asset_label) renders as host
 #[test]
@@ -2798,7 +2798,7 @@ fn slice_by_display_cols_emoji_then_accented_text() {
     );
 }
 
-// ── AC3: Affordance StyleRun structural equality (ADR 0032 / ADR 0041) ────────
+// ── Affordance StyleRun structural equality ────────
 
 // Own-comment: build_detail_content emits an EditAffordance StyleRun on the card
 // header line whose (start, len) equals the hit-test affordance's (col_start,
@@ -2893,7 +2893,7 @@ fn own_comment_delete_style_run_coords_equal_affordance_coords() {
     );
 }
 
-// --- AC1: structural OpenUrl affordance emission (ADR 0043 / task ek-0046) ---
+// --- Structural OpenUrl affordance emission ---
 
 // AC1-A1: single-line URL in body emits exactly one OpenUrl affordance with
 // the complete URL; its col_start is inside the content area (>= BODY_LEFT_CHROME_COLS).
@@ -3102,7 +3102,7 @@ fn other_comment_has_no_affordance_style_runs_and_no_affordances() {
     );
 }
 
-// ADR 0068 / issue 0062 C1 — render_task and render_mine_table must never write a raw
+// render_task and render_mine_table must never write a raw
 // 0x1B (ESC) byte to stdout for server-supplied text, whether it arrives as an HTML
 // entity (decoded by html_to_text), a raw byte in a field that skips html_to_text
 // entirely (body_plain_text, name), or a table row name.

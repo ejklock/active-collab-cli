@@ -467,21 +467,23 @@ fn walk_rs_files_collects_rs_files_recursively() {
 }
 
 #[test]
-fn rust_src_has_no_comment_policy_violations() {
-    let src_dir = Path::new("src");
-    let files = walk_rs_files(src_dir);
-    assert!(
-        !files.is_empty(),
-        "walk_rs_files found no .rs files under src/"
-    );
-
+fn rust_sources_have_no_comment_policy_violations() {
     let mut all_violations: Vec<String> = Vec::new();
-    for file in &files {
-        let text = std::fs::read_to_string(file)
-            .unwrap_or_else(|e| panic!("cannot read {}: {e}", file.display()));
-        let violations = scan_source(&text);
-        for (line_num, kind) in violations {
-            all_violations.push(format!("{}:{}  {}", file.display(), line_num, kind));
+    for (root, citations_only) in [("src", false), ("tests", true)] {
+        let files = walk_rs_files(Path::new(root));
+        assert!(
+            !files.is_empty(),
+            "walk_rs_files found no .rs files under {root}/"
+        );
+        for file in &files {
+            let text = std::fs::read_to_string(file)
+                .unwrap_or_else(|e| panic!("cannot read {}: {e}", file.display()));
+            for (line_num, kind) in scan_source(&text) {
+                if citations_only && kind != ViolationKind::RecordCitation {
+                    continue;
+                }
+                all_violations.push(format!("{}:{}  {}", file.display(), line_num, kind));
+            }
         }
     }
 

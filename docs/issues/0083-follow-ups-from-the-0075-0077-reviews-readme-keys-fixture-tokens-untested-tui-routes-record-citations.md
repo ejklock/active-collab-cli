@@ -2,7 +2,7 @@
 type: Issue
 title: "Follow-ups from the 0075-0077 reviews: README keys, fixture tokens, untested TUI routes, record citations"
 description: Fix the stale README key table and the masked fixture tokens, pin three TUI behaviors with tests, and remove record citations from code comments.
-status: open
+status: closed
 labels: [docs, tests, tui, tech-debt]
 timestamp: 2026-11-12T11:51:58Z
 ---
@@ -32,12 +32,13 @@ Excluded: any production behavior change; the `t(&format!(...))` defect (issue 0
 - A citation comment with no other content is deleted; one with a why keeps the why in the same words minus the citation.
 - The citation rule joins `tests/comment_policy.rs` as a violation kind checked on every comment, doc comments included, first over `src/` (S3), then over `tests/` (S4), so the comment gate keeps the tree clean instead of a one-time `rg`. Not taken: a CI grep, which would be a second comment gate beside the test.
 - S3 touches `src/tui/footer.rs`, so the complexity gate re-reads `hint_for_screen` (cognitive 19, ceiling 12). Its six `if overlay.is_x() { None } else { overlay.x() }` fields are always `None`, because each accessor returns `Some` only for its own variant; S3 builds them as `None` and a test proves the footer hint unchanged with each overlay open (owner, 2026-11-12). Not taken: a separate slice first; a baseline of the finding. The overlay branches of `detail_hint` that this call can no longer reach are tracked separately.
+- The overlay-close repaint gets no test (owner, 2026-11-12): the `*rendered_width = usize::MAX` reset in `close_detail_overlay` is redundant, because the data writers already clear the detail cache and the TUI shell reflows every frame, so a test could only pin it through a hand-built state no caller produces. Not taken: keeping the two tests as a cache contract. The redundant reset is tracked separately.
 
 ### Acceptance
 
 - AC1: the README key table matches `src/tui/events.rs` key for key. (`verify_by: inspection`)
 - AC2: `rg -n 'MASKED by secret-mask' tests src` prints nothing and the suite passes. (`verify_by: command`)
-- AC3: removing the status-confirm route, the overlay-close repaint, the draw order or the image-viewer area each fails a named test. (`verify_by: test`)
+- AC3: removing the status-confirm route, the draw order or the image-viewer area each fails a named test. (`verify_by: test`)
 - AC4: `rg -n '//.*\b(ADR|BDR|PRD|[Ii]ssue) ?[0-9]{2,4}' src tests` prints nothing, and the same holds for assertion strings. (`verify_by: command`)
 - CC: no superfluous comments, banners or commented-out code. (`verify_by: inspection`)
 
@@ -51,6 +52,6 @@ Excluded: any production behavior change; the `t(&format!(...))` defect (issue 0
 ### Plan
 
 - S1: the README key table matches the TUI keys and the fixtures hold a plain token | files: README.md, tests/unit/tui_mine_snapshot.rs, tests/unit/model.rs | after: none
-- S2: the status-confirm route, the overlay-close repaint and the Detail overlay draw order are pinned by tests | files: tests/unit/app.rs, tests/unit/model.rs, tests/unit/tui_render.rs | after: S1 (shares tests/unit/model.rs)
+- S2: the status-confirm route and the Detail overlay draw order are pinned by tests | files: tests/unit/app.rs, tests/unit/model.rs, tests/unit/tui_render.rs | after: S1 (shares tests/unit/model.rs)
 - S3: code comments under src/ carry no record citations | files: the src/ files the AC4 command lists | after: none
 - S4: comments and assertion strings under tests/ carry no record citations | files: the tests/ files the AC4 command lists | after: S2 (shares the test files)

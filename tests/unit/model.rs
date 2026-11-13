@@ -546,7 +546,7 @@ fn click_non_url_bracket_token_is_noop() {
 }
 
 // V5-A3: Mailto bracket token yields Cmd::OpenAsset with 'mailto:' scheme pre-added
-// at emit time (ADR 0043 §2) and stored in the OpenUrl affordance.
+// at emit time and stored in the OpenUrl affordance.
 #[test]
 fn click_mailto_bracket_token_yields_mailto_cmd() {
     let email = "user@example.com";
@@ -604,7 +604,7 @@ fn click_outside_content_text_area_is_noop() {
 
 /// Build a Detail model with a URL that hard-splits across at least two body content
 /// lines. Uses `build_detail_content` so that `affordances` is properly populated
-/// with `OpenUrl` spans for every wrapped fragment (ADR 0043 §2).
+/// with `OpenUrl` spans for every wrapped fragment.
 ///
 /// Returns `(model, line0_idx, line1_idx, text_top, col_in_frag0, col_in_frag1)`
 /// where `col_in_frag0` and `col_in_frag1` are click columns guaranteed to be inside
@@ -760,7 +760,7 @@ fn plain_click_on_url_token_is_noop() {
     );
     assert!(
         cmds.is_empty(),
-        "plain click on url token must not emit any cmd (BDR 0014 Sc.8)"
+        "plain click on url token must not emit any cmd"
     );
 }
 
@@ -1650,7 +1650,7 @@ fn loaded_tasks_clears_revalidating_and_stamps_last_loaded() {
     }
 }
 
-// AC3 (BDR 0019 Sc.3): Pressing a digit '1'-'9' in the detail view produces no asset action.
+// Pressing a digit '1'-'9' in the detail view produces no asset action.
 // The key-event mapper no longer maps digit chars to any Msg that opens assets.
 // Verify via events::map_browse_key_event that digits produce None.
 #[test]
@@ -1673,7 +1673,7 @@ fn digit_keys_produce_no_asset_action_in_detail_view() {
     }
 }
 
-// AC3 (BDR 0019 Sc.4): Pressing 'd' in the detail view enters no download mode.
+// Pressing 'd' in the detail view enters no download mode.
 // The key 'd' is no longer mapped to TogglePendingDownload.
 #[test]
 fn d_key_does_not_enter_download_mode() {
@@ -1693,7 +1693,7 @@ fn d_key_does_not_enter_download_mode() {
     );
 }
 
-// AC1 (BDR 0021 Sc.1): The detail footer hint with assets returns the plain scroll/nav hint
+// The detail footer hint with assets returns the plain scroll/nav hint
 // and does NOT contain 'Ctrl/Cmd' or 'abrir anexo' (hint moved into the Artifacts card).
 #[test]
 fn detail_footer_hint_with_assets_has_no_ctrl_cmd_reference() {
@@ -1732,7 +1732,7 @@ fn detail_footer_hint_with_assets_has_no_ctrl_cmd_reference() {
     );
     assert!(
         hint.contains("j/k"),
-        "footer hint must contain 'j/k' navigation (ADR 0038 browsing hint): {hint:?}"
+        "footer hint must contain 'j/k' navigation: {hint:?}"
     );
 }
 
@@ -2717,7 +2717,7 @@ fn relative_due_overdue_many_days_returns_plural_label() {
     );
 }
 
-// --- S2b: assets-inline geometry and scroll-aware click tests (BDR 0022) ---
+// --- S2b: assets-inline geometry and scroll-aware click tests ---
 
 /// Build a Detail model with inline asset section pre-spliced into `lines`.
 ///
@@ -2803,7 +2803,7 @@ fn detail_model_with_inline_assets(
     }
 }
 
-// AC2 (BDR 0022 Sc.2): detail_max_offset no longer subtracts any panel height.
+// detail_max_offset no longer subtracts any panel height.
 // For a viewport of 24 rows, DETAIL_CHROME_ROWS=4, text_vh=20.
 // With 30 body lines + blank + 6 asset-section lines = 37 total lines, max = 37-20 = 17.
 // (Before: subtracting panel height would have reduced text_vh further.)
@@ -2828,7 +2828,7 @@ fn detail_max_offset_with_inline_assets_does_not_subtract_panel_height() {
     );
 }
 
-// AC2 (BDR 0022 Sc.7): empty asset list yields no inline section.
+// Empty asset list yields no inline section.
 // Lines are just body lines, and detail_max_offset behaves the same as before.
 #[test]
 fn detail_max_offset_empty_assets_no_inline_section() {
@@ -2842,7 +2842,7 @@ fn detail_max_offset_empty_assets_no_inline_section() {
     );
 }
 
-// AC2 (BDR 0022 Sc.2): last asset row is reachable at max scroll offset.
+// Last asset row is reachable at max scroll offset.
 // With 1 body line + blank + 6 section rows = 8 total lines, viewport_rows=24,
 // text_vh=20, max=8-20=0 (all fits), so the asset section is always visible at offset=0.
 // For the long list scenario: 25 body lines + blank + 6 section = 32 lines.
@@ -2877,7 +2877,7 @@ fn last_asset_row_reachable_at_max_scroll_offset() {
     );
 }
 
-// AC3 (BDR 0022 Sc.5): Ctrl+click on a visible asset row emits OpenAsset for that asset.
+// Ctrl+click on a visible asset row emits OpenAsset for that asset.
 // Model: 5 body lines + blank + section (6 rows) = 12 total lines.
 // Viewport 80x24, offset=0, text_top=2.
 // asset_section_start = 12 - 6 = 6.
@@ -2916,7 +2916,7 @@ fn ctrl_click_on_visible_asset_row_emits_open_asset() {
     }
 }
 
-// AC3 (BDR 0022 Sc.6): Ctrl+click on the section header row (interior_row=0) emits NO cmd.
+// Ctrl+click on the section header row (interior_row=0) emits NO cmd.
 #[test]
 fn ctrl_click_on_asset_section_header_row_emits_no_cmd() {
     let assets = vec![make_asset("doc.pdf", "https://example.com/doc.pdf")];
@@ -2939,7 +2939,7 @@ fn ctrl_click_on_asset_section_header_row_emits_no_cmd() {
     );
 }
 
-// AC3 (BDR 0022 Sc.5): plain (unmodified) click on an asset row emits NO OpenAsset.
+// Plain (unmodified) click on an asset row emits NO OpenAsset.
 // It falls through to is_in_body_area selection (assets are selectable body content).
 #[test]
 fn plain_click_on_asset_row_emits_no_open_asset() {
@@ -2963,7 +2963,7 @@ fn plain_click_on_asset_row_emits_no_open_asset() {
     );
 }
 
-// AC3 (BDR 0022 Sc.6): Ctrl+click on a blank separator row (interior_row=3) emits no cmd.
+// Ctrl+click on a blank separator row (interior_row=3) emits no cmd.
 #[test]
 fn ctrl_click_on_separator_row_emits_no_cmd() {
     let assets = vec![make_asset("doc.pdf", "https://example.com/doc.pdf")];
@@ -2987,7 +2987,7 @@ fn ctrl_click_on_separator_row_emits_no_cmd() {
     );
 }
 
-// AC3 (BDR 0022 Sc.6): Ctrl+click on the italic hint row (interior_row=4) emits no cmd.
+// Ctrl+click on the italic hint row (interior_row=4) emits no cmd.
 #[test]
 fn ctrl_click_on_hint_row_emits_no_cmd() {
     let assets = vec![make_asset("doc.pdf", "https://example.com/doc.pdf")];
@@ -3007,7 +3007,7 @@ fn ctrl_click_on_hint_row_emits_no_cmd() {
     assert!(cmds.is_empty(), "Ctrl+click on hint row must emit no cmd");
 }
 
-// AC3 (BDR 0022 Sc.6): Ctrl+click on asset row at a non-zero scroll offset opens the correct asset.
+// Ctrl+click on asset row at a non-zero scroll offset opens the correct asset.
 // With offset=5, the body line at line_idx=6+2=8 is the asset row at section interior_row=2.
 // But viewport row for that line: row = text_top + (line_idx - offset) = 2 + (8-5) = 5.
 #[test]
@@ -3047,7 +3047,7 @@ fn ctrl_click_on_asset_row_at_nonzero_offset_is_scroll_aware() {
     }
 }
 
-// AC2 (BDR 0022 Sc.2): is_in_body_area includes asset section rows (no panel_h subtracted).
+// is_in_body_area includes asset section rows (no panel_h subtracted).
 // With viewport 80x24, text_top=2, content_text_height=20:
 // rows 2..21 are all "in body area". Row 21 is just outside.
 #[test]
@@ -3078,7 +3078,7 @@ fn is_in_body_area_includes_asset_rows_no_panel_height_subtracted() {
 // emits Cmd::OpenAsset with that asset's url; a plain (unmodified) click on the SAME row
 // does NOT emit OpenAsset (reserved for text selection). Pins the Ctrl/Cmd gate end-to-end.
 //
-// This is the regression guard for ADR 0032: the hit-test (asset_panel_cmd_at) is intact.
+// This is the regression guard: the hit-test (asset_panel_cmd_at) is intact.
 // What was broken was only the VISUAL affordance (no link style). Both are now tested together.
 //
 // Layout math for viewport (80, 24), 3 body lines + blank + section:
@@ -3145,7 +3145,7 @@ fn ctrl_click_on_asset_row_emits_open_asset_plain_click_does_not() {
     );
 }
 
-// AC3 (BDR 0022 Sc.5): empty assets list → no inline section → no OpenAsset on any row.
+// Empty assets list → no inline section → no OpenAsset on any row.
 #[test]
 fn ctrl_click_with_empty_assets_emits_no_cmd() {
     let body: Vec<String> = (0..5).map(|i| format!("body line {i}")).collect();
@@ -3166,7 +3166,7 @@ fn ctrl_click_with_empty_assets_emits_no_cmd() {
     );
 }
 
-// AC2 (issue 0045): Ctrl+click on a wrapped continuation line of an asset emits
+// Ctrl+click on a wrapped continuation line of an asset emits
 // OpenAsset with the asset's url.
 // Width 42 → inner_width=40 → content_width=39 (PANEL_HPAD=1). A 35+ char label
 // at that width wraps to at least 2 Asset rows in the layout, each carrying an
@@ -3254,8 +3254,8 @@ fn ctrl_click_on_wrapped_asset_continuation_emits_open_asset() {
     }
 }
 
-// AC4 (issue 0045): plain (no Ctrl/Cmd) click on a wrapped asset continuation row
-// does NOT emit Cmd::OpenAsset. (The modifier gate is enforced per BDR 0014 Sc.8.)
+// Plain (no Ctrl/Cmd) click on a wrapped asset continuation row
+// does NOT emit Cmd::OpenAsset. (The modifier gate is what blocks the plain click.)
 #[test]
 fn plain_click_on_wrapped_asset_continuation_emits_no_open_asset() {
     let asset_url = "https://example.com/file.pdf";
@@ -3304,11 +3304,11 @@ fn plain_click_on_wrapped_asset_continuation_emits_no_open_asset() {
     let has_open = cmds.iter().any(|c| matches!(c, Cmd::OpenAsset { .. }));
     assert!(
         !has_open,
-        "plain click on wrapped continuation must NOT emit OpenAsset (BDR 0014 Sc.8): {cmds:?}"
+        "plain click on wrapped continuation must NOT emit OpenAsset: {cmds:?}"
     );
 }
 
-// ── Compose mode tests (BDR 0024 / ADR 0034 / ADR 0035) ──────────────────────
+// ── Compose mode tests ──────────────────────
 
 use crate::tui::model::{
     Compose, ComposeKind, ComposeStatus, DetailOverlay, LogTimeField, LogTimeForm, LogTimeStatus,
@@ -3837,7 +3837,7 @@ fn compose_multiline_editor_produces_two_lines() {
     );
 }
 
-// ── Log-time modal tests (issue 0067 TUI slice) ───────────────────────────────
+// ── Log-time modal tests ───────────────────────────────
 
 fn extract_log_time(model: &Model) -> Option<&LogTimeForm> {
     match model.top() {
@@ -4193,7 +4193,7 @@ fn map_browse_key_event_plain_t_yields_log_time_open() {
     );
 }
 
-// ── Estimate-edit modal tests (issue 0068 TUI slice) ──────────────────────────
+// ── Estimate-edit modal tests ──────────────────────────
 
 fn detail_model_with_task(
     instance: &str,
@@ -4548,7 +4548,7 @@ fn map_browse_key_event_plain_e_yields_estimate_open() {
     );
 }
 
-// ── Status-confirm modal tests (issue 0068 TUI slice) ─────────────────────────
+// ── Status-confirm modal tests ─────────────────────────
 
 fn extract_status_confirm(model: &Model) -> Option<(bool, &EditStatus)> {
     match model.top() {
@@ -4830,7 +4830,7 @@ fn map_browse_key_event_plain_s_yields_status_toggle_open() {
     );
 }
 
-// Assignee-picker modal tests (issue 0068 TUI slice)
+// Assignee-picker modal tests
 
 fn detail_model_with_task_and_users(
     instance: &str,
@@ -5388,7 +5388,7 @@ fn map_browse_key_event_plain_a_yields_assignee_picker_open() {
     );
 }
 
-// ── Comment-edit-ui tests (BDR 0024 Sc.4-5 / ADR 0036) ───────────────────────
+// ── Comment-edit-ui tests ───────────────────────
 
 /// Build a Detail model that has one owned comment (created_by_id == current_user_id)
 /// and one unowned comment. The model is reflowed at `width` so `edit_affordances`
@@ -5612,7 +5612,7 @@ fn plain_click_on_edit_affordance_coords_does_not_open_compose() {
     );
 }
 
-// ── Comment-delete-ui tests (BDR 0024 Sc.6 / issue 0034) ─────────────────────
+// ── Comment-delete-ui tests ─────────────────────
 
 /// Build a reflowed Detail model that has one owned comment (id=42, created_by_id=7)
 /// so `delete_affordances` is populated after `reflow_detail`.
@@ -5686,7 +5686,7 @@ fn confirm_affordances_absent_when_confirm_delete_is_none() {
                 "confirm_delete must be None before any click"
             );
             // The confirm/cancel modal buttons are hit-tested by dispatch_modal_click
-            // from frame geometry (ADR 0039). The scroll-aware affordance list must
+            // from frame geometry. The scroll-aware affordance list must
             // contain only Edit and Delete kinds — never modal-specific entries.
             let only_edit_or_delete = affordances.iter().all(|a| {
                 matches!(
@@ -5789,7 +5789,7 @@ fn plain_click_on_delete_affordance_does_not_set_confirm_delete() {
 
 // ACd2-c: After clicking `[excluir]`, confirm_delete is Some and the modal overlay
 // owns confirm/cancel UI. The scroll-aware affordance list must NOT contain inline
-// Confirm/Cancel entries (they moved to the modal, ADR 0039 slice 2).
+// Confirm/Cancel entries (they moved to the modal).
 #[test]
 fn confirm_affordances_absent_in_affordances_after_delete_request() {
     let m = detail_model_with_comments_for_delete("inst", 1, 1, Some(7), 82);
@@ -5828,7 +5828,7 @@ fn confirm_affordances_absent_in_affordances_after_delete_request() {
                 "confirm_delete must be Some(42) after excluir click"
             );
             // The confirm/cancel modal buttons are hit-tested by dispatch_modal_click
-            // from frame geometry (ADR 0039). The scroll-aware affordance list must
+            // from frame geometry. The scroll-aware affordance list must
             // contain only Edit and Delete kinds — never modal-specific entries.
             let only_edit_or_delete = affordances.iter().all(|a| {
                 matches!(
@@ -5849,7 +5849,7 @@ fn confirm_affordances_absent_in_affordances_after_delete_request() {
 
 // ACd2-d: When confirm_delete is Some, Msg::ConfirmDeleteComment emits exactly one
 // `Cmd::DeleteComment{comment_id: 42}` with the correct instance and clears confirm_delete.
-// (Modal confirm is now via Enter key / Msg::ConfirmDeleteComment — ADR 0039 slice 2.)
+// (Modal confirm is now via Enter key / Msg::ConfirmDeleteComment.)
 #[test]
 fn confirm_delete_msg_emits_delete_comment_cmd() {
     let m = detail_model_with_comments_for_delete("myinst", 1, 1, Some(7), 82);
@@ -5902,7 +5902,7 @@ fn confirm_delete_msg_emits_delete_comment_cmd() {
 }
 
 // ACd2-e: When confirm_delete is Some, Msg::CancelDeleteComment clears it and emits NO Cmd.
-// (Modal cancel is now via Esc key / Msg::CancelDeleteComment — ADR 0039 slice 2.)
+// (Modal cancel is now via Esc key / Msg::CancelDeleteComment.)
 #[test]
 fn cancel_delete_msg_clears_confirm_delete_no_cmd() {
     let m = detail_model_with_comments_for_delete("inst", 1, 1, Some(7), 82);
@@ -6567,7 +6567,7 @@ fn no_key_acts_on_focused_comment_for_edit_or_delete() {
     let _ = m_after_e;
 }
 
-// --- AC1 (BDR 0026 Sc.9): modal_area centering and clamping ---
+// --- modal_area centering and clamping ---
 
 #[test]
 fn modal_area_centers_in_large_frame() {
@@ -6680,7 +6680,7 @@ fn modal_target_size_respects_content_minimum() {
     assert!(w >= 1, "width must be at least 1: got {w}");
 }
 
-// --- AC3 (BDR 0026 Sc.3): compose absent from scrollable lines after reflow ---
+// --- Compose absent from scrollable lines after reflow ---
 
 #[test]
 fn reflow_detail_with_compose_does_not_append_compose_lines() {
@@ -6926,7 +6926,7 @@ fn scroll_offset_for_card_scrolls_up_when_above() {
     assert_eq!(result, 3, "card above viewport: offset must be card_start");
 }
 
-// --- Confirm-delete modal keyboard routing (ADR 0039 slice 2) ---
+// --- Confirm-delete modal keyboard routing ---
 
 fn detail_model_with_confirm_delete(comment_id: i64) -> Model {
     Model {
@@ -7511,7 +7511,7 @@ fn affordance_kind_is_row_target_only_for_open_asset() {
     );
 }
 
-// ── Image viewer overlay lifecycle tests (ADR 0065 slice 0058a) ──────────────
+// ── Image viewer overlay lifecycle tests ──────────────
 
 use crate::tui::model::{ImageAssetRef, ImageStatus};
 
@@ -10080,4 +10080,48 @@ async fn task_list_picker_shell_write_sends_only_the_list_in_one_put() {
     };
     let msg = dispatch_to_one_msg(cmd, &[shell_instance(&server.uri())]).await;
     assert!(matches!(msg, Msg::TaskEditOk));
+}
+
+fn status_confirm_model() -> Model {
+    detail_model_with_overlay(DetailOverlay::StatusConfirm {
+        completed_target: true,
+        status: EditStatus::Editing,
+    })
+}
+
+#[test]
+fn status_confirm_overlay_routes_enter_to_the_confirm_message() {
+    let msg = crate::tui::route_key_event(
+        &status_confirm_model(),
+        key_press(crossterm::event::KeyCode::Enter),
+    );
+    assert!(matches!(msg, Some(Msg::StatusToggleConfirm)));
+}
+
+#[test]
+fn status_confirm_overlay_routes_ctrl_s_to_the_confirm_message() {
+    let key = crossterm::event::KeyEvent::new(
+        crossterm::event::KeyCode::Char('s'),
+        KeyModifiers::CONTROL,
+    );
+    let msg = crate::tui::route_key_event(&status_confirm_model(), key);
+    assert!(matches!(msg, Some(Msg::StatusToggleConfirm)));
+}
+
+#[test]
+fn status_confirm_overlay_routes_esc_to_the_cancel_message() {
+    let msg = crate::tui::route_key_event(
+        &status_confirm_model(),
+        key_press(crossterm::event::KeyCode::Esc),
+    );
+    assert!(matches!(msg, Some(Msg::StatusToggleCancel)));
+}
+
+#[test]
+fn status_confirm_overlay_swallows_q_instead_of_quitting() {
+    let msg = crate::tui::route_key_event(
+        &status_confirm_model(),
+        key_press(crossterm::event::KeyCode::Char('q')),
+    );
+    assert!(msg.is_none(), "q must not reach the browse map's quit");
 }

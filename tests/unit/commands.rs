@@ -3317,7 +3317,7 @@ async fn comment_core_404_keeps_existing_output_without_reauth_message() {
     );
 }
 
-// Issue 0071 AC2: with --html, the posted body equals the caller's input
+// With --html, the posted body equals the caller's input
 // byte for byte — no escaping, no paragraph wrapping — reaching the server
 // through the same client.create_comment seam the TUI uses.
 #[tokio::test]
@@ -3366,7 +3366,7 @@ async fn comment_core_html_flag_posts_body_verbatim() {
     }
 }
 
-// Issue 0071 AC3: an empty or whitespace-only body under --html still exits
+// An empty or whitespace-only body under --html still exits
 // 2 with the existing message and sends no request — the html flag changes
 // encoding, never the empty-body guard.
 #[tokio::test]
@@ -3404,7 +3404,7 @@ async fn comment_core_html_flag_whitespace_only_body_returns_exit2() {
     }
 }
 
-// Issue 0071: a markup-only body such as `<p></p>` is accepted under --html
+// A markup-only body such as `<p></p>` is accepted under --html
 // (owner decision) — the empty-body guard stays `str::trim`, which does not
 // treat markup as blank.
 #[tokio::test]
@@ -3440,7 +3440,7 @@ async fn comment_core_html_flag_markup_only_body_is_posted() {
     assert_eq!(code, 0, "err: {}", output_str(&err));
 }
 
-// Issue 0071 AC5: --html changes only the posted body, never the --json
+// --html changes only the posted body, never the --json
 // output shape, the HTTP-4xx failure path or the 401 re-auth message.
 #[tokio::test]
 async fn comment_core_html_flag_json_output_is_unchanged() {
@@ -3997,7 +3997,7 @@ async fn time_log_core_http_failure_with_json_flag_emits_error_object() {
     assert!(obj.get("error").is_some());
 }
 
-// --- task_set_core (issue 0068 slice 2) ---
+// --- task_set_core ---
 
 fn task_write_response(id: i64) -> serde_json::Value {
     serde_json::json!({ "id": id })

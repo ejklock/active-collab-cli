@@ -2004,7 +2004,7 @@ fn detail_global_scroll_offset_advances_through_all_content() {
     }
 }
 
-// ADR 0031 AC1: reflow_tasks at unchanged width + unchanged list is a no-op.
+// reflow_tasks at unchanged width + unchanged list is a no-op.
 // Verify by poisoning the cache with a sentinel, calling reflow_tasks at the same
 // width, and asserting the sentinel is still present (no rebuild occurred).
 #[test]
@@ -2068,7 +2068,7 @@ fn reflow_tasks_unchanged_width_is_noop() {
     }
 }
 
-// ADR 0031 AC2: list swap (handle_loaded_mine_tasks) invalidates the cache;
+// A list swap (handle_loaded_mine_tasks) invalidates the cache, but
 // changing only `selected` does NOT rebuild.
 #[test]
 fn reflow_tasks_list_swap_invalidates_cache_selected_change_does_not() {
@@ -2163,7 +2163,7 @@ fn reflow_tasks_list_swap_invalidates_cache_selected_change_does_not() {
     }
 }
 
-// ADR 0031 AC2: every Screen::Tasks construction is born with empty caches + rendered_width usize::MAX.
+// Every Screen::Tasks construction is born with empty caches + rendered_width usize::MAX.
 #[test]
 fn new_tasks_screen_born_with_empty_cache() {
     let m = tasks_model_for_reflow(make_tasks(5));
@@ -2231,7 +2231,7 @@ fn first_visible_linear_oracle(offsets: &[u32], selected: usize, visible_h: u16)
     selected
 }
 
-// ADR 0031 AC3: first_visible calls the production binary search and returns
+// first_visible calls the production binary search and returns
 // the same index as the linear oracle for every selected across the fixture,
 // including selection near the end, the exact-boundary case (kills < vs <= mutant),
 // and the card-taller-than-viewport case (kills dropped .min(selected) mutant).
@@ -2312,7 +2312,7 @@ fn first_visible_card_binary_equals_linear_for_fixture() {
     }
 }
 
-// ADR 0031 AC4: card_offsets uses u32 — cumulative height beyond u16::MAX is exact.
+// card_offsets uses u32 — cumulative height beyond u16::MAX is exact.
 #[test]
 fn card_offsets_do_not_saturate_beyond_u16_max() {
     let single_card_height: usize = 5;
@@ -2351,7 +2351,7 @@ fn card_offsets_do_not_saturate_beyond_u16_max() {
     );
 }
 
-// ADR 0051: pure task_layout unit tests, from primitives only — no Frame, no Model.
+// Pure task_layout unit tests, from primitives only — no Frame, no Model.
 
 fn task_row_named(name: &str) -> TaskRow {
     TaskRow {

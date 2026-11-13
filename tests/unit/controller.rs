@@ -987,7 +987,7 @@ async fn load_task_core_enriches_task_with_project_name_from_cache() {
     assert_no_project_fetches(
         &server,
         10,
-        "warm cache hit must issue zero projects/{id} requests (ADR 0014 guarantee)",
+        "warm cache hit must issue zero projects/{id} requests",
     )
     .await;
 }
@@ -1276,7 +1276,7 @@ async fn task_detail_empty_user_cache_fetches_once_then_serves_from_cache() {
     );
 }
 
-// BDR-0008 Scenario 6: two instances both expose project_id=N with DIFFERENT names —
+// Two instances both expose project_id=N with DIFFERENT names —
 // each group must show ITS OWN name; the last-joined instance must not clobber the first.
 #[tokio::test]
 async fn tasks_by_project_colliding_project_ids_show_per_instance_names() {
@@ -1564,7 +1564,7 @@ fn seed_project_names_cache(
 
 // --- D1b: derive_asset_label ---
 
-// D1b-A1: URL with query tail → host label (BDR 0017 Sc.1)
+// D1b-A1: URL with query tail → host label
 #[test]
 fn derive_asset_label_query_tail_url_yields_host() {
     let url = "https://docs.google.com/document/d/ABC/edit?tab=t.0";
@@ -1575,7 +1575,7 @@ fn derive_asset_label_query_tail_url_yields_host() {
     );
 }
 
-// D1b-A2: URL ending in a real file → filename label (BDR 0017 Sc.2)
+// D1b-A2: URL ending in a real file → filename label
 #[test]
 fn derive_asset_label_real_filename_yields_filename() {
     let url = "https://x.example.com/uploads/relatorio.pdf";
@@ -1586,7 +1586,7 @@ fn derive_asset_label_real_filename_yields_filename() {
     );
 }
 
-// D1b-A3: anchor text present and different from URL → anchor text wins (BDR 0017 Sc.3)
+// D1b-A3: anchor text present and different from URL → anchor text wins
 #[test]
 fn derive_asset_label_anchor_text_preferred_over_filename() {
     let url = "https://x.example.com/uploads/relatorio.pdf";
@@ -1597,7 +1597,7 @@ fn derive_asset_label_anchor_text_preferred_over_filename() {
     );
 }
 
-// D1b-A4: query tail segment like `edit?tab=t.0` is never a filename (BDR 0017 Sc.4)
+// D1b-A4: query tail segment like `edit?tab=t.0` is never a filename
 #[test]
 fn derive_asset_label_query_tail_segment_is_never_a_filename() {
     let url = "https://docs.google.com/document/d/ABC/edit?tab=t.0";
@@ -2050,7 +2050,7 @@ fn attach_project_names_memoises_per_instance_read() {
     assert_eq!(result[1].project_name.as_deref(), Some("Project Two"));
 }
 
-// --- ek-0061 S1 (ADR 0066): downloadable_assets ---
+// --- ek-0061 S1: downloadable_assets ---
 
 #[test]
 fn downloadable_assets_includes_attachments_and_inline_images_only() {

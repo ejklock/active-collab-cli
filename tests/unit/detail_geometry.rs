@@ -148,7 +148,7 @@ fn content_height_clamped_zero_viewport_returns_one() {
     );
 }
 
-// --- ADR 0050: selected_text — the column half absorbed from model.rs ---
+// --- selected_text — the column half absorbed from model.rs ---
 
 // A boxed Detail body line: `│ {content} │`, matching the chrome
 // `box_inner_content` strips (border + HPAD on each side).
