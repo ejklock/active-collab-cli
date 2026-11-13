@@ -26,6 +26,8 @@ pub(crate) struct DisplayFlags {
 ///
 /// Returns (task, comments) from cache or API, or None on HTTP error.
 /// When `refresh` is false and the cache has a hit, no network call is made.
+/// The cache always holds the full comment list; `no_comments` empties only
+/// the comments returned.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn load_task(
     cache: &TaskCache<'_>,
@@ -45,6 +47,7 @@ pub(crate) async fn load_task(
                 .and_then(|obj| obj.remove("comments"))
                 .and_then(|v| v.as_array().cloned())
                 .unwrap_or_default();
+            let comments = if no_comments { vec![] } else { comments };
             return Some((task, comments));
         }
     }
@@ -67,27 +70,18 @@ pub(crate) async fn load_task(
         return None;
     }
 
-    let payload = payload_opt.unwrap_or(Value::Null);
-    let mut task = payload
-        .get("single")
-        .cloned()
-        .unwrap_or(Value::Object(serde_json::Map::new()));
-    task["tracked_time"] = payload.get("tracked_time").cloned().unwrap_or(Value::Null);
-    let comments: Vec<Value> = if no_comments {
-        vec![]
-    } else {
-        payload
-            .get("comments")
-            .and_then(|v| v.as_array())
-            .cloned()
-            .unwrap_or_default()
-    };
-
-    let comments_value = Value::Array(comments.clone());
+    let (task, comments) = controller::parse_task_payload(payload_opt.unwrap_or(Value::Null));
     cache
-        .write(instance_name, pid, tid, &task, &comments_value)
+        .write(
+            instance_name,
+            pid,
+            tid,
+            &task,
+            &Value::Array(comments.clone()),
+        )
         .ok();
 
+    let comments = if no_comments { vec![] } else { comments };
     Some((task, comments))
 }
 

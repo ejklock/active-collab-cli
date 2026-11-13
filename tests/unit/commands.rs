@@ -1535,6 +1535,235 @@ async fn comment_attachments_download_failure_keeps_task_attachment() {
     assert!(downloaded[1]["error"].as_str().is_some(), "{downloaded:?}");
 }
 
+struct CommentedTaskServer {
+    server: MockServer,
+    comment_url: String,
+}
+
+async fn commented_task_server(
+    comments: serde_json::Value,
+    task_requests: u64,
+) -> CommentedTaskServer {
+    let server = MockServer::start().await;
+    let task_url = format!("{}/task-note.txt", server.uri());
+    let comment_url = format!("{}/comment-note.txt", server.uri());
+    let comments = if comments.is_null() {
+        serde_json::json!([{
+            "id": 1,
+            "body": "see the attached file",
+            "created_by_id": 1,
+            "created_on": 1700000000,
+            "attachments": [{
+                "name": "comment-note.txt",
+                "download_url": comment_url,
+                "mime_type": "text/plain",
+                "size": 7
+            }]
+        }])
+    } else {
+        comments
+    };
+    Mock::given(method("GET"))
+        .and(path("/api/v1/projects/5/tasks/10"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "single": task_with_attachment(10, "Attachment task", &task_url),
+            "tracked_time": 0,
+            "comments": comments
+        })))
+        .expect(task_requests)
+        .mount(&server)
+        .await;
+    for (route, bytes) in [
+        ("/task-note.txt", "task-bytes"),
+        ("/comment-note.txt", "comment-bytes"),
+    ] {
+        Mock::given(method("GET"))
+            .and(path(route))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(bytes.as_bytes().to_vec()))
+            .mount(&server)
+            .await;
+    }
+    CommentedTaskServer {
+        server,
+        comment_url,
+    }
+}
+
+async fn read_task(
+    server: &MockServer,
+    cache: &TaskCache<'_>,
+    flags: &DisplayFlags,
+) -> (String, String) {
+    let inst = make_inst(&server.uri());
+    let client = ActiveCollabClient::new(inst.clone(), make_http());
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    let code = do_get_task(&inst, cache, &client, 5, 10, flags, &mut out, &mut err).await;
+    assert_eq!(code, 0, "{}", output_str(&err));
+    (output_str(&out).to_owned(), output_str(&err).to_owned())
+}
+
+fn download_flags(dest: &TempDir, no_comments: bool) -> DisplayFlags {
+    DisplayFlags {
+        no_comments,
+        download_attachments: true,
+        attachments_dir: Some(dest.path().to_string_lossy().to_string()),
+        ..default_flags()
+    }
+}
+
+#[tokio::test]
+async fn full_read_after_no_comments_read_prints_the_comment_from_the_cache() {
+    let fixture = commented_task_server(serde_json::Value::Null, 1).await;
+    let (_dir, store) = make_store();
+    let cache = TaskCache::new(store.conn());
+    let no_comments = DisplayFlags {
+        no_comments: true,
+        ..default_flags()
+    };
+
+    let (first, _) = read_task(&fixture.server, &cache, &no_comments).await;
+    let (second, _) = read_task(&fixture.server, &cache, &default_flags()).await;
+
+    assert!(!first.contains("see the attached file"), "{first}");
+    assert!(second.contains("see the attached file"), "{second}");
+    fixture.server.verify().await;
+}
+
+#[tokio::test]
+async fn download_after_no_comments_read_fetches_the_comment_attachment_from_the_cache() {
+    let fixture = commented_task_server(serde_json::Value::Null, 1).await;
+    let (_dir, store) = make_store();
+    let cache = TaskCache::new(store.conn());
+    let no_comments = DisplayFlags {
+        no_comments: true,
+        ..default_flags()
+    };
+    read_task(&fixture.server, &cache, &no_comments).await;
+
+    let dest = TempDir::new().unwrap();
+    let (second, _) = read_task(&fixture.server, &cache, &download_flags(&dest, false)).await;
+
+    assert!(
+        second.contains("Downloaded 2 of 2 attachment(s)"),
+        "{second}"
+    );
+    assert_eq!(
+        std::fs::read(dest.path().join("comment-note.txt")).unwrap(),
+        b"comment-bytes",
+        "{}",
+        fixture.comment_url
+    );
+    fixture.server.verify().await;
+}
+
+#[tokio::test]
+async fn full_read_after_no_comments_read_of_a_task_without_comments_prints_none() {
+    let fixture = commented_task_server(serde_json::json!([]), 1).await;
+    let (_dir, store) = make_store();
+    let cache = TaskCache::new(store.conn());
+    let no_comments = DisplayFlags {
+        no_comments: true,
+        ..default_flags()
+    };
+    read_task(&fixture.server, &cache, &no_comments).await;
+
+    let (second, err) = read_task(&fixture.server, &cache, &default_flags()).await;
+
+    assert!(second.contains("Attachment task"), "{second}");
+    assert!(!second.contains("see the attached file"), "{second}");
+    assert!(err.is_empty(), "{err}");
+    fixture.server.verify().await;
+}
+
+#[tokio::test]
+async fn a_comments_value_that_is_not_a_list_reads_as_no_comments_and_is_cached() {
+    let fixture = commented_task_server(serde_json::json!("unexpected"), 1).await;
+    let (_dir, store) = make_store();
+    let cache = TaskCache::new(store.conn());
+
+    let (first, first_err) = read_task(&fixture.server, &cache, &default_flags()).await;
+    let (second, _) = read_task(&fixture.server, &cache, &default_flags()).await;
+
+    assert!(first.contains("Attachment task"), "{first}");
+    assert!(!first.contains("unexpected"), "{first}");
+    assert!(first_err.is_empty(), "{first_err}");
+    assert_eq!(first, second);
+    fixture.server.verify().await;
+}
+
+#[tokio::test]
+async fn no_comments_download_skips_comment_attachments_on_a_miss_and_on_a_hit() {
+    let fixture = commented_task_server(serde_json::Value::Null, 1).await;
+    let (_dir, store) = make_store();
+    let cache = TaskCache::new(store.conn());
+
+    let miss_dest = TempDir::new().unwrap();
+    let (miss, _) = read_task(&fixture.server, &cache, &download_flags(&miss_dest, true)).await;
+    let hit_dest = TempDir::new().unwrap();
+    let (hit, _) = read_task(&fixture.server, &cache, &download_flags(&hit_dest, true)).await;
+
+    for (output, dest) in [(&miss, &miss_dest), (&hit, &hit_dest)] {
+        assert!(
+            output.contains("Downloaded 1 of 1 attachment(s)"),
+            "{output}"
+        );
+        assert!(dest.path().join("note.txt").exists());
+        assert!(!dest.path().join("comment-note.txt").exists());
+    }
+    fixture.server.verify().await;
+}
+
+#[tokio::test]
+async fn no_comments_read_after_a_full_read_prints_no_comment_text() {
+    let fixture = commented_task_server(serde_json::Value::Null, 1).await;
+    let (_dir, store) = make_store();
+    let cache = TaskCache::new(store.conn());
+    let full = read_task(&fixture.server, &cache, &default_flags()).await.0;
+    assert!(full.contains("see the attached file"), "{full}");
+
+    let plain = DisplayFlags {
+        no_comments: true,
+        ..default_flags()
+    };
+    let (plain_out, _) = read_task(&fixture.server, &cache, &plain).await;
+    let json = DisplayFlags {
+        json: true,
+        no_comments: true,
+        ..default_flags()
+    };
+    let (json_out, _) = read_task(&fixture.server, &cache, &json).await;
+
+    assert!(!plain_out.contains("see the attached file"), "{plain_out}");
+    assert!(!json_out.contains("see the attached file"), "{json_out}");
+    let obj: serde_json::Value = serde_json::from_str(json_out.trim_end()).unwrap();
+    assert_eq!(obj["comments"], serde_json::json!([]));
+    fixture.server.verify().await;
+}
+
+#[tokio::test]
+async fn cache_entry_in_the_old_shape_is_fetched_once_then_served_from_the_cache() {
+    let fixture = commented_task_server(serde_json::Value::Null, 1).await;
+    let (_dir, store) = make_store();
+    store
+        .conn()
+        .execute(
+            "INSERT INTO ticket_cache (instance, project_id, task_id, fields_json, fetched_at) \
+             VALUES ('testinst', 5, 10, ?1, '2026-01-01T00:00:00Z')",
+            rusqlite::params![r#"{"id":10,"name":"Stale","comments":[]}"#],
+        )
+        .unwrap();
+    let cache = TaskCache::new(store.conn());
+
+    let (first, _) = read_task(&fixture.server, &cache, &default_flags()).await;
+    let (second, _) = read_task(&fixture.server, &cache, &default_flags()).await;
+
+    assert!(first.contains("see the attached file"), "{first}");
+    assert!(first.contains("Attachment task"), "{first}");
+    assert!(second.contains("see the attached file"), "{second}");
+    fixture.server.verify().await;
+}
+
 #[tokio::test]
 async fn do_get_task_json_mode_omits_downloaded_attachments_when_flag_absent() {
     let server = MockServer::start().await;
