@@ -583,7 +583,7 @@ fn browse_object_empty_groups_yields_empty_projects_array() {
     );
 }
 
-// --- ADR 0040: comment_result and comment_error shapes ---
+// --- comment_result and comment_error shapes ---
 
 #[test]
 fn comment_result_exact_minified_string() {
@@ -641,7 +641,7 @@ fn comment_error_is_single_minified_line() {
     );
 }
 
-// --- time_result shape (issue 0067) ---
+// --- time_result shape ---
 
 #[test]
 fn time_result_exact_minified_string() {
@@ -663,7 +663,7 @@ fn time_result_is_valid_json_with_ok_true() {
     assert_eq!(obj["hours"], 4.0);
 }
 
-// --- task_result shape (issue 0068 slice 2) ---
+// --- task_result shape ---
 
 #[test]
 fn task_result_status_only_carries_only_status() {

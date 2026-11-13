@@ -237,7 +237,7 @@ fn project_names_cache_write_with_fetched_at_stamps_supplied_timestamp() {
     );
 }
 
-// ADR 0052: read_fresh returns Some for a recently-written entry when
+// read_fresh returns Some for a recently-written entry when
 // max_age_secs is large enough to cover its age.
 #[test]
 fn project_names_cache_read_fresh_returns_some_for_recent_entry() {
@@ -256,7 +256,7 @@ fn project_names_cache_read_fresh_returns_some_for_recent_entry() {
     );
 }
 
-// ADR 0052: read_fresh returns None for a stale entry when max_age_secs is
+// read_fresh returns None for a stale entry when max_age_secs is
 // smaller than the entry's age.
 #[test]
 fn project_names_cache_read_fresh_returns_none_for_stale_entry() {
@@ -272,7 +272,7 @@ fn project_names_cache_read_fresh_returns_none_for_stale_entry() {
     );
 }
 
-// ADR 0052: read_fresh returns None when no entry has been written.
+// read_fresh returns None when no entry has been written.
 #[test]
 fn project_names_cache_read_fresh_returns_none_when_absent() {
     let (_dir, store) = make_store();
@@ -281,7 +281,7 @@ fn project_names_cache_read_fresh_returns_none_when_absent() {
     assert!(result.is_none());
 }
 
-// ADR 0052: entry exactly at the max_age boundary reads Some (age ==
+// Entry exactly at the max_age boundary reads Some (age ==
 // max_age_secs), mirroring the TaskListCache boundary test below — the
 // read_fresh comparison must be inclusive, not strict.
 #[test]

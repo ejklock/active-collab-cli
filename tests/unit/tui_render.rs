@@ -319,7 +319,7 @@ fn draw_tasks_card_layout_no_nome_header_has_bordered_card() {
         content.contains("My Task"),
         "card content must contain the task name: {content}"
     );
-    // Card uses squared-corner box chars (ADR 0061)
+    // Card uses squared-corner box chars
     assert!(
         content.contains(BOX_TL) || content.contains(BOX_BL),
         "card must use squared-box border chars: {content}"
@@ -931,7 +931,7 @@ fn build_detail_lines_with_comment_produces_boxed_lines_fitting_width() {
     );
 }
 
-// U8-A1 / ADR 0060: token-driven theme — every style fn reads its Rgb channels
+// Token-driven theme — every style fn reads its Rgb channels
 // from the active palette's named tokens, never a literal hue.
 #[test]
 fn footer_style_is_footer_token_on_raised_band_bold() {
@@ -947,7 +947,7 @@ fn footer_style_is_footer_token_on_raised_band_bold() {
     );
 }
 
-// U8-A1 / ADR 0060: selection_style — selection_fg token on selection token, bold.
+// selection_style — selection_fg token on selection token, bold.
 #[test]
 fn selection_style_is_selection_fg_token_on_selection_token_bold() {
     use ratatui::style::{Modifier, Style};
@@ -962,7 +962,7 @@ fn selection_style_is_selection_fg_token_on_selection_token_bold() {
     );
 }
 
-// U8-A1 / ADR 0060: column_header_style — accent token fg + bold.
+// column_header_style — accent token fg + bold.
 #[test]
 fn column_header_style_is_accent_token_bold() {
     use ratatui::style::{Modifier, Style};
@@ -2139,7 +2139,7 @@ fn view_detail_footer_has_no_tab_switch_hint() {
         !content.contains("1-9"),
         "Detail footer must NOT contain '1-9 open asset' hint (numeric scheme removed): {content}"
     );
-    // The contextual browsing hint now starts with j/k (ADR 0038 §1).
+    // The contextual browsing hint now starts with j/k.
     assert!(
         content.contains("j/k"),
         "Detail footer (browsing mode) must contain 'j/k' hint: {content}"
@@ -4309,7 +4309,7 @@ fn build_detail_content_structured_path_preserves_plain_text() {
 // R3b-A3: Plain lines (no emphasis HTML) produce no content-emphasis style
 // runs (Bold/Italic/Code/Link/affordances). The structural RichStyle::PanelTitle
 // run on the Details/Description top-border rows is expected by design
-// (ADR 0063) and is not a content-emphasis run, so it is excluded here.
+// and is not a content-emphasis run, so it is excluded here.
 #[test]
 fn plain_body_produces_no_content_emphasis_style_runs() {
     let task = json!({
@@ -4332,7 +4332,7 @@ fn plain_body_produces_no_content_emphasis_style_runs() {
 
     assert!(
         body_lines_with_content_emphasis.is_empty(),
-        "plain HTML body must produce no content-emphasis style runs (structural PanelTitle runs on panel borders are expected per ADR 0063); affected lines: {body_lines_with_content_emphasis:?}"
+        "plain HTML body must produce no content-emphasis style runs (structural PanelTitle runs on panel borders are expected); affected lines: {body_lines_with_content_emphasis:?}"
     );
 }
 
@@ -4494,7 +4494,7 @@ mod w1_chrome_wrap {
 
     // W1-A1: At a narrow terminal width the user header bar wraps to multiple lines and the
     // full identity ({name} <{email}> · {instance}) is present in the buffer — no ellipsis,
-    // no right-clip. (BDR 0012 S1)
+    // no right-clip.
     #[test]
     fn narrow_header_wraps_and_full_identity_present_no_clip() {
         // header_line = "Alice <alice@prod.example.com> · production" (44 chars).
@@ -4553,7 +4553,6 @@ mod w1_chrome_wrap {
 
     // W1-A2: At a narrow terminal width the footer (hint + Updated-at timestamp) wraps so
     // both the hint text and the timestamp are fully present in the buffer — nothing clipped.
-    // (BDR 0012 S3)
     #[test]
     fn narrow_footer_wraps_hint_and_timestamp_both_present() {
         // At width=40 the hint "↑/↓ navigate  Enter select  r refresh  Esc/b back  q quit  s selection" (72 chars)
@@ -4594,7 +4593,7 @@ mod w1_chrome_wrap {
     }
 
     // W1-A3: At a wide terminal the user header bar and footer are each a single line at
-    // height 1 (no wrapping, no stray blank line). (BDR 0012 S5)
+    // height 1 (no wrapping, no stray blank line).
     #[test]
     fn wide_terminal_header_and_footer_each_single_line() {
         // At width=120, header "Alice <alice@example.com> · prod" (33 chars) fits on one line.
@@ -4675,7 +4674,7 @@ mod w1_chrome_wrap {
     }
 
     // W1-A4: A single unbreakable token longer than the available display width hard-breaks at
-    // the display-column boundary without overflowing the region. (BDR 0012 S6)
+    // the display-column boundary without overflowing the region.
     #[test]
     fn unbreakable_token_hard_breaks_at_display_column_boundary() {
         // email = "noreply-serviceaccount-admin@very-long-subdomain.example.com" (61 chars)
@@ -4728,9 +4727,9 @@ mod w1_chrome_wrap {
     }
 }
 
-// --- D1f (BDR 0021) render tests ---
+// --- D1f render tests ---
 
-// AC2 (BDR 0021 Sc.2): the inline Artifacts section renders the hint text
+// The inline Artifacts section renders the hint text
 // 'Ctrl/Cmd+clique abrir anexo' as an italic row within the scrollable content.
 // Those cells carry the ITALIC modifier. Derived from the REAL buffer.
 #[test]
@@ -4771,11 +4770,11 @@ fn draw_detail_assets_card_last_interior_line_is_italic_hint() {
     });
     assert!(
         has_italic,
-        "hint row (y={hint_y}) must have at least one cell with ITALIC modifier (BDR 0021 Sc.2)"
+        "hint row (y={hint_y}) must have at least one cell with ITALIC modifier"
     );
 }
 
-// AC1 (BDR 0021 Sc.1): hint_for_screen for a Detail screen WITH assets returns the plain
+// hint_for_screen for a Detail screen WITH assets returns the plain
 // scroll hint and contains neither 'Ctrl/Cmd' nor 'abrir anexo'.
 #[test]
 fn hint_for_screen_detail_with_assets_has_no_ctrl_cmd_in_footer() {
@@ -4810,15 +4809,15 @@ fn hint_for_screen_detail_with_assets_has_no_ctrl_cmd_in_footer() {
     let hint = hint_for_screen(&screen);
     assert!(
         !hint.to_lowercase().contains("ctrl") && !hint.to_lowercase().contains("cmd"),
-        "footer hint for Detail-with-assets must NOT contain 'Ctrl/Cmd' (BDR 0021 Sc.1): {hint:?}"
+        "footer hint for Detail-with-assets must NOT contain 'Ctrl/Cmd': {hint:?}"
     );
     assert!(
         !hint.contains("abrir anexo"),
-        "footer hint for Detail-with-assets must NOT contain 'abrir anexo' (BDR 0021 Sc.1): {hint:?}"
+        "footer hint for Detail-with-assets must NOT contain 'abrir anexo': {hint:?}"
     );
     assert!(
         hint.contains("j/k"),
-        "footer hint for Detail must contain 'j/k' navigation (ADR 0038 browsing hint): {hint:?}"
+        "footer hint for Detail must contain 'j/k' navigation: {hint:?}"
     );
 }
 
@@ -4952,7 +4951,7 @@ fn hint_for_screen_non_detail_screen_shows_the_list_browse_hint() {
     );
 }
 
-// AC1 (ADR 0053): footer::plan for a non-Detail screen yields the browse hint
+// footer::plan for a non-Detail screen yields the browse hint
 // with status_line None, matching hint_for_screen for the same screen.
 #[test]
 fn footer_plan_projects_screen_yields_browse_hint_with_no_status() {
@@ -4978,7 +4977,7 @@ fn footer_plan_projects_screen_yields_browse_hint_with_no_status() {
     );
 }
 
-// AC1 (ADR 0053): footer::plan for a Detail screen with auth_error true carries
+// footer::plan for a Detail screen with auth_error true carries
 // the re-auth message in status_line, taking priority over copied_feedback.
 #[test]
 fn footer_plan_detail_auth_error_carries_reauth_status() {
@@ -5617,9 +5616,9 @@ mod asset_panel_inline {
     }
 }
 
-// --- S2b: AC1 render-buffer tests (BDR 0022 Sc.1, 3, 4) ---
+// --- render-buffer tests ---
 
-// AC1 (BDR 0022 Sc.1): draw_detail renders assets INLINE — assets add no panel box
+// draw_detail renders assets INLINE — assets add no panel box
 // of their own. The fixture legitimately renders 3 top-left corners: outer frame +
 // Details panel + Description panel. If assets ever grew their own panel, this count
 // would increase and the test would fail.
@@ -5648,7 +5647,7 @@ fn draw_detail_assets_inline_adds_no_extra_box() {
     );
 }
 
-// AC1 (BDR 0022 Sc.3): empty asset list yields NO inline section — no "Artifacts" header,
+// Empty asset list yields NO inline section — no "Artifacts" header,
 // no "[1]" marker, and no extra bordered box.
 #[test]
 fn draw_detail_empty_assets_no_inline_section() {
@@ -5673,7 +5672,7 @@ fn draw_detail_empty_assets_no_inline_section() {
     );
 }
 
-// AC1 (BDR 0022 Sc.4): localized pt-BR Artifacts header ("Anexos") appears inline.
+// Localized pt-BR Artifacts header ("Anexos") appears inline.
 // The section header is t("Artifacts") which maps to "Anexos" in pt-BR.
 #[test]
 fn draw_detail_assets_inline_ptbr_artifacts_label() {
@@ -5697,7 +5696,7 @@ fn draw_detail_assets_inline_ptbr_artifacts_label() {
 
 // AC1 (fix-inline-asset-link-style-click): asset row cells carry link_style() (muted green +
 // UNDERLINED) for a non-URL label.  This is STRUCTURAL styling emitted as a Link StyleRun from
-// section_lines(), not URL-text detection — the exact regression that ADR 0032 fixes.
+// section_lines(), not URL-text detection — the exact regression this guards.
 //
 // The test pins three invariants simultaneously:
 //   1. Asset token cells → link_style fg (muted green) + UNDERLINED modifier.
@@ -5821,7 +5820,7 @@ fn asset_row_cells_carry_link_style_structural_not_url_detection() {
     }
 }
 
-// AC2/AC3/AC5 (BDR 0026): compose renders in a centered modal overlay (ADR 0039).
+// Compose renders in a centered modal overlay.
 // The compose field is no longer appended to the scrollable `lines` by reflow_detail;
 // instead view() renders a modal box over the thread via render_compose_modal.
 
@@ -5914,7 +5913,7 @@ mod compose_render {
         out
     }
 
-    // AC2 (BDR 0026 Sc.1): with compose active, a centered titled modal renders
+    // With compose active, a centered titled modal renders
     // over the thread via view(); the buffer text and in-box hint appear in the modal.
     #[test]
     fn compose_active_shows_label_buffer_and_hint() {
@@ -5938,7 +5937,7 @@ mod compose_render {
         );
     }
 
-    // AC2 (BDR 0026 Sc.2): multiline compose buffer — both lines visible in the modal.
+    // Multiline compose buffer — both lines visible in the modal.
     #[test]
     fn compose_active_multiline_buffer_both_lines_visible() {
         let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -5959,7 +5958,7 @@ mod compose_render {
         );
     }
 
-    // AC3 (BDR 0026 Sc.3): compose None — compose content absent from scrollable lines
+    // Compose None — compose content absent from scrollable lines
     // and the modal hint does not appear in raw draw_detail output.
     #[test]
     fn compose_inactive_shows_no_compose_content() {
@@ -5979,7 +5978,7 @@ mod compose_render {
         );
     }
 
-    // AC5 (BDR 0026 Sc.6): edit compose opens modal titled 'Edit comment' pre-filled.
+    // Edit compose opens modal titled 'Edit comment' pre-filled.
     #[test]
     fn compose_edit_renders_edit_title_and_prefilled_buffer() {
         let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -6001,7 +6000,7 @@ mod compose_render {
         );
     }
 
-    // AC2 (BDR 0026 Sc.1, pt_BR): compose active shows localized modal title.
+    // Compose active shows localized modal title.
     #[test]
     fn compose_active_shows_localized_hint_in_pt_br() {
         let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -6020,7 +6019,7 @@ mod compose_render {
         );
     }
 
-    // AC2 (slice 0057b, BDR 0026): the compose body is painted by the tui_textarea
+    // The compose body is painted by the tui_textarea
     // `TextArea` widget, not a static `Paragraph` of its lines — so the widget's caret
     // (Modifier::REVERSED cell) and current-line highlight (Modifier::UNDERLINED row)
     // must be visible in the rendered buffer. No other style in this fixture (no
@@ -6084,7 +6083,7 @@ mod compose_render {
         );
     }
 
-    // AC1 (slice-1b, BDR 0026 Sc.9): the rendered modal box occupies ≈70% of the frame.
+    // The rendered modal box occupies ≈70% of the frame.
     // On a 100×40 frame the modal width must be in 64..=76 and height in 24..=32
     // (70%±~10%). Box extents are derived from the buffer: border cells with
     // theme::modal_border_style()'s fg isolate the modal from the detail panel
@@ -6152,7 +6151,7 @@ mod compose_render {
         );
     }
 
-    // AC2 (slice-1b, BDR 0026 Sc.1): a backdrop cell at (0,0) carries BOTH Modifier::DIM
+    // A backdrop cell at (0,0) carries BOTH Modifier::DIM
     // AND the dark backdrop background from theme::modal_backdrop_style().
     #[test]
     fn compose_modal_backdrop_cell_carries_dim_and_surface_base_bg() {
@@ -6180,7 +6179,7 @@ mod compose_render {
     }
 }
 
-// AC4 (issue 0067 TUI slice): the log-time modal renders its two labeled fields
+// The log-time modal renders its two labeled fields
 // and hint via the shared modal primitive.
 
 mod log_time_render {
@@ -6333,7 +6332,7 @@ mod log_time_render {
     }
 }
 
-// AC3 (issue 0068 TUI slice): the estimate-edit modal renders its labeled field and
+// The estimate-edit modal renders its labeled field and
 // hint via the shared modal primitive.
 
 mod estimate_edit_render {
@@ -6470,7 +6469,7 @@ mod estimate_edit_render {
     }
 }
 
-// AC3 (issue 0068 TUI slice): the status-confirm modal renders the complete-vs-reopen
+// The status-confirm modal renders the complete-vs-reopen
 // prompt and hint via the shared modal primitive.
 
 mod status_confirm_render {
@@ -6617,7 +6616,7 @@ mod status_confirm_render {
     }
 }
 
-// AC3 (issue 0068 TUI slice): the assignee-picker modal renders the candidate list
+// The assignee-picker modal renders the candidate list
 // with the highlighted row marked, the empty-directory state, and the hint/status
 // via the shared modal primitive.
 
@@ -7138,7 +7137,7 @@ mod modal_render_inner_rect_contract {
     }
 }
 
-// ── Confirm-delete modal render tests (BDR 0026 Sc.7/8, ADR 0039 §4) ─────────
+// ── Confirm-delete modal render tests ─────────
 
 mod confirm_modal_buttons {
     use crate::i18n::set_language;
@@ -7214,8 +7213,8 @@ mod confirm_modal_buttons {
         out
     }
 
-    // AC1 (BDR 0026 Sc.7): confirm_delete=Some renders modal with title 'Excluir comentário?'
-    // and visible [Sim]/[Não] button labels (ADR 0041), over a strongly-dimmed backdrop.
+    // confirm_delete=Some renders modal with title 'Excluir comentário?'
+    // and visible [Sim]/[Não] button labels, over a strongly-dimmed backdrop.
     #[test]
     fn confirm_modal_renders_title_and_buttons_pt_br() {
         use ratatui::style::Modifier;
@@ -7251,7 +7250,7 @@ mod confirm_modal_buttons {
         );
     }
 
-    // AC3 (BDR 0026 Sc.8, geometry-consistency): the [Sim] and [Não] labels are
+    // Geometry-consistency: the [Sim] and [Não] labels are
     // located in the rendered buffer; a plain click at those exact cells emits the right result.
     // Button positions come from the registered ModalButtonTargets — never assumed.
     #[test]
@@ -7411,7 +7410,7 @@ mod confirm_modal_buttons {
     }
 }
 
-// ── Yes/No confirm modal label tests (ADR 0041) ──────────────────────────────
+// ── Yes/No confirm modal label tests ──────────────────────────────
 
 mod yes_no_confirm_labels {
     use crate::i18n::{set_language, t};
@@ -7666,7 +7665,7 @@ mod yes_no_confirm_labels {
     }
 
     // AC2: ConfirmDeleteComment (Enter) confirms and CancelDeleteComment (Esc) cancels
-    // — key handling is unchanged by the label relabeling (ADR 0041).
+    // — key handling is unchanged by the label relabeling.
     #[test]
     fn confirm_msg_confirms_and_cancel_msg_cancels_in_confirm_modal() {
         use crate::tui::model::{update, Cmd, Msg};
@@ -7723,7 +7722,7 @@ mod yes_no_confirm_labels {
     }
 }
 
-// ── Edit-comment affordance render tests (BDR 0024 / ADR 0036) ───────────────
+// ── Edit-comment affordance render tests ───────────────
 // AC1: build_detail_content gates the [editar] token to comments whose
 // created_by_id matches current_user_id.
 
@@ -8070,7 +8069,7 @@ mod comment_focus_render {
     }
 }
 
-// --- ADR 0038 / BDR 0025 Scenarios 7-9: contextual footer + status line ---
+// --- Contextual footer + status line ---
 
 mod contextual_footer {
     use crate::i18n::set_language;
@@ -8245,7 +8244,7 @@ mod contextual_footer {
         );
     }
 
-    // (issue 0068 TUI slice) the Detail browsing hint exposes the 'a assignee'
+    // The Detail browsing hint exposes the 'a assignee'
     // affordance. Checked against the pure hint string rather than the width-80
     // render above: the hint already exceeds 80 columns before this token, so a
     // fixed-width render clips it the same way it already clips the trailing
@@ -8285,7 +8284,7 @@ mod contextual_footer {
         );
     }
 
-    // AC4 (issue 0067 TUI slice): while the log-time modal is open, the footer shows
+    // While the log-time modal is open, the footer shows
     // the browse hint — the modal owns its own hint (one-home rule, mirrors compose).
     #[test]
     fn detail_footer_logging_time_mode_shows_browse_hint() {
@@ -8310,7 +8309,7 @@ mod contextual_footer {
         );
     }
 
-    // (issue 0068 TUI slice) while the estimate-edit modal is open, the footer shows
+    // While the estimate-edit modal is open, the footer shows
     // the browse hint — the modal owns its own hint (one-home rule, mirrors log time).
     #[test]
     fn detail_footer_estimate_edit_mode_shows_browse_hint() {
@@ -8338,7 +8337,7 @@ mod contextual_footer {
         );
     }
 
-    // (issue 0068 TUI slice) while the status-confirm modal is open, the footer shows
+    // While the status-confirm modal is open, the footer shows
     // the browse hint — the modal owns its own hint (one-home rule, mirrors estimate).
     #[test]
     fn detail_footer_status_confirm_mode_shows_browse_hint() {
@@ -8366,7 +8365,7 @@ mod contextual_footer {
         );
     }
 
-    // (issue 0068 TUI slice) while the assignee-picker modal is open, the footer shows
+    // While the assignee-picker modal is open, the footer shows
     // the browse hint — the modal owns its own hint (one-home rule, mirrors status).
     #[test]
     fn detail_footer_assignee_picker_mode_shows_browse_hint() {
@@ -8392,7 +8391,7 @@ mod contextual_footer {
         );
     }
 
-    // AC6 (ADR 0039 §5): while compose modal is open, the footer shows the browse
+    // While compose modal is open, the footer shows the browse
     // hint — the modal owns the compose hint/status (one-home rule).
     // Ctrl+S/Esc hint appears inside the modal box, NOT in the footer.
     #[test]
@@ -8418,7 +8417,7 @@ mod contextual_footer {
         );
     }
 
-    // AC1/Scenario 7: confirm-delete modal shows buttons inside the box (ADR 0039 §5).
+    // Confirm-delete modal shows buttons inside the box.
     // The modal owns its confirm buttons; the footer shows the browse hint behind the dim.
     #[test]
     fn detail_footer_confirm_delete_mode_shows_confirm_hint() {
@@ -8433,7 +8432,7 @@ mod contextual_footer {
         );
         set_language("en");
         let content = buf_to_string(&buf);
-        // The confirm buttons render INSIDE the modal box (one-home rule, ADR 0039 §5).
+        // The confirm buttons render INSIDE the modal box (one-home rule).
         assert!(
             content.contains("Yes") || content.contains("Sim"),
             "confirm button [Yes/Sim] must appear inside the modal box: {content}"
@@ -8442,10 +8441,10 @@ mod contextual_footer {
             content.contains("No") || content.contains("N\u{00e3}o"),
             "cancel button [No/Não] must appear inside the modal box: {content}"
         );
-        // Per ADR 0039 §5 the footer shows the browse hint while the modal is open.
+        // The footer shows the browse hint while the modal is open.
         assert!(
             content.contains("j/k move"),
-            "footer must show browse hint 'j/k move' while confirm modal is open (ADR 0039 §5): {content}"
+            "footer must show browse hint 'j/k move' while confirm modal is open: {content}"
         );
     }
 
@@ -8491,7 +8490,7 @@ mod contextual_footer {
         );
     }
 
-    // AC6 (ADR 0039 §5): modal open vs browse produce different render output.
+    // Modal open vs browse produce different render output.
     // Browse shows j/k move, modal frame adds the compose overlay (Ctrl+S in modal).
     #[test]
     fn detail_footer_hint_switches_when_mode_changes() {
@@ -8522,7 +8521,7 @@ mod contextual_footer {
         );
     }
 
-    // AC4 (ADR 0039 §5, Scenario 4): 'Enviando…' appears in the compose modal hint
+    // 'Enviando…' appears in the compose modal hint
     // when Submitting (rendered by view() which includes the modal overlay).
     #[test]
     fn detail_footer_status_row_shows_enviando_when_submitting() {
@@ -8543,7 +8542,7 @@ mod contextual_footer {
         );
     }
 
-    // AC4 (ADR 0039 §5): localized error appears in the compose modal when Error.
+    // Localized error appears in the compose modal when Error.
     #[test]
     fn detail_footer_status_row_shows_error_when_compose_error() {
         let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -8602,7 +8601,7 @@ mod contextual_footer {
     }
 
     // AC4: FooterPlan height accounts for status row when status is present.
-    // AC4 (ADR 0039 §5): compose status lives in the modal, not the footer.
+    // Compose status lives in the modal, not the footer.
     // When Submitting, 'Enviando…' appears inside the modal box; the footer
     // shows the browse hint (footer height is unchanged by compose status).
     #[test]
@@ -8732,7 +8731,7 @@ mod contextual_footer {
     }
 }
 
-// --- Confirm-delete modal overlay (ADR 0039 slice 2) ---
+// --- Confirm-delete modal overlay ---
 
 mod confirm_modal_render {
     use crate::i18n::set_language;
@@ -8882,7 +8881,7 @@ mod confirm_modal_render {
         );
     }
 
-    // AC2: the confirm-modal buttons [Sim]/[Não] appear in the MODAL overlay (ADR 0041),
+    // The confirm-modal buttons [Sim]/[Não] appear in the MODAL overlay,
     // not spliced inline into the comment card. The buttons are visible in the buffer (in the
     // modal), but the comment card body lines do NOT carry them as inline affordance tokens.
     #[test]
@@ -8924,7 +8923,7 @@ mod confirm_modal_render {
         );
     }
 
-    // AC1: confirm modal shows [Yes]/[No] button labels (ADR 0041) inside the modal.
+    // Confirm modal shows [Yes]/[No] button labels inside the modal.
     #[test]
     fn confirm_modal_shows_button_labels() {
         let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -8942,7 +8941,7 @@ mod confirm_modal_render {
     }
 }
 
-// ── AC1/AC2: Affordance color cells in TestBackend (ADR 0041) ────────────────
+// ── Affordance color cells in TestBackend ────────────────
 
 /// Build `DetailContent` for a single own comment and render it through
 /// `draw_detail` into a `TestBackend` buffer of the given dimensions.
@@ -9508,7 +9507,7 @@ mod auth_error_render {
     }
 }
 
-// --- AC1 (issue 0045): build_detail_content emits OpenAsset affordances structurally ---
+// --- build_detail_content emits OpenAsset affordances structurally ---
 //
 // These tests assert the emitted `DetailContent.affordances` payload from
 // `build_detail_content`, not a re-implementation of the geometry.
@@ -9690,7 +9689,7 @@ mod open_asset_affordance_emission {
     }
 }
 
-// --- AC1 (ek-0046 / ADR 0043): build_detail_content emits OpenUrl affordances structurally ---
+// --- build_detail_content emits OpenUrl affordances structurally ---
 //
 // Buffer-derived tests: the DetailContent payload from build_detail_content is the
 // source of truth for hit-targets. Each test is derived from an AC/BDR scenario.
@@ -9871,7 +9870,7 @@ mod open_url_affordance_emission {
     }
 }
 
-// ── Image viewer overlay render tests (ADR 0065 slice 0058a) ─────────────────
+// ── Image viewer overlay render tests ─────────────────
 //
 // Loading/Error draw a placeholder (real ratatui-image render lands in slice 0059).
 // Sized to the near-full detail content area, NOT render_modal's ~70% box.
@@ -9997,7 +9996,7 @@ mod image_viewer_render {
         );
     }
 
-    // A3: the dim backdrop (Modifier::DIM, ADR 0039) is present while the viewer is open.
+    // A3: the dim backdrop (Modifier::DIM) is present while the viewer is open.
     #[test]
     fn open_viewer_backdrop_carries_dim_modifier() {
         let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -10087,7 +10086,7 @@ mod image_viewer_render {
     }
 }
 
-// --- ADR 0065 slice 0058b: image-asset classification, ViewImage affordance
+// --- image-asset classification, ViewImage affordance
 // emission, and hit-test resolve ---
 
 // B1: is_image_filename accepts the raster set (case-insensitive) and rejects
@@ -10138,7 +10137,7 @@ mod image_filename_classification {
 }
 
 // B2: an image asset row emits AffordanceKind::ViewImage; a non-image asset row
-// keeps its OpenAsset external-open affordance (ADR 0065 §1 default).
+// keeps its OpenAsset external-open affordance (the default for a non-image asset).
 mod view_image_affordance_emission {
     use crate::render::{build_detail_content, AffordanceKind};
     use serde_json::json;
@@ -10342,7 +10341,7 @@ mod view_image_hit_test_resolve {
 
     #[test]
     fn resolve_detail_click_view_image_matches_whole_row() {
-        // ADR 0029 whole-row rule: a hit anywhere on the row (not just [2,10)) resolves.
+        // Whole-row rule: a hit anywhere on the row (not just [2,10)) resolves.
         let url = "https://example.test/photo.png";
         let model = detail_model_with_view_image_affordance(url, "photo.png");
 
@@ -11231,5 +11230,146 @@ mod detail_download_footer {
         let translated = crate::i18n::t("Could not find the home directory");
         set_language("en");
         assert_ne!(translated, "Could not find the home directory");
+    }
+}
+
+mod detail_overlay_render {
+    use super::LANG_MUTEX;
+    use crate::i18n::set_language;
+    use crate::tui::detail_geometry::Selection;
+    use crate::tui::model::{
+        DetailOverlay, EditStatus, Header, ImageAssetRef, ImageStatus, Model, Screen,
+    };
+    use crate::tui::view::view;
+    use ratatui::{backend::TestBackend, buffer::Buffer, style::Modifier, Terminal};
+    use serde_json::Value;
+    use std::collections::HashMap;
+
+    const WIDTH: u16 = 80;
+    const HEIGHT: u16 = 24;
+
+    fn detail_with(overlay: DetailOverlay, selection: Option<Selection>) -> Model {
+        Model {
+            stack: vec![Screen::Detail {
+                instance: "inst".into(),
+                project_id: 1,
+                task_id: 42,
+                task: Value::Null,
+                comments: vec![],
+                user_map: HashMap::new(),
+                lines: vec!["body text".into()],
+                line_styles: vec![],
+                assets: vec![],
+                offset: 0,
+                loading: false,
+                rendered_width: usize::MAX,
+                overlay,
+                current_user_id: None,
+                affordances: vec![],
+                focused_comment: None,
+                auth_error: false,
+                download: None,
+                comment_spans: vec![],
+            }],
+            should_quit: false,
+            header: Header::from_instances(&[], None),
+            viewport: (WIDTH, HEIGHT),
+            click_targets: vec![],
+            modal_button_targets: vec![],
+            last_loaded: None,
+            selection,
+            copied_feedback: false,
+            report: None,
+        }
+    }
+
+    fn render(model: &Model) -> Buffer {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let mut terminal = Terminal::new(TestBackend::new(WIDTH, HEIGHT)).unwrap();
+        terminal
+            .draw(|frame| view(model, frame, &mut vec![], &mut vec![]))
+            .unwrap();
+        terminal.backend().buffer().clone()
+    }
+
+    fn row_text(buf: &Buffer, y: u16) -> String {
+        (0..WIDTH)
+            .map(|x| buf.cell((x, y)).unwrap().symbol())
+            .collect()
+    }
+
+    fn select_whole_frame() -> Option<Selection> {
+        Some(Selection {
+            anchor: (0, 0),
+            cursor: (HEIGHT - 1, WIDTH - 1),
+        })
+    }
+
+    fn is_reversed(buf: &Buffer, x: u16, y: u16) -> bool {
+        buf.cell((x, y))
+            .unwrap()
+            .style()
+            .add_modifier
+            .contains(Modifier::REVERSED)
+    }
+
+    #[test]
+    fn detail_overlay_modal_cells_show_the_modal_not_the_selection_highlight() {
+        let modal = DetailOverlay::StatusConfirm {
+            completed_target: true,
+            status: EditStatus::Editing,
+        };
+        let buf = render(&detail_with(modal, select_whole_frame()));
+
+        let title_row = (0..HEIGHT)
+            .find(|&y| row_text(&buf, y).contains("Change status"))
+            .expect("the status modal title is drawn");
+        let row = row_text(&buf, title_row);
+        let title_byte = row.find("Change status").expect("title column");
+        let title_col = row[..title_byte].chars().count() as u16;
+        assert!(
+            !is_reversed(&buf, title_col, title_row),
+            "the modal title must not carry the selection highlight"
+        );
+        assert!(
+            is_reversed(&buf, 0, 0),
+            "cells outside the modal keep the selection highlight"
+        );
+    }
+
+    #[test]
+    fn detail_overlay_image_viewer_stays_inside_the_content_area() {
+        let viewer = DetailOverlay::ImageViewer {
+            asset: ImageAssetRef {
+                url: "https://example.test/photo.png".into(),
+                label: "photo.png".into(),
+            },
+            status: ImageStatus::Loading,
+        };
+        let buf = render(&detail_with(viewer, None));
+
+        let box_chars = ['┌', '┐', '└', '┘', '│', '─'];
+        let has_box = |y: u16| row_text(&buf, y).chars().any(|c| box_chars.contains(&c));
+        let top_edge = row_text(&buf, 1);
+        let bottom_edge = row_text(&buf, 21);
+        assert!(!has_box(0), "header row stays untouched");
+        assert!(!has_box(22), "footer row stays untouched");
+        assert!(
+            top_edge.starts_with('┌') && !top_edge.contains("photo.png"),
+            "the content frame's top edge stays visible above the viewer: {top_edge}"
+        );
+        assert!(
+            bottom_edge.starts_with('└'),
+            "the content frame's bottom edge stays visible below the viewer: {bottom_edge}"
+        );
+        assert!(
+            row_text(&buf, 2).starts_with("│┌ photo.png"),
+            "viewer top border sits one row inside the content frame"
+        );
+        assert!(
+            row_text(&buf, 20).starts_with("│└"),
+            "viewer bottom border sits one row inside the content frame"
+        );
     }
 }

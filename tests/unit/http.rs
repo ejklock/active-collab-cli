@@ -51,7 +51,7 @@ fn origin_gated_token_scheme_downgrade_returns_none() {
     assert!(
         result.is_none(),
         "same-host cleartext request against an https instance must not carry the token \
-         (issue 0062 C2 scheme downgrade)"
+         (scheme downgrade)"
     );
 }
 
@@ -161,7 +161,7 @@ async fn authed_get_no_token_for_cleartext_request_to_https_instance_same_host()
     assert!(
         reqs[0].headers.get(TOKEN_HEADER).is_none(),
         "token must not reach a cleartext request whose instance base URL is https on the same host \
-         (issue 0062 C2 end-to-end)"
+         (end-to-end)"
     );
 }
 
