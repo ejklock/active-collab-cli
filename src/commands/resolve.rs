@@ -18,7 +18,7 @@ pub(crate) fn pick_instance(
         writeln!(
             err,
             "{}",
-            t("Error: no instances configured. Run: active_collab.py setup add")
+            t("Error: no instances configured. Run: ac setup add")
         )
         .ok();
         return Err(2);
@@ -82,7 +82,7 @@ pub(crate) fn load_targets(
     if instances.is_empty() {
         return Err(TargetFailure {
             code: 2,
-            message: t("Error: no instances configured. Run: active_collab.py setup add"),
+            message: t("Error: no instances configured. Run: ac setup add"),
         });
     }
     let Some(name) = name else {

@@ -55,7 +55,7 @@ pub enum Command {
     Task(TaskOpts),
     /// Print an embedded agent skill (ac skill list | ac skill <name>).
     Skill(SkillArgs),
-    /// Serve the CLI as MCP tools over stdio (ac_read, ac_write).
+    /// Serve the CLI as MCP tools over stdio (ac_read, ac_write, ac_download_attachments).
     Mcp,
 }
 

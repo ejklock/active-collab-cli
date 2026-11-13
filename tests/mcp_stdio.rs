@@ -102,59 +102,42 @@ fn reference(task: &SeedTask) -> String {
     format!("{}/{}", task.project_id, task.id)
 }
 
-fn operation_schemas(tool: &Tool) -> Vec<Value> {
-    let schema = Value::Object((*tool.input_schema).clone());
-    schema
-        .get("oneOf")
-        .and_then(Value::as_array)
-        .unwrap_or_else(|| panic!("{} input schema is not a oneOf union: {schema}", tool.name))
-        .clone()
-}
-
-fn operation_name(variant: &Value) -> String {
-    let tag = &variant["properties"]["operation"];
-    tag.get("const")
-        .or_else(|| tag.get("enum").and_then(|values| values.get(0)))
-        .and_then(Value::as_str)
-        .unwrap_or_else(|| panic!("variant has no operation tag: {variant}"))
-        .to_owned()
-}
-
-fn required_of(variant: &Value) -> BTreeSet<String> {
-    variant["required"]
-        .as_array()
-        .map(|items| {
-            items
-                .iter()
-                .map(|item| item.as_str().unwrap().to_owned())
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
 fn set(items: &[&str]) -> BTreeSet<String> {
     items.iter().map(|item| (*item).to_owned()).collect()
 }
 
-fn expected_operations(tool: &str) -> Vec<(&'static str, BTreeSet<String>)> {
+fn input_schema(tool: &Tool) -> Value {
+    Value::Object(tool.input_schema.as_ref().clone())
+}
+
+fn property_names(schema: &Value) -> BTreeSet<String> {
+    schema["properties"]
+        .as_object()
+        .unwrap_or_else(|| panic!("{schema} has no properties"))
+        .keys()
+        .cloned()
+        .collect()
+}
+
+fn expected_flat_schema(tool: &str) -> (BTreeSet<String>, BTreeSet<String>) {
     match tool {
-        "ac_read" => vec![
-            ("get", set(&["operation", "ref"])),
-            ("current", set(&["operation"])),
-            ("mine", set(&["operation"])),
-        ],
-        "ac_write" => vec![
-            ("comment", set(&["operation", "ref", "body"])),
-            ("log_time", set(&["operation", "ref", "hours"])),
-            ("set_task", set(&["operation", "ref"])),
-            ("time_report", set(&["operation"])),
-        ],
+        "ac_read" => (
+            set(&["get", "current", "mine"]),
+            set(&["ref", "no_comments", "refresh", "branch", "instance"]),
+        ),
+        "ac_write" => (
+            set(&["comment", "log_time", "set_task", "time_report"]),
+            set(&[
+                "ref", "body", "html", "hours", "date", "summary", "job_type", "status",
+                "assignee", "estimate", "list", "period", "start", "end", "format", "instance",
+            ]),
+        ),
         other => panic!("unexpected tool {other}"),
     }
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn lists_three_tools_with_annotations_and_operation_unions() {
+async fn lists_three_tools_with_annotations_and_flat_object_schemas() {
     let env = Env::new(&[]);
     let client = env.connect().await;
     let tools = client.list_all_tools().await.unwrap();
@@ -166,6 +149,15 @@ async fn lists_three_tools_with_annotations_and_operation_unions() {
     );
 
     for tool in &tools {
+        let schema = input_schema(tool);
+        assert_eq!(schema["type"], "object", "{} root: {schema}", tool.name);
+        for keyword in ["oneOf", "anyOf", "allOf"] {
+            assert!(
+                schema.get(keyword).is_none(),
+                "{} has a top-level {keyword}: {schema}",
+                tool.name
+            );
+        }
         let annotations = tool.annotations.as_ref().expect("annotations");
         match tool.name.as_ref() {
             "ac_read" => assert_eq!(annotations.read_only_hint, Some(true)),
@@ -174,57 +166,159 @@ async fn lists_three_tools_with_annotations_and_operation_unions() {
                 assert_eq!(annotations.read_only_hint, Some(false));
                 assert_eq!(annotations.destructive_hint, Some(false));
                 assert_eq!(annotations.idempotent_hint, Some(true));
-                let schema = Value::Object((*tool.input_schema).clone());
                 assert_eq!(schema["required"], json!(["ref"]), "{schema}");
                 assert!(schema["properties"].get("attachments_dir").is_some());
                 assert!(schema["properties"].get("instance").is_some());
-                continue;
             }
-        }
-
-        let variants = operation_schemas(tool);
-        if tool.name == "ac_read" {
-            let get = variants
-                .iter()
-                .find(|variant| operation_name(variant) == "get")
-                .expect("get variant");
-            for property in ["download_attachments", "attachments_dir"] {
-                assert!(
-                    get["properties"].get(property).is_none(),
-                    "get must not offer {property}: {get}"
-                );
-            }
-        }
-        let mut found: Vec<(String, BTreeSet<String>)> = variants
-            .iter()
-            .map(|variant| (operation_name(variant), required_of(variant)))
-            .collect();
-        found.sort();
-        let mut expected: Vec<(String, BTreeSet<String>)> = expected_operations(&tool.name)
-            .into_iter()
-            .map(|(name, required)| (name.to_owned(), required))
-            .collect();
-        expected.sort();
-        assert_eq!(found, expected, "{} operations", tool.name);
-
-        if tool.name == "ac_write" {
-            let set_task = variants
-                .iter()
-                .find(|variant| operation_name(variant) == "set_task")
-                .expect("set_task variant");
-            assert!(set_task["properties"].get("list").is_some(), "{set_task}");
-            assert!(!required_of(set_task).contains("list"));
-        }
-
-        for variant in &variants {
-            assert!(
-                variant["properties"].get("instance").is_some(),
-                "{} lacks an optional instance: {variant}",
-                operation_name(variant)
-            );
-            assert!(!required_of(variant).contains("instance"));
         }
     }
+    client.cancel().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn operation_tools_publish_exactly_the_fields_their_operations_take() {
+    let env = Env::new(&[]);
+    let client = env.connect().await;
+    let tools = client.list_all_tools().await.unwrap();
+
+    for tool in tools.iter().filter(|t| t.name != "ac_download_attachments") {
+        let schema = input_schema(tool);
+        let (operations, fields) = expected_flat_schema(&tool.name);
+        let operation = &schema["properties"]["operation"];
+        assert_eq!(operation["type"], "string", "{} {schema}", tool.name);
+        let listed: BTreeSet<String> = operation["enum"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{} operation has no enum: {schema}", tool.name))
+            .iter()
+            .map(|item| item.as_str().unwrap().to_owned())
+            .collect();
+        assert_eq!(listed, operations, "{} operations", tool.name);
+        assert_eq!(schema["required"], json!(["operation"]), "{schema}");
+
+        let mut published = property_names(&schema);
+        assert!(published.remove("operation"));
+        assert_eq!(published, fields, "{} fields", tool.name);
+        for field in &fields {
+            let description = schema["properties"][field]["description"]
+                .as_str()
+                .unwrap_or_default();
+            assert!(
+                description.contains("Taken by:"),
+                "{} {field} does not say which operations take it: {schema}",
+                tool.name
+            );
+        }
+    }
+    client.cancel().await.unwrap();
+}
+
+fn description_of(schema: &Value, field: &str) -> String {
+    schema["properties"][field]["description"]
+        .as_str()
+        .unwrap_or_else(|| panic!("{field} has no description: {schema}"))
+        .to_owned()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn operation_description_names_every_operation_with_its_own_text() {
+    let env = Env::new(&[]);
+    let client = env.connect().await;
+    let tools = client.list_all_tools().await.unwrap();
+    let schema_of = |name: &str| input_schema(tools.iter().find(|t| t.name == name).unwrap());
+
+    let read = description_of(&schema_of("ac_read"), "operation");
+    let write = description_of(&schema_of("ac_write"), "operation");
+    for (description, operation, text) in [
+        (&read, "get", "Fetch one task with its comments"),
+        (&read, "current", "Fetch the task of a git branch"),
+        (&read, "mine", "List open tasks assigned to you"),
+        (&write, "comment", "Post a comment as the logged-in user"),
+        (&write, "log_time", "Log time against a task"),
+        (
+            &write,
+            "set_task",
+            "Edit task fields; give at least one of status, assignee, estimate, list",
+        ),
+        (&write, "time_report", "Write your hours report to a file"),
+    ] {
+        let paired = format!("{operation}: {text}");
+        assert!(description.contains(&paired), "{paired}: {description}");
+    }
+    client.cancel().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn field_descriptions_name_exactly_the_operations_that_take_each_field() {
+    let env = Env::new(&[]);
+    let client = env.connect().await;
+    let tools = client.list_all_tools().await.unwrap();
+    let schema_of = |name: &str| input_schema(tools.iter().find(|t| t.name == name).unwrap());
+    let read = schema_of("ac_read");
+    let write = schema_of("ac_write");
+
+    assert_eq!(
+        description_of(&write, "ref"),
+        "Task URL or PROJECT_ID/TASK_ID. Taken by: comment (required), log_time (required), set_task (required)."
+    );
+    assert_eq!(
+        description_of(&write, "instance"),
+        "Taken by: comment, log_time, set_task, time_report."
+    );
+    assert_eq!(
+        description_of(&read, "ref"),
+        "Task URL or PROJECT_ID/TASK_ID. Taken by: get (required)."
+    );
+    assert_eq!(
+        description_of(&write, "hours"),
+        "Positive number of hours. Taken by: log_time (required)."
+    );
+    client.cancel().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn write_operations_reject_a_field_they_do_not_take_before_any_request() {
+    let server = MockServer::start().await;
+    let task = report_task();
+    let target = reference(&task);
+    let target = target.as_str();
+    mount_seeded(&server, &Fixture::seeded()).await;
+    let env = Env::new(&[("alpha", &server, Fixture::seeded().user_id)]);
+    let client = env.connect().await;
+
+    for (args, unknown) in [
+        (
+            json!({ "operation": "comment", "ref": target, "body": "x", "hours": 3 }),
+            "hours",
+        ),
+        (
+            json!({ "operation": "set_task", "ref": target, "status": "open", "body": "x" }),
+            "body",
+        ),
+    ] {
+        match call(&client, "ac_write", args.clone()).await {
+            Err(ServiceError::McpError(error)) => {
+                assert_eq!(error.code, ErrorCode::INVALID_PARAMS, "{args}");
+                assert!(error.message.contains(unknown), "{}", error.message);
+            }
+            other => panic!("{args} should be invalid_params, got {other:?}"),
+        }
+    }
+    assert!(server.received_requests().await.unwrap().is_empty());
+
+    ok_text(
+        &client,
+        "ac_write",
+        json!({ "operation": "comment", "ref": target, "body": "posted once" }),
+    )
+    .await;
+    let posts = server
+        .received_requests()
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|r| r.method.as_str() == "POST")
+        .count();
+    assert_eq!(posts, 1);
     client.cancel().await.unwrap();
 }
 
@@ -642,6 +736,45 @@ async fn download_params_are_validated_as_protocol_errors() {
     )
     .await;
     assert_eq!(plain, env.cli(&["get", target, "--json", "--refresh"]));
+    client.cancel().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn malformed_operation_arguments_are_protocol_errors() {
+    let server = MockServer::start().await;
+    let task = report_task();
+    let target = reference(&task);
+    let target = target.as_str();
+    mount_seeded(&server, &Fixture::seeded()).await;
+    let env = Env::new(&[("alpha", &server, Fixture::seeded().user_id)]);
+    let client = env.connect().await;
+
+    let invalid = [
+        ("ac_read", json!({})),
+        ("ac_read", json!({ "operation": "nope" })),
+        ("ac_read", json!({ "operation": "get" })),
+        ("ac_read", json!({ "operation": "mine", "ref": target })),
+        (
+            "ac_write",
+            json!({ "operation": "log_time", "ref": target, "hours": "2" }),
+        ),
+    ];
+    for (tool, args) in invalid {
+        match call(&client, tool, args.clone()).await {
+            Err(ServiceError::McpError(error)) => {
+                assert_eq!(error.code, ErrorCode::INVALID_PARAMS, "{args}");
+                assert!(error.message.starts_with("invalid arguments:"), "{args}");
+            }
+            other => panic!("{tool} {args} should be invalid_params, got {other:?}"),
+        }
+    }
+    let task_json = ok_text(
+        &client,
+        "ac_read",
+        json!({ "operation": "get", "ref": target }),
+    )
+    .await;
+    assert!(task_json.contains(&task.id.to_string()), "{task_json}");
     client.cancel().await.unwrap();
 }
 

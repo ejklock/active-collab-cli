@@ -85,9 +85,100 @@ impl AcServer {
     }
 }
 
-/// The tool's input schema: the operation union with its root as an object.
+/// The tool's input schema. A tagged enum derives as a top-level `oneOf`,
+/// which Claude's tool API rejects, so the variants are merged into one flat
+/// object (see `flatten_operations`).
 fn input_schema<T: JsonSchema + 'static>() -> Arc<JsonObject> {
-    schema_for_input::<T>().unwrap_or_else(|_| schema_for_empty_input())
+    let mut schema = schema_for_input::<T>().unwrap_or_else(|_| schema_for_empty_input());
+    flatten_operations(Arc::make_mut(&mut schema));
+    schema
+}
+
+/// Rewrite a schema whose root is a `oneOf` of tagged variants into one object:
+/// an `operation` string enum plus the union of every variant's properties,
+/// each described with the operations that take it. A schema without a
+/// `oneOf` is left as it is. Only the published schema changes; the enum's own
+/// parse still rejects a field the chosen operation does not take.
+fn flatten_operations(schema: &mut JsonObject) {
+    let Some(Value::Array(variants)) = schema.remove("oneOf") else {
+        return;
+    };
+    let mut operations: Vec<Value> = Vec::new();
+    let mut properties = serde_json::Map::new();
+    let mut takers: Vec<(String, Vec<String>)> = Vec::new();
+    let mut summaries: Vec<String> = Vec::new();
+    for variant in &variants {
+        if let Some(name) = variant["properties"]["operation"]["const"].as_str() {
+            operations.push(Value::String(name.to_owned()));
+            summaries.push(match variant["description"].as_str() {
+                Some(doc) => format!("{name}: {doc}"),
+                None => name.to_owned(),
+            });
+            merge_variant(name, variant, &mut properties, &mut takers);
+        }
+    }
+    for (field, labels) in takers {
+        if let Some(Value::Object(field_schema)) = properties.get_mut(&field) {
+            annotate_takers(field_schema, &labels);
+        }
+    }
+    let mut flat = serde_json::Map::new();
+    flat.insert(
+        "operation".into(),
+        serde_json::json!({
+            "type": "string",
+            "enum": operations,
+            "description": format!("The command to run. {}", summaries.join(" "))
+        }),
+    );
+    flat.extend(properties);
+    schema.insert("type".into(), Value::String("object".into()));
+    schema.insert("properties".into(), Value::Object(flat));
+    schema.insert("required".into(), serde_json::json!(["operation"]));
+}
+
+/// Add one variant's fields (all but the `operation` tag) to the merged
+/// properties, and `takers` records which operations take it and whether they
+/// require it. Operations sharing a field must declare the same schema for it,
+/// since only one can be published.
+fn merge_variant(
+    name: &str,
+    variant: &Value,
+    properties: &mut serde_json::Map<String, Value>,
+    takers: &mut Vec<(String, Vec<String>)>,
+) {
+    let required: Vec<&str> = variant["required"]
+        .as_array()
+        .map(|items| items.iter().filter_map(Value::as_str).collect())
+        .unwrap_or_default();
+    let fields = variant["properties"].as_object().into_iter().flatten();
+    for (field, field_schema) in fields.filter(|(field, _)| *field != "operation") {
+        let published = properties
+            .entry(field.clone())
+            .or_insert_with(|| field_schema.clone());
+        assert_eq!(
+            published, field_schema,
+            "operation {name} declares field {field} differently from an earlier operation"
+        );
+        let label = if required.contains(&field.as_str()) {
+            format!("{name} (required)")
+        } else {
+            name.to_owned()
+        };
+        match takers.iter_mut().find(|(taken, _)| taken == field) {
+            Some((_, labels)) => labels.push(label),
+            None => takers.push((field.clone(), vec![label])),
+        }
+    }
+}
+
+fn annotate_takers(field_schema: &mut serde_json::Map<String, Value>, labels: &[String]) {
+    let note = format!("Taken by: {}.", labels.join(", "));
+    let text = match field_schema.get("description").and_then(Value::as_str) {
+        Some(doc) => format!("{doc} {note}"),
+        None => note,
+    };
+    field_schema.insert("description".into(), Value::String(text));
 }
 
 /// Parse the tool arguments by hand: rmcp reports a failed `Parameters`
@@ -146,7 +237,7 @@ struct DownloadArguments {
 /// file into the server's working directory and returns its path. Every
 /// operation takes an optional `instance` name.
 #[derive(Deserialize, JsonSchema)]
-#[serde(tag = "operation", rename_all = "snake_case")]
+#[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
 #[schemars(extend("type" = "object"))]
 enum WriteOperation {
     /// Post a comment as the logged-in user.
@@ -516,3 +607,7 @@ async fn run_write(operation: WriteOperation, period: Option<OwnedReportPeriod>)
     }
     run
 }
+
+#[cfg(test)]
+#[path = "../../tests/unit/mcp.rs"]
+mod tests;

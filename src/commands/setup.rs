@@ -17,12 +17,7 @@ pub(crate) fn setup_list(repo: &InstanceRepository<'_>, out: &mut dyn Write) -> 
     };
 
     if rows.is_empty() {
-        writeln!(
-            out,
-            "{}",
-            t("No instances configured. Run: active_collab.py setup add")
-        )
-        .ok();
+        writeln!(out, "{}", t("No instances configured. Run: ac setup add")).ok();
         return 0;
     }
 
