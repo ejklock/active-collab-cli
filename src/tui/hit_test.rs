@@ -24,7 +24,7 @@ pub enum DetailClickTarget {
 /// - the top screen is not a Detail screen,
 /// - `row` falls outside the scrollable body area (delegated to `detail_geometry::row_to_line_idx`),
 /// - the resolved `line_idx` is past the end of `lines` (the guard that
-///   `affordance_at` previously lacked, closing AC5).
+///   `affordance_at` previously lacked).
 fn viewport_to_line_col(model: &Model, column: u16, row: u16) -> Option<(usize, usize)> {
     let Screen::Detail { lines, offset, .. } = model.top()? else {
         return None;

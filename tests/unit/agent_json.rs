@@ -47,15 +47,11 @@ fn sample_comments() -> Vec<Value> {
     })]
 }
 
-// --- J1-A1: ref form ---
-
 #[test]
 fn task_object_ref_equals_project_id_slash_task_id() {
     let obj = task_object(&open_task(), &[], &user_map_with_12(), "work", false);
     assert_eq!(obj["ref"], "665/75159", "ref must be project_id/task_id");
 }
-
-// --- J1-A1: status literal ---
 
 #[test]
 fn task_object_open_status_is_literal_open() {
@@ -71,8 +67,6 @@ fn task_object_completed_status_is_literal_completed() {
         "completed task must have status 'completed'"
     );
 }
-
-// --- J1-A1: assignee resolved name vs null ---
 
 #[test]
 fn task_object_assignee_resolved_from_user_map() {
@@ -113,8 +107,6 @@ fn task_object_assignee_and_id_null_when_no_assignee_id() {
     );
 }
 
-// --- J1-A1 / J1-A2: no_comments => comments [] ---
-
 #[test]
 fn task_object_no_comments_flag_yields_empty_comments_array() {
     let obj = task_object(
@@ -150,8 +142,6 @@ fn task_object_with_comments_includes_them_when_flag_false() {
     assert_eq!(arr[0]["author_id"], 7);
     assert_eq!(arr[0]["body"], "Nice");
 }
-
-// --- J1-A1: absent start_on/due_on => JSON null ---
 
 #[test]
 fn task_object_absent_dates_are_json_null() {
@@ -191,8 +181,6 @@ fn task_object_present_dates_are_strings() {
     );
 }
 
-// --- J1-A1: assets shape ---
-
 #[test]
 fn task_object_assets_each_have_name_and_url() {
     let task = json!({
@@ -213,8 +201,6 @@ fn task_object_assets_each_have_name_and_url() {
     assert_eq!(assets[0]["url"], "https://cdn.example.com/spec.pdf");
 }
 
-// --- J1-A1: description is HTML-stripped ---
-
 #[test]
 fn task_object_description_strips_html() {
     let obj = task_object(&open_task(), &[], &user_map_with_12(), "work", false);
@@ -228,8 +214,6 @@ fn task_object_description_strips_html() {
         "description must contain text content"
     );
 }
-
-// --- J1-A2: output is single line (no embedded newline) ---
 
 #[test]
 fn task_object_serializes_to_single_minified_line() {
@@ -251,8 +235,6 @@ fn task_object_serializes_to_single_minified_line() {
     );
 }
 
-// --- url field ---
-
 #[test]
 fn task_object_url_contains_project_and_task_ids() {
     let obj = task_object(
@@ -272,8 +254,6 @@ fn task_object_url_contains_project_and_task_ids() {
         "url must start with instance base: {url}"
     );
 }
-
-// --- instance + field presence ---
 
 #[test]
 fn task_object_carries_instance_name() {
@@ -309,8 +289,6 @@ fn task_object_has_all_required_top_level_keys() {
         );
     }
 }
-
-// --- J2-A1: mine_object shape ---
 
 fn sample_mine_rows() -> Vec<crate::render::MineTableRow> {
     vec![
@@ -422,8 +400,6 @@ fn mine_object_empty_rows_yields_count_zero_and_empty_tasks() {
     let tasks = obj["tasks"].as_array().expect("tasks must be present");
     assert!(tasks.is_empty(), "empty rows must yield empty tasks array");
 }
-
-// --- J3-A1: browse_object shape and fields ---
 
 fn sample_task_row(
     task_id: i64,
@@ -583,8 +559,6 @@ fn browse_object_empty_groups_yields_empty_projects_array() {
     );
 }
 
-// --- comment_result and comment_error shapes ---
-
 #[test]
 fn comment_result_exact_minified_string() {
     let line = comment_result(123, 75346, 524);
@@ -641,8 +615,6 @@ fn comment_error_is_single_minified_line() {
     );
 }
 
-// --- time_result shape ---
-
 #[test]
 fn time_result_exact_minified_string() {
     let line = time_result(901, 75346, 524, 1.5);
@@ -662,8 +634,6 @@ fn time_result_is_valid_json_with_ok_true() {
     assert_eq!(obj["project_id"], 3);
     assert_eq!(obj["hours"], 4.0);
 }
-
-// --- task_result shape ---
 
 #[test]
 fn task_result_status_only_carries_only_status() {

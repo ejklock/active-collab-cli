@@ -2,8 +2,6 @@ use super::*;
 use serde_json::json;
 use unicode_width::UnicodeWidthStr;
 
-// --- D3: link_segments ---
-
 #[test]
 fn link_segments_no_url_returns_single_non_link_segment() {
     let segs = link_segments("plain text with no URL");
@@ -137,8 +135,6 @@ fn link_segments_segments_reconstruct_original_line() {
         "concatenated segments must equal original line"
     );
 }
-
-// --- V5-A1: link_segments handles bracketed [url] tokens ---
 
 #[test]
 fn link_segments_bracketed_url_inner_is_link_brackets_are_not() {
@@ -769,8 +765,6 @@ fn dw(s: &str) -> usize {
     UnicodeWidthStr::width(s)
 }
 
-// --- U10: panel_box ---
-
 #[test]
 fn panel_box_returns_empty_when_width_less_than_4() {
     assert!(panel_box("label", &[], 3).is_empty());
@@ -945,8 +939,6 @@ fn panel_box_empty_inner_lines_produces_empty_body_line() {
     );
 }
 
-// --- D1-A1: panel_box display-width invariant (every line exactly `width` DISPLAY cols) ---
-
 #[test]
 fn panel_box_every_line_exactly_width_display_cols_ascii() {
     let width = 40usize;
@@ -1029,8 +1021,6 @@ fn panel_box_over_long_inner_line_right_border_closes() {
     );
 }
 
-// --- D1-A2: panel_box horizontal + vertical padding invariants ---
-
 #[test]
 fn panel_box_vpad_first_and_last_body_rows_are_blank() {
     let width = 30usize;
@@ -1066,8 +1056,6 @@ fn panel_box_hpad_separates_content_from_borders() {
         "char before BOX_V must be HPAD space"
     );
 }
-
-// --- U10: comment_box regression (delegates to panel_box, output byte-identical) ---
 
 #[test]
 fn comment_box_returns_empty_when_width_less_than_4() {
@@ -1206,8 +1194,6 @@ fn comment_box_multiline_body_each_middle_line_exactly_width() {
         );
     }
 }
-
-// --- U10: build_header_lines (Details panel) ---
 
 #[test]
 fn build_header_lines_returns_panel_with_details_label() {
@@ -1429,8 +1415,6 @@ fn build_header_lines_2_column_alignment() {
     }
 }
 
-// --- D1a: Título row, Projeto populated, long-title wraps ---
-
 #[test]
 fn build_header_lines_project_row_shows_fallback_when_project_name_absent() {
     let task = json!({
@@ -1535,8 +1519,6 @@ fn build_header_lines_long_title_wraps_within_panel() {
     );
 }
 
-// --- U10: build_body_lines (Description panel) ---
-
 #[test]
 fn build_body_lines_is_panel_with_description_label() {
     let task = json!({ "id": 1, "body": "<p>Hello world</p>" });
@@ -1616,8 +1598,6 @@ fn build_body_lines_no_line_exceeds_inner_width() {
         );
     }
 }
-
-// --- U10: build_comment_lines (Comments panel) ---
 
 #[test]
 fn build_comment_lines_empty_for_zero_comments() {
@@ -1717,8 +1697,6 @@ fn build_comment_lines_no_line_exceeds_inner_width() {
         );
     }
 }
-
-// --- U10: build_detail_content (full detail layout) ---
 
 #[test]
 fn build_detail_lines_first_line_is_details_panel_top_border() {
@@ -2029,8 +2007,6 @@ fn truncate_cell_cjk_truncates_on_char_boundary_without_panic() {
     );
 }
 
-// --- U11: looks_like_filename and asset_link_line ---
-
 #[test]
 fn looks_like_filename_accepts_real_filename() {
     assert!(
@@ -2243,8 +2219,6 @@ fn asset_link_line_index_is_1_based_and_matches_position() {
     );
 }
 
-// --- V5-A2: build_detail_content (inline URLs) ---
-
 #[test]
 fn build_detail_content_url_in_description_renders_inline() {
     let task = json!({
@@ -2286,8 +2260,6 @@ fn build_detail_content_no_url_produces_lines_with_no_url() {
         "no URL in body must produce no URL in lines: {joined}"
     );
 }
-
-// --- V5-A3: url_at resolves click column to URL ---
 
 #[test]
 fn url_at_bracketed_url_returns_inner_without_brackets() {
@@ -2335,8 +2307,6 @@ fn url_at_plain_text_returns_none() {
         "url_at on plain text must return None: {result:?}"
     );
 }
-
-// --- layout-emitted PanelTitle StyleRun on section panel headers ---
 
 #[test]
 fn description_panel_top_border_carries_panel_title_run() {
@@ -2498,8 +2468,6 @@ fn url_at_col_past_end_returns_none() {
     assert!(result.is_none(), "url_at past end of line must return None");
 }
 
-// --- R3a: build_body_lines richtext structure (TUI path) ---
-
 #[test]
 fn build_body_lines_ul_produces_bullet_lines() {
     let task = json!({ "id": 1, "body": "<ul><li>alpha</li><li>beta</li></ul>" });
@@ -2629,8 +2597,6 @@ fn render_comments_to_str_uses_html_to_text_not_richtext() {
     );
 }
 
-// --- V5-A4: url_at with bordered/padded lines (panel body simulation) ---
-
 #[test]
 fn url_at_col_on_border_char_returns_none() {
     let url = "https://example.com/info";
@@ -2647,7 +2613,7 @@ fn url_at_inside_bracketed_url_in_bordered_padded_line() {
     // "│ [https://example.com] │" — url starts at col 3 (│=1, space=1, [=1)
     let url = "https://example.com";
     let line = format!("\u{2502} [{url}] \u{2502}");
-    let col_inside_url = 3; // first char of the URL (after '│ [')
+    let col_inside_url = 3; // first char of the URL (after '| [')
     let result = url_at(&line, col_inside_url);
     assert_eq!(
         result.as_deref(),
@@ -2655,8 +2621,6 @@ fn url_at_inside_bracketed_url_in_bordered_padded_line() {
         "url_at inside bordered bracketed URL must return URL: {result:?}"
     );
 }
-
-// --- D1b: asset_link_line with pre-derived labels ---
 
 // D1b-A1: asset with host label (from derive_asset_label) renders as host
 #[test]
@@ -2703,8 +2667,6 @@ fn asset_link_line_with_derived_anchor_text_label() {
         "anchor text label must render as-is: {line:?}"
     );
 }
-
-// --- V6-A7c: slice_by_display_cols ---
 
 // Pure ASCII: window [2, 5) returns chars at display cols 2,3,4.
 #[test]
@@ -2797,8 +2759,6 @@ fn slice_by_display_cols_emoji_then_accented_text() {
         "after a 2-wide emoji, cols [2,12) must yield the next 10 chars: got {result:?}"
     );
 }
-
-// ── Affordance StyleRun structural equality ────────
 
 // Own-comment: build_detail_content emits an EditAffordance StyleRun on the card
 // header line whose (start, len) equals the hit-test affordance's (col_start,
@@ -2893,9 +2853,7 @@ fn own_comment_delete_style_run_coords_equal_affordance_coords() {
     );
 }
 
-// --- Structural OpenUrl affordance emission ---
-
-// AC1-A1: single-line URL in body emits exactly one OpenUrl affordance with
+// single-line URL in body emits exactly one OpenUrl affordance with
 // the complete URL; its col_start is inside the content area (>= BODY_LEFT_CHROME_COLS).
 #[test]
 fn build_detail_content_single_line_url_emits_one_open_url_affordance() {
@@ -2934,7 +2892,7 @@ fn build_detail_content_single_line_url_emits_one_open_url_affordance() {
     );
 }
 
-// AC1-A2: a URL that wraps across two fragments emits two OpenUrl affordances,
+// a URL that wraps across two fragments emits two OpenUrl affordances,
 // both carrying the COMPLETE URL (not just the fragment text).
 #[test]
 fn build_detail_content_wrapped_url_emits_two_affordances_with_complete_url() {
@@ -2989,7 +2947,7 @@ fn build_detail_content_wrapped_url_emits_two_affordances_with_complete_url() {
     );
 }
 
-// AC1-A3: OBS-35 case — the second fragment line is exactly content_width wide
+// Boundary case — the second fragment line is exactly content_width wide
 // but the affordance still carries the COMPLETE URL (not truncated by the old
 // over-join bug that treated a word-boundary line as a hard-split continuation).
 // For inner_width=40, content_width=36; frag1 "ge]" is 3 chars < 36, so the
@@ -3013,14 +2971,14 @@ fn build_detail_content_obs35_last_fragment_carries_complete_url() {
         };
         assert_eq!(
             stored_url, url,
-            "every OpenUrl affordance must carry the complete URL (OBS-35 guard); \
+            "every OpenUrl affordance must carry the complete URL (over-join guard); \
              got {stored_url:?} at line {}, cols [{}, {})",
             aff.line_idx, aff.col_start, aff.col_end
         );
     }
 }
 
-// AC1-A4: a bare email anchor in the body emits an OpenUrl affordance with
+// a bare email anchor in the body emits an OpenUrl affordance with
 // the mailto: prefix.
 #[test]
 fn build_detail_content_bare_email_emits_mailto_affordance() {
@@ -3044,7 +3002,7 @@ fn build_detail_content_bare_email_emits_mailto_affordance() {
     );
 }
 
-// AC1-A5: a non-URL bracketed token in the body (e.g. [note]) does NOT produce
+// a non-URL bracketed token in the body (e.g. [note]) does NOT produce
 // any OpenUrl affordance — only URL/email tokens are openable.
 #[test]
 fn build_detail_content_non_url_bracket_token_emits_no_open_url_affordance() {

@@ -3,7 +3,7 @@ use super::{
     Selection, DETAIL_CHROME_ROWS, DETAIL_TEXT_TOP,
 };
 
-// AC4: is_in_content — row just below DETAIL_TEXT_TOP is out of the body area.
+// is_in_content — row just below DETAIL_TEXT_TOP is out of the body area.
 #[test]
 fn is_in_content_row_below_text_top_is_false() {
     let viewport_rows = 24;
@@ -15,7 +15,7 @@ fn is_in_content_row_below_text_top_is_false() {
     );
 }
 
-// AC4: is_in_content — row exactly at DETAIL_TEXT_TOP is the first valid body row.
+// is_in_content — row exactly at DETAIL_TEXT_TOP is the first valid body row.
 #[test]
 fn is_in_content_at_text_top_is_true() {
     let viewport_rows = 24;
@@ -27,7 +27,7 @@ fn is_in_content_at_text_top_is_true() {
     );
 }
 
-// AC4: is_in_content — last in-content row is DETAIL_TEXT_TOP + content_height - 1.
+// is_in_content — last in-content row is DETAIL_TEXT_TOP + content_height - 1.
 #[test]
 fn is_in_content_last_row_is_true() {
     let viewport_rows = 24u16;
@@ -40,7 +40,7 @@ fn is_in_content_last_row_is_true() {
     );
 }
 
-// AC4: is_in_content — first row past content (DETAIL_TEXT_TOP + content_height) is out.
+// is_in_content — first row past content (DETAIL_TEXT_TOP + content_height) is out.
 #[test]
 fn is_in_content_first_row_past_content_is_false() {
     let viewport_rows = 24u16;
@@ -53,7 +53,7 @@ fn is_in_content_first_row_past_content_is_false() {
     );
 }
 
-// AC4: row_to_line_idx — in-range row with a non-zero offset produces the correct line index.
+// row_to_line_idx — in-range row with a non-zero offset produces the correct line index.
 // offset=5, viewport_rows=24, row=4 (DETAIL_TEXT_TOP=2) → line_idx = 5 + (4 - 2) = 7.
 #[test]
 fn row_to_line_idx_in_range_applies_offset_shift() {
@@ -68,7 +68,7 @@ fn row_to_line_idx_in_range_applies_offset_shift() {
     );
 }
 
-// AC4: row_to_line_idx — out-of-range row returns None.
+// row_to_line_idx — out-of-range row returns None.
 #[test]
 fn row_to_line_idx_out_of_range_row_returns_none() {
     let offset = 0usize;
@@ -80,7 +80,7 @@ fn row_to_line_idx_out_of_range_row_returns_none() {
     );
 }
 
-// AC4: row_to_line_idx — row at DETAIL_TEXT_TOP with zero offset maps to line 0.
+// row_to_line_idx — row at DETAIL_TEXT_TOP with zero offset maps to line 0.
 #[test]
 fn row_to_line_idx_at_text_top_zero_offset_returns_zero() {
     assert_eq!(
@@ -100,7 +100,7 @@ fn detail_text_top_is_two() {
     );
 }
 
-// AC3: content_height_clamped — viewport smaller than the chrome yields 1 (the floor).
+// content_height_clamped — viewport smaller than the chrome yields 1 (the floor).
 // Dropping the .max(1) floor causes this to return 0.
 #[test]
 fn content_height_clamped_below_chrome_returns_one() {
@@ -112,7 +112,7 @@ fn content_height_clamped_below_chrome_returns_one() {
     );
 }
 
-// AC3: content_height_clamped — viewport exactly equal to the chrome yields 1 (the floor).
+// content_height_clamped — viewport exactly equal to the chrome yields 1 (the floor).
 // Dropping the .max(1) floor causes this to return 0 (content_height returns 0 at the boundary).
 #[test]
 fn content_height_clamped_at_chrome_boundary_returns_one() {
@@ -124,7 +124,7 @@ fn content_height_clamped_at_chrome_boundary_returns_one() {
     );
 }
 
-// AC3: content_height_clamped — viewport with N body rows above the chrome yields N.
+// content_height_clamped — viewport with N body rows above the chrome yields N.
 // Dropping the chrome subtraction causes this to return viewport_rows (too large).
 #[test]
 fn content_height_clamped_above_chrome_returns_body_rows() {
@@ -148,8 +148,6 @@ fn content_height_clamped_zero_viewport_returns_one() {
     );
 }
 
-// --- selected_text — the column half absorbed from model.rs ---
-
 // A boxed Detail body line: `│ {content} │`, matching the chrome
 // `box_inner_content` strips (border + HPAD on each side).
 fn boxed(content: &str) -> String {
@@ -161,7 +159,7 @@ fn boxed(content: &str) -> String {
 // matching DETAIL_CONTENT_BLOCK_BORDER_COLS + BODY_LEFT_CHROME_COLS.
 const LEFT_OFFSET: u16 = 3;
 
-// AC5: single-row selection extracts the exact inner-content slice.
+// single-row selection extracts the exact inner-content slice.
 #[test]
 fn selected_text_single_row_extracts_slice() {
     let lines = vec![boxed("hello world")];
@@ -176,7 +174,7 @@ fn selected_text_single_row_extracts_slice() {
     );
 }
 
-// AC5: multi-row selection joins each row's slice with '\n', trimming to the
+// multi-row selection joins each row's slice with '\n', trimming to the
 // selection start column on the first row and the end column on the last row.
 #[test]
 fn selected_text_multi_row_joins_with_newline() {
@@ -192,7 +190,7 @@ fn selected_text_multi_row_joins_with_newline() {
     );
 }
 
-// AC5: partial-column selection starting and ending mid-line (not at a line edge).
+// partial-column selection starting and ending mid-line (not at a line edge).
 #[test]
 fn selected_text_partial_column_mid_line() {
     let lines = vec![boxed("hello world")];
@@ -207,7 +205,7 @@ fn selected_text_partial_column_mid_line() {
     );
 }
 
-// AC5: double-width (emoji) selection never splits a glyph — the window boundary
+// double-width (emoji) selection never splits a glyph — the window boundary
 // falls exactly on the glyph edge so only the first emoji is included.
 #[test]
 fn selected_text_double_width_glyph_not_split() {
@@ -223,7 +221,7 @@ fn selected_text_double_width_glyph_not_split() {
     );
 }
 
-// AC5: a scroll offset shifts which logical line a viewport row maps to, but the
+// a scroll offset shifts which logical line a viewport row maps to, but the
 // extracted text is unaffected by the shift itself — proves selected_text composes
 // row_to_line_idx rather than assuming offset=0.
 #[test]
@@ -240,7 +238,7 @@ fn selected_text_applies_scroll_offset_to_row_mapping() {
     );
 }
 
-// AC5: a selection row outside the scrollable body area contributes nothing —
+// a selection row outside the scrollable body area contributes nothing —
 // row_to_line_idx returns None and the row is skipped rather than panicking.
 #[test]
 fn selected_text_row_outside_content_is_skipped() {

@@ -293,7 +293,7 @@ fn draw_projects_single_name_column_no_task_count() {
     );
 }
 
-// D2a-AC1: Tasks list renders NO 'NOME' column header; each task is a bordered card.
+// Tasks list renders NO 'NOME' column header; each task is a bordered card.
 // The card content line begins with '#<task_number>' and includes the task name.
 #[test]
 fn draw_tasks_card_layout_no_nome_header_has_bordered_card() {
@@ -419,7 +419,7 @@ fn draw_projects_long_name_wraps_on_narrow_terminal() {
     );
 }
 
-// D2a-AC2: A long task name wraps inside the card and the card grows in height.
+// A long task name wraps inside the card and the card grows in height.
 // At width=20, outer block takes 2 cols (borders), card borders take 2 more, HPAD takes 2 more,
 // leaving card_inner_w = 20 - 2 - 2 - 2 = 14.
 // "#1  Alpha Beta Gamma Delta" (len 26) wraps at 14 cols across at least 2 content rows.
@@ -550,7 +550,7 @@ fn draw_projects_selected_row_has_selection_symbol() {
     );
 }
 
-// D2a-AC4: The selected card's border and content rows all carry the selection style.
+// The selected card's border and content rows all carry the selection style.
 // All buffer rows belonging to the selected card (top border, content, bottom border)
 // must have at least one cell with the amber selection background.
 #[test]
@@ -594,12 +594,12 @@ fn draw_tasks_selected_card_all_rows_carry_selection_style() {
         });
         assert!(
             has_selection_bg,
-            "selected card row y={y} must have the selection token bg (D2a-AC4)"
+            "selected card row y={y} must have the selection token bg (selection highlight)"
         );
     }
 }
 
-// D2a-AC3: A click on a non-first row of a card resolves to that task's index.
+// A click on a non-first row of a card resolves to that task's index.
 // Card for task 0 occupies at least 3 rows (top border, content, bottom border).
 // Clicking the second row (y_start+1) must still resolve to index 0.
 #[test]
@@ -646,7 +646,7 @@ fn draw_tasks_click_on_non_first_card_row_resolves_to_task_index() {
     assert_eq!(
         resolved,
         Some(0),
-        "clicking non-first row y={click_y} must resolve to card index 0 (D2a-AC3)"
+        "clicking non-first row y={click_y} must resolve to card index 0 (card index from the clicked row)"
     );
 }
 
@@ -686,7 +686,7 @@ fn draw_projects_header_row_present() {
     );
 }
 
-// D2a-AC1: Tasks screen has no column header row; each task is a bordered card.
+// Tasks screen has no column header row; each task is a bordered card.
 #[test]
 fn draw_tasks_no_header_row_only_cards() {
     let tasks = make_tasks(&["My Task"]);
@@ -1147,7 +1147,7 @@ fn draw_tasks_wide_terminal_short_name_no_ellipsis() {
     );
 }
 
-// D2c-AC4: single-line card height grew by exactly one row for line 2.
+// single-line card height grew by exactly one row for line 2.
 // A card with a short name (fits on one line) now occupies 4 rows:
 // top border + name line + due line + bottom border.
 // Derived from the REAL buffer: locate the first card, measure y_end - y_start.
@@ -1187,7 +1187,7 @@ fn draw_tasks_single_line_card_height_is_five_rows() {
     );
 }
 
-// D2c-AC1: line 2 shows the relative due text from relative_due with a FIXED today.
+// line 2 shows the relative due text from relative_due with a FIXED today.
 // Task due in 2 days from today_fixed() (2025-06-15) => due_on = "2025-06-17".
 // Expected label contains the count and the 'Vence em' prefix (pt-BR).
 #[test]
@@ -1219,7 +1219,7 @@ fn draw_tasks_due_line_shows_relative_due_text() {
     );
 }
 
-// D2c-AC2: overdue task's due cells carry the danger fg.
+// overdue task's due cells carry the danger fg.
 #[test]
 fn draw_tasks_overdue_task_due_cells_carry_red_fg() {
     let task = TaskRow {
@@ -1269,11 +1269,11 @@ fn draw_tasks_overdue_task_due_cells_carry_red_fg() {
     });
     assert!(
         found_red,
-        "overdue card's due row (y={due_row}) must have at least one danger-token-fg cell (D2c-AC2)"
+        "overdue card's due row (y={due_row}) must have at least one danger-token-fg cell (due row colour)"
     );
 }
 
-// D2c-AC2: near-due task's due cells carry the warning fg.
+// near-due task's due cells carry the warning fg.
 #[test]
 fn draw_tasks_near_due_task_due_cells_carry_yellow_fg() {
     let task = TaskRow {
@@ -1321,11 +1321,11 @@ fn draw_tasks_near_due_task_due_cells_carry_yellow_fg() {
     });
     assert!(
         found_yellow,
-        "near-due card's due row (y={due_row}) must have at least one warning-token-fg cell (D2c-AC2)"
+        "near-due card's due row (y={due_row}) must have at least one warning-token-fg cell (due row colour)"
     );
 }
 
-// D2c-AC3: a task with no due_on shows 'sem data' on line 2 with neither red nor yellow fg.
+// a task with no due_on shows 'sem data' on line 2 with neither red nor yellow fg.
 #[test]
 fn draw_tasks_no_due_shows_sem_data_with_default_style() {
     let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -1382,11 +1382,11 @@ fn draw_tasks_no_due_shows_sem_data_with_default_style() {
     });
     assert!(
         !has_urgency_color,
-        "no-due task's due row must NOT have danger- or warning-token fg (D2c-AC3): row y={due_row}"
+        "no-due task's due row must NOT have danger- or warning-token fg (no-due row colour): row y={due_row}"
     );
 }
 
-// D2c-AC4: the selected card highlights every row including the due line (line 2),
+// the selected card highlights every row including the due line (line 2),
 // AND the due color (danger/warning) remains visible on the selected row.
 #[test]
 fn draw_tasks_selected_card_due_line_keeps_color_on_selection_bg() {
@@ -1438,7 +1438,7 @@ fn draw_tasks_selected_card_due_line_keeps_color_on_selection_bg() {
         });
         assert!(
             has_selection_bg,
-            "selected card row y={y} must have the selection token bg (D2c-AC4 whole-card highlight)"
+            "selected card row y={y} must have the selection token bg (whole-card highlight)"
         );
     }
 
@@ -1451,11 +1451,11 @@ fn draw_tasks_selected_card_due_line_keeps_color_on_selection_bg() {
     });
     assert!(
         has_red_on_due_row,
-        "selected overdue card's due row (y={due_row}) must still carry danger-token fg over the selection bg (D2c-AC4)"
+        "selected overdue card's due row (y={due_row}) must still carry danger-token fg over the selection bg (selection over due colour)"
     );
 }
 
-// D2d-ii-AC1: when TaskRow.project_name is Some(non-empty), card line 2 shows
+// when TaskRow.project_name is Some(non-empty), card line 2 shows
 // '<relative due> · <project name>'. Verified against the REAL TestBackend buffer.
 #[test]
 fn draw_tasks_due_line_with_project_name_shows_due_separator_project() {
@@ -1519,7 +1519,7 @@ fn draw_tasks_due_line_with_project_name_shows_due_separator_project() {
     );
 }
 
-// D2d-ii-AC2: the due portion of line 2 keeps its DueStyle color (overdue red) while
+// the due portion of line 2 keeps its DueStyle color (overdue red) while
 // the ' · <project>' portion uses the default style (no red fg on project cells).
 // Verified by reading per-cell styles from the REAL buffer.
 #[test]
@@ -1587,7 +1587,7 @@ fn draw_tasks_due_line_project_portion_has_default_style_not_due_color() {
     });
     assert!(
         due_cells_have_red,
-        "cells before the separator must carry overdue red fg (D2d-ii-AC2)"
+        "cells before the separator must carry overdue red fg (separator colour)"
     );
 
     // Cells at and after the separator (project portion) must NOT carry red fg.
@@ -1598,11 +1598,11 @@ fn draw_tasks_due_line_project_portion_has_default_style_not_due_color() {
     });
     assert!(
         !proj_cells_have_red,
-        "cells at/after the separator must NOT carry red fg (project uses default style, D2d-ii-AC2)"
+        "cells at/after the separator must NOT carry red fg (project uses default style)"
     );
 }
 
-// D2d-ii-AC3: when TaskRow.project_name is None, card line 2 shows only the due text
+// when TaskRow.project_name is None, card line 2 shows only the due text
 // with NO trailing ' · ' separator (graceful cold-cache degrade).
 #[test]
 fn draw_tasks_due_line_without_project_name_shows_no_separator() {
@@ -3600,8 +3600,6 @@ mod footer_refresh_hint {
     }
 }
 
-// --- V4a: TestBackend render — comment with long URL shows label, not raw URL ---
-
 // V5-A3: a Detail screen whose comment holds a long URL renders the URL inline.
 // The URL cells carry link_style (muted-green + underline). The full URL appears
 // in the rendered output (possibly wrapped across lines).
@@ -3665,8 +3663,6 @@ fn draw_detail_comment_with_long_url_renders_inline_with_link_style() {
         "inline URL cells must carry link_style's fg+underline"
     );
 }
-
-// --- V6: footer indicator and highlight rendering tests ---
 
 mod v6_view {
     use crate::i18n::set_language;
@@ -3874,8 +3870,6 @@ mod v6_view {
     }
 }
 
-// --- W2: Detail chrome responsiveness — task name header + asset row wrapping ---
-
 // D1a-A2: draw_detail does not inject the task name into the content rows at all.
 // Only the content lines passed in are rendered; `task_name` is used only for the loading state.
 #[test]
@@ -3929,7 +3923,7 @@ fn draw_detail_long_asset_label_wraps_with_hanging_indent_no_clip() {
     );
 }
 
-// D1d-AC3: A task with four assets whose labels each fit on one line shows all
+// A task with four assets whose labels each fit on one line shows all
 // four [n] rows — assets are inline in the scrollable content, no height cap.
 #[test]
 fn draw_detail_four_assets_all_visible_no_clip() {
@@ -4001,8 +3995,6 @@ fn draw_detail_over_scroll_clamp_still_works_with_name_header() {
         "last body line must be visible after over-scroll clamp: {content}"
     );
 }
-
-// --- R3b inline-emphasis style runs ----------------------------------------
 
 fn style_run_matches(run: &StyleRun, expected_style: RichStyle) -> bool {
     run.style == expected_style
@@ -4441,8 +4433,6 @@ fn projects_title_hides_revalidating_indicator_when_not_revalidating() {
     );
 }
 
-// --- W1: Detail chrome responsiveness — header and footer word-wrap on narrow terminals ---
-
 mod w1_chrome_wrap {
     use crate::tui::model::{Header, Model, Screen};
     use crate::tui::view::view;
@@ -4726,8 +4716,6 @@ mod w1_chrome_wrap {
         );
     }
 }
-
-// --- D1f render tests ---
 
 // The inline Artifacts section renders the hint text
 // 'Ctrl/Cmd+clique abrir anexo' as an italic row within the scrollable content.
@@ -5023,7 +5011,7 @@ fn footer_plan_detail_auth_error_carries_reauth_status() {
     );
 }
 
-// AC4: Direct unit tests on Vec<PanelRow> — the layout is the test surface.
+// Direct unit tests on Vec<PanelRow> — the layout is the test surface.
 // These assert the composition for all cases required by the acceptance criterion:
 // (a) empty list -> empty vec, (b) single asset, (c) two assets, (d) wrapped label.
 
@@ -5242,8 +5230,6 @@ mod panel_row_layout {
     }
 }
 
-// --- S1: asset_panel inline building blocks (section_lines + asset_index_for_section_row) ---
-//
 // Tests derive expectations from the REAL layout() output to avoid hand-fabricating geometry.
 
 mod asset_panel_inline {
@@ -5260,7 +5246,7 @@ mod asset_panel_inline {
         }
     }
 
-    // AC1: empty assets -> section_lines returns Vec::new() (no header emitted).
+    // empty assets -> section_lines returns Vec::new() (no header emitted).
     #[test]
     fn section_lines_empty_assets_returns_empty() {
         let lines = section_lines(&[], 60);
@@ -5270,7 +5256,7 @@ mod asset_panel_inline {
         );
     }
 
-    // AC1: single asset -> header + layout-derived rows; header carries Bold StyleRun.
+    // single asset -> header + layout-derived rows; header carries Bold StyleRun.
     #[test]
     fn section_lines_single_asset_has_header_then_layout_rows() {
         let assets = vec![make_asset("report.pdf")];
@@ -5313,7 +5299,7 @@ mod asset_panel_inline {
         );
     }
 
-    // AC1: single asset -> Pad/Separator rows map to blank "" with empty style vec;
+    // single asset -> Pad/Separator rows map to blank "" with empty style vec;
     //      Asset rows carry PANEL_HPAD prefix and empty style vec;
     //      Hint row carries PANEL_HPAD prefix and Italic StyleRun over hint text.
     #[test]
@@ -5407,7 +5393,7 @@ mod asset_panel_inline {
         }
     }
 
-    // AC1: two assets -> a blank Separator line appears between the two asset rows.
+    // two assets -> a blank Separator line appears between the two asset rows.
     #[test]
     fn section_lines_two_assets_have_blank_separator_between_them() {
         let assets = vec![make_asset("alpha.pdf"), make_asset("beta.pdf")];
@@ -5442,7 +5428,7 @@ mod asset_panel_inline {
         );
     }
 
-    // AC1: a label that wraps at content_width produces multiple consecutive Asset rows,
+    // a label that wraps at content_width produces multiple consecutive Asset rows,
     //      all with an empty style vec.
     #[test]
     fn section_lines_wrapped_label_produces_multiple_asset_rows_no_styles() {
@@ -5487,7 +5473,7 @@ mod asset_panel_inline {
         }
     }
 
-    // AC2: asset_index_for_section_row -> row 0 (header) always returns None.
+    // asset_index_for_section_row -> row 0 (header) always returns None.
     #[test]
     fn asset_index_for_section_row_header_row_returns_none() {
         let assets = vec![make_asset("file.pdf")];
@@ -5495,7 +5481,7 @@ mod asset_panel_inline {
         assert_eq!(result, None, "interior_row=0 (header) must return None");
     }
 
-    // AC2: asset_index_for_section_row -> pad/separator/hint rows return None.
+    // asset_index_for_section_row -> pad/separator/hint rows return None.
     #[test]
     fn asset_index_for_section_row_non_asset_rows_return_none() {
         let assets = vec![make_asset("file.pdf")];
@@ -5517,7 +5503,7 @@ mod asset_panel_inline {
         }
     }
 
-    // AC2: asset_index_for_section_row -> each asset row returns Some(owning idx).
+    // asset_index_for_section_row -> each asset row returns Some(owning idx).
     #[test]
     fn asset_index_for_section_row_asset_rows_return_some_idx() {
         let assets = vec![make_asset("alpha.pdf"), make_asset("beta.pdf")];
@@ -5537,7 +5523,7 @@ mod asset_panel_inline {
         }
     }
 
-    // AC2: wrapped continuation lines for a multi-row label all return Some(same owning idx).
+    // wrapped continuation lines for a multi-row label all return Some(same owning idx).
     #[test]
     fn asset_index_for_section_row_wrapped_continuation_returns_same_idx() {
         let long_label = "a-very-long-filename-that-wraps-inside-the-content-width-area.pdf";
@@ -5574,7 +5560,7 @@ mod asset_panel_inline {
         }
     }
 
-    // AC2: out-of-range interior_row returns None.
+    // out-of-range interior_row returns None.
     #[test]
     fn asset_index_for_section_row_out_of_range_returns_none() {
         let assets = vec![make_asset("file.pdf")];
@@ -5588,7 +5574,7 @@ mod asset_panel_inline {
         );
     }
 
-    // AC2: empty assets -> asset_index_for_section_row always returns None (even row 0).
+    // empty assets -> asset_index_for_section_row always returns None (even row 0).
     #[test]
     fn asset_index_for_section_row_empty_assets_always_none() {
         assert_eq!(asset_index_for_section_row(&[], 60, 0), None);
@@ -5596,7 +5582,7 @@ mod asset_panel_inline {
         assert_eq!(asset_index_for_section_row(&[], 60, 99), None);
     }
 
-    // AC3: section_lines.len() == 1 + layout().len() for non-empty assets (offset contract).
+    // section_lines.len() == 1 + layout().len() for non-empty assets (offset contract).
     #[test]
     fn section_lines_len_equals_one_plus_layout_len() {
         let assets = vec![
@@ -5615,8 +5601,6 @@ mod asset_panel_inline {
         }
     }
 }
-
-// --- render-buffer tests ---
 
 // draw_detail renders assets INLINE — assets add no panel box
 // of their own. The fixture legitimately renders 3 top-left corners: outer frame +
@@ -5694,7 +5678,7 @@ fn draw_detail_assets_inline_ptbr_artifacts_label() {
     );
 }
 
-// AC1 (fix-inline-asset-link-style-click): asset row cells carry link_style() (muted green +
+// asset row cells carry link_style() (muted green +
 // UNDERLINED) for a non-URL label.  This is STRUCTURAL styling emitted as a Link StyleRun from
 // section_lines(), not URL-text detection — the exact regression this guards.
 //
@@ -6060,7 +6044,7 @@ mod compose_render {
         );
     }
 
-    // AC2 (backdrop DIM): backdrop cells outside the modal Rect carry Modifier::DIM.
+    // backdrop cells outside the modal Rect carry Modifier::DIM.
     #[test]
     fn compose_modal_backdrop_cells_carry_dim_modifier() {
         use ratatui::style::Modifier;
@@ -6259,7 +6243,7 @@ mod log_time_render {
         out
     }
 
-    // AC4: the modal shows the title, both labeled fields with their buffers, and
+    // the modal shows the title, both labeled fields with their buffers, and
     // the editing hint.
     #[test]
     fn log_time_active_shows_title_fields_and_hint() {
@@ -6299,7 +6283,7 @@ mod log_time_render {
         );
     }
 
-    // AC4: the modal shows the Submitting status text while the form is submitting.
+    // the modal shows the Submitting status text while the form is submitting.
     #[test]
     fn log_time_submitting_shows_sending_status() {
         let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -6316,7 +6300,7 @@ mod log_time_render {
         );
     }
 
-    // AC2/AC4: log-time inactive — no log-time content leaks into the render.
+    // log-time inactive — no log-time content leaks into the render.
     #[test]
     fn log_time_inactive_shows_no_log_time_content() {
         let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -6408,7 +6392,7 @@ mod estimate_edit_render {
         out
     }
 
-    // AC3: the modal shows the title, the labeled field with its buffer, and the
+    // the modal shows the title, the labeled field with its buffer, and the
     // editing hint.
     #[test]
     fn estimate_edit_active_shows_title_field_and_hint() {
@@ -6436,7 +6420,7 @@ mod estimate_edit_render {
         );
     }
 
-    // AC3: the modal shows the Submitting status text while the form is submitting.
+    // the modal shows the Submitting status text while the form is submitting.
     #[test]
     fn estimate_edit_submitting_shows_sending_status() {
         let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -6453,7 +6437,7 @@ mod estimate_edit_render {
         );
     }
 
-    // AC3: estimate-edit inactive — no estimate-edit content leaks into the render.
+    // estimate-edit inactive — no estimate-edit content leaks into the render.
     #[test]
     fn estimate_edit_inactive_shows_no_estimate_content() {
         let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -6538,7 +6522,7 @@ mod status_confirm_render {
         out
     }
 
-    // AC3: completed_target=true shows the "mark as completed" prompt.
+    // completed_target=true shows the "mark as completed" prompt.
     #[test]
     fn status_confirm_targeting_completion_shows_complete_prompt() {
         let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -6564,7 +6548,7 @@ mod status_confirm_render {
         );
     }
 
-    // AC3: completed_target=false shows the "reopen" prompt.
+    // completed_target=false shows the "reopen" prompt.
     #[test]
     fn status_confirm_targeting_reopen_shows_reopen_prompt() {
         let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -6582,7 +6566,7 @@ mod status_confirm_render {
         );
     }
 
-    // AC3: the modal shows the Submitting status text while the form is submitting.
+    // the modal shows the Submitting status text while the form is submitting.
     #[test]
     fn status_confirm_submitting_shows_sending_status() {
         let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -6600,7 +6584,7 @@ mod status_confirm_render {
         );
     }
 
-    // AC3: status-confirm inactive — no status-confirm content leaks into the render.
+    // status-confirm inactive — no status-confirm content leaks into the render.
     #[test]
     fn status_confirm_inactive_shows_no_status_confirm_content() {
         let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -6694,7 +6678,7 @@ mod assignee_picker_render {
         vec![(1i64, "Alice".to_string()), (2i64, "Bob".to_string())]
     }
 
-    // AC3: the modal shows the title, every candidate name, and the navigate/confirm hint.
+    // the modal shows the title, every candidate name, and the navigate/confirm hint.
     #[test]
     fn assignee_picker_active_shows_title_candidates_and_hint() {
         let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -6726,7 +6710,7 @@ mod assignee_picker_render {
         );
     }
 
-    // AC3: the highlighted row is marked distinctly from the non-selected rows.
+    // the highlighted row is marked distinctly from the non-selected rows.
     #[test]
     fn assignee_picker_marks_the_selected_row() {
         let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -6750,7 +6734,7 @@ mod assignee_picker_render {
         );
     }
 
-    // AC3: an empty candidate list shows the empty-directory state.
+    // an empty candidate list shows the empty-directory state.
     #[test]
     fn assignee_picker_with_no_candidates_shows_empty_state() {
         let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -6770,7 +6754,7 @@ mod assignee_picker_render {
         );
     }
 
-    // AC3: the modal shows the Submitting status text while the picker is submitting.
+    // the modal shows the Submitting status text while the picker is submitting.
     #[test]
     fn assignee_picker_submitting_shows_sending_status() {
         let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -6790,7 +6774,7 @@ mod assignee_picker_render {
         );
     }
 
-    // AC6: a non-empty filter renders the search line with the typed text.
+    // a non-empty filter renders the search line with the typed text.
     #[test]
     fn assignee_picker_shows_search_line_with_filter_text() {
         let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -6810,7 +6794,7 @@ mod assignee_picker_render {
         );
     }
 
-    // AC6: the list shows only the filtered rows, with the selected one marked.
+    // the list shows only the filtered rows, with the selected one marked.
     #[test]
     fn assignee_picker_filters_candidates_and_marks_selection() {
         let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -6834,7 +6818,7 @@ mod assignee_picker_render {
         );
     }
 
-    // AC6: a filter that matches nothing shows the empty-match line.
+    // a filter that matches nothing shows the empty-match line.
     #[test]
     fn assignee_picker_with_no_filter_matches_shows_empty_match_state() {
         let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -6858,7 +6842,7 @@ mod assignee_picker_render {
         );
     }
 
-    // AC6: the in-modal hint describes the new keys — move, type to filter, confirm, cancel.
+    // the in-modal hint describes the new keys — move, type to filter, confirm, cancel.
     #[test]
     fn assignee_picker_hint_describes_filter_keys() {
         let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -6886,7 +6870,7 @@ mod assignee_picker_render {
         );
     }
 
-    // AC3: assignee-picker inactive — no assignee-picker content leaks into the render.
+    // assignee-picker inactive — no assignee-picker content leaks into the render.
     #[test]
     fn assignee_picker_inactive_shows_no_assignee_picker_content() {
         let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -7072,7 +7056,7 @@ mod task_list_picker_render {
     }
 }
 
-// AC B1 (slice 0057b): render_modal returns the inner content (body) Rect — the
+// render_modal returns the inner content (body) Rect — the
 // area beneath the title border and above the hint row, not the outer bordered box.
 
 mod modal_render_inner_rect_contract {
@@ -7136,8 +7120,6 @@ mod modal_render_inner_rect_contract {
         }
     }
 }
-
-// ── Confirm-delete modal render tests ─────────
 
 mod confirm_modal_buttons {
     use crate::i18n::set_language;
@@ -7329,7 +7311,7 @@ mod confirm_modal_buttons {
         }
     }
 
-    // AC3b (geometry-consistency / capture): plain click OUTSIDE the button labels while
+    // plain click OUTSIDE the button labels while
     // the confirm modal is open does NOT delete and does NOT start a text selection.
     #[test]
     fn plain_click_outside_buttons_does_not_delete_or_select() {
@@ -7369,7 +7351,7 @@ mod confirm_modal_buttons {
         );
     }
 
-    // AC3 (plain click on cancel from buffer): plain click on [Não] clears confirm, no Cmd.
+    // plain click on [Não] clears confirm, no Cmd.
     #[test]
     fn plain_click_on_buffer_located_cancel_button_clears_confirm() {
         use crate::tui::model::{update, Msg};
@@ -7409,8 +7391,6 @@ mod confirm_modal_buttons {
         }
     }
 }
-
-// ── Yes/No confirm modal label tests ──────────────────────────────
 
 mod yes_no_confirm_labels {
     use crate::i18n::{set_language, t};
@@ -7486,7 +7466,7 @@ mod yes_no_confirm_labels {
         out
     }
 
-    // AC1: the hint row of the delete-confirm modal shows [Sim] and [Não] in pt-BR,
+    // the hint row of the delete-confirm modal shows [Sim] and [Não] in pt-BR,
     // asserted against the real rendered TestBackend buffer.
     #[test]
     fn confirm_modal_hint_row_shows_sim_and_nao_in_pt_br() {
@@ -7514,7 +7494,7 @@ mod yes_no_confirm_labels {
         );
     }
 
-    // AC1 (en): in English locale the hint row shows [Yes] and [No].
+    // in English locale the hint row shows [Yes] and [No].
     #[test]
     fn confirm_modal_hint_row_shows_yes_and_no_in_english() {
         let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -7532,7 +7512,7 @@ mod yes_no_confirm_labels {
         );
     }
 
-    // AC2: the first registered button target (is_confirm: true) maps to the [Sim] columns.
+    // the first registered button target (is_confirm: true) maps to the [Sim] columns.
     // The second (is_confirm: false) maps to the [Não] columns in pt-BR.
     // Swapping the targets would break this test (mutation floor).
     #[test]
@@ -7592,7 +7572,7 @@ mod yes_no_confirm_labels {
         );
     }
 
-    // AC2: a click on the Sim target (is_confirm=true) dispatches ConfirmDeleteComment /
+    // a click on the Sim target (is_confirm=true) dispatches ConfirmDeleteComment /
     // DeleteComment; a click on the Não target (is_confirm=false) dispatches CancelDeleteComment.
     #[test]
     fn click_sim_dispatches_delete_click_nao_dispatches_cancel() {
@@ -7664,7 +7644,7 @@ mod yes_no_confirm_labels {
         }
     }
 
-    // AC2: ConfirmDeleteComment (Enter) confirms and CancelDeleteComment (Esc) cancels
+    // ConfirmDeleteComment (Enter) confirms and CancelDeleteComment (Esc) cancels
     // — key handling is unchanged by the label relabeling.
     #[test]
     fn confirm_msg_confirms_and_cancel_msg_cancels_in_confirm_modal() {
@@ -7706,7 +7686,7 @@ mod yes_no_confirm_labels {
         }
     }
 
-    // AC3: i18n — t("Yes") resolves to "Sim" in pt-BR and "Yes" in English (identity).
+    // i18n — t("Yes") resolves to "Sim" in pt-BR and "Yes" in English (identity).
     //            t("No") resolves to "Não" in pt-BR and "No" in English (identity).
     #[test]
     fn i18n_yes_no_keys_resolve_correctly() {
@@ -7722,11 +7702,10 @@ mod yes_no_confirm_labels {
     }
 }
 
-// ── Edit-comment affordance render tests ───────────────
-// AC1: build_detail_content gates the [editar] token to comments whose
+// build_detail_content gates the [editar] token to comments whose
 // created_by_id matches current_user_id.
 
-// AC1-part1: A comment whose created_by_id matches current_user_id carries
+// A comment whose created_by_id matches current_user_id carries
 // an edit affordance: the edit_affordances vec is non-empty and the header
 // line contains the edit token in brackets.
 #[test]
@@ -7773,7 +7752,7 @@ fn edit_affordance_shown_for_own_comment() {
     );
 }
 
-// AC1-part2: A comment owned by a DIFFERENT user must NOT show an edit affordance.
+// A comment owned by a DIFFERENT user must NOT show an edit affordance.
 #[test]
 fn edit_affordance_hidden_for_other_user_comment() {
     use crate::render::{build_detail_content, AffordanceKind};
@@ -7802,7 +7781,7 @@ fn edit_affordance_hidden_for_other_user_comment() {
     );
 }
 
-// AC1-part3: When current_user_id is None, edit affordances are absent.
+// When current_user_id is None, edit affordances are absent.
 #[test]
 fn edit_affordance_hidden_when_current_user_id_is_none() {
     use crate::render::{build_detail_content, AffordanceKind};
@@ -7831,7 +7810,7 @@ fn edit_affordance_hidden_when_current_user_id_is_none() {
     );
 }
 
-// AC1-part4: Edit affordances are populated exactly once (for the own comment).
+// Edit affordances are populated exactly once (for the own comment).
 #[test]
 fn edit_affordances_populated_only_for_own_comment() {
     use crate::render::{build_detail_content, AffordanceKind};
@@ -7870,8 +7849,6 @@ fn edit_affordances_populated_only_for_own_comment() {
     };
     assert_eq!(cid, 10, "affordance must reference comment_id=10");
 }
-
-// --- AC4: focused comment card carries the focus highlight; others do not ---
 
 mod comment_focus_render {
     use crate::render::build_detail_content;
@@ -7942,7 +7919,7 @@ mod comment_focus_render {
         })
     }
 
-    // AC4: focused card's lines carry the focus background; unfocused card's lines do not.
+    // focused card's lines carry the focus background; unfocused card's lines do not.
     #[test]
     fn focused_card_has_highlight_style_unfocused_does_not() {
         let width = 80u16;
@@ -7987,7 +7964,7 @@ mod comment_focus_render {
         let _ = (span1_count, span1_start);
     }
 
-    // AC4: moving focus from card 0 to card 1 moves the highlight.
+    // moving focus from card 0 to card 1 moves the highlight.
     #[test]
     fn moving_focus_moves_highlight_to_new_card() {
         let width = 80u16;
@@ -8037,7 +8014,7 @@ mod comment_focus_render {
         );
     }
 
-    // AC4: no focus (None) — no lines carry the focus background.
+    // no focus (None) — no lines carry the focus background.
     #[test]
     fn no_focus_means_no_highlight_anywhere() {
         let width = 80u16;
@@ -8068,8 +8045,6 @@ mod comment_focus_render {
         );
     }
 }
-
-// --- Contextual footer + status line ---
 
 mod contextual_footer {
     use crate::i18n::set_language;
@@ -8210,7 +8185,7 @@ mod contextual_footer {
         }
     }
 
-    // AC1/Scenario 7: browsing mode shows the browse hint.
+    // browsing mode shows the browse hint.
     #[test]
     fn detail_footer_browsing_mode_shows_browse_hint() {
         let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -8448,7 +8423,7 @@ mod contextual_footer {
         );
     }
 
-    // AC1/Scenario 7: own-comment-focused mode shows the own-focused hint.
+    // own-comment-focused mode shows the own-focused hint.
     #[test]
     fn detail_footer_own_comment_focused_shows_own_focused_hint() {
         let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -8471,7 +8446,7 @@ mod contextual_footer {
         );
     }
 
-    // AC1: focused on OTHER user's comment → browsing hint (not own-focused).
+    // focused on OTHER user's comment → browsing hint (not own-focused).
     #[test]
     fn detail_footer_other_comment_focused_shows_browse_hint() {
         let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -8562,7 +8537,7 @@ mod contextual_footer {
         );
     }
 
-    // AC2/Scenario 8: status row shows 'Copiado ✓' when copied_feedback is set.
+    // status row shows 'Copiado ✓' when copied_feedback is set.
     #[test]
     fn detail_footer_status_row_shows_copiado_when_copied_feedback() {
         let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -8576,7 +8551,7 @@ mod contextual_footer {
         );
     }
 
-    // AC2/Scenario 8: status row is blank when idle (no compose, no copied_feedback).
+    // status row is blank when idle (no compose, no copied_feedback).
     #[test]
     fn detail_footer_status_row_is_blank_when_idle() {
         let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -8600,7 +8575,7 @@ mod contextual_footer {
         );
     }
 
-    // AC4: FooterPlan height accounts for status row when status is present.
+    // FooterPlan height accounts for status row when status is present.
     // Compose status lives in the modal, not the footer.
     // When Submitting, 'Enviando…' appears inside the modal box; the footer
     // shows the browse hint (footer height is unchanged by compose status).
@@ -8629,7 +8604,7 @@ mod contextual_footer {
         );
     }
 
-    // AC4: render at MIN_HEIGHT (6) with a status string does not panic.
+    // render at MIN_HEIGHT (6) with a status string does not panic.
     #[test]
     fn detail_footer_at_min_height_with_status_does_not_panic() {
         let task = json!({"name": "T", "id": 1, "project_id": 1, "is_completed": false});
@@ -8677,7 +8652,7 @@ mod contextual_footer {
         );
     }
 
-    // AC5: pt-BR translations are present in the catalog.
+    // pt-BR translations are present in the catalog.
     #[test]
     fn pt_br_catalog_has_contextual_footer_keys() {
         let raw = include_str!("../../locales/pt_BR.json");
@@ -8712,7 +8687,7 @@ mod contextual_footer {
         );
     }
 
-    // AC5: all new footer/status strings resolve through i18n::t() in pt-BR.
+    // all new footer/status strings resolve through i18n::t() in pt-BR.
     #[test]
     fn detail_footer_pt_br_browsing_hint_shows_portuguese() {
         let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -8730,8 +8705,6 @@ mod contextual_footer {
         );
     }
 }
-
-// --- Confirm-delete modal overlay ---
 
 mod confirm_modal_render {
     use crate::i18n::set_language;
@@ -8814,7 +8787,7 @@ mod confirm_modal_render {
         terminal.backend().buffer().clone()
     }
 
-    // AC1: when confirm_delete is Some, the modal renders with DIM backdrop and
+    // when confirm_delete is Some, the modal renders with DIM backdrop and
     // the title "Delete comment?" (or pt-BR equivalent).
     #[test]
     fn confirm_modal_renders_dim_backdrop_and_title() {
@@ -8841,7 +8814,7 @@ mod confirm_modal_render {
         );
     }
 
-    // AC1 (pt-BR): confirm modal title is translated.
+    // confirm modal title is translated.
     #[test]
     fn confirm_modal_title_translates_to_pt_br() {
         let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -8855,7 +8828,7 @@ mod confirm_modal_render {
         );
     }
 
-    // AC1: when confirm_delete is None, the modal is absent (no DIM backdrop).
+    // when confirm_delete is None, the modal is absent (no DIM backdrop).
     #[test]
     fn no_confirm_modal_when_confirm_delete_none() {
         let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -8905,7 +8878,7 @@ mod confirm_modal_render {
         );
     }
 
-    // AC2 (footer one-home): footer does NOT show the confirm hint when modal is open.
+    // footer does NOT show the confirm hint when modal is open.
     #[test]
     fn footer_does_not_show_confirm_hint_when_modal_open() {
         let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -8940,8 +8913,6 @@ mod confirm_modal_render {
         );
     }
 }
-
-// ── Affordance color cells in TestBackend ────────────────
 
 /// Build `DetailContent` for a single own comment and render it through
 /// `draw_detail` into a `TestBackend` buffer of the given dimensions.
@@ -9001,7 +8972,7 @@ fn build_and_render_detail_with_own_comment(
     (terminal.backend().buffer().clone(), content)
 }
 
-// AC1: On an own comment rendered to TestBackend, [editar] cells carry
+// On an own comment rendered to TestBackend, [editar] cells carry
 // edit_affordance_style's fg + UNDERLINED.
 //
 // The block rendered in the test frame has its left outer border at x=0, so the
@@ -9052,7 +9023,7 @@ fn own_comment_editar_cells_carry_edit_affordance_style() {
     );
 }
 
-// AC2: On an own comment rendered to TestBackend, [excluir] cells carry
+// On an own comment rendered to TestBackend, [excluir] cells carry
 // delete_affordance_style's fg + UNDERLINED.
 #[test]
 fn own_comment_excluir_cells_carry_delete_affordance_style() {
@@ -9096,7 +9067,7 @@ fn own_comment_excluir_cells_carry_delete_affordance_style() {
     );
 }
 
-// AC4 (regression): Ctrl+click on the styled [editar] cell still opens compose-edit
+// Ctrl+click on the styled [editar] cell still opens compose-edit
 // via the real update() path; a plain click does not.
 #[test]
 fn ctrl_click_on_editar_cell_opens_compose_edit_regression() {
@@ -9315,7 +9286,7 @@ mod auth_error_render {
         make_detail_model(false, DetailOverlay::None)
     }
 
-    // AC1: A 401 detail-load sets auth_error on the model and the rendered status
+    // A 401 detail-load sets auth_error on the model and the rendered status
     // line shows the re-auth message.
     #[test]
     fn detail_load_401_sets_auth_error_and_renders_reauth_message() {
@@ -9338,7 +9309,7 @@ mod auth_error_render {
         );
     }
 
-    // AC1 (negation): A 200 detail-load does not set auth_error.
+    // A 200 detail-load does not set auth_error.
     #[test]
     fn detail_load_200_does_not_set_auth_error() {
         let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -9356,7 +9327,7 @@ mod auth_error_render {
         );
     }
 
-    // AC2: Msg::AuthExpired sets auth_error and retains the compose editor content.
+    // Msg::AuthExpired sets auth_error and retains the compose editor content.
     #[test]
     fn auth_expired_sets_auth_error_retains_compose_editor() {
         let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -9389,7 +9360,7 @@ mod auth_error_render {
         }
     }
 
-    // AC2: After AuthExpired, the rendered status line shows the re-auth message,
+    // After AuthExpired, the rendered status line shows the re-auth message,
     // which is distinct from the generic write-error copy.
     #[test]
     fn auth_expired_renders_reauth_message_not_generic_error() {
@@ -9408,7 +9379,7 @@ mod auth_error_render {
         );
     }
 
-    // AC3: A subsequent 200 detail load clears auth_error.
+    // A subsequent 200 detail load clears auth_error.
     #[test]
     fn subsequent_200_load_clears_auth_error() {
         let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -9440,7 +9411,7 @@ mod auth_error_render {
         );
     }
 
-    // AC4: Under pt-BR locale the status line renders the pt-BR translation.
+    // Under pt-BR locale the status line renders the pt-BR translation.
     #[test]
     fn auth_error_renders_pt_br_translation() {
         let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -9459,7 +9430,7 @@ mod auth_error_render {
         );
     }
 
-    // AC4 (identity key check): The English key matches identity — i18n::t returns
+    // identity key check: The English key matches identity — i18n::t returns
     // the source string unchanged when the locale is English.
     #[test]
     fn auth_error_english_key_is_identity() {
@@ -9507,8 +9478,6 @@ mod auth_error_render {
     }
 }
 
-// --- build_detail_content emits OpenAsset affordances structurally ---
-//
 // These tests assert the emitted `DetailContent.affordances` payload from
 // `build_detail_content`, not a re-implementation of the geometry.
 mod open_asset_affordance_emission {
@@ -9537,7 +9506,7 @@ mod open_asset_affordance_emission {
         })
     }
 
-    // AC1-a: every NON-IMAGE asset content row carries an OpenAsset affordance with the
+    // every NON-IMAGE asset content row carries an OpenAsset affordance with the
     // asset's exact url. Both assets here are non-image extensions; image classification
     // (which instead emits ViewImage) is covered by the image_affordance_classification
     // module below.
@@ -9572,7 +9541,7 @@ mod open_asset_affordance_emission {
         );
     }
 
-    // AC1-b: non-asset rows (header, separator, pad, hint) carry NO OpenAsset span.
+    // non-asset rows (header, separator, pad, hint) carry NO OpenAsset span.
     // With one short-label asset the section is: [header, pad, Asset, sep, hint, pad].
     // Only the Asset row must have an OpenAsset affordance.
     #[test]
@@ -9631,7 +9600,7 @@ mod open_asset_affordance_emission {
         }
     }
 
-    // AC1-c: a wrapped asset (label longer than content_width) produces multiple Asset rows
+    // a wrapped asset (label longer than content_width) produces multiple Asset rows
     // in the layout, each carrying an OpenAsset affordance with the SAME url.
     // Width 40 → inner_width 38. The prefix "[1] ↗ " is ~8 display cols; a 35+ char label wraps.
     #[test]
@@ -9669,7 +9638,7 @@ mod open_asset_affordance_emission {
         }
     }
 
-    // AC1-d: task with no attachments must produce zero OpenAsset affordances.
+    // task with no attachments must produce zero OpenAsset affordances.
     #[test]
     fn task_without_assets_produces_no_open_asset_affordances() {
         let task = json!({
@@ -9689,8 +9658,6 @@ mod open_asset_affordance_emission {
     }
 }
 
-// --- build_detail_content emits OpenUrl affordances structurally ---
-//
 // Buffer-derived tests: the DetailContent payload from build_detail_content is the
 // source of truth for hit-targets. Each test is derived from an AC/BDR scenario.
 mod open_url_affordance_emission {
@@ -9698,7 +9665,7 @@ mod open_url_affordance_emission {
     use serde_json::json;
     use std::collections::HashMap;
 
-    // AC1 (buffer-derived): an HTTP URL in the body emits one OpenUrl affordance
+    // an HTTP URL in the body emits one OpenUrl affordance
     // with the complete, unmodified URL. col_start is >= BODY_LEFT_CHROME_COLS
     // (inside the content area, not on the border or padding).
     #[test]
@@ -9731,7 +9698,7 @@ mod open_url_affordance_emission {
         );
     }
 
-    // AC1 (buffer-derived, multi-fragment): a URL that hard-wraps across two lines
+    // a URL that hard-wraps across two lines
     // emits two OpenUrl affordances, BOTH carrying the COMPLETE URL.
     // Uses inner_width=40 → content_width=36; "[URL]" of 39 chars wraps at 36.
     #[test]
@@ -9775,7 +9742,7 @@ mod open_url_affordance_emission {
         );
     }
 
-    // AC4 / OBS-35 (buffer-derived): clicking on the LAST fragment of a hard-wrapped URL
+    // clicking on the LAST fragment of a hard-wrapped URL
     // (where frag0 fills exactly content_width columns) carries the COMPLETE URL.
     // Regression guard for the old inverse-wrap over-join bug.
     #[test]
@@ -9804,7 +9771,7 @@ mod open_url_affordance_emission {
         assert_eq!(
             url_affs.len(),
             2,
-            "OBS-35 URL must emit two affordances (not one over-joined or three): {:?}",
+            "a wrapped URL must emit two affordances (not one over-joined or three): {:?}",
             content.affordances
         );
 
@@ -9814,14 +9781,14 @@ mod open_url_affordance_emission {
             };
             assert_eq!(
                 stored_url, url,
-                "OBS-35: both fragment affordances must carry the complete URL; \
+                "both fragment affordances must carry the complete URL; \
                  got {stored_url:?} at line {}, cols [{}, {})",
                 aff.line_idx, aff.col_start, aff.col_end
             );
         }
     }
 
-    // AC5 (buffer-derived): an email anchor emits OpenUrl("mailto:...") — not
+    // an email anchor emits OpenUrl("mailto:...") — not
     // a plain HTTP URL and not empty.
     #[test]
     fn email_anchor_in_body_emits_mailto_open_url_affordance() {
@@ -9846,7 +9813,7 @@ mod open_url_affordance_emission {
         );
     }
 
-    // AC5 / CC (buffer-derived): a non-URL bracketed token produces NO OpenUrl affordance.
+    // a non-URL bracketed token produces NO OpenUrl affordance.
     // Negative test — asserts the filter works and non-openable tokens are excluded.
     #[test]
     fn non_url_bracket_text_in_body_emits_no_open_url_affordance() {
@@ -9870,9 +9837,7 @@ mod open_url_affordance_emission {
     }
 }
 
-// ── Image viewer overlay render tests ─────────────────
-//
-// Loading/Error draw a placeholder (real ratatui-image render lands in slice 0059).
+// Loading/Error draw a placeholder (real ratatui-image render is not wired yet).
 // Sized to the near-full detail content area, NOT render_modal's ~70% box.
 
 mod image_viewer_render {

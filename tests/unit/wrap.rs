@@ -79,8 +79,6 @@ fn wrap_text_multibyte_chars_counted_by_char_not_byte() {
     }
 }
 
-// --- D1-A3: wrap_text wraps by DISPLAY width ---
-
 #[test]
 fn wrap_text_cjk_no_line_exceeds_display_width() {
     let text = "日本語テスト文字列が長すぎる場合のラップ動作を確認する";

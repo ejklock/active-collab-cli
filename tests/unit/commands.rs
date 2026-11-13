@@ -2688,8 +2688,6 @@ async fn browse_async_inside_active_runtime_returns_i32_without_panic() {
     );
 }
 
-// --- J2-A2: mine --json prints minified mine line, never launches TUI, exit 0 ---
-
 #[tokio::test]
 async fn mine_core_json_mode_prints_minified_line_and_never_calls_launch() {
     let server = MockServer::start().await;
@@ -3291,7 +3289,7 @@ async fn comment_core_http_failure_with_json_flag_emits_error_object() {
     );
 }
 
-// AC1: get/current 401 → re-auth message, non-zero exit, no "task not found"
+// get/current 401 → re-auth message, non-zero exit, no "task not found"
 #[tokio::test]
 async fn do_get_task_401_prints_reauth_message_and_returns_nonzero() {
     let server = MockServer::start().await;
@@ -3334,7 +3332,7 @@ async fn do_get_task_401_prints_reauth_message_and_returns_nonzero() {
     );
 }
 
-// AC1: load_task 401 writes re-auth message to the err writer
+// load_task 401 writes re-auth message to the err writer
 #[tokio::test]
 async fn load_task_401_writes_reauth_to_err_and_returns_none() {
     let server = MockServer::start().await;
@@ -3372,7 +3370,7 @@ async fn load_task_401_writes_reauth_to_err_and_returns_none() {
     );
 }
 
-// AC2: comment 401 → re-auth message, non-zero exit
+// comment 401 → re-auth message, non-zero exit
 #[tokio::test]
 async fn comment_core_401_prints_reauth_message_and_returns_nonzero() {
     let server = MockServer::start().await;
@@ -3415,7 +3413,7 @@ async fn comment_core_401_prints_reauth_message_and_returns_nonzero() {
     );
 }
 
-// AC2: comment 401 with --json → failure shape (no "ok": true)
+// comment 401 with --json → failure shape (no "ok": true)
 #[tokio::test]
 async fn comment_core_401_json_emits_failure_shape_without_ok_true() {
     let server = MockServer::start().await;
@@ -3462,7 +3460,7 @@ async fn comment_core_401_json_emits_failure_shape_without_ok_true() {
     );
 }
 
-// AC3: non-401 errors (404/500) keep existing output, no re-auth message
+// non-401 errors (404/500) keep existing output, no re-auth message
 #[tokio::test]
 async fn do_get_task_404_prints_not_found_without_reauth_message() {
     let server = MockServer::start().await;
@@ -3790,7 +3788,7 @@ async fn comment_core_html_flag_401_prints_reauth_message() {
     );
 }
 
-// AC4: i18n — message resolves through t(); pt-BR maps to translated string
+// i18n — message resolves through t(); pt-BR maps to translated string
 #[test]
 fn reauth_message_resolves_in_pt_br() {
     let _guard = LANG_MUTEX.lock().unwrap();
@@ -4225,8 +4223,6 @@ async fn time_log_core_http_failure_with_json_flag_emits_error_object() {
     assert_eq!(obj["ok"], false);
     assert!(obj.get("error").is_some());
 }
-
-// --- task_set_core ---
 
 fn task_write_response(id: i64) -> serde_json::Value {
     serde_json::json!({ "id": id })
