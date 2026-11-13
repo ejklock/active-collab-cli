@@ -35,12 +35,14 @@ Excluded: choosing the TUI destination, downloading a single asset from the TUI,
 - The pure core builds the asset set with `controller::downloadable_assets(task, comments)` from the open Detail screen and emits one `Cmd` carrying it; the shell resolves the home directory and runs `download_task_attachments` (ADR 0066 safety unchanged). `update` sits at its complexity ceiling, so the new messages join the existing image-viewer family as one asset-effects family instead of a new arm.
 - The outcome lives on the Detail screen and shows in its footer status row, below an auth error and above the copied note: downloading, "Downloaded N of M attachment(s) to <dir>", or the failure. `D` while a download runs does nothing; a task with no downloadable asset shows a "no attachments" note and emits no `Cmd`; no home directory is a failure, never a fallback path. The footer row does not wrap, so the shown directory abbreviates the home directory to `~` (`~/Downloads/ac-attachments/<project_id>-<task_id>`), which keeps the whole path visible at 80 columns.
 
+- The live acceptance criterion verifies against the mock ActiveCollab of [issue 0084](/issues/0084-replay-the-live-acceptance-criteria-as-terminal-walkthroughs-against-a-mock-activecollab.md) (owner, 2026-11-12): the owner's `ac` is connected to the real instance, which no check may touch. Risk accepted: the mock returns the JSON shapes `tests/mcp_stdio.rs` mounts, so a real API that diverges from them still passes the walkthrough. Not taken: the mock plus live read-only reads.
+
 ### Acceptance
 
 - AC1: a task whose comments carry attachments yields them in `downloadable_assets` and `extract_assets`, once each. (`verify_by: test`)
 - AC2: `ac get --download-attachments` writes comment attachments next to task attachments. (`verify_by: test`)
 - AC3: `D` in the detail starts the download, and the status line shows the count and directory, or the failure; the transitions live in the pure update core. (`verify_by: test`)
-- AC4: against collab.base.digital, a task with a comment attachment downloads it. (`verify_by: command`)
+- AC4: against the mock ActiveCollab, a task with a comment attachment downloads it, replayed by a terminal walkthrough. (`verify_by: command`)
 - CC: no superfluous comments, banners or commented-out code. (`verify_by: inspection`)
 
 ### Verification commands

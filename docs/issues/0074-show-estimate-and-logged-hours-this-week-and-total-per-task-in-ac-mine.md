@@ -35,13 +35,15 @@ Excluded: totals per group ([issue 0075](/issues/0075-group-ac-mine-by-due-date-
 - The list keeps its stale-while-revalidate first paint: cached rows show at once, and the hour columns fill in when the revalidation finishes.
 - A failed task call leaves that task's `logged_total` empty instead of failing the list.
 
+- The live acceptance criterion verifies against the mock ActiveCollab of [issue 0084](/issues/0084-replay-the-live-acceptance-criteria-as-terminal-walkthroughs-against-a-mock-activecollab.md) (owner, 2026-11-12): the owner's `ac` is connected to the real instance, which no check may touch. Risk accepted: the mock returns the JSON shapes `tests/mcp_stdio.rs` mounts, so a real API that diverges from them still passes the walkthrough. Not taken: the mock plus live read-only reads.
+
 ### Acceptance
 
 - AC1: `logged_week` sums only the user's records of the current Monday–Sunday whose parent is the task. (`verify_by: test`)
 - AC2: the CLI table, the TUI cards and the JSON show the three values, with an empty value when unknown. (`verify_by: test`)
 - AC3: the JSON keeps every existing field and adds only the four new ones. (`verify_by: test`)
 - AC4: a failing task call does not fail the list. (`verify_by: test`)
-- AC5: `ac mine` against collab.base.digital matches the estimates and hours the web UI shows for three tasks. (`verify_by: command`)
+- AC5: `ac mine` against the mock ActiveCollab shows the seeded estimate, week and total hours for three tasks, replayed by a terminal walkthrough. (`verify_by: command`)
 - CC: no superfluous comments, banners or commented-out code. (`verify_by: inspection`)
 
 ### Verification commands
