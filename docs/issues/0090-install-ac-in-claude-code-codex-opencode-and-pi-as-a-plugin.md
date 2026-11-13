@@ -2,7 +2,7 @@
 type: Issue
 title: Install ac in Claude Code, Codex, OpenCode and Pi as a plugin
 description: "One install step per agent harness: a git-marketplace plugin for Claude Code and Codex and npm packages for OpenCode and Pi, each wiring ac mcp and the shared skill stub."
-status: in-progress
+status: closed
 timestamp: 2026-11-13T18:22:35Z
 ---
 
@@ -45,3 +45,11 @@ Excluded: `npm publish`, reserving package names, pushing, and a release; bundli
 - S2: OpenCode npm plugin package and npm workspace root | files: package.json, package-lock.json, packages/opencode/** | after: S1
 - S3: Pi npm package | files: packages/pi/**, package.json | after: S2
 - S4: README install section, proof script, gate and CI wiring for the Node workspace and for `scripts/check-skill-stubs.sh` with its test | files: README.md, scripts/prove-plugins.sh, .jscpd.json, .github/workflows/ci.yml | after: S3
+
+### Outcome
+
+Delivered in five commits: d6cb111 (ADR 0074 and this issue), e2fea88 (Claude Code and Codex plugin with both marketplaces and the skill stub check), db0185a (OpenCode package, a user's own MCP entry wins), af2b587 (Pi package, skill only), c9c3d23 (README, `scripts/prove-plugins.sh`, CI). Issue 0091 (32a0a98) fixed the `ac mcp` schemas Claude Code rejected, found while trying the plugin.
+
+Proof: `PI_BIN=/usr/bin/pi sh scripts/prove-plugins.sh` installs, lists and removes each plugin in a temporary home with the harness's own CLI (Claude Code 2.1.322, Codex 0.167.0, OpenCode 1.19.5, Pi 1.5.2); planted breaks fail it. `sh scripts/test-check-skill-stubs.sh` and `node --test packages/opencode/` run in CI.
+
+Not done here: publishing the npm packages and pushing the marketplace (owner's call); the Codex proof reads the source plugin through `plugin/read`, so a broken installed copy of the skill still passes it (re-review normal finding, 2026-11-13: assert `skills/list` or the installed summary); `jq` missing reads as an app-server failure; a fixed 8-second wait in the Codex proof.

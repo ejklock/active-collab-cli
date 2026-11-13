@@ -30,7 +30,6 @@ TUI/UX work (V/R/ARCH slices), tracing to
 * [0074 — Show estimate and logged hours (this week and total) per task in ac mine](0074-show-estimate-and-logged-hours-this-week-and-total-per-task-in-ac-mine.md) - open
 * [0076 — Download comment attachments in the CLI and from a TUI key](0076-download-comment-attachments-in-the-cli-and-from-a-tui-key.md) - in-progress
 * [0077 — Move a task between task lists from CLI, TUI and MCP](0077-move-a-task-between-task-lists-from-cli-tui-and-mcp.md) - in-progress
-* [0090 — Install ac in Claude Code, Codex, OpenCode and Pi as a plugin](0090-install-ac-in-claude-code-codex-opencode-and-pi-as-a-plugin.md) - in-progress
 * [0091 — Claude Code drops ac_read and ac_write because their schema is a top-level oneOf](0091-claude-code-drops-ac-read-and-ac-write-because-their-schema-is-a-top-level-oneof.md) - open
 
 ## Closed
@@ -99,3 +98,4 @@ TUI/UX work (V/R/ARCH slices), tracing to
 * [0087 — Remove the TUI leftovers: redundant overlay-close reset, stale dead-code allows, unreachable footer hint branches](0087-remove-the-tui-leftovers-redundant-overlay-close-reset-stale-dead-code-allows-unreachable-footer-hint-branches.md) - closed
 * [0088 — The mock ActiveCollab fixtures are the single source of the automated end-to-end tests](0088-the-mock-activecollab-fixtures-are-the-single-source-of-the-automated-end-to-end-tests.md) - closed
 * [0089 — Pin the Rust toolchain and raise it deliberately](0089-pin-the-rust-toolchain-and-raise-it-deliberately.md) - closed
+* [0090 — Install ac in Claude Code, Codex, OpenCode and Pi as a plugin](0090-install-ac-in-claude-code-codex-opencode-and-pi-as-a-plugin.md) - closed
