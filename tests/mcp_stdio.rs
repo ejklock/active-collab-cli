@@ -5,66 +5,26 @@ use rmcp::ServiceExt;
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
 use std::io::{BufRead, BufReader, Write};
-use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use tempfile::TempDir;
+use std::path::Path;
+use std::process::Stdio;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
+#[path = "support/ac_env.rs"]
+mod ac_env;
 #[path = "support/mock_collab.rs"]
 mod mock_collab;
 
+use ac_env::Env;
 use mock_collab::{mount_routes, Fixture, SeedTask, COMMENT_TEXT, TASK_LISTS};
 
 type Client = RunningService<RoleClient, ()>;
 
-struct Env {
-    dir: TempDir,
-    db: PathBuf,
+trait Connect {
+    async fn connect(&self) -> Client;
 }
 
-impl Env {
-    fn new(instances: &[(&str, &MockServer, i64)]) -> Env {
-        let dir = TempDir::new().unwrap();
-        let db = dir.path().join("ac.db");
-        std::fs::create_dir(dir.path().join("tmp")).unwrap();
-        let env = Env { dir, db };
-        let init = env.command().args(["setup", "list"]).output().unwrap();
-        assert!(init.status.success(), "store init failed: {init:?}");
-        let conn = rusqlite::Connection::open(&env.db).unwrap();
-        for (name, server, user_id) in instances {
-            conn.execute(
-                "INSERT INTO instances (name, base_url, email, token, user_id, created_at) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, '2026-01-01T00:00:00Z')",
-                rusqlite::params![
-                    name,
-                    server.uri(),
-                    format!("{name}@example.com"),
-                    format!("tok-{name}"),
-                    user_id
-                ],
-            )
-            .unwrap();
-        }
-        env
-    }
-
-    fn command(&self) -> Command {
-        let mut cmd = Command::new(env!("CARGO_BIN_EXE_ac"));
-        cmd.env("ACTIVE_COLLAB_DB", &self.db)
-            .env("ACTIVE_COLLAB_LANG", "en")
-            .env("HOME", self.dir.path())
-            .env("TMPDIR", self.dir.path().join("tmp"))
-            .current_dir(self.dir.path());
-        cmd
-    }
-
-    fn cli(&self, args: &[&str]) -> String {
-        let output = self.command().args(args).output().unwrap();
-        assert!(output.status.success(), "ac {args:?} failed: {output:?}");
-        String::from_utf8(output.stdout).unwrap()
-    }
-
+impl Connect for Env {
     async fn connect(&self) -> Client {
         let cmd = tokio::process::Command::new(env!("CARGO_BIN_EXE_ac"));
         let transport = TokioChildProcess::new(cmd.configure(|c| {
