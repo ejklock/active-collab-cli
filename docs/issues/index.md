@@ -33,6 +33,7 @@ TUI/UX work (V/R/ARCH slices), tracing to
 * [0086 — The comment gate applies every rule to tests and rejects every artifact citation](0086-the-comment-gate-applies-every-rule-to-tests-and-rejects-every-artifact-citation.md) - open
 * [0087 — Remove the TUI leftovers: redundant overlay-close reset, stale dead-code allows, unreachable footer hint branches](0087-remove-the-tui-leftovers-redundant-overlay-close-reset-stale-dead-code-allows-unreachable-footer-hint-branches.md) - open
 * [0088 — The mock ActiveCollab fixtures are the single source of the automated end-to-end tests](0088-the-mock-activecollab-fixtures-are-the-single-source-of-the-automated-end-to-end-tests.md) - open
+* [0089 — Pin the Rust toolchain and raise it deliberately](0089-pin-the-rust-toolchain-and-raise-it-deliberately.md) - open
 
 ## Closed
 
