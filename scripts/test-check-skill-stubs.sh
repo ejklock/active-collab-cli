@@ -24,6 +24,8 @@ fresh_tree() {
   mkdir -p "${tree}/scripts"
   cp "${repo}/install-skill.sh" "${repo}/Cargo.toml" "${tree}/"
   cp -R "${repo}/plugins" "${repo}/.claude-plugin" "${repo}/.agents" "${tree}/"
+  mkdir -p "${tree}/packages"
+  cp -R "${repo}/packages/opencode" "${tree}/packages/"
   echo "${tree}"
 }
 
@@ -134,6 +136,28 @@ test_skill_stub_change_fails() {
   expect_red skill_stub_change_fails "plugin SKILL.md differs from the install-skill.sh stub"
 }
 
+test_opencode_skill_stub_change_fails() {
+  t="$(fresh_tree)"
+  s="${t}/packages/opencode/skills/active-collab/SKILL.md"
+  printf 'x\n' >>"${s}"
+  run_check "${t}"
+  expect_red opencode_skill_stub_change_fails "opencode SKILL.md differs from the install-skill.sh stub"
+}
+
+test_opencode_version_drift_fails() {
+  t="$(fresh_tree)"
+  edit "${t}" packages/opencode/package.json '.version = "99.0.0"'
+  run_check "${t}"
+  expect_red opencode_version_drift_fails "packages/opencode/package.json: .version is '99.0.0'"
+}
+
+test_opencode_name_drift_fails() {
+  t="$(fresh_tree)"
+  edit "${t}" packages/opencode/package.json '.name = "other"'
+  run_check "${t}"
+  expect_red opencode_name_drift_fails "packages/opencode/package.json: .name is 'other'"
+}
+
 test_failing_installer_fails() {
   t="$(fresh_tree)"
   printf 'exit 7\n' >"${t}/install-skill.sh"
@@ -161,6 +185,9 @@ for t in \
   test_moved_entry_is_blamed_by_its_own_position \
   test_missing_plugin_entry_fails \
   test_skill_stub_change_fails \
+  test_opencode_skill_stub_change_fails \
+  test_opencode_version_drift_fails \
+  test_opencode_name_drift_fails \
   test_failing_installer_fails \
   test_unrelated_root_variable_is_ignored; do
   "$t"
