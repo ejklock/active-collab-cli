@@ -1,11 +1,15 @@
 FROM rust:1-slim AS builder
 
+WORKDIR /app
+
+# rust-toolchain.toml is the single source of the Rust version; rustup installs
+# that toolchain and its components into this layer.
+COPY rust-toolchain.toml ./
+RUN rustup toolchain install
+
 # cargo-watch is needed by the dev service for hot-reload; installed in the
 # builder stage so the runtime stage stays minimal.
-RUN rustup component add clippy rustfmt && \
-    cargo install cargo-watch --locked
-
-WORKDIR /app
+RUN cargo install cargo-watch --locked
 
 COPY Cargo.toml ./
 RUN mkdir src && printf 'fn main() {}\n' > src/main.rs && \
@@ -18,6 +22,13 @@ COPY locales ./locales
 # .claude/skills/ must be present at compile time so include_str! embeds SKILL.md (ADR 0057)
 COPY .claude/skills ./.claude/skills
 RUN cargo build --release
+
+FROM builder AS dev
+
+# Coverage tooling lives only in this stage so the release image does not carry it;
+# the component goes on the toolchain pinned by rust-toolchain.toml.
+RUN rustup component add llvm-tools-preview && \
+    cargo install cargo-llvm-cov --locked
 
 FROM debian:trixie-slim AS runtime
 
