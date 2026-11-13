@@ -325,6 +325,45 @@ pi profile, use `--scope project --dir ~/.pi/agent-profiles/<name>`.
 > The skill grants an agent no access beyond the CLI commands you already run
 > yourself, including the ones that write (`ac comment`, `ac time log`, `ac task set`).
 
+### Plugins
+
+The Claude Code, Codex and OpenCode plugins install the skill **and** the `ac mcp` server
+into a harness in one step (the Pi package installs the skill only).
+Install `ac` first (`install.sh`, above): each of these plugins starts the `ac` found on your
+`PATH`, and needs a release that has the `mcp` subcommand (releases up to 0.11.0 lack it).
+
+```sh
+# Claude Code
+claude plugin marketplace add ejklock/active-collab-cli
+claude plugin install active-collab@active-collab
+
+# Codex
+codex plugin marketplace add ejklock/active-collab-cli
+codex plugin add active-collab@active-collab
+```
+
+OpenCode: add the package to the `plugin` list in `opencode.json`:
+
+```json
+{ "plugin": ["opencode-active-collab"] }
+```
+
+Pi installs the skill only (it has no MCP client):
+
+```sh
+pi install npm:pi-active-collab
+```
+
+The `opencode-active-collab` and `pi-active-collab` npm packages are **not published
+yet**. Until they are, install them from a clone of this repository: for Pi, run
+`pi install ./packages/pi`; for OpenCode, list the absolute path
+`"file:///path/to/active-collab-cli/packages/opencode"` in `plugin`.
+
+`scripts/prove-plugins.sh` installs and removes each plugin from a checkout in a
+temporary home, with the harness CLIs it finds on `PATH` (`PI_BIN` names the real `pi`
+binary when yours is a wrapper). `install-skill.sh` remains the way to install the skill
+for GitHub Copilot and Cursor, which have no plugin here.
+
 ### MCP server — `ac mcp`
 
 `ac mcp` serves the same commands as MCP tools over stdio, so an agent calls them
@@ -344,7 +383,7 @@ marked neither read-only nor destructive; `ac_read` `get` does not download. See
 
 `ac_write` changes data on your ActiveCollab instance as the logged-in user and is
 marked destructive, so a harness that honours MCP tool hints asks before calling it.
-Register the server once per harness:
+The Claude Code, Codex and OpenCode plugins above register the server for you. To register it by hand instead, once per harness:
 
 ```sh
 # Claude Code
