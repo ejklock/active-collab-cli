@@ -7,6 +7,11 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::Value;
 use std::collections::HashMap;
 
+/// Key stored inside each cached task object, marking an entry that holds the
+/// full comment list; `TaskCache::read` treats an entry without it as a miss.
+const FORMAT_KEY: &str = "_ac_cache_format";
+const FORMAT_VERSION: i64 = 1;
+
 pub struct CachedTask {
     pub fields: Value,
     pub fetched_at: String,
@@ -40,7 +45,14 @@ impl<'a> TaskCache<'a> {
         match row {
             None => Ok(None),
             Some((fields_json, fetched_at)) => {
-                let fields: Value = serde_json::from_str(&fields_json)?;
+                let mut fields: Value = serde_json::from_str(&fields_json)?;
+                let marked = fields
+                    .as_object_mut()
+                    .and_then(|obj| obj.remove(FORMAT_KEY))
+                    .is_some_and(|v| v == FORMAT_VERSION);
+                if !marked {
+                    return Ok(None);
+                }
                 Ok(Some(CachedTask { fields, fetched_at }))
             }
         }
@@ -57,6 +69,7 @@ impl<'a> TaskCache<'a> {
         let mut payload = task.clone();
         if let Some(obj) = payload.as_object_mut() {
             obj.insert("comments".to_string(), comments.clone());
+            obj.insert(FORMAT_KEY.to_string(), Value::from(FORMAT_VERSION));
         }
         let fields_json = serde_json::to_string(&payload)?;
         self.conn.execute(

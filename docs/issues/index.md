@@ -95,3 +95,4 @@ TUI/UX work (V/R/ARCH slices), tracing to
 * [0082 — Messages filled with format! before t() are never translated](0082-messages-filled-with-format-before-t-are-never-translated.md) - closed
 * [0083 — Follow-ups from the 0075-0077 reviews: README keys, fixture tokens, untested TUI routes, record citations](0083-follow-ups-from-the-0075-0077-reviews-readme-keys-fixture-tokens-untested-tui-routes-record-citations.md) - closed
 * [0084 — Replay the live acceptance criteria as terminal walkthroughs against a mock ActiveCollab](0084-replay-the-live-acceptance-criteria-as-terminal-walkthroughs-against-a-mock-activecollab.md) - closed
+* [0085 — A --no-comments read leaves a cache entry that hides comments from later reads](0085-a-no-comments-read-leaves-a-cache-entry-that-hides-comments-from-later-reads.md) - closed

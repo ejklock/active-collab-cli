@@ -840,7 +840,7 @@ fn try_cache_write(
     }
 }
 
-fn parse_task_payload(payload: Value) -> (Value, Vec<Value>) {
+pub(crate) fn parse_task_payload(payload: Value) -> (Value, Vec<Value>) {
     let mut task = payload
         .get("single")
         .cloned()
