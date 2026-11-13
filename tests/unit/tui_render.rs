@@ -2486,20 +2486,6 @@ fn view_too_small_suppresses_header_and_footer() {
     );
 }
 
-// U8-A1 (theme): badge_style returns the selection token fg + BOLD modifier.
-#[test]
-fn badge_style_is_selection_token_bold() {
-    use ratatui::style::{Modifier, Style};
-    let style = theme::badge_style();
-    assert_eq!(
-        style,
-        Style::default()
-            .fg(theme::ANGIE_DARK.selection)
-            .add_modifier(Modifier::BOLD),
-        "badge_style must be the selection token + bold"
-    );
-}
-
 // U8-A1 (theme): app_header_style is the accent token on the raised-band token, bold.
 #[test]
 fn app_header_style_is_accent_on_raised_band_bold() {
@@ -4919,6 +4905,30 @@ fn hint_for_screen_detail_shows_browsing_hint_for_every_overlay() {
         let hint = hint_for_screen(&detail_screen_with_overlay(overlay));
         assert_eq!(hint, browsing, "overlay {name}");
     }
+}
+
+#[test]
+fn hint_for_screen_detail_with_an_own_comment_focused_shows_the_edit_delete_hint() {
+    use crate::tui::footer::hint_for_screen;
+    use crate::tui::model::Screen;
+
+    set_language("en");
+    let mut screen = detail_screen_with_overlay(DetailOverlay::None);
+    if let Screen::Detail {
+        comments,
+        focused_comment,
+        current_user_id,
+        ..
+    } = &mut screen
+    {
+        *comments = vec![json!({"created_by_id": 5})];
+        *focused_comment = Some(0);
+        *current_user_id = Some(5);
+    }
+    assert_eq!(
+        hint_for_screen(&screen),
+        "↑/↓ · j/k move · Ctrl+click edit/delete · c new"
+    );
 }
 
 #[test]
@@ -8665,13 +8675,6 @@ mod contextual_footer {
                 .map(String::as_str),
             Some("↑/↓ · j/k mover · c comentar · r atualizar · Esc/b voltar · q sair"),
             "pt_BR must have browsing hint"
-        );
-        assert_eq!(
-            catalog
-                .get("Enter/click confirm · Esc cancel")
-                .map(String::as_str),
-            Some("Enter/clique confirmar · Esc cancelar"),
-            "pt_BR must have confirm-delete hint"
         );
         assert_eq!(
             catalog

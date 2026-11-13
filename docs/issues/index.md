@@ -30,7 +30,6 @@ TUI/UX work (V/R/ARCH slices), tracing to
 * [0074 — Show estimate and logged hours (this week and total) per task in ac mine](0074-show-estimate-and-logged-hours-this-week-and-total-per-task-in-ac-mine.md) - open
 * [0076 — Download comment attachments in the CLI and from a TUI key](0076-download-comment-attachments-in-the-cli-and-from-a-tui-key.md) - in-progress
 * [0077 — Move a task between task lists from CLI, TUI and MCP](0077-move-a-task-between-task-lists-from-cli-tui-and-mcp.md) - in-progress
-* [0087 — Remove the TUI leftovers: redundant overlay-close reset, stale dead-code allows, unreachable footer hint branches](0087-remove-the-tui-leftovers-redundant-overlay-close-reset-stale-dead-code-allows-unreachable-footer-hint-branches.md) - open
 * [0088 — The mock ActiveCollab fixtures are the single source of the automated end-to-end tests](0088-the-mock-activecollab-fixtures-are-the-single-source-of-the-automated-end-to-end-tests.md) - open
 * [0089 — Pin the Rust toolchain and raise it deliberately](0089-pin-the-rust-toolchain-and-raise-it-deliberately.md) - open
 
@@ -97,3 +96,4 @@ TUI/UX work (V/R/ARCH slices), tracing to
 * [0084 — Replay the live acceptance criteria as terminal walkthroughs against a mock ActiveCollab](0084-replay-the-live-acceptance-criteria-as-terminal-walkthroughs-against-a-mock-activecollab.md) - closed
 * [0085 — A --no-comments read leaves a cache entry that hides comments from later reads](0085-a-no-comments-read-leaves-a-cache-entry-that-hides-comments-from-later-reads.md) - closed
 * [0086 — The comment gate applies every rule to tests and rejects every artifact citation](0086-the-comment-gate-applies-every-rule-to-tests-and-rejects-every-artifact-citation.md) - closed
+* [0087 — Remove the TUI leftovers: redundant overlay-close reset, stale dead-code allows, unreachable footer hint branches](0087-remove-the-tui-leftovers-redundant-overlay-close-reset-stale-dead-code-allows-unreachable-footer-hint-branches.md) - closed
