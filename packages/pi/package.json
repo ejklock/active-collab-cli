@@ -1,0 +1,8 @@
+{
+  "name": "pi-active-collab",
+  "version": "0.11.0",
+  "description": "Gives Pi the active-collab skill, which drives the ac CLI with --json",
+  "license": "MIT",
+  "keywords": ["pi-package"],
+  "files": ["skills"]
+}
