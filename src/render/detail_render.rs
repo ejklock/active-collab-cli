@@ -77,7 +77,7 @@ fn bracket_depth(s: &str) -> i32 {
 /// Bracketed `[url]` tokens are handled by bracket-counting: lines with an unmatched
 /// `[` are joined with their continuations until the group closes. Raw `https?://…`
 /// tokens that reach the right edge of a full-width line are joined with the next line
-/// so their complete URL is recovered. Both strategies fix the OBS-35 over-join bug by
+/// so their complete URL is recovered. Both strategies fix the over-join bug by
 /// stopping at a structural boundary (closing `]` or URL terminator) instead of at
 /// display-width.
 ///

@@ -2,7 +2,7 @@
 type: Issue
 title: The comment gate applies every rule to tests and rejects every artifact citation
 description: "Close the comment-gate gaps left after 0083: every citation form, block comments, the full rule set on tests/, and docs that describe the gate."
-status: open
+status: closed
 labels: [tests, tooling, tech-debt]
 blocked_by: []
 timestamp: 2026-11-12T16:28:03Z
@@ -38,6 +38,9 @@ Excluded: `qa/` (TypeScript and JSON, not Rust); any production behavior change.
 - The artifact forms the gate rejects in comments: a record (ADR, BDR, PRD, issue) followed by a number in any case and with `#`, `-` or a space between; a numberless "the ADR/BDR/PRD"; a criterion id `AC<n>`; a scenario id `Sc.<n>`; `slice <n>`; a task id `<two letters>-<four digits>`; a phase code such as `V6` is reworded by hand where found, not gated. Not taken: bare slice codes such as `S1`, which collide with ordinary text.
 - Block comments are scanned with the same rules as line comments.
 - A banner section divider in `tests/` is deleted, not rewritten; the test names already say what each group covers.
+- S1 also rewrites the tail of `is_commented_out_code` (`tests/comment_policy.rs:101-106`, `if ... { return true; } false`) as one boolean expression, because clippy's `needless_bool` from Rust 1.100 rejects it under `-D warnings` and the slice already edits the file (owner, 2026-11-12). Pinning the toolchain is its own issue, [0089](/issues/0089-pin-the-rust-toolchain-and-raise-it-deliberately.md).
+- The comment gate and the translation policy (`tests/i18n_policy.rs`) share one Rust source lexer under `tests/common/`, which already reads multi-line strings, raw strings, char literals and lifetime ticks; the comment gate takes its comment spans from it (owner, 2026-11-12, after the S1 review found the gate's own scanner duplicating the policy's and over the complexity ceiling). Not taken: splitting the gate's scanner locally, which keeps two lexers and makes S2 re-implement what the policy's already reads.
+- The banner and commented-out-code rules read shape, not single tokens: a banner is a run of divider or box-drawing glyphs, or a comment made mostly of them, never prose that names one glyph such as the `│` border; a bare `//` between two comment lines is a paragraph break, not a banner; a comment starting with `return` is code only when it has code shape (session, 2026-11-12, from the S2 review, which found 25 comments reworded around these false positives). Not taken: rewording comments to satisfy the gate.
 
 ### Acceptance
 

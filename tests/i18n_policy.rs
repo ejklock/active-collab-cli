@@ -1,112 +1,21 @@
+mod common;
+
 use std::path::{Path, PathBuf};
+
+use common::{lex, SpanKind};
 
 /// Replace comments and string or char literals with spaces, keeping every newline,
 /// so a pattern search sees only real code and reports the right line numbers.
 fn blank_non_code(text: &str) -> String {
-    let b = text.as_bytes();
-    let mut out = b.to_vec();
-    let mut i = 0;
-    while i < b.len() {
-        let end = if b[i..].starts_with(b"//") {
-            line_end(b, i)
-        } else if b[i..].starts_with(b"/*") {
-            block_comment_end(b, i)
-        } else if b[i] == b'"' {
-            quoted_end(b, i + 1, b'"')
-        } else if let Some(end) = raw_string_end(b, i) {
-            end
-        } else if b[i] == b'\'' {
-            char_literal_end(b, i)
-        } else {
-            i += 1;
-            continue;
-        };
-        for byte in &mut out[i..end] {
+    let mut out = text.as_bytes().to_vec();
+    for span in lex(text).into_iter().filter(|s| s.kind != SpanKind::Code) {
+        for byte in &mut out[span.range] {
             if *byte != b'\n' {
                 *byte = b' ';
             }
         }
-        i = end;
     }
     String::from_utf8_lossy(&out).into_owned()
-}
-
-fn line_end(b: &[u8], from: usize) -> usize {
-    b[from..]
-        .iter()
-        .position(|&c| c == b'\n')
-        .map_or(b.len(), |p| from + p)
-}
-
-fn block_comment_end(b: &[u8], from: usize) -> usize {
-    let mut depth = 0;
-    let mut i = from;
-    while i < b.len() {
-        if b[i..].starts_with(b"/*") {
-            depth += 1;
-            i += 2;
-        } else if b[i..].starts_with(b"*/") {
-            depth -= 1;
-            i += 2;
-            if depth == 0 {
-                return i;
-            }
-        } else {
-            i += 1;
-        }
-    }
-    b.len()
-}
-
-fn quoted_end(b: &[u8], from: usize, quote: u8) -> usize {
-    let mut i = from;
-    while i < b.len() {
-        if b[i] == b'\\' {
-            i += 2;
-        } else if b[i] == quote {
-            return i + 1;
-        } else {
-            i += 1;
-        }
-    }
-    b.len()
-}
-
-/// End of a raw string such as `r#"..."#` starting at `from`, or `None` when `from`
-/// does not open one.
-fn raw_string_end(b: &[u8], from: usize) -> Option<usize> {
-    let prev_is_ident = from > 0 && (b[from - 1].is_ascii_alphanumeric() || b[from - 1] == b'_');
-    if b[from] != b'r' || prev_is_ident {
-        return None;
-    }
-    let hashes = b[from + 1..].iter().take_while(|&&c| c == b'#').count();
-    if b.get(from + 1 + hashes) != Some(&b'"') {
-        return None;
-    }
-    let mut closing = vec![b'"'];
-    closing.extend(std::iter::repeat_n(b'#', hashes));
-    let body = from + 2 + hashes;
-    let found = b[body..]
-        .windows(closing.len())
-        .position(|w| w == closing.as_slice());
-    Some(found.map_or(b.len(), |p| body + p + closing.len()))
-}
-
-/// A `'` opens a char literal only when it closes right after one character or an
-/// escape; otherwise it marks a lifetime and only the quote itself is skipped.
-fn char_literal_end(b: &[u8], from: usize) -> usize {
-    if b.get(from + 1) == Some(&b'\\') {
-        return quoted_end(b, from + 1, b'\'');
-    }
-    let width = std::str::from_utf8(&b[from + 1..])
-        .ok()
-        .and_then(|s| s.chars().next())
-        .map_or(1, char::len_utf8);
-    if b.get(from + 1 + width) == Some(&b'\'') {
-        from + 2 + width
-    } else {
-        from + 1
-    }
 }
 
 /// Lines where `t(` (also `i18n::t(` and `crate::i18n::t(`) takes a `&format!(...)`

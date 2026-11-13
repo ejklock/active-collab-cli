@@ -84,7 +84,7 @@ impl Selection {
 /// Extract the text covered by `sel` from a Detail body's boxed `lines`.
 ///
 /// Strips the box chrome (│ border + HPAD) from each logical line before slicing,
-/// so the copied text is chrome-free and char-correct (Sc.8, Sc.9). Row→line
+/// so the copied text is chrome-free and char-correct. Row→line
 /// mapping delegates to `row_to_line_idx`. Returns text in reading order (anchor
 /// normalized to be before cursor). Reads only its arguments — no terminal, time,
 /// or async sources — so it is safe to call from the pure TEA update loop.

@@ -24,7 +24,7 @@ service mounts `./` and sets `working_dir` to `/app`. Therefore:
 1. **Run every build/test/lint command from the repo root, bare:**
    - `docker compose run --rm dev cargo build`
    - `docker compose run --rm dev cargo test`
-   - `docker compose run --rm dev cargo test --test comment_policy` (comment-policy gate: no banners, no commented-out code; doc comments and non-obvious why-comments are allowed)
+   - `docker compose run --rm dev cargo test --test comment_policy` (comment-policy gate over `src/`, `tests/` and `examples/`: no banners, no commented-out code, no process-artifact citations such as `ADR 0012`, `issue #45`, `AC4`, `Sc.8`, `slice 3` or a task id like `ek-0061`; doc comments and non-obvious why-comments are allowed)
    - `docker compose run --rm dev cargo clippy --all-targets -- -D warnings`
      (use `--all-targets` to match CI: without it clippy does **not** lint the
      `#[path]`-included `#[cfg(test)]` modules, and `cargo test` only surfaces

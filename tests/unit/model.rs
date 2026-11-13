@@ -364,8 +364,6 @@ fn click_on_projects_screen_with_target_drills_into_tasks() {
     }
 }
 
-// --- V5 body-link click tests (inline url-from-click contract) ---
-
 /// Build a Detail model with specific lines, assets, offset and viewport.
 fn detail_model_with_lines_and_assets(
     lines: Vec<String>,
@@ -600,8 +598,6 @@ fn click_outside_content_text_area_is_noop() {
     );
 }
 
-// --- D1c: modifier-gated wrapped-URL click tests ---
-
 /// Build a Detail model with a URL that hard-splits across at least two body content
 /// lines. Uses `build_detail_content` so that `affordances` is properly populated
 /// with `OpenUrl` spans for every wrapped fragment.
@@ -795,8 +791,6 @@ fn ctrl_click_on_single_line_url_still_resolves() {
         other => panic!("expected OpenAsset for single-line url, got {other:?}"),
     }
 }
-
-// --- V6: app-managed text selection tests ---
 
 fn projects_browse_model() -> Model {
     Model {
@@ -1200,7 +1194,7 @@ fn ctrl_click_on_url_still_opens_link_after_v6() {
     );
 }
 
-// V6-A7 (Sc.8): Multi-line copy over boxed body is chrome-free, UTF-8 correct, and
+// Multi-line copy over boxed body is chrome-free, UTF-8 correct, and
 // no border padding leaks into the clipboard.
 // Viewport 80×24 (no assets). text_top=2, content rows 2..21.
 // Line 0 has "intervenção credibilidade", line 1 has "segunda linha".
@@ -1260,7 +1254,7 @@ fn multiline_copy_chrome_free_utf8_correct() {
     }
 }
 
-// V6-A7 (Sc.8b): A full-width drag (cursor past the right border) still yields zero border chars.
+// A full-width drag (cursor past the right border) still yields zero border chars.
 // Clamp proof: col past the right │ must not include the border in the copied text.
 #[test]
 fn full_width_drag_yields_no_border_chars() {
@@ -1312,7 +1306,7 @@ fn full_width_drag_yields_no_border_chars() {
     }
 }
 
-// V6-A8 (Sc.9): A wrapped logical line copies its FULL content with no eaten/duplicated
+// A wrapped logical line copies its FULL content with no eaten/duplicated
 // characters at the wrap seam.
 // Two consecutive boxed lines that together form one logical sentence (wrapped by panel_box).
 // A selection spanning both rows must produce the full joined content without dropping chars.
@@ -1368,7 +1362,7 @@ fn wrapped_line_copy_has_no_eaten_chars_at_seam() {
     }
 }
 
-// V6-A9 (Sc.10): Selection is scroll-stable.
+// Selection is scroll-stable.
 // Set anchor+cursor, then change Detail scroll offset, then finalize.
 // The copied text must be the SAME logical span as before the scroll.
 #[test]
@@ -1760,8 +1754,6 @@ fn quit_sets_should_quit_regardless_of_selection_mode() {
     );
 }
 
-// --- V6: Sc.8, Sc.9, Sc.10 copy-fidelity tests ---
-
 /// Build a Detail model with boxed lines as produced by build_detail_content.
 /// The lines contain box chrome (│ border + HPAD), matching real runtime output.
 fn detail_model_with_boxed_lines(lines: Vec<String>, viewport: (u16, u16), offset: usize) -> Model {
@@ -1804,7 +1796,7 @@ fn make_boxed_line(content: &str) -> String {
     format!("\u{2502} {content} \u{2502}")
 }
 
-// V6-A7 / Sc.8: Copied text contains NO box-drawing chars (│, ─) or panel padding,
+// V6-A7: Copied text contains NO box-drawing chars (│, ─) or panel padding,
 // and accented pt-BR characters survive intact (char-correct, never byte-sliced).
 // A selection spanning the visible body row (viewport col 0..=col 30) on a line
 // containing "intervenção" must produce ONLY the logical text without `│` or padding.
@@ -1865,7 +1857,7 @@ fn copy_is_chrome_free_and_accents_intact() {
     }
 }
 
-// V6-A7 / Sc.8: Selecting only within the content area on a boxed line gives exactly
+// Selecting only within the content area on a boxed line gives exactly
 // the content characters — no border, no padding.
 // Absolute frame col 3 = first content char; left offset = block-border(1) + panel-chrome(2) = 3.
 #[test]
@@ -1914,7 +1906,7 @@ fn copy_col_range_within_content_gives_exact_chars() {
     }
 }
 
-// V6-A7 / Sc.9: A selection spanning two consecutive boxed lines (simulating a wrapped
+// A selection spanning two consecutive boxed lines (simulating a wrapped
 // logical line) copies the full text from both lines with no chars dropped at the seam.
 #[test]
 fn copy_spanning_two_lines_has_no_dropped_chars_at_seam() {
@@ -1980,7 +1972,7 @@ fn copy_spanning_two_lines_has_no_dropped_chars_at_seam() {
     }
 }
 
-// V6-A8 / Sc.10: Selection is scroll-stable — scrolling the body does NOT change
+// Selection is scroll-stable — scrolling the body does NOT change
 // the logical span that gets copied.
 // Set a selection at offset=0, extract it. Then scroll (change offset) and extract
 // again — the result must be the SAME logical text.
@@ -2026,17 +2018,17 @@ fn copy_is_scroll_stable_same_logical_span_after_scroll() {
     // and re-set the same selection to simulate what happens after scroll.
     // The selection coordinates are in (viewport_row, viewport_col) space — after
     // scroll, the SAME selection now maps to a DIFFERENT logical line.
-    // Sc.10 says: the anchor/cursor are logical coords; scroll must not change them.
+    // The anchor and cursor should be logical coordinates, so a scroll must not change them.
     //
     // The current implementation stores viewport coords, so scrolling shifts which
-    // logical line is extracted. This test verifies the contract from the ADR:
+    // logical line is extracted. This test verifies the contract:
     // the SELECTION is in viewport coords, and extraction re-maps at extract time.
     // After a scroll, the same anchor/cursor pointing to viewport row 2 now maps to
     // a different logical line (offset lines[5+0] instead of lines[0]).
-    // This is the KNOWN limitation documented in the plan: the plan says "anchor/cursor
-    // must be stored as LOGICAL (line, col) positions".
+    // This is a known limitation: the anchor and cursor should be stored as LOGICAL
+    // (line, col) positions.
     //
-    // Given the CURRENT implementation (viewport coords), Sc.10 as stated in the BDR
+    // Given the CURRENT implementation (viewport coords), logical anchoring
     // requires a design change. We verify the minimal invariant: that the selection
     // state is preserved across a Down scroll (not silently cleared).
     let (m, _) = update(m, Msg::Down);
@@ -2059,11 +2051,9 @@ fn copy_is_scroll_stable_same_logical_span_after_scroll() {
     // The selection is NOT cleared by scroll — it survives.
     assert!(
         m.selection.is_some(),
-        "selection must survive a scroll (Sc.10 stability)"
+        "selection must survive a scroll (stability across a scroll)"
     );
 }
-
-// --- S8c: mine SWR pure-model tests ---
 
 use crate::render::MineTableRow;
 
@@ -2229,7 +2219,7 @@ fn loaded_mine_tasks_replaces_rows_clears_revalidating_stamps_last_loaded() {
     }
 }
 
-// V6-A7b (Sc.8): A detail-body copy whose content has a leading double-width emoji
+// A detail-body copy whose content has a leading double-width emoji
 // ('🔹') and accented chars copies the EXACT logical text: emoji present, NO
 // eaten/shifted letter, accents intact, zero '│' chars.
 //
@@ -2477,8 +2467,6 @@ fn loaded_mine_tasks_on_cold_model_clears_loading() {
     }
 }
 
-// --- D2b: due_on threading and relative_due formatter ---
-
 fn mine_row_with_due(due_on: Option<&str>) -> MineTableRow {
     MineTableRow {
         instance: "inst".into(),
@@ -2540,9 +2528,7 @@ fn mine_table_row_old_snapshot_missing_due_on_deserializes_to_none() {
     );
 }
 
-// --- D2d-i: project_name threading and serde ---
-
-// AC3: project_name threads MineTableRow → rows_to_task_rows → TaskRow.
+// project_name threads MineTableRow → rows_to_task_rows → TaskRow.
 #[test]
 fn project_name_threads_mine_table_row_to_task_row_via_init_mine() {
     use crate::tui::model::init_mine;
@@ -2589,7 +2575,7 @@ fn project_name_threads_mine_table_row_to_task_row_via_init_mine() {
     }
 }
 
-// AC3 (serde): MineTableRow round-trip preserves project_name.
+// MineTableRow round-trip preserves project_name.
 #[test]
 fn mine_table_row_serde_round_trip_preserves_project_name() {
     let row = MineTableRow {
@@ -2613,7 +2599,7 @@ fn mine_table_row_serde_round_trip_preserves_project_name() {
     );
 }
 
-// AC3 (old snapshot): an old snapshot JSON without the project_name field
+// an old snapshot JSON without the project_name field
 // must deserialize to None (serde default).
 #[test]
 fn mine_table_row_old_snapshot_missing_project_name_deserializes_to_none() {
@@ -2716,8 +2702,6 @@ fn relative_due_overdue_many_days_returns_plural_label() {
         "plural overdue must not contain singular '1': {label}"
     );
 }
-
-// --- S2b: assets-inline geometry and scroll-aware click tests ---
 
 /// Build a Detail model with inline asset section pre-spliced into `lines`.
 ///
@@ -3074,7 +3058,7 @@ fn is_in_body_area_includes_asset_rows_no_panel_height_subtracted() {
     );
 }
 
-// AC2 (fix-inline-asset-link-style-click): Ctrl/Cmd+click on an inline asset content row
+// Ctrl/Cmd+click on an inline asset content row
 // emits Cmd::OpenAsset with that asset's url; a plain (unmodified) click on the SAME row
 // does NOT emit OpenAsset (reserved for text selection). Pins the Ctrl/Cmd gate end-to-end.
 //
@@ -3086,7 +3070,7 @@ fn is_in_body_area_includes_asset_rows_no_panel_height_subtracted() {
 //   section_lines for 1 asset: [header(0), pad(1), Asset(2), sep(3), hint(4), pad(5)] = 6 rows
 //   total_lines = 3 + 1 + 6 = 10
 //   asset_section_start = 10 - 6 = 4
-//   interior_row = 2 → Asset{idx:0}
+//   interior_row 2 selects the first asset
 //   line_idx = 4 + 2 = 6
 //   row = text_top(2) + (line_idx - offset(0)) = 8
 #[test]
@@ -3308,8 +3292,6 @@ fn plain_click_on_wrapped_asset_continuation_emits_no_open_asset() {
     );
 }
 
-// ── Compose mode tests ──────────────────────
-
 use crate::tui::model::{
     Compose, ComposeKind, ComposeStatus, DetailOverlay, LogTimeField, LogTimeForm, LogTimeStatus,
 };
@@ -3394,7 +3376,7 @@ fn type_str(mut model: Model, s: &str) -> Model {
     model
 }
 
-// AC1-part1: ComposeOpen on a Detail screen sets compose=Some(Editing, empty editor).
+// ComposeOpen on a Detail screen sets compose=Some(Editing, empty editor).
 #[test]
 fn compose_open_on_detail_sets_editing_state_with_empty_editor() {
     let m = detail_model_for_compose("inst", 10, 42);
@@ -3406,7 +3388,7 @@ fn compose_open_on_detail_sets_editing_state_with_empty_editor() {
     assert_eq!(cp.status, ComposeStatus::Editing);
 }
 
-// AC1-part2: ComposeOpen on a screen that already has compose active is a no-op.
+// ComposeOpen on a screen that already has compose active is a no-op.
 #[test]
 fn compose_open_when_already_active_is_noop() {
     let mut m = detail_model_for_compose("inst", 10, 42);
@@ -3429,7 +3411,7 @@ fn compose_open_when_already_active_is_noop() {
     );
 }
 
-// AC1-part3: ComposeInput appends a character to the editor.
+// ComposeInput appends a character to the editor.
 #[test]
 fn compose_input_appends_character_to_editor() {
     let m = detail_model_for_compose("inst", 10, 42);
@@ -3441,7 +3423,7 @@ fn compose_input_appends_character_to_editor() {
     assert_eq!(cp.editor.lines(), ["hi"]);
 }
 
-// AC1-part4: an Enter Input inserts a newline — it is NOT a submit.
+// an Enter Input inserts a newline — it is NOT a submit.
 #[test]
 fn compose_enter_input_inserts_newline_not_submit() {
     let m = detail_model_for_compose("inst", 10, 42);
@@ -3461,7 +3443,7 @@ fn compose_enter_input_inserts_newline_not_submit() {
     );
 }
 
-// AC1-part5: a Backspace Input removes the last character.
+// a Backspace Input removes the last character.
 #[test]
 fn compose_backspace_input_removes_last_character() {
     let m = detail_model_for_compose("inst", 10, 42);
@@ -3474,7 +3456,7 @@ fn compose_backspace_input_removes_last_character() {
     assert_eq!(cp.editor.lines(), ["a"]);
 }
 
-// AC1 (caret): Left moves the caret back without modifying text; a subsequent insert
+// Left moves the caret back without modifying text; a subsequent insert
 // lands at the caret's new position, not at the end of the line.
 #[test]
 fn compose_left_input_moves_caret_so_insert_lands_mid_line() {
@@ -3490,7 +3472,7 @@ fn compose_left_input_moves_caret_so_insert_lands_mid_line() {
     );
 }
 
-// AC1 (caret): Home/End move the caret to the line's start/end.
+// Home/End move the caret to the line's start/end.
 #[test]
 fn compose_home_end_input_move_caret_to_line_bounds() {
     let m = detail_model_for_compose("inst", 1, 1);
@@ -3514,7 +3496,7 @@ fn compose_home_end_input_move_caret_to_line_bounds() {
     );
 }
 
-// AC1 (caret): Up moves the caret to the previous line.
+// Up moves the caret to the previous line.
 #[test]
 fn compose_up_input_moves_caret_to_previous_line() {
     let m = detail_model_for_compose("inst", 1, 1);
@@ -3533,7 +3515,7 @@ fn compose_up_input_moves_caret_to_previous_line() {
     );
 }
 
-// AC1 (undo/redo): Ctrl+U undoes the last edit; Ctrl+R redoes it.
+// Ctrl+U undoes the last edit; Ctrl+R redoes it.
 #[test]
 fn compose_undo_redo_input_revert_and_reapply_edit() {
     let m = detail_model_for_compose("inst", 1, 1);
@@ -3556,7 +3538,7 @@ fn compose_undo_redo_input_revert_and_reapply_edit() {
     );
 }
 
-// AC1-part6: ComposeCancel clears compose and emits no Cmd.
+// ComposeCancel clears compose and emits no Cmd.
 #[test]
 fn compose_cancel_clears_compose_and_emits_no_cmd() {
     let m = detail_model_for_compose("inst", 10, 42);
@@ -3570,7 +3552,7 @@ fn compose_cancel_clears_compose_and_emits_no_cmd() {
     );
 }
 
-// AC2-part1: ComposeSubmit on non-empty Editing editor emits exactly one Cmd::SubmitComment
+// ComposeSubmit on non-empty Editing editor emits exactly one Cmd::SubmitComment
 // with the correct fields and sets status=Submitting.
 #[test]
 fn compose_submit_nonempty_editor_emits_submit_comment_cmd() {
@@ -3603,7 +3585,7 @@ fn compose_submit_nonempty_editor_emits_submit_comment_cmd() {
     );
 }
 
-// AC2-part2: ComposeSubmit on an empty editor emits no Cmd.
+// ComposeSubmit on an empty editor emits no Cmd.
 #[test]
 fn compose_submit_empty_editor_emits_no_cmd() {
     let m = detail_model_for_compose("inst", 1, 1);
@@ -3615,7 +3597,7 @@ fn compose_submit_empty_editor_emits_no_cmd() {
     );
 }
 
-// AC1: ComposeSubmit on a whitespace-only editor also emits no Cmd (tightened guard).
+// ComposeSubmit on a whitespace-only editor also emits no Cmd (tightened guard).
 #[test]
 fn compose_submit_whitespace_only_editor_emits_no_cmd() {
     let m = detail_model_for_compose("inst", 1, 1);
@@ -3627,7 +3609,7 @@ fn compose_submit_whitespace_only_editor_emits_no_cmd() {
     );
 }
 
-// AC3-part1: CommentMutationOk clears compose AND emits exactly one Cmd::LoadDetail{refresh:true}.
+// CommentMutationOk clears compose AND emits exactly one Cmd::LoadDetail{refresh:true}.
 #[test]
 fn comment_mutation_ok_clears_compose_and_emits_load_detail_refresh() {
     let m = detail_model_for_compose("inst", 7, 13);
@@ -3656,7 +3638,7 @@ fn comment_mutation_ok_clears_compose_and_emits_load_detail_refresh() {
     }
 }
 
-// AC3-part2: CommentMutationErr keeps the editor intact and sets status=Error(msg), emits no Cmd.
+// CommentMutationErr keeps the editor intact and sets status=Error(msg), emits no Cmd.
 #[test]
 fn comment_mutation_err_preserves_editor_and_sets_error_status() {
     let m = detail_model_for_compose("inst", 1, 1);
@@ -3677,7 +3659,7 @@ fn comment_mutation_err_preserves_editor_and_sets_error_status() {
     );
 }
 
-// AC4-part1: map_compose_key_event maps Enter -> ComposeInput(Input{key: Enter}) — the
+// map_compose_key_event maps Enter -> ComposeInput(Input{key: Enter}) — the
 // editor (not a distinct Msg) turns it into a newline.
 #[test]
 fn map_compose_key_event_enter_yields_compose_input_with_enter_key() {
@@ -3703,7 +3685,7 @@ fn map_compose_key_event_enter_yields_compose_input_with_enter_key() {
     );
 }
 
-// AC4-part2: map_compose_key_event maps a printable char -> ComposeInput(Input{key: Char(c)}).
+// map_compose_key_event maps a printable char -> ComposeInput(Input{key: Char(c)}).
 #[test]
 fn map_compose_key_event_printable_char_yields_compose_input() {
     use crate::tui::events::map_compose_key_event;
@@ -3728,7 +3710,7 @@ fn map_compose_key_event_printable_char_yields_compose_input() {
     );
 }
 
-// AC4: map_compose_key_event maps Backspace -> ComposeInput(Input{key: Backspace}) — the
+// map_compose_key_event maps Backspace -> ComposeInput(Input{key: Backspace}) — the
 // generic Input path, not a distinct Msg.
 #[test]
 fn map_compose_key_event_backspace_yields_compose_input_with_backspace_key() {
@@ -3754,7 +3736,7 @@ fn map_compose_key_event_backspace_yields_compose_input_with_backspace_key() {
     );
 }
 
-// AC4-part3: map_compose_key_event maps Ctrl+S -> ComposeSubmit.
+// map_compose_key_event maps Ctrl+S -> ComposeSubmit.
 #[test]
 fn map_compose_key_event_ctrl_s_yields_compose_submit() {
     use crate::tui::events::map_compose_key_event;
@@ -3771,7 +3753,7 @@ fn map_compose_key_event_ctrl_s_yields_compose_submit() {
     );
 }
 
-// AC4-part4: map_compose_key_event maps Esc -> ComposeCancel.
+// map_compose_key_event maps Esc -> ComposeCancel.
 #[test]
 fn map_compose_key_event_esc_yields_compose_cancel() {
     use crate::tui::events::map_compose_key_event;
@@ -3788,7 +3770,7 @@ fn map_compose_key_event_esc_yields_compose_cancel() {
     );
 }
 
-// AC4-part5: map_browse_key_event maps plain 'c' -> ComposeOpen (not a selection or nav action).
+// map_browse_key_event maps plain 'c' -> ComposeOpen (not a selection or nav action).
 #[test]
 fn map_browse_key_event_plain_c_yields_compose_open() {
     use crate::tui::events::map_browse_key_event;
@@ -3805,7 +3787,7 @@ fn map_browse_key_event_plain_c_yields_compose_open() {
     );
 }
 
-// AC4-part6: map_browse_key_event still maps Ctrl+C -> Quit (not ComposeOpen).
+// map_browse_key_event still maps Ctrl+C -> Quit (not ComposeOpen).
 #[test]
 fn map_browse_key_event_ctrl_c_still_quits() {
     use crate::tui::events::map_browse_key_event;
@@ -3822,7 +3804,7 @@ fn map_browse_key_event_ctrl_c_still_quits() {
     );
 }
 
-// AC1-multiline: a sequence of ComposeInput chars + an Enter Input yields two editor lines.
+// a sequence of ComposeInput chars + an Enter Input yields two editor lines.
 #[test]
 fn compose_multiline_editor_produces_two_lines() {
     let m = detail_model_for_compose("inst", 1, 1);
@@ -3837,8 +3819,6 @@ fn compose_multiline_editor_produces_two_lines() {
     );
 }
 
-// ── Log-time modal tests ───────────────────────────────
-
 fn extract_log_time(model: &Model) -> Option<&LogTimeForm> {
     match model.top() {
         Some(Screen::Detail { overlay, .. }) => overlay.log_time(),
@@ -3846,7 +3826,7 @@ fn extract_log_time(model: &Model) -> Option<&LogTimeForm> {
     }
 }
 
-// AC1-part1: LogTimeOpen on a Detail screen sets the form to Editing/Hours/empty buffers.
+// LogTimeOpen on a Detail screen sets the form to Editing/Hours/empty buffers.
 #[test]
 fn log_time_open_on_detail_sets_editing_state_with_empty_buffers() {
     let m = detail_model_for_compose("inst", 10, 42);
@@ -3859,7 +3839,7 @@ fn log_time_open_on_detail_sets_editing_state_with_empty_buffers() {
     assert_eq!(form.status, LogTimeStatus::Editing);
 }
 
-// AC1-part2: LogTimeOpen on a screen that already has the log-time modal active is a no-op.
+// LogTimeOpen on a screen that already has the log-time modal active is a no-op.
 #[test]
 fn log_time_open_when_already_active_is_noop() {
     let mut m = detail_model_for_compose("inst", 10, 42);
@@ -3879,7 +3859,7 @@ fn log_time_open_when_already_active_is_noop() {
     assert_eq!(form.hours, "3", "existing hours buffer must be preserved");
 }
 
-// AC1-part3: LogTimeChar appends to the focused (Hours) field only.
+// LogTimeChar appends to the focused (Hours) field only.
 #[test]
 fn log_time_char_appends_to_focused_hours_field() {
     let m = detail_model_for_compose("inst", 10, 42);
@@ -3893,7 +3873,7 @@ fn log_time_char_appends_to_focused_hours_field() {
     assert_eq!(form.summary, "", "summary must stay untouched");
 }
 
-// AC1-part3: LogTimeToggleField switches focus so LogTimeChar edits Summary instead.
+// LogTimeToggleField switches focus so LogTimeChar edits Summary instead.
 #[test]
 fn log_time_char_edits_summary_after_toggle_field() {
     let m = detail_model_for_compose("inst", 10, 42);
@@ -3907,7 +3887,7 @@ fn log_time_char_edits_summary_after_toggle_field() {
     assert_eq!(form.hours, "", "hours must stay untouched");
 }
 
-// AC1: LogTimeToggleField is symmetric — a second toggle returns focus to Hours.
+// LogTimeToggleField is symmetric — a second toggle returns focus to Hours.
 #[test]
 fn log_time_toggle_field_twice_returns_to_hours() {
     let m = detail_model_for_compose("inst", 10, 42);
@@ -3918,7 +3898,7 @@ fn log_time_toggle_field_twice_returns_to_hours() {
     assert_eq!(form.field, LogTimeField::Hours);
 }
 
-// AC1-part5: LogTimeBackspace removes the last character of the focused field.
+// LogTimeBackspace removes the last character of the focused field.
 #[test]
 fn log_time_backspace_removes_last_character() {
     let m = detail_model_for_compose("inst", 10, 42);
@@ -3931,7 +3911,7 @@ fn log_time_backspace_removes_last_character() {
     assert_eq!(form.hours, "2");
 }
 
-// AC1-part6: LogTimeCancel clears the overlay and emits no Cmd.
+// LogTimeCancel clears the overlay and emits no Cmd.
 #[test]
 fn log_time_cancel_clears_overlay_and_emits_no_cmd() {
     let m = detail_model_for_compose("inst", 10, 42);
@@ -3945,7 +3925,7 @@ fn log_time_cancel_clears_overlay_and_emits_no_cmd() {
     );
 }
 
-// AC2-part1: LogTimeSubmit with a valid hours buffer and no summary emits exactly one
+// LogTimeSubmit with a valid hours buffer and no summary emits exactly one
 // Cmd::SubmitTimeLog with summary=None and sets status=Submitting.
 #[test]
 fn log_time_submit_valid_hours_emits_submit_time_log_cmd_with_no_summary() {
@@ -3974,7 +3954,7 @@ fn log_time_submit_valid_hours_emits_submit_time_log_cmd_with_no_summary() {
     assert_eq!(form.status, LogTimeStatus::Submitting);
 }
 
-// AC2-part1: a non-empty summary buffer flows into Cmd::SubmitTimeLog as Some(trimmed).
+// a non-empty summary buffer flows into Cmd::SubmitTimeLog as Some(trimmed).
 #[test]
 fn log_time_submit_with_summary_includes_some_summary() {
     let m = detail_model_for_compose("inst", 1, 1);
@@ -3991,7 +3971,7 @@ fn log_time_submit_with_summary_includes_some_summary() {
     }
 }
 
-// AC2-part2: an empty hours buffer sets Error and emits no Cmd.
+// an empty hours buffer sets Error and emits no Cmd.
 #[test]
 fn log_time_submit_empty_hours_sets_error_and_emits_no_cmd() {
     let m = detail_model_for_compose("inst", 1, 1);
@@ -4002,7 +3982,7 @@ fn log_time_submit_empty_hours_sets_error_and_emits_no_cmd() {
     assert!(matches!(form.status, LogTimeStatus::Error(_)));
 }
 
-// AC2-part2: a zero hours buffer sets Error and emits no Cmd.
+// a zero hours buffer sets Error and emits no Cmd.
 #[test]
 fn log_time_submit_zero_hours_sets_error_and_emits_no_cmd() {
     let m = detail_model_for_compose("inst", 1, 1);
@@ -4013,7 +3993,7 @@ fn log_time_submit_zero_hours_sets_error_and_emits_no_cmd() {
     assert!(matches!(form.status, LogTimeStatus::Error(_)));
 }
 
-// AC2-part2: a negative hours buffer sets Error and emits no Cmd.
+// a negative hours buffer sets Error and emits no Cmd.
 #[test]
 fn log_time_submit_negative_hours_sets_error_and_emits_no_cmd() {
     let m = detail_model_for_compose("inst", 1, 1);
@@ -4024,7 +4004,7 @@ fn log_time_submit_negative_hours_sets_error_and_emits_no_cmd() {
     assert!(matches!(form.status, LogTimeStatus::Error(_)));
 }
 
-// AC2-part2: a non-numeric hours buffer sets Error and emits no Cmd.
+// a non-numeric hours buffer sets Error and emits no Cmd.
 #[test]
 fn log_time_submit_non_numeric_hours_sets_error_and_emits_no_cmd() {
     let m = detail_model_for_compose("inst", 1, 1);
@@ -4035,7 +4015,7 @@ fn log_time_submit_non_numeric_hours_sets_error_and_emits_no_cmd() {
     assert!(matches!(form.status, LogTimeStatus::Error(_)));
 }
 
-// AC3-part1: TimeMutationOk clears the overlay AND emits exactly one
+// TimeMutationOk clears the overlay AND emits exactly one
 // Cmd::LoadDetail{refresh:true}, the same server-truth refresh as the comment path.
 #[test]
 fn time_mutation_ok_clears_overlay_and_emits_load_detail_refresh() {
@@ -4064,7 +4044,7 @@ fn time_mutation_ok_clears_overlay_and_emits_load_detail_refresh() {
     }
 }
 
-// AC3-part2: TimeMutationErr keeps the buffers intact and sets status=Error(msg), emits no Cmd.
+// TimeMutationErr keeps the buffers intact and sets status=Error(msg), emits no Cmd.
 #[test]
 fn time_mutation_err_preserves_buffers_and_sets_error_status() {
     let m = detail_model_for_compose("inst", 1, 1);
@@ -4091,7 +4071,7 @@ fn type_log_time_chars(mut model: Model, s: &str) -> Model {
     model
 }
 
-// AC4: map_log_time_key_event maps Ctrl+S -> LogTimeSubmit.
+// map_log_time_key_event maps Ctrl+S -> LogTimeSubmit.
 #[test]
 fn map_log_time_key_event_ctrl_s_yields_log_time_submit() {
     use crate::tui::events::map_log_time_key_event;
@@ -4108,7 +4088,7 @@ fn map_log_time_key_event_ctrl_s_yields_log_time_submit() {
     );
 }
 
-// AC4: map_log_time_key_event maps Esc -> LogTimeCancel.
+// map_log_time_key_event maps Esc -> LogTimeCancel.
 #[test]
 fn map_log_time_key_event_esc_yields_log_time_cancel() {
     use crate::tui::events::map_log_time_key_event;
@@ -4125,7 +4105,7 @@ fn map_log_time_key_event_esc_yields_log_time_cancel() {
     );
 }
 
-// AC4: map_log_time_key_event maps Tab -> LogTimeToggleField.
+// map_log_time_key_event maps Tab -> LogTimeToggleField.
 #[test]
 fn map_log_time_key_event_tab_yields_log_time_toggle_field() {
     use crate::tui::events::map_log_time_key_event;
@@ -4142,7 +4122,7 @@ fn map_log_time_key_event_tab_yields_log_time_toggle_field() {
     );
 }
 
-// AC4: map_log_time_key_event maps Backspace -> LogTimeBackspace.
+// map_log_time_key_event maps Backspace -> LogTimeBackspace.
 #[test]
 fn map_log_time_key_event_backspace_yields_log_time_backspace() {
     use crate::tui::events::map_log_time_key_event;
@@ -4159,7 +4139,7 @@ fn map_log_time_key_event_backspace_yields_log_time_backspace() {
     );
 }
 
-// AC4: map_log_time_key_event maps a printable char -> LogTimeChar(c).
+// map_log_time_key_event maps a printable char -> LogTimeChar(c).
 #[test]
 fn map_log_time_key_event_printable_char_yields_log_time_char() {
     use crate::tui::events::map_log_time_key_event;
@@ -4176,7 +4156,7 @@ fn map_log_time_key_event_printable_char_yields_log_time_char() {
     );
 }
 
-// AC4: map_browse_key_event maps plain 't' -> LogTimeOpen (not a selection or nav action).
+// map_browse_key_event maps plain 't' -> LogTimeOpen (not a selection or nav action).
 #[test]
 fn map_browse_key_event_plain_t_yields_log_time_open() {
     use crate::tui::events::map_browse_key_event;
@@ -4192,8 +4172,6 @@ fn map_browse_key_event_plain_t_yields_log_time_open() {
         "plain 't' must map to LogTimeOpen"
     );
 }
-
-// ── Estimate-edit modal tests ──────────────────────────
 
 fn detail_model_with_task(
     instance: &str,
@@ -4249,7 +4227,7 @@ fn type_estimate_chars(mut model: Model, s: &str) -> Model {
     model
 }
 
-// AC1: EstimateOpen on a task with no estimate sets the form to Editing with an empty value.
+// EstimateOpen on a task with no estimate sets the form to Editing with an empty value.
 #[test]
 fn estimate_open_on_detail_with_no_estimate_sets_editing_state_with_empty_value() {
     let m = detail_model_for_compose("inst", 10, 42);
@@ -4260,7 +4238,7 @@ fn estimate_open_on_detail_with_no_estimate_sets_editing_state_with_empty_value(
     assert_eq!(form.status, EditStatus::Editing);
 }
 
-// AC1: EstimateOpen prefills the value from the task's current estimate when present.
+// EstimateOpen prefills the value from the task's current estimate when present.
 #[test]
 fn estimate_open_prefills_value_from_existing_task_estimate() {
     let m = detail_model_with_task("inst", 10, 42, serde_json::json!({ "estimate": 8 }));
@@ -4272,7 +4250,7 @@ fn estimate_open_prefills_value_from_existing_task_estimate() {
     );
 }
 
-// AC1: a fractional task estimate prefills with its decimal value intact.
+// a fractional task estimate prefills with its decimal value intact.
 #[test]
 fn estimate_open_prefills_fractional_task_estimate() {
     let m = detail_model_with_task("inst", 10, 42, serde_json::json!({ "estimate": 4.5 }));
@@ -4281,7 +4259,7 @@ fn estimate_open_prefills_fractional_task_estimate() {
     assert_eq!(form.value, "4.5");
 }
 
-// AC1: EstimateOpen on a screen that already has the estimate modal active is a no-op.
+// EstimateOpen on a screen that already has the estimate modal active is a no-op.
 #[test]
 fn estimate_open_when_already_active_is_noop() {
     let mut m = detail_model_for_compose("inst", 10, 42);
@@ -4299,7 +4277,7 @@ fn estimate_open_when_already_active_is_noop() {
     assert_eq!(form.value, "3", "existing value buffer must be preserved");
 }
 
-// AC1: EstimateChar appends to the value buffer while Editing.
+// EstimateChar appends to the value buffer while Editing.
 #[test]
 fn estimate_char_appends_to_value_buffer() {
     let m = detail_model_for_compose("inst", 10, 42);
@@ -4312,7 +4290,7 @@ fn estimate_char_appends_to_value_buffer() {
     assert_eq!(form.value, "4.5");
 }
 
-// AC1: EstimateBackspace removes the last character of the value buffer.
+// EstimateBackspace removes the last character of the value buffer.
 #[test]
 fn estimate_backspace_removes_last_character() {
     let m = detail_model_for_compose("inst", 10, 42);
@@ -4323,7 +4301,7 @@ fn estimate_backspace_removes_last_character() {
     assert_eq!(form.value, "2");
 }
 
-// AC1: EstimateCancel clears the overlay and emits no Cmd.
+// EstimateCancel clears the overlay and emits no Cmd.
 #[test]
 fn estimate_cancel_clears_overlay_and_emits_no_cmd() {
     let m = detail_model_for_compose("inst", 10, 42);
@@ -4336,7 +4314,7 @@ fn estimate_cancel_clears_overlay_and_emits_no_cmd() {
     );
 }
 
-// AC2: a valid non-negative value emits exactly one Cmd::SubmitTaskEdit carrying
+// a valid non-negative value emits exactly one Cmd::SubmitTaskEdit carrying
 // estimate: Some(value), completion: None, assignee_id: None, and sets Submitting.
 #[test]
 fn estimate_submit_valid_value_emits_submit_task_edit_cmd() {
@@ -4369,7 +4347,7 @@ fn estimate_submit_valid_value_emits_submit_task_edit_cmd() {
     assert_eq!(form.status, EditStatus::Submitting);
 }
 
-// AC2: zero is a valid estimate (>= 0) and emits Cmd::SubmitTaskEdit with estimate: Some(0.0).
+// zero is a valid estimate (>= 0) and emits Cmd::SubmitTaskEdit with estimate: Some(0.0).
 #[test]
 fn estimate_submit_zero_is_accepted() {
     let m = detail_model_for_compose("inst", 1, 1);
@@ -4384,7 +4362,7 @@ fn estimate_submit_zero_is_accepted() {
     }
 }
 
-// AC2: an empty value buffer sets Error and emits no Cmd.
+// an empty value buffer sets Error and emits no Cmd.
 #[test]
 fn estimate_submit_empty_value_sets_error_and_emits_no_cmd() {
     let m = detail_model_for_compose("inst", 1, 1);
@@ -4395,7 +4373,7 @@ fn estimate_submit_empty_value_sets_error_and_emits_no_cmd() {
     assert!(matches!(form.status, EditStatus::Error(_)));
 }
 
-// AC2: a negative value sets Error and emits no Cmd.
+// a negative value sets Error and emits no Cmd.
 #[test]
 fn estimate_submit_negative_value_sets_error_and_emits_no_cmd() {
     let m = detail_model_for_compose("inst", 1, 1);
@@ -4406,7 +4384,7 @@ fn estimate_submit_negative_value_sets_error_and_emits_no_cmd() {
     assert!(matches!(form.status, EditStatus::Error(_)));
 }
 
-// AC2: a non-numeric value sets Error and emits no Cmd.
+// a non-numeric value sets Error and emits no Cmd.
 #[test]
 fn estimate_submit_non_numeric_value_sets_error_and_emits_no_cmd() {
     let m = detail_model_for_compose("inst", 1, 1);
@@ -4417,7 +4395,7 @@ fn estimate_submit_non_numeric_value_sets_error_and_emits_no_cmd() {
     assert!(matches!(form.status, EditStatus::Error(_)));
 }
 
-// AC3: TaskEditOk clears the overlay AND emits exactly one Cmd::LoadDetail{refresh:true},
+// TaskEditOk clears the overlay AND emits exactly one Cmd::LoadDetail{refresh:true},
 // the same server-truth refresh as the comment and time-log write paths.
 #[test]
 fn task_edit_ok_clears_overlay_and_emits_load_detail_refresh() {
@@ -4446,7 +4424,7 @@ fn task_edit_ok_clears_overlay_and_emits_load_detail_refresh() {
     }
 }
 
-// AC3: TaskEditErr keeps the value buffer intact and sets status=Error(msg), emits no Cmd.
+// TaskEditErr keeps the value buffer intact and sets status=Error(msg), emits no Cmd.
 #[test]
 fn task_edit_err_preserves_value_and_sets_error_status() {
     let m = detail_model_for_compose("inst", 1, 1);
@@ -4463,7 +4441,7 @@ fn task_edit_err_preserves_value_and_sets_error_status() {
     );
 }
 
-// AC1/AC3: map_estimate_key_event maps Ctrl+S -> EstimateSubmit.
+// map_estimate_key_event maps Ctrl+S -> EstimateSubmit.
 #[test]
 fn map_estimate_key_event_ctrl_s_yields_estimate_submit() {
     use crate::tui::events::map_estimate_key_event;
@@ -4480,7 +4458,7 @@ fn map_estimate_key_event_ctrl_s_yields_estimate_submit() {
     );
 }
 
-// AC1: map_estimate_key_event maps Esc -> EstimateCancel.
+// map_estimate_key_event maps Esc -> EstimateCancel.
 #[test]
 fn map_estimate_key_event_esc_yields_estimate_cancel() {
     use crate::tui::events::map_estimate_key_event;
@@ -4497,7 +4475,7 @@ fn map_estimate_key_event_esc_yields_estimate_cancel() {
     );
 }
 
-// AC1: map_estimate_key_event maps Backspace -> EstimateBackspace.
+// map_estimate_key_event maps Backspace -> EstimateBackspace.
 #[test]
 fn map_estimate_key_event_backspace_yields_estimate_backspace() {
     use crate::tui::events::map_estimate_key_event;
@@ -4514,7 +4492,7 @@ fn map_estimate_key_event_backspace_yields_estimate_backspace() {
     );
 }
 
-// AC1: map_estimate_key_event maps a printable char -> EstimateChar(c).
+// map_estimate_key_event maps a printable char -> EstimateChar(c).
 #[test]
 fn map_estimate_key_event_printable_char_yields_estimate_char() {
     use crate::tui::events::map_estimate_key_event;
@@ -4531,7 +4509,7 @@ fn map_estimate_key_event_printable_char_yields_estimate_char() {
     );
 }
 
-// AC1: map_browse_key_event maps plain 'e' -> EstimateOpen (not a selection or nav action).
+// map_browse_key_event maps plain 'e' -> EstimateOpen (not a selection or nav action).
 #[test]
 fn map_browse_key_event_plain_e_yields_estimate_open() {
     use crate::tui::events::map_browse_key_event;
@@ -4548,8 +4526,6 @@ fn map_browse_key_event_plain_e_yields_estimate_open() {
     );
 }
 
-// ── Status-confirm modal tests ─────────────────────────
-
 fn extract_status_confirm(model: &Model) -> Option<(bool, &EditStatus)> {
     match model.top() {
         Some(Screen::Detail { overlay, .. }) => overlay.status_confirm(),
@@ -4557,7 +4533,7 @@ fn extract_status_confirm(model: &Model) -> Option<(bool, &EditStatus)> {
     }
 }
 
-// AC1: StatusToggleOpen on an OPEN task sets completed_target=true with status Editing.
+// StatusToggleOpen on an OPEN task sets completed_target=true with status Editing.
 #[test]
 fn status_toggle_open_on_open_task_targets_completed() {
     let m = detail_model_with_task("inst", 10, 42, serde_json::json!({ "is_completed": false }));
@@ -4569,7 +4545,7 @@ fn status_toggle_open_on_open_task_targets_completed() {
     assert_eq!(*status, EditStatus::Editing);
 }
 
-// AC1: StatusToggleOpen on a COMPLETED task sets completed_target=false.
+// StatusToggleOpen on a COMPLETED task sets completed_target=false.
 #[test]
 fn status_toggle_open_on_completed_task_targets_reopen() {
     let m = detail_model_with_task("inst", 10, 42, serde_json::json!({ "is_completed": true }));
@@ -4579,7 +4555,7 @@ fn status_toggle_open_on_completed_task_targets_reopen() {
     assert!(!completed_target, "a completed task must target reopen");
 }
 
-// AC1: StatusToggleOpen on a screen that already has the modal active is a no-op.
+// StatusToggleOpen on a screen that already has the modal active is a no-op.
 #[test]
 fn status_toggle_open_when_already_active_is_noop() {
     let mut m =
@@ -4602,7 +4578,7 @@ fn status_toggle_open_when_already_active_is_noop() {
     );
 }
 
-// AC1: StatusToggleCancel clears the overlay and emits no Cmd.
+// StatusToggleCancel clears the overlay and emits no Cmd.
 #[test]
 fn status_toggle_cancel_clears_overlay_and_emits_no_cmd() {
     let m = detail_model_with_task("inst", 10, 42, serde_json::json!({ "is_completed": false }));
@@ -4615,7 +4591,7 @@ fn status_toggle_cancel_clears_overlay_and_emits_no_cmd() {
     );
 }
 
-// AC2: StatusToggleConfirm while Editing emits exactly one Cmd::SubmitTaskEdit
+// StatusToggleConfirm while Editing emits exactly one Cmd::SubmitTaskEdit
 // carrying completion: Some(completed_target), assignee_id: None, estimate: None,
 // and sets status Submitting.
 #[test]
@@ -4654,7 +4630,7 @@ fn status_toggle_confirm_emits_submit_task_edit_cmd() {
     assert_eq!(*status, EditStatus::Submitting);
 }
 
-// AC2: StatusToggleConfirm is a no-op (no Cmd) when the overlay's status is not Editing.
+// StatusToggleConfirm is a no-op (no Cmd) when the overlay's status is not Editing.
 #[test]
 fn status_toggle_confirm_while_submitting_emits_no_cmd() {
     let mut m = detail_model_with_task("inst", 5, 99, serde_json::json!({ "is_completed": false }));
@@ -4674,7 +4650,7 @@ fn status_toggle_confirm_while_submitting_emits_no_cmd() {
     );
 }
 
-// AC2: StatusToggleConfirm is a no-op (no Cmd) when no status-confirm overlay is active.
+// StatusToggleConfirm is a no-op (no Cmd) when no status-confirm overlay is active.
 #[test]
 fn status_toggle_confirm_without_overlay_emits_no_cmd() {
     let m = detail_model_with_task("inst", 5, 99, serde_json::json!({ "is_completed": false }));
@@ -4685,7 +4661,7 @@ fn status_toggle_confirm_without_overlay_emits_no_cmd() {
     );
 }
 
-// AC3: TaskEditOk clears the status-confirm overlay AND emits exactly one
+// TaskEditOk clears the status-confirm overlay AND emits exactly one
 // Cmd::LoadDetail{refresh:true}, the same shared refresh path as the estimate write.
 #[test]
 fn status_task_edit_ok_clears_overlay_and_emits_load_detail_refresh() {
@@ -4714,7 +4690,7 @@ fn status_task_edit_ok_clears_overlay_and_emits_load_detail_refresh() {
     }
 }
 
-// AC3: TaskEditErr sets the status-confirm overlay's status to Error(msg), proving the
+// TaskEditErr sets the status-confirm overlay's status to Error(msg), proving the
 // generalized task-edit error setter reaches this overlay too.
 #[test]
 fn status_task_edit_err_sets_error_status() {
@@ -4736,7 +4712,7 @@ fn status_task_edit_err_sets_error_status() {
     );
 }
 
-// AC1/AC2: map_status_confirm_key_event maps Enter -> StatusToggleConfirm.
+// map_status_confirm_key_event maps Enter -> StatusToggleConfirm.
 #[test]
 fn map_status_confirm_key_event_enter_yields_status_toggle_confirm() {
     use crate::tui::events::map_status_confirm_key_event;
@@ -4756,7 +4732,7 @@ fn map_status_confirm_key_event_enter_yields_status_toggle_confirm() {
     );
 }
 
-// AC1/AC2: map_status_confirm_key_event maps Ctrl+S -> StatusToggleConfirm.
+// map_status_confirm_key_event maps Ctrl+S -> StatusToggleConfirm.
 #[test]
 fn map_status_confirm_key_event_ctrl_s_yields_status_toggle_confirm() {
     use crate::tui::events::map_status_confirm_key_event;
@@ -4776,7 +4752,7 @@ fn map_status_confirm_key_event_ctrl_s_yields_status_toggle_confirm() {
     );
 }
 
-// AC1: map_status_confirm_key_event maps Esc -> StatusToggleCancel.
+// map_status_confirm_key_event maps Esc -> StatusToggleCancel.
 #[test]
 fn map_status_confirm_key_event_esc_yields_status_toggle_cancel() {
     use crate::tui::events::map_status_confirm_key_event;
@@ -4796,7 +4772,7 @@ fn map_status_confirm_key_event_esc_yields_status_toggle_cancel() {
     );
 }
 
-// AC1: map_status_confirm_key_event ignores a plain printable char — no text entry.
+// map_status_confirm_key_event ignores a plain printable char — no text entry.
 #[test]
 fn map_status_confirm_key_event_printable_char_yields_none() {
     use crate::tui::events::map_status_confirm_key_event;
@@ -4813,7 +4789,7 @@ fn map_status_confirm_key_event_printable_char_yields_none() {
     );
 }
 
-// AC1: map_browse_key_event maps plain 's' -> StatusToggleOpen (not a selection or nav action).
+// map_browse_key_event maps plain 's' -> StatusToggleOpen (not a selection or nav action).
 #[test]
 fn map_browse_key_event_plain_s_yields_status_toggle_open() {
     use crate::tui::events::map_browse_key_event;
@@ -4864,7 +4840,7 @@ fn users_two() -> HashMap<i64, String> {
     map
 }
 
-// AC1: AssigneePickerOpen builds candidates sorted case-insensitively by name and
+// AssigneePickerOpen builds candidates sorted case-insensitively by name and
 // pre-selects index 0 when the task has no current assignee.
 #[test]
 fn assignee_picker_open_builds_sorted_candidates_with_no_assignee_selects_zero() {
@@ -4883,7 +4859,7 @@ fn assignee_picker_open_builds_sorted_candidates_with_no_assignee_selects_zero()
     assert_eq!(*status, EditStatus::Editing);
 }
 
-// AC1: AssigneePickerOpen pre-selects the index of the task's current assignee_id.
+// AssigneePickerOpen pre-selects the index of the task's current assignee_id.
 #[test]
 fn assignee_picker_open_preselects_current_assignee_index() {
     let m = detail_model_with_task_and_users(
@@ -4902,7 +4878,7 @@ fn assignee_picker_open_preselects_current_assignee_index() {
     );
 }
 
-// AC1: an empty user directory produces an empty candidate list and selected 0.
+// an empty user directory produces an empty candidate list and selected 0.
 #[test]
 fn assignee_picker_open_with_empty_directory_yields_empty_candidates() {
     let m = detail_model_with_task_and_users("inst", 10, 42, serde_json::json!({}), HashMap::new());
@@ -4913,7 +4889,7 @@ fn assignee_picker_open_with_empty_directory_yields_empty_candidates() {
     assert_eq!(selected, 0);
 }
 
-// AC1: AssigneePickerOpen on a screen that already has the picker active is a no-op.
+// AssigneePickerOpen on a screen that already has the picker active is a no-op.
 #[test]
 fn assignee_picker_open_when_already_active_is_noop() {
     let mut m =
@@ -4939,7 +4915,7 @@ fn assignee_picker_open_when_already_active_is_noop() {
     );
 }
 
-// AC1: AssigneePickerDown moves the selection forward and saturates at the last row.
+// AssigneePickerDown moves the selection forward and saturates at the last row.
 #[test]
 fn assignee_picker_down_moves_selection_and_saturates_at_end() {
     let m = detail_model_with_task_and_users("inst", 10, 42, serde_json::json!({}), users_two());
@@ -4953,7 +4929,7 @@ fn assignee_picker_down_moves_selection_and_saturates_at_end() {
     assert_eq!(selected, 1, "must saturate at the last candidate index");
 }
 
-// AC1: AssigneePickerUp moves the selection backward and saturates at the first row.
+// AssigneePickerUp moves the selection backward and saturates at the first row.
 #[test]
 fn assignee_picker_up_moves_selection_and_saturates_at_start() {
     let m = detail_model_with_task_and_users("inst", 10, 42, serde_json::json!({}), users_two());
@@ -4968,7 +4944,7 @@ fn assignee_picker_up_moves_selection_and_saturates_at_start() {
     assert_eq!(selected, 0, "must saturate at the first candidate index");
 }
 
-// AC1: AssigneePickerCancel clears the overlay and emits no Cmd.
+// AssigneePickerCancel clears the overlay and emits no Cmd.
 #[test]
 fn assignee_picker_cancel_clears_overlay_and_emits_no_cmd() {
     let m = detail_model_with_task_and_users("inst", 10, 42, serde_json::json!({}), users_two());
@@ -4981,7 +4957,7 @@ fn assignee_picker_cancel_clears_overlay_and_emits_no_cmd() {
     );
 }
 
-// AC2: AssigneePickerSubmit while Editing emits exactly one Cmd::SubmitTaskEdit
+// AssigneePickerSubmit while Editing emits exactly one Cmd::SubmitTaskEdit
 // carrying assignee_id: Some(selected id), completion: None, estimate: None,
 // and sets status Submitting.
 #[test]
@@ -5016,7 +4992,7 @@ fn assignee_picker_submit_emits_submit_task_edit_cmd() {
     assert_eq!(*status, EditStatus::Submitting);
 }
 
-// AC2: AssigneePickerSubmit is a no-op (no Cmd) when candidates is empty.
+// AssigneePickerSubmit is a no-op (no Cmd) when candidates is empty.
 #[test]
 fn assignee_picker_submit_with_empty_candidates_emits_no_cmd() {
     let m = detail_model_with_task_and_users("inst", 5, 99, serde_json::json!({}), HashMap::new());
@@ -5028,7 +5004,7 @@ fn assignee_picker_submit_with_empty_candidates_emits_no_cmd() {
     );
 }
 
-// AC2: AssigneePickerSubmit is a no-op (no Cmd) when the overlay's status is not Editing.
+// AssigneePickerSubmit is a no-op (no Cmd) when the overlay's status is not Editing.
 #[test]
 fn assignee_picker_submit_while_submitting_emits_no_cmd() {
     let mut m = detail_model_with_task_and_users("inst", 5, 99, serde_json::json!({}), users_two());
@@ -5050,7 +5026,7 @@ fn assignee_picker_submit_while_submitting_emits_no_cmd() {
     );
 }
 
-// AC2: AssigneePickerSubmit is a no-op (no Cmd) when no assignee-picker overlay is active.
+// AssigneePickerSubmit is a no-op (no Cmd) when no assignee-picker overlay is active.
 #[test]
 fn assignee_picker_submit_without_overlay_emits_no_cmd() {
     let m = detail_model_with_task_and_users("inst", 5, 99, serde_json::json!({}), users_two());
@@ -5061,7 +5037,7 @@ fn assignee_picker_submit_without_overlay_emits_no_cmd() {
     );
 }
 
-// AC3: TaskEditOk clears the assignee-picker overlay AND emits exactly one
+// TaskEditOk clears the assignee-picker overlay AND emits exactly one
 // Cmd::LoadDetail{refresh:true}, the same shared refresh path as the other task-edit writes.
 #[test]
 fn assignee_picker_task_edit_ok_clears_overlay_and_emits_load_detail_refresh() {
@@ -5090,7 +5066,7 @@ fn assignee_picker_task_edit_ok_clears_overlay_and_emits_load_detail_refresh() {
     }
 }
 
-// AC3: TaskEditErr sets the assignee-picker overlay's status to Error(msg), proving
+// TaskEditErr sets the assignee-picker overlay's status to Error(msg), proving
 // the generalized task-edit error setter reaches this overlay too.
 #[test]
 fn assignee_picker_task_edit_err_sets_error_status() {
@@ -5108,7 +5084,7 @@ fn assignee_picker_task_edit_err_sets_error_status() {
     );
 }
 
-// AC1: typed characters filter the candidate list to names containing the filter
+// typed characters filter the candidate list to names containing the filter
 // text, case-insensitive substring match on name only.
 #[test]
 fn assignee_picker_char_filters_candidates_by_name_case_insensitive() {
@@ -5126,7 +5102,7 @@ fn assignee_picker_char_filters_candidates_by_name_case_insensitive() {
     );
 }
 
-// AC2: a filter change resets the highlighted row to the first match, and Up/Down
+// a filter change resets the highlighted row to the first match, and Up/Down
 // move only within the filtered list, saturating at its first/last row.
 #[test]
 fn assignee_picker_filter_resets_selection_and_nav_clamps_to_filtered_list() {
@@ -5167,7 +5143,7 @@ fn assignee_picker_filter_resets_selection_and_nav_clamps_to_filtered_list() {
     assert_eq!(selected, 0, "Up must saturate at the first filtered row");
 }
 
-// AC3: Submit with a non-empty filtered list emits Cmd::SubmitTaskEdit carrying the
+// Submit with a non-empty filtered list emits Cmd::SubmitTaskEdit carrying the
 // highlighted FILTERED candidate's id, not an index into the full candidate list.
 #[test]
 fn assignee_picker_submit_uses_filtered_candidate_id() {
@@ -5188,7 +5164,7 @@ fn assignee_picker_submit_uses_filtered_candidate_id() {
     }
 }
 
-// AC3: Submit is a no-op (no Cmd) when the current filter matches no candidate.
+// Submit is a no-op (no Cmd) when the current filter matches no candidate.
 #[test]
 fn assignee_picker_submit_with_no_filter_matches_emits_no_cmd() {
     let m = detail_model_with_task_and_users("inst", 5, 99, serde_json::json!({}), users_two());
@@ -5201,7 +5177,7 @@ fn assignee_picker_submit_with_no_filter_matches_emits_no_cmd() {
     );
 }
 
-// AC5: Backspace removes the last character from the filter buffer.
+// Backspace removes the last character from the filter buffer.
 #[test]
 fn assignee_picker_backspace_removes_last_filter_char() {
     let m = detail_model_with_task_and_users("inst", 10, 42, serde_json::json!({}), users_two());
@@ -5216,7 +5192,7 @@ fn assignee_picker_backspace_removes_last_filter_char() {
     assert_eq!(filter, "b");
 }
 
-// AC5: Backspace on an already-empty filter is a no-op.
+// Backspace on an already-empty filter is a no-op.
 #[test]
 fn assignee_picker_backspace_on_empty_filter_is_noop() {
     let m = detail_model_with_task_and_users("inst", 10, 42, serde_json::json!({}), users_two());
@@ -5250,7 +5226,7 @@ fn assignee_picker_char_while_submitting_is_noop() {
     assert_eq!(filter, "", "filter must not change while Submitting");
 }
 
-// AC4: map_assignee_picker_key_event maps Down -> AssigneePickerDown.
+// map_assignee_picker_key_event maps Down -> AssigneePickerDown.
 #[test]
 fn map_assignee_picker_key_event_down_yields_assignee_picker_down() {
     use crate::tui::events::map_assignee_picker_key_event;
@@ -5267,7 +5243,7 @@ fn map_assignee_picker_key_event_down_yields_assignee_picker_down() {
     ));
 }
 
-// AC4: map_assignee_picker_key_event maps Up -> AssigneePickerUp.
+// map_assignee_picker_key_event maps Up -> AssigneePickerUp.
 #[test]
 fn map_assignee_picker_key_event_up_yields_assignee_picker_up() {
     use crate::tui::events::map_assignee_picker_key_event;
@@ -5284,7 +5260,7 @@ fn map_assignee_picker_key_event_up_yields_assignee_picker_up() {
     ));
 }
 
-// AC4: map_assignee_picker_key_event maps j/k and every other printable char to
+// map_assignee_picker_key_event maps j/k and every other printable char to
 // AssigneePickerChar — j/k no longer navigate, they type into the filter.
 #[test]
 fn map_assignee_picker_key_event_printable_chars_yield_assignee_picker_char() {
@@ -5307,7 +5283,7 @@ fn map_assignee_picker_key_event_printable_chars_yield_assignee_picker_char() {
     }
 }
 
-// AC4: map_assignee_picker_key_event maps Backspace -> AssigneePickerBackspace.
+// map_assignee_picker_key_event maps Backspace -> AssigneePickerBackspace.
 #[test]
 fn map_assignee_picker_key_event_backspace_yields_assignee_picker_backspace() {
     use crate::tui::events::map_assignee_picker_key_event;
@@ -5324,7 +5300,7 @@ fn map_assignee_picker_key_event_backspace_yields_assignee_picker_backspace() {
     ));
 }
 
-// AC1/AC2: map_assignee_picker_key_event maps Enter and Ctrl+S -> AssigneePickerSubmit.
+// map_assignee_picker_key_event maps Enter and Ctrl+S -> AssigneePickerSubmit.
 #[test]
 fn map_assignee_picker_key_event_enter_and_ctrl_s_yield_assignee_picker_submit() {
     use crate::tui::events::map_assignee_picker_key_event;
@@ -5351,7 +5327,7 @@ fn map_assignee_picker_key_event_enter_and_ctrl_s_yield_assignee_picker_submit()
     ));
 }
 
-// AC1: map_assignee_picker_key_event maps Esc -> AssigneePickerCancel.
+// map_assignee_picker_key_event maps Esc -> AssigneePickerCancel.
 #[test]
 fn map_assignee_picker_key_event_esc_yields_assignee_picker_cancel() {
     use crate::tui::events::map_assignee_picker_key_event;
@@ -5371,7 +5347,7 @@ fn map_assignee_picker_key_event_esc_yields_assignee_picker_cancel() {
     );
 }
 
-// AC1: map_browse_key_event maps plain 'a' -> AssigneePickerOpen (not a selection or nav action).
+// map_browse_key_event maps plain 'a' -> AssigneePickerOpen (not a selection or nav action).
 #[test]
 fn map_browse_key_event_plain_a_yields_assignee_picker_open() {
     use crate::tui::events::map_browse_key_event;
@@ -5387,8 +5363,6 @@ fn map_browse_key_event_plain_a_yields_assignee_picker_open() {
         "plain 'a' must map to AssigneePickerOpen"
     );
 }
-
-// ── Comment-edit-ui tests ───────────────────────
 
 /// Build a Detail model that has one owned comment (created_by_id == current_user_id)
 /// and one unowned comment. The model is reflowed at `width` so `edit_affordances`
@@ -5452,7 +5426,7 @@ fn detail_model_with_comments_for_edit(
     m
 }
 
-// edit-AC4: ComposeSubmit with kind=Edit{comment_id} emits Cmd::UpdateComment
+// ComposeSubmit with kind=Edit{comment_id} emits Cmd::UpdateComment
 // (NOT Cmd::SubmitComment), carries the correct instance / comment_id / body.
 // Drives the real Ctrl+click -> compose open -> submit path.
 #[test]
@@ -5509,7 +5483,7 @@ fn compose_submit_with_edit_kind_emits_update_comment_cmd() {
     );
 }
 
-// edit-AC4-B: ComposeSubmit with kind=New still emits Cmd::SubmitComment (regression guard).
+// ComposeSubmit with kind=New still emits Cmd::SubmitComment (regression guard).
 #[test]
 fn compose_submit_with_new_kind_still_emits_submit_comment_cmd() {
     let m = detail_model_for_compose("myinst", 5, 99);
@@ -5525,7 +5499,7 @@ fn compose_submit_with_new_kind_still_emits_submit_comment_cmd() {
     );
 }
 
-// edit-AC2: A Ctrl/Cmd+click landing on the [editar] affordance opens compose
+// A Ctrl/Cmd+click landing on the [editar] affordance opens compose
 // with kind=Edit (scroll-aware: verifies via affordance coordinates populated by
 // reflow_detail). A plain (unmodified) click on the same coordinates does NOT
 // open compose.
@@ -5580,7 +5554,7 @@ fn ctrl_click_on_edit_affordance_opens_compose_edit() {
     assert_eq!(cp.status, ComposeStatus::Editing, "status must be Editing");
 }
 
-// edit-AC2-B: A plain (unmodified) click on the affordance coordinates does NOT
+// A plain (unmodified) click on the affordance coordinates does NOT
 // open compose (modifier gate is required for [editar] activation).
 #[test]
 fn plain_click_on_edit_affordance_coords_does_not_open_compose() {
@@ -5611,8 +5585,6 @@ fn plain_click_on_edit_affordance_coords_does_not_open_compose() {
         "plain click on affordance coords must NOT open compose"
     );
 }
-
-// ── Comment-delete-ui tests ─────────────────────
 
 /// Build a reflowed Detail model that has one owned comment (id=42, created_by_id=7)
 /// so `delete_affordances` is populated after `reflow_detail`.
@@ -6030,8 +6002,6 @@ fn comment_mutation_err_does_not_emit_refresh() {
     );
 }
 
-// --- AC1: FocusNextComment / FocusPrevComment move focused_comment, emit no Cmd ---
-
 fn detail_model_with_n_comments(n: usize) -> Model {
     use serde_json::json;
     let comments: Vec<serde_json::Value> = (0..n)
@@ -6093,7 +6063,7 @@ fn focused_comment(model: &Model) -> Option<usize> {
     }
 }
 
-// AC1: FocusNextComment with None focus moves to first comment (index 0), emits no Cmd.
+// FocusNextComment with None focus moves to first comment (index 0), emits no Cmd.
 #[test]
 fn focus_next_from_none_moves_to_first_comment() {
     let m = detail_model_with_n_comments_and_spans(3);
@@ -6106,7 +6076,7 @@ fn focus_next_from_none_moves_to_first_comment() {
     );
 }
 
-// AC1: FocusNextComment moves focus from 0 to 1.
+// FocusNextComment moves focus from 0 to 1.
 #[test]
 fn focus_next_increments_focused_comment() {
     let mut m = detail_model_with_n_comments_and_spans(3);
@@ -6125,7 +6095,7 @@ fn focus_next_increments_focused_comment() {
     );
 }
 
-// AC1: FocusPrevComment with None focus moves to first comment (index 0), emits no Cmd.
+// FocusPrevComment with None focus moves to first comment (index 0), emits no Cmd.
 #[test]
 fn focus_prev_from_none_moves_to_first_comment() {
     let m = detail_model_with_n_comments_and_spans(3);
@@ -6138,7 +6108,7 @@ fn focus_prev_from_none_moves_to_first_comment() {
     );
 }
 
-// AC1: FocusPrevComment moves focus from 1 to 0.
+// FocusPrevComment moves focus from 1 to 0.
 #[test]
 fn focus_prev_decrements_focused_comment() {
     let mut m = detail_model_with_n_comments_and_spans(3);
@@ -6157,7 +6127,7 @@ fn focus_prev_decrements_focused_comment() {
     );
 }
 
-// AC1: FocusNextComment at last comment is a no-op (no wraparound).
+// FocusNextComment at last comment is a no-op (no wraparound).
 #[test]
 fn focus_next_at_last_comment_is_noop() {
     let mut m = detail_model_with_n_comments_and_spans(3);
@@ -6176,7 +6146,7 @@ fn focus_next_at_last_comment_is_noop() {
     );
 }
 
-// AC1: FocusPrevComment at first comment is a no-op (no wraparound).
+// FocusPrevComment at first comment is a no-op (no wraparound).
 #[test]
 fn focus_prev_at_first_comment_is_noop() {
     let mut m = detail_model_with_n_comments_and_spans(3);
@@ -6195,7 +6165,7 @@ fn focus_prev_at_first_comment_is_noop() {
     );
 }
 
-// AC1: Zero-comment thread keeps focused_comment = None on FocusNextComment.
+// Zero-comment thread keeps focused_comment = None on FocusNextComment.
 #[test]
 fn focus_next_on_empty_thread_is_noop() {
     let m = detail_model_with_n_comments_and_spans(0);
@@ -6208,7 +6178,7 @@ fn focus_next_on_empty_thread_is_noop() {
     );
 }
 
-// AC1: Zero-comment thread keeps focused_comment = None on FocusPrevComment.
+// Zero-comment thread keeps focused_comment = None on FocusPrevComment.
 #[test]
 fn focus_prev_on_empty_thread_is_noop() {
     let m = detail_model_with_n_comments_and_spans(0);
@@ -6220,8 +6190,6 @@ fn focus_prev_on_empty_thread_is_noop() {
         "empty thread: FocusPrev must keep focused_comment = None"
     );
 }
-
-// --- AC2: focus move sets offset so focused card is fully visible ---
 
 fn detail_model_with_comment_spans(
     comment_spans: Vec<(usize, usize)>,
@@ -6283,7 +6251,7 @@ fn detail_offset(model: &Model) -> usize {
     }
 }
 
-// AC2: card below viewport — focus move scrolls down so card's last line is visible.
+// card below viewport — focus move scrolls down so card's last line is visible.
 // viewport_rows=14, DETAIL_CHROME_ROWS=4 → text_vh=10.
 // Card at lines 15..20 (start=15, count=5). Offset=0 → card_end(20) > viewport_end(10).
 // Expected offset = card_end - text_vh = 20 - 10 = 10.
@@ -6306,7 +6274,7 @@ fn focus_move_scrolls_down_when_card_below_viewport() {
     );
 }
 
-// AC2: card above viewport — focus move scrolls up so card's first line is visible.
+// card above viewport — focus move scrolls up so card's first line is visible.
 // viewport_rows=14, text_vh=10. Card at lines 3..8 (start=3, count=5).
 // Offset=10 → card_start(3) < current_offset(10).
 // Expected offset = card_start = 3.
@@ -6327,7 +6295,7 @@ fn focus_move_scrolls_up_when_card_above_viewport() {
     );
 }
 
-// AC2: card already fully visible — focus move leaves offset unchanged.
+// card already fully visible — focus move leaves offset unchanged.
 // viewport_rows=14, text_vh=10. Card at lines 2..6 (start=2, count=4).
 // Offset=0 → viewport covers lines 0..10; card [2..6] fully inside.
 // Expected offset = 0 (unchanged).
@@ -6347,8 +6315,6 @@ fn focus_move_does_not_change_offset_when_card_already_visible() {
         "card already visible: offset must remain unchanged"
     );
 }
-
-// --- AC3: PageUp/PageDown change offset and leave focused_comment unchanged ---
 
 #[test]
 fn page_down_changes_offset_leaves_focused_comment_unchanged() {
@@ -6421,8 +6387,6 @@ fn mouse_wheel_scroll_leaves_focused_comment_unchanged() {
         "ScrollDown must leave focused_comment unchanged"
     );
 }
-
-// --- AC5: reflow_detail rebuilds comment_spans on width change, reuses on same width ---
 
 #[test]
 fn reflow_detail_builds_comment_spans_on_width_change() {
@@ -6512,8 +6476,6 @@ fn reflow_detail_rebuilds_comment_spans_on_data_change() {
     }
 }
 
-// --- AC6: Ctrl/Cmd+click on [editar]/[excluir] still emits the correct Cmd (regression) ---
-
 #[test]
 fn ctrl_click_editar_on_focused_own_card_still_emits_compose_open() {
     let m = detail_model_with_comments_for_edit("inst", 1, 1, Some(7), 82);
@@ -6566,8 +6528,6 @@ fn no_key_acts_on_focused_comment_for_edit_or_delete() {
     );
     let _ = m_after_e;
 }
-
-// --- modal_area centering and clamping ---
 
 #[test]
 fn modal_area_centers_in_large_frame() {
@@ -6637,8 +6597,6 @@ fn modal_area_clamps_when_frame_shorter_than_desired() {
     );
 }
 
-// --- AC3 (slice-1b): modal_target_size pure unit tests ---
-
 #[test]
 fn modal_target_size_large_frame_returns_70_percent() {
     use crate::tui::widgets::modal::{modal_target_size, ModalContent};
@@ -6679,8 +6637,6 @@ fn modal_target_size_respects_content_minimum() {
     );
     assert!(w >= 1, "width must be at least 1: got {w}");
 }
-
-// --- Compose absent from scrollable lines after reflow ---
 
 #[test]
 fn reflow_detail_with_compose_does_not_append_compose_lines() {
@@ -6739,7 +6695,6 @@ fn reflow_detail_with_compose_does_not_append_compose_lines() {
     }
 }
 
-// --- AC7: compose semantics regression — key map unchanged after modal migration ---
 // These exercise the pure update() transitions to confirm the compose mode behavior
 // is unaffected by moving the rendering to an overlay.
 
@@ -6926,8 +6881,6 @@ fn scroll_offset_for_card_scrolls_up_when_above() {
     assert_eq!(result, 3, "card above viewport: offset must be card_start");
 }
 
-// --- Confirm-delete modal keyboard routing ---
-
 fn detail_model_with_confirm_delete(comment_id: i64) -> Model {
     Model {
         stack: vec![Screen::Detail {
@@ -6963,7 +6916,7 @@ fn detail_model_with_confirm_delete(comment_id: i64) -> Model {
     }
 }
 
-// AC4: Enter key (Msg::Select) when confirm_delete is Some confirms the delete.
+// Enter key (Msg::Select) when confirm_delete is Some confirms the delete.
 #[test]
 fn enter_key_when_confirm_delete_some_emits_delete_comment() {
     let m = detail_model_with_confirm_delete(99);
@@ -6991,7 +6944,7 @@ fn enter_key_when_confirm_delete_some_emits_delete_comment() {
     }
 }
 
-// AC4: Esc key (Msg::Back) when confirm_delete is Some cancels the delete (no cmd, no pop).
+// Esc key (Msg::Back) when confirm_delete is Some cancels the delete (no cmd, no pop).
 #[test]
 fn esc_key_when_confirm_delete_some_cancels_without_popping() {
     let m = detail_model_with_confirm_delete(99);
@@ -7013,7 +6966,7 @@ fn esc_key_when_confirm_delete_some_cancels_without_popping() {
     assert!(!m2.should_quit, "Esc in confirm sub-mode must not quit");
 }
 
-// AC4: Msg::ConfirmDeleteComment when confirm_delete is None is a no-op.
+// Msg::ConfirmDeleteComment when confirm_delete is None is a no-op.
 #[test]
 fn confirm_delete_msg_when_none_is_noop() {
     let m = detail_model_with_assets_and_viewport(vec![], "inst", (80, 24));
@@ -7030,7 +6983,7 @@ fn confirm_delete_msg_when_none_is_noop() {
     }
 }
 
-// AC4: Msg::CancelDeleteComment when confirm_delete is None is a no-op.
+// Msg::CancelDeleteComment when confirm_delete is None is a no-op.
 #[test]
 fn cancel_delete_msg_when_none_is_noop() {
     let m = detail_model_with_assets_and_viewport(vec![], "inst", (80, 24));
@@ -7045,7 +6998,7 @@ fn cancel_delete_msg_when_none_is_noop() {
     );
 }
 
-// AC5 (regression): Msg::CommentMutationOk after a delete triggers LoadDetail{refresh:true}.
+// Msg::CommentMutationOk after a delete triggers LoadDetail{refresh:true}.
 // This test duplicates the existing comment_mutation_ok_after_delete_emits_load_detail_refresh
 // from the same file to guard against the delete refresh path regressing across slices.
 #[test]
@@ -7096,7 +7049,7 @@ fn comment_mutation_ok_after_delete_triggers_load_detail_refresh_regression() {
     }
 }
 
-// AC3: plain left click on the [confirmar] button target emits Cmd::DeleteComment.
+// plain left click on the [confirmar] button target emits Cmd::DeleteComment.
 // Button targets are set on the model (mirroring the shell's render-then-set flow).
 // For an 80×24 frame: modal at x=12,y=4,w=56,h=16, inner_x=13, hint_row=18.
 // [confirmar] → x_start=13, x_end=24.
@@ -7150,7 +7103,7 @@ fn plain_click_on_confirm_button_emits_delete_comment() {
     }
 }
 
-// AC3: plain left click on the [cancelar] button target clears confirm_delete, emits no Cmd.
+// plain left click on the [cancelar] button target clears confirm_delete, emits no Cmd.
 #[test]
 fn plain_click_on_cancel_button_clears_confirm_no_cmd() {
     use crate::tui::model::ModalButtonTarget;
@@ -7194,7 +7147,7 @@ fn plain_click_on_cancel_button_clears_confirm_no_cmd() {
     }
 }
 
-// AC3b: plain click OUTSIDE the button targets while confirm modal is open is a no-op
+// plain click OUTSIDE the button targets while confirm modal is open is a no-op
 // (modal captures all clicks — no selection starts behind it).
 #[test]
 fn plain_click_outside_buttons_while_modal_open_is_noop() {
@@ -7243,8 +7196,6 @@ fn plain_click_outside_buttons_while_modal_open_is_noop() {
     );
 }
 
-// ── hit_test::resolve_detail_click unit tests (AC4, AC5, TE) ─────────────────
-
 use super::super::hit_test::{resolve_detail_click, DetailClickTarget};
 use crate::render::{AffordanceKind, LocalAffordance};
 
@@ -7285,7 +7236,7 @@ fn hit_test_model(lines: Vec<String>, affordances: Vec<LocalAffordance>) -> Mode
     }
 }
 
-// AC4 / TE: plain click (has_modifier=false) always resolves to None.
+// plain click (has_modifier=false) always resolves to None.
 #[test]
 fn resolve_detail_click_plain_click_is_none() {
     let m = hit_test_model(
@@ -7304,7 +7255,7 @@ fn resolve_detail_click_plain_click_is_none() {
     );
 }
 
-// AC4 / TE: Ctrl/Cmd click on an Edit affordance resolves to CommentEdit(id).
+// Ctrl/Cmd click on an Edit affordance resolves to CommentEdit(id).
 #[test]
 fn resolve_detail_click_edit_affordance_returns_comment_edit() {
     let m = hit_test_model(
@@ -7325,7 +7276,7 @@ fn resolve_detail_click_edit_affordance_returns_comment_edit() {
     );
 }
 
-// AC4 / TE: Ctrl/Cmd click on a Delete affordance resolves to CommentDelete(id).
+// Ctrl/Cmd click on a Delete affordance resolves to CommentDelete(id).
 #[test]
 fn resolve_detail_click_delete_affordance_returns_comment_delete() {
     let m = hit_test_model(
@@ -7344,7 +7295,7 @@ fn resolve_detail_click_delete_affordance_returns_comment_delete() {
     );
 }
 
-// AC4 / TE: Ctrl/Cmd click on an OpenUrl affordance resolves to OpenUrl(url).
+// Ctrl/Cmd click on an OpenUrl affordance resolves to OpenUrl(url).
 #[test]
 fn resolve_detail_click_open_url_affordance_returns_open_url() {
     let url = "https://example.com/doc.pdf";
@@ -7366,7 +7317,7 @@ fn resolve_detail_click_open_url_affordance_returns_open_url() {
     }
 }
 
-// AC4 / TE: asset whole-row rule — Ctrl/Cmd click anywhere on an OpenAsset line
+// asset whole-row rule — Ctrl/Cmd click anywhere on an OpenAsset line
 // resolves to OpenAsset(url), even if the column is outside [col_start, col_end).
 #[test]
 fn resolve_detail_click_open_asset_matches_whole_row() {
@@ -7394,7 +7345,7 @@ fn resolve_detail_click_open_asset_matches_whole_row() {
     }
 }
 
-// AC4 / TE: non-row-target (Edit) outside [col_start, col_end) resolves to None.
+// non-row-target (Edit) outside [col_start, col_end) resolves to None.
 #[test]
 fn resolve_detail_click_edit_outside_col_range_is_none() {
     let m = hit_test_model(
@@ -7414,7 +7365,7 @@ fn resolve_detail_click_edit_outside_col_range_is_none() {
     );
 }
 
-// AC5 / TE: line_idx >= lines.len() out-of-range guard → None (no panic, no stale hit).
+// line_idx >= lines.len() out-of-range guard → None (no panic, no stale hit).
 // A Ctrl/Cmd+click whose scroll-aware line_idx exceeds the content must resolve to None,
 // even when an affordance exists at that line_idx in the affordance list.
 #[test]
@@ -7437,7 +7388,7 @@ fn resolve_detail_click_out_of_range_line_idx_is_none() {
     );
 }
 
-// AC4 / TE: click outside the text viewport (row < text_top) resolves to None.
+// click outside the text viewport (row < text_top) resolves to None.
 #[test]
 fn resolve_detail_click_row_above_text_top_is_none() {
     let m = hit_test_model(
@@ -7457,7 +7408,7 @@ fn resolve_detail_click_row_above_text_top_is_none() {
     );
 }
 
-// AC4 / TE: swapping the arm would miss — Edit and Delete variants map to distinct targets.
+// swapping the arm would miss — Edit and Delete variants map to distinct targets.
 #[test]
 fn resolve_detail_click_edit_and_delete_map_to_distinct_targets() {
     let m_edit = hit_test_model(
@@ -7490,7 +7441,7 @@ fn resolve_detail_click_edit_and_delete_map_to_distinct_targets() {
     );
 }
 
-// AC4: is_row_target predicate — OpenAsset returns true, all others return false.
+// is_row_target predicate — OpenAsset returns true, all others return false.
 #[test]
 fn affordance_kind_is_row_target_only_for_open_asset() {
     assert!(
@@ -7510,8 +7461,6 @@ fn affordance_kind_is_row_target_only_for_open_asset() {
         "OpenUrl must NOT be a row target"
     );
 }
-
-// ── Image viewer overlay lifecycle tests ──────────────
 
 use crate::tui::model::{ImageAssetRef, ImageStatus};
 
@@ -7542,7 +7491,7 @@ fn extract_image_viewer(model: &Model) -> Option<(ImageAssetRef, ImageStatus)> {
     }
 }
 
-// A1: applying DetailClickTarget::ViewImage(asset) sets overlay=ImageViewer{Loading}
+// A1: applying DetailClickTarget::ViewImage(asset) sets the overlay to the image viewer in its loading state
 // and emits Cmd::LoadImage{asset}.
 #[test]
 fn view_image_click_target_opens_viewer_loading_and_emits_load_image() {
@@ -7668,8 +7617,6 @@ fn q_still_quits_when_no_overlay_open() {
     let (m2, _) = update(m, Msg::Quit);
     assert!(m2.should_quit, "q must quit when no overlay is open");
 }
-
-// ── Hours-report modal ────────────────────────────────────────────────────────
 
 fn report_header() -> Header {
     Header {
@@ -8055,8 +8002,6 @@ fn report_modal_close_clears_the_form_from_any_status() {
         assert!(cmds.is_empty());
     }
 }
-
-// ── Hours-report modal: export outcome mapping and pointer isolation ─────────
 
 #[test]
 fn report_outcome_ok_carries_the_saved_path_and_total() {
@@ -8843,8 +8788,6 @@ fn mine_list_bucket_layout_moves_selection_across_buckets_on_tasks_only() {
         assert_eq!(mine_tasks_of(&model).1, 3);
     }
 }
-
-// ── Task attachment download from the detail ─────────────────────────────────
 
 use crate::tui::model::{DownloadOutcome, DownloadState};
 

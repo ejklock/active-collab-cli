@@ -898,7 +898,7 @@ fn detail_click_does_not_change_state_or_quit() {
     }
 }
 
-// R6c: AC1 — single-flight guard drops refresh while loading is true
+// single-flight guard drops refresh while loading is true
 #[test]
 fn refresh_while_detail_loading_is_dropped() {
     let m = loading_detail_model();
@@ -930,7 +930,7 @@ fn refresh_while_projects_loading_is_dropped() {
     assert!(!m.should_quit);
 }
 
-// R6c: AC2 — refresh when idle emits the correct Cmd and sets loading=true + offset=0
+// refresh when idle emits the correct Cmd and sets loading=true + offset=0
 #[test]
 fn refresh_on_idle_detail_emits_load_detail_refresh_true() {
     let m = detail_model(10, 5);
@@ -979,7 +979,7 @@ fn refresh_on_idle_tasks_emits_load_tasks_by_project() {
     assert!(!m.should_quit);
 }
 
-// R6c: AC3 — cross-screen safety matrix: Detail mouse/scroll/click-below-last never quit
+// cross-screen safety matrix: Detail mouse/scroll/click-below-last never quit
 #[test]
 fn detail_wheel_scroll_never_sets_should_quit() {
     let m = detail_model(3, 2);

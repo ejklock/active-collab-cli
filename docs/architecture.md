@@ -500,4 +500,10 @@ idempotent `setup add`), not a token refresh; there is no in-app re-auth modal.
 
 ## Quality gates
 
-The Rust crate enforces a comment policy via the `comment_policy` integration test (`tests/comment_policy.rs`), run as part of `cargo test`. It forbids banner/divider comments (e.g. `// ----`, `// === Section ===`, box-drawing chars) and commented-out Rust code, while allowing doc comments (`///`, `//!`) and ordinary prose why-comments that explain non-obvious intent.
+The Rust crate enforces a comment policy via the `comment_policy` integration test (`tests/comment_policy.rs`), run as part of `cargo test`. It scans every `.rs` file under three roots, `src/`, `tests/` and `examples/`, and applies three rules to `//`, `///` and `//!` comments:
+
+- **Banners:** a divider run (`// ----`, `// === Section ===`), a run of three or more box-drawing glyphs (`// ── Section ──`), or a comment made mostly of them. Prose that names one glyph (`the │ border`) and a bare `//` between two comment lines are allowed.
+- **Commented-out code:** a comment that reads as Rust code (`// let x = 1;`, `// return x;`).
+- **Artifact citations:** a record and number (`ADR 0012`, `issue #45`), a numberless `the ADR/BDR/PRD`, a criterion id `AC4`, a scenario id `Sc.8`, `slice 3`, or a task id such as `ek-0061`.
+
+`/* */` block comments get the citation rule only. Doc comments and ordinary prose why-comments that explain non-obvious intent are allowed. The gate and the translation policy (`tests/i18n_policy.rs`, which forbids `t(&format!(...))`) read source through one lexer in `tests/common/mod.rs`, so comment markers inside strings, raw strings and char literals and after lifetime ticks are read correctly.

@@ -1002,7 +1002,7 @@ async fn assert_no_project_fetches(server: &wiremock::MockServer, project_id: i6
     assert!(hits.is_empty(), "{context}: got {hits:?}");
 }
 
-// D1a-A5 / AC2: on a cache miss, when the server names the project, load_task_core
+// on a cache miss, when the server names the project, load_task_core
 // resolves the name over the network and issues exactly one request.
 #[tokio::test]
 async fn load_task_core_resolves_project_name_on_cache_miss() {
@@ -1046,7 +1046,7 @@ async fn load_task_core_resolves_project_name_on_cache_miss() {
     server.verify().await;
 }
 
-// D1a-A6 / AC3: after a miss resolves and writes back, a second load_task_core for
+// after a miss resolves and writes back, a second load_task_core for
 // the same project id serves the name from cache with zero further requests.
 #[tokio::test]
 async fn load_task_core_caches_resolved_project_name() {
@@ -1103,7 +1103,7 @@ async fn load_task_core_caches_resolved_project_name() {
     server.verify().await;
 }
 
-// D1a-A4 / AC5: on a cache miss where the server yields no usable name (non-200),
+// on a cache miss where the server yields no usable name (non-200),
 // load_task_core injects the fallback → Projeto row never blank.
 #[tokio::test]
 async fn load_task_core_project_name_fallback_when_cache_miss() {
@@ -1562,8 +1562,6 @@ fn seed_project_names_cache(
         .unwrap();
 }
 
-// --- D1b: derive_asset_label ---
-
 // D1b-A1: URL with query tail → host label
 #[test]
 fn derive_asset_label_query_tail_url_yields_host() {
@@ -1891,8 +1889,6 @@ async fn tasks_by_project_always_fetches_open_tasks() {
     server.verify().await;
 }
 
-// --- extract_assets (moved from render domain to controller domain) ---
-
 #[test]
 fn extract_assets_from_body_html() {
     let task = serde_json::json!({
@@ -1940,8 +1936,6 @@ fn extract_assets_empty_when_no_body_or_attachments() {
     assert!(assets.is_empty());
 }
 
-// --- D2d-i: attach_project_names ---
-
 fn make_mine_row(instance: &str, project_id: i64, task_id: i64) -> crate::render::MineTableRow {
     crate::render::MineTableRow {
         instance: instance.to_owned(),
@@ -1957,7 +1951,7 @@ fn make_mine_row(instance: &str, project_id: i64, task_id: i64) -> crate::render
     }
 }
 
-// D2d-i AC1: warm cache → Some(name) for a known project_id.
+// warm cache → Some(name) for a known project_id.
 #[test]
 fn attach_project_names_warm_cache_resolves_name() {
     let (_dir, db_path) = make_db_path();
@@ -1975,7 +1969,7 @@ fn attach_project_names_warm_cache_resolves_name() {
     );
 }
 
-// D2d-i AC1 (cold path): cold cache → project_name is None.
+// cold cache → project_name is None.
 #[test]
 fn attach_project_names_cold_cache_yields_none() {
     let (_dir, db_path) = make_db_path();
@@ -1989,7 +1983,7 @@ fn attach_project_names_cold_cache_yields_none() {
     );
 }
 
-// D2d-i AC1 (absent id): project_id present in warm cache but this id is not in the map → None.
+// project_id present in warm cache but this id is not in the map → None.
 #[test]
 fn attach_project_names_absent_id_in_warm_cache_yields_none() {
     let (_dir, db_path) = make_db_path();
@@ -2006,7 +2000,7 @@ fn attach_project_names_absent_id_in_warm_cache_yields_none() {
     );
 }
 
-// D2d-i AC2: per-instance isolation — project_id cached under instance A must NOT
+// per-instance isolation — project_id cached under instance A must NOT
 // resolve for a row on instance B.
 #[test]
 fn attach_project_names_cross_instance_isolation() {
@@ -2049,8 +2043,6 @@ fn attach_project_names_memoises_per_instance_read() {
     assert_eq!(result[0].project_name.as_deref(), Some("Project One"));
     assert_eq!(result[1].project_name.as_deref(), Some("Project Two"));
 }
-
-// --- ek-0061 S1: downloadable_assets ---
 
 #[test]
 fn downloadable_assets_includes_attachments_and_inline_images_only() {
@@ -2129,8 +2121,6 @@ fn downloadable_assets_empty_task_yields_empty_set() {
     assert!(assets.is_empty());
 }
 
-// --- sanitize_attachment_filename ---
-
 #[test]
 fn sanitize_attachment_filename_keeps_safe_name_unchanged() {
     assert_eq!(sanitize_attachment_filename("report.pdf", 1), "report.pdf");
@@ -2197,16 +2187,12 @@ fn sanitize_attachment_filename_trailing_slash_collapses_to_basename() {
     assert_eq!(sanitize_attachment_filename("report.pdf/", 1), "report.pdf");
 }
 
-// --- default_attachments_dir ---
-
 #[test]
 fn default_attachments_dir_matches_temp_dir_formula() {
     let result = default_attachments_dir(42, 99);
     let expected = std::env::temp_dir().join("ac-attachments").join("42-99");
     assert_eq!(result, expected);
 }
-
-// --- contained_write_path (write-containment defense in depth) ---
 
 #[test]
 fn contained_write_path_rejects_embedded_separator() {
@@ -2244,8 +2230,6 @@ fn contained_write_path_rejects_symlink_escape() {
         "a pre-existing symlink escaping dest_dir must be rejected, not resolved outside it"
     );
 }
-
-// --- download_task_attachments ---
 
 fn make_download_client(name: &str, base_url: &str) -> ActiveCollabClient {
     ActiveCollabClient::new(make_instance(name, base_url, Some(1)), make_http())
