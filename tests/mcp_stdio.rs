@@ -11,6 +11,11 @@ use tempfile::TempDir;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
+#[path = "support/mock_collab.rs"]
+mod mock_collab;
+
+use mock_collab::{mount_routes, Fixture, SeedTask, COMMENT_TEXT, TASK_LISTS};
+
 type Client = RunningService<RoleClient, ()>;
 
 struct Env {
@@ -111,14 +116,6 @@ async fn ok_text(client: &Client, tool: &'static str, args: Value) -> String {
     text_of(&result)
 }
 
-async fn mount_json(server: &MockServer, verb: &str, route: &str, status: u16, body: Value) {
-    Mock::given(method(verb))
-        .and(path(route))
-        .respond_with(ResponseTemplate::new(status).set_body_json(body))
-        .mount(server)
-        .await;
-}
-
 async fn mount_status(server: &MockServer, route: &str, status: u16) {
     Mock::given(method("GET"))
         .and(path(route))
@@ -127,96 +124,22 @@ async fn mount_status(server: &MockServer, route: &str, status: u16) {
         .await;
 }
 
-async fn mount_api(server: &MockServer, user_id: i64, task_title: &str) {
-    mount_json(
-        server,
-        "GET",
-        "/api/v1/projects/10/tasks/99",
-        200,
-        json!({
-            "single": { "id": 99, "name": task_title, "project_id": 10, "task_number": 7 },
-            "tracked_time": 3.5,
-            "comments": [{ "id": 1, "body": "<p>first comment</p>", "created_by_id": 42 }]
-        }),
-    )
-    .await;
-    mount_json(
-        server,
-        "GET",
-        "/api/v1/users",
-        200,
-        json!([{ "id": 42, "first_name": "Ada", "last_name": "Lovelace", "email": "ada@example.com" }]),
-    )
-    .await;
-    mount_json(
-        server,
-        "GET",
-        &format!("/api/v1/users/{user_id}/tasks"),
-        200,
-        json!({ "tasks": [
-            { "id": 99, "name": task_title, "project_id": 10, "task_number": 7,
-              "is_completed": false, "is_trashed": false }
-        ] }),
-    )
-    .await;
-    mount_json(
-        server,
-        "POST",
-        "/api/v1/comments/task/99",
-        200,
-        json!({ "single": { "id": 555 } }),
-    )
-    .await;
-    mount_json(
-        server,
-        "GET",
-        "/api/v1/job-types",
-        200,
-        json!([{ "id": 3, "name": "Development", "is_default": true }]),
-    )
-    .await;
-    mount_json(
-        server,
-        "POST",
-        "/api/v1/projects/10/time-records",
-        200,
-        json!({ "single": { "id": 777 } }),
-    )
-    .await;
-    mount_json(
-        server,
-        "PUT",
-        "/api/v1/complete/task/99",
-        200,
-        json!({ "single": { "id": 99 } }),
-    )
-    .await;
-    mount_json(
-        server,
-        "GET",
-        "/api/v1/projects/10/task-lists",
-        200,
-        json!([{ "id": 5, "name": "In progress" }, { "id": 6, "name": "Revisão" }]),
-    )
-    .await;
-    mount_json(
-        server,
-        "PUT",
-        "/api/v1/projects/10/tasks/99",
-        200,
-        json!({ "single": { "id": 99 } }),
-    )
-    .await;
-    mount_json(
-        server,
-        "GET",
-        &format!("/api/v1/users/{user_id}/time-records/filtered-by-date"),
-        200,
-        json!({ "time_records": [] }),
-    )
-    .await;
+async fn mount_seeded(server: &MockServer, fixture: &Fixture) {
+    mount_routes(server, fixture, None).await;
     mount_status(server, "/api/v1/projects/10/tasks/404", 404).await;
     mount_status(server, "/api/v1/projects/10/tasks/401", 401).await;
+}
+
+fn report_task() -> SeedTask {
+    Fixture::seeded().tasks.remove(0)
+}
+
+fn offsite_task() -> SeedTask {
+    Fixture::seeded().tasks.remove(2)
+}
+
+fn reference(task: &SeedTask) -> String {
+    format!("{}/{}", task.project_id, task.id)
 }
 
 fn operation_schemas(tool: &Tool) -> Vec<Value> {
@@ -268,34 +191,6 @@ fn expected_operations(tool: &str) -> Vec<(&'static str, BTreeSet<String>)> {
         ],
         other => panic!("unexpected tool {other}"),
     }
-}
-
-async fn mount_task_with_attachments(server: &MockServer) {
-    let url = |name: &str| format!("{}/files/{name}", server.uri());
-    mount_json(
-        server,
-        "GET",
-        "/api/v1/projects/10/tasks/99",
-        200,
-        json!({
-            "single": {
-                "id": 99, "name": "Task with files", "project_id": 10, "task_number": 7,
-                "attachments": [
-                    { "name": "good.txt", "url": url("good.txt") },
-                    { "name": "bad.txt", "url": url("bad.txt") }
-                ]
-            },
-            "tracked_time": 0,
-            "comments": []
-        }),
-    )
-    .await;
-    Mock::given(method("GET"))
-        .and(path("/files/good.txt"))
-        .respond_with(ResponseTemplate::new(200).set_body_bytes(b"mocked bytes".to_vec()))
-        .mount(server)
-        .await;
-    mount_status(server, "/files/bad.txt", 500).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -376,54 +271,57 @@ async fn lists_three_tools_with_annotations_and_operation_unions() {
 #[tokio::test(flavor = "multi_thread")]
 async fn each_operation_matches_the_json_command() {
     let server = MockServer::start().await;
-    mount_api(&server, 42, "Fetched task").await;
-    let env = Env::new(&[("alpha", &server, 42)]);
+    let task = report_task();
+    let target = reference(&task);
+    let target = target.as_str();
+    mount_seeded(&server, &Fixture::seeded()).await;
+    let env = Env::new(&[("alpha", &server, Fixture::seeded().user_id)]);
     let client = env.connect().await;
 
     let get = ok_text(
         &client,
         "ac_read",
-        json!({ "operation": "get", "ref": "10/99", "refresh": true }),
+        json!({ "operation": "get", "ref": target, "refresh": true }),
     )
     .await;
-    assert_eq!(get, env.cli(&["get", "10/99", "--json", "--refresh"]));
-    assert!(get.contains("first comment"));
+    assert_eq!(get, env.cli(&["get", target, "--json", "--refresh"]));
+    assert!(get.contains(COMMENT_TEXT));
 
     let no_comments = ok_text(
         &client,
         "ac_read",
-        json!({ "operation": "get", "ref": "10/99", "no_comments": true, "refresh": true }),
+        json!({ "operation": "get", "ref": target, "no_comments": true, "refresh": true }),
     )
     .await;
     assert_eq!(
         no_comments,
-        env.cli(&["get", "10/99", "--json", "--no-comments", "--refresh"])
+        env.cli(&["get", target, "--json", "--no-comments", "--refresh"])
     );
-    assert!(!no_comments.contains("first comment"));
+    assert!(!no_comments.contains(COMMENT_TEXT));
 
     let current = ok_text(
         &client,
         "ac_read",
-        json!({ "operation": "current", "branch": "feature/10-99" }),
+        json!({ "operation": "current", "branch": format!("feature/{}-{}", task.project_id, task.id) }),
     )
     .await;
-    assert_eq!(current, env.cli(&["get", "10/99", "--json"]));
+    assert_eq!(current, env.cli(&["get", target, "--json"]));
 
     let comment = ok_text(
         &client,
         "ac_write",
-        json!({ "operation": "comment", "ref": "10/99", "body": "hello" }),
+        json!({ "operation": "comment", "ref": target, "body": "hello" }),
     )
     .await;
     assert_eq!(
         comment,
-        env.cli(&["comment", "10/99", "-m", "hello", "--json"])
+        env.cli(&["comment", target, "-m", "hello", "--json"])
     );
 
     let log_time = ok_text(
         &client,
         "ac_write",
-        json!({ "operation": "log_time", "ref": "10/99", "hours": 1.5, "date": "2026-11-01", "summary": "work" }),
+        json!({ "operation": "log_time", "ref": target, "hours": 1.5, "date": "2026-11-01", "summary": "work" }),
     )
     .await;
     assert_eq!(
@@ -431,7 +329,7 @@ async fn each_operation_matches_the_json_command() {
         env.cli(&[
             "time",
             "log",
-            "10/99",
+            target,
             "--hours",
             "1.5",
             "--date",
@@ -445,36 +343,46 @@ async fn each_operation_matches_the_json_command() {
     let status_only = ok_text(
         &client,
         "ac_write",
-        json!({ "operation": "set_task", "ref": "10/99", "status": "done" }),
+        json!({ "operation": "set_task", "ref": target, "status": "done" }),
     )
     .await;
     assert_eq!(
         status_only,
-        env.cli(&["task", "set", "10/99", "--status", "done", "--json"])
+        env.cli(&["task", "set", target, "--status", "done", "--json"])
     );
 
     let estimate_only = ok_text(
         &client,
         "ac_write",
-        json!({ "operation": "set_task", "ref": "10/99", "estimate": 2.5 }),
+        json!({ "operation": "set_task", "ref": target, "estimate": 2.5 }),
     )
     .await;
     assert_eq!(
         estimate_only,
-        env.cli(&["task", "set", "10/99", "--estimate", "2.5", "--json"])
+        env.cli(&["task", "set", target, "--estimate", "2.5", "--json"])
     );
 
+    let (review_id, review) = TASK_LISTS[2];
     let list_move = ok_text(
         &client,
         "ac_write",
-        json!({ "operation": "set_task", "ref": "10/99", "list": "revisão" }),
+        json!({ "operation": "set_task", "ref": target, "list": review.to_lowercase() }),
     )
     .await;
     assert_eq!(
         list_move,
-        env.cli(&["task", "set", "10/99", "--list", "revisão", "--json"])
+        env.cli(&[
+            "task",
+            "set",
+            target,
+            "--list",
+            &review.to_lowercase(),
+            "--json"
+        ])
     );
-    assert!(list_move.contains(r#""task_list_id":6,"task_list":"Revisão""#));
+    assert!(list_move.contains(&format!(
+        r#""task_list_id":{review_id},"task_list":"{review}""#
+    )));
 
     let report = ok_text(
         &client,
@@ -494,28 +402,24 @@ async fn each_operation_matches_the_json_command() {
 #[tokio::test(flavor = "multi_thread")]
 async fn set_task_with_an_unknown_list_sends_no_write() {
     let server = MockServer::start().await;
-    mount_json(
-        &server,
-        "GET",
-        "/api/v1/projects/10/task-lists",
-        200,
-        json!([{ "id": 5, "name": "In progress" }]),
-    )
-    .await;
-    let env = Env::new(&[("alpha", &server, 42)]);
+    let task = report_task();
+    let target = reference(&task);
+    let target = target.as_str();
+    mount_seeded(&server, &Fixture::seeded()).await;
+    let env = Env::new(&[("alpha", &server, Fixture::seeded().user_id)]);
     let client = env.connect().await;
 
     let result = call(
         &client,
         "ac_write",
-        json!({ "operation": "set_task", "ref": "10/99", "list": "Backlog" }),
+        json!({ "operation": "set_task", "ref": target, "list": "Backlog" }),
     )
     .await
     .unwrap();
 
     assert_eq!(result.is_error, Some(true));
     assert!(
-        text_of(&result).contains("5 In progress"),
+        text_of(&result).contains(&format!("{} {}", TASK_LISTS[1].0, TASK_LISTS[1].1)),
         "{}",
         text_of(&result)
     );
@@ -534,14 +438,22 @@ async fn set_task_with_an_unknown_list_sends_no_write() {
 async fn mine_matches_the_json_command_across_instances_and_with_instance_set() {
     let alpha = MockServer::start().await;
     let beta = MockServer::start().await;
-    mount_api(&alpha, 42, "Alpha task").await;
-    mount_api(&beta, 7, "Beta task").await;
-    let env = Env::new(&[("alpha", &alpha, 42), ("beta", &beta, 7)]);
+    let alpha_fixture = Fixture::seeded();
+    let beta_fixture = Fixture {
+        user_id: alpha_fixture.user_id + 1,
+        ..Fixture::seeded()
+    };
+    mount_seeded(&alpha, &alpha_fixture).await;
+    mount_seeded(&beta, &beta_fixture).await;
+    let env = Env::new(&[
+        ("alpha", &alpha, alpha_fixture.user_id),
+        ("beta", &beta, beta_fixture.user_id),
+    ]);
     let client = env.connect().await;
 
     let both = ok_text(&client, "ac_read", json!({ "operation": "mine" })).await;
     assert_eq!(both, env.cli(&["mine", "--json"]));
-    assert!(both.contains("Alpha task") && both.contains("Beta task"));
+    assert!(both.contains(r#""instance":"alpha""#) && both.contains(r#""instance":"beta""#));
 
     let only_beta = ok_text(
         &client,
@@ -553,15 +465,20 @@ async fn mine_matches_the_json_command_across_instances_and_with_instance_set() 
         only_beta,
         env.cli(&["mine", "--instance", "beta", "--json"])
     );
-    assert!(only_beta.contains("Beta task") && !only_beta.contains("Alpha task"));
+    assert!(
+        only_beta.contains(r#""instance":"beta""#) && !only_beta.contains(r#""instance":"alpha""#)
+    );
     client.cancel().await.unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn reports_core_failures_as_tool_errors_and_keeps_serving() {
     let server = MockServer::start().await;
-    mount_api(&server, 42, "Fetched task").await;
-    let env = Env::new(&[("alpha", &server, 42)]);
+    let task = report_task();
+    let target = reference(&task);
+    let target = target.as_str();
+    mount_seeded(&server, &Fixture::seeded()).await;
+    let env = Env::new(&[("alpha", &server, Fixture::seeded().user_id)]);
     let client = env.connect().await;
 
     let failures = [
@@ -582,27 +499,27 @@ async fn reports_core_failures_as_tool_errors_and_keeps_serving() {
         ),
         (
             "ac_read",
-            json!({ "operation": "get", "ref": "10/99", "instance": "ghost" }),
+            json!({ "operation": "get", "ref": target, "instance": "ghost" }),
             "instance 'ghost' not found",
         ),
         (
             "ac_write",
-            json!({ "operation": "set_task", "ref": "10/99" }),
+            json!({ "operation": "set_task", "ref": target }),
             "at least one of",
         ),
         (
             "ac_write",
-            json!({ "operation": "set_task", "ref": "10/99", "list": "Backlog" }),
+            json!({ "operation": "set_task", "ref": target, "list": "Backlog" }),
             "no task list matches",
         ),
         (
             "ac_write",
-            json!({ "operation": "log_time", "ref": "10/99", "hours": 0 }),
+            json!({ "operation": "log_time", "ref": target, "hours": 0 }),
             "hours must be a positive number",
         ),
         (
             "ac_write",
-            json!({ "operation": "comment", "ref": "10/99", "body": "   " }),
+            json!({ "operation": "comment", "ref": target, "body": "   " }),
             "no comment body",
         ),
     ];
@@ -617,10 +534,10 @@ async fn reports_core_failures_as_tool_errors_and_keeps_serving() {
         let next = ok_text(
             &client,
             "ac_read",
-            json!({ "operation": "get", "ref": "10/99" }),
+            json!({ "operation": "get", "ref": target }),
         )
         .await;
-        assert!(next.contains("Fetched task"));
+        assert!(next.contains(task.name));
     }
 
     let protocol_failures = [
@@ -628,7 +545,7 @@ async fn reports_core_failures_as_tool_errors_and_keeps_serving() {
         ("ac_read", json!({ "operation": "get" })),
         (
             "ac_write",
-            json!({ "operation": "log_time", "ref": "10/99" }),
+            json!({ "operation": "log_time", "ref": target }),
         ),
     ];
     for (tool, args) in protocol_failures {
@@ -641,10 +558,10 @@ async fn reports_core_failures_as_tool_errors_and_keeps_serving() {
         let next = ok_text(
             &client,
             "ac_read",
-            json!({ "operation": "get", "ref": "10/99" }),
+            json!({ "operation": "get", "ref": target }),
         )
         .await;
-        assert!(next.contains("Fetched task"));
+        assert!(next.contains(task.name));
     }
     client.cancel().await.unwrap();
 }
@@ -652,8 +569,12 @@ async fn reports_core_failures_as_tool_errors_and_keeps_serving() {
 #[tokio::test(flavor = "multi_thread")]
 async fn download_tool_matches_the_cli_and_writes_the_files() {
     let server = MockServer::start().await;
-    mount_task_with_attachments(&server).await;
-    let env = Env::new(&[("alpha", &server, 42)]);
+    let task = offsite_task();
+    let target = reference(&task);
+    let target = target.as_str();
+    let (good, bad) = (&task.attachments[0], &task.attachments[1]);
+    mount_seeded(&server, &Fixture::seeded()).await;
+    let env = Env::new(&[("alpha", &server, Fixture::seeded().user_id)]);
     let client = env.connect().await;
     let dest = env.dir.path().join("downloads");
     let dest_arg = dest.to_str().unwrap();
@@ -661,14 +582,14 @@ async fn download_tool_matches_the_cli_and_writes_the_files() {
     let text = ok_text(
         &client,
         "ac_download_attachments",
-        json!({ "ref": "10/99", "attachments_dir": dest_arg }),
+        json!({ "ref": target, "attachments_dir": dest_arg }),
     )
     .await;
     assert_eq!(
         text,
         env.cli(&[
             "get",
-            "10/99",
+            target,
             "--download-attachments",
             "--attachments-dir",
             dest_arg,
@@ -676,10 +597,10 @@ async fn download_tool_matches_the_cli_and_writes_the_files() {
         ])
     );
     assert_eq!(
-        std::fs::read(dest.join("good.txt")).unwrap(),
-        b"mocked bytes"
+        std::fs::read(dest.join(good.name)).unwrap(),
+        good.bytes.unwrap()
     );
-    assert!(text.contains("bad.txt"), "{text}");
+    assert!(text.contains(bad.name), "{text}");
     assert!(text.contains("HTTP 500"), "{text}");
 
     let default_dir = env
@@ -687,27 +608,22 @@ async fn download_tool_matches_the_cli_and_writes_the_files() {
         .path()
         .join("tmp")
         .join("ac-attachments")
-        .join("10-99");
-    let default_text = ok_text(
-        &client,
-        "ac_download_attachments",
-        json!({ "ref": "10/99" }),
-    )
-    .await;
+        .join(format!("{}-{}", task.project_id, task.id));
+    let default_text = ok_text(&client, "ac_download_attachments", json!({ "ref": target })).await;
     assert_eq!(
         default_text,
-        env.cli(&["get", "10/99", "--download-attachments", "--json"])
+        env.cli(&["get", target, "--download-attachments", "--json"])
     );
     assert!(
-        default_text.contains(default_dir.join("good.txt").to_str().unwrap()),
+        default_text.contains(default_dir.join(good.name).to_str().unwrap()),
         "{default_text}"
     );
-    assert!(default_dir.join("good.txt").is_file());
+    assert!(default_dir.join(good.name).is_file());
 
     let ghost = call(
         &client,
         "ac_download_attachments",
-        json!({ "ref": "10/99", "instance": "ghost" }),
+        json!({ "ref": target, "instance": "ghost" }),
     )
     .await
     .unwrap();
@@ -719,18 +635,21 @@ async fn download_tool_matches_the_cli_and_writes_the_files() {
 #[tokio::test(flavor = "multi_thread")]
 async fn download_params_are_validated_as_protocol_errors() {
     let server = MockServer::start().await;
-    mount_api(&server, 42, "Fetched task").await;
-    let env = Env::new(&[("alpha", &server, 42)]);
+    let task = report_task();
+    let target = reference(&task);
+    let target = target.as_str();
+    mount_seeded(&server, &Fixture::seeded()).await;
+    let env = Env::new(&[("alpha", &server, Fixture::seeded().user_id)]);
     let client = env.connect().await;
 
     let invalid = [
         (
             "ac_read",
-            json!({ "operation": "get", "ref": "10/99", "download_attachments": true }),
+            json!({ "operation": "get", "ref": target, "download_attachments": true }),
         ),
         (
             "ac_read",
-            json!({ "operation": "get", "ref": "10/99", "attachments_dir": "x" }),
+            json!({ "operation": "get", "ref": target, "attachments_dir": "x" }),
         ),
         ("ac_download_attachments", json!({})),
         ("ac_download_attachments", json!({ "ref": 99 })),
@@ -741,11 +660,11 @@ async fn download_params_are_validated_as_protocol_errors() {
         ),
         (
             "ac_read",
-            json!({ "operation": "get", "ref": "10/99", "foo": 1 }),
+            json!({ "operation": "get", "ref": target, "foo": 1 }),
         ),
         (
             "ac_download_attachments",
-            json!({ "ref": "10/99", "download": true }),
+            json!({ "ref": target, "download": true }),
         ),
     ];
     for (tool, args) in invalid {
@@ -759,10 +678,10 @@ async fn download_params_are_validated_as_protocol_errors() {
     let plain = ok_text(
         &client,
         "ac_read",
-        json!({ "operation": "get", "ref": "10/99", "refresh": true }),
+        json!({ "operation": "get", "ref": target, "refresh": true }),
     )
     .await;
-    assert_eq!(plain, env.cli(&["get", "10/99", "--json", "--refresh"]));
+    assert_eq!(plain, env.cli(&["get", target, "--json", "--refresh"]));
     client.cancel().await.unwrap();
 }
 
@@ -850,33 +769,36 @@ impl RawSession {
 #[tokio::test(flavor = "multi_thread")]
 async fn stdout_carries_only_protocol_frames() {
     let server = MockServer::start().await;
-    mount_api(&server, 42, "Fetched task").await;
-    let env = Env::new(&[("alpha", &server, 42)]);
+    let task = report_task();
+    let target = reference(&task);
+    let target = target.as_str();
+    mount_seeded(&server, &Fixture::seeded()).await;
+    let env = Env::new(&[("alpha", &server, Fixture::seeded().user_id)]);
     let mut session = RawSession::start(&env);
 
     let calls = [
-        ("ac_read", json!({ "operation": "get", "ref": "10/99" })),
+        ("ac_read", json!({ "operation": "get", "ref": target })),
         ("ac_read", json!({ "operation": "get", "ref": "10/404" })),
         (
             "ac_read",
-            json!({ "operation": "current", "branch": "feature/10-99" }),
+            json!({ "operation": "current", "branch": format!("feature/{}-{}", task.project_id, task.id) }),
         ),
         ("ac_read", json!({ "operation": "mine" })),
         (
             "ac_write",
-            json!({ "operation": "comment", "ref": "10/99", "body": "hi" }),
+            json!({ "operation": "comment", "ref": target, "body": "hi" }),
         ),
         (
             "ac_write",
-            json!({ "operation": "comment", "ref": "10/99", "body": "" }),
+            json!({ "operation": "comment", "ref": target, "body": "" }),
         ),
         (
             "ac_write",
-            json!({ "operation": "log_time", "ref": "10/99", "hours": 1 }),
+            json!({ "operation": "log_time", "ref": target, "hours": 1 }),
         ),
         (
             "ac_write",
-            json!({ "operation": "set_task", "ref": "10/99", "status": "done" }),
+            json!({ "operation": "set_task", "ref": target, "status": "done" }),
         ),
         (
             "ac_write",
