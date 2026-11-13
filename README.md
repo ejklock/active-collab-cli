@@ -460,5 +460,10 @@ docker compose run --rm dev cargo clippy -- -D warnings
 docker compose run --rm dev cargo fmt --check
 ```
 
+The Rust version is pinned in `rust-toolchain.toml`; the Docker images and both
+workflows read it from there. To raise it, edit that file, rebuild the image
+with `docker compose build`, and fix whatever the new clippy lints report, all
+in one change.
+
 The TUI core (`src/app.rs` `update`) is a pure function with no terminal or
 network dependency — it is unit-tested directly without a TTY.

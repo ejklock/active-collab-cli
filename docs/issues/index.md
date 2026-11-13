@@ -31,7 +31,6 @@ TUI/UX work (V/R/ARCH slices), tracing to
 * [0076 — Download comment attachments in the CLI and from a TUI key](0076-download-comment-attachments-in-the-cli-and-from-a-tui-key.md) - in-progress
 * [0077 — Move a task between task lists from CLI, TUI and MCP](0077-move-a-task-between-task-lists-from-cli-tui-and-mcp.md) - in-progress
 * [0088 — The mock ActiveCollab fixtures are the single source of the automated end-to-end tests](0088-the-mock-activecollab-fixtures-are-the-single-source-of-the-automated-end-to-end-tests.md) - open
-* [0089 — Pin the Rust toolchain and raise it deliberately](0089-pin-the-rust-toolchain-and-raise-it-deliberately.md) - open
 
 ## Closed
 
@@ -97,3 +96,4 @@ TUI/UX work (V/R/ARCH slices), tracing to
 * [0085 — A --no-comments read leaves a cache entry that hides comments from later reads](0085-a-no-comments-read-leaves-a-cache-entry-that-hides-comments-from-later-reads.md) - closed
 * [0086 — The comment gate applies every rule to tests and rejects every artifact citation](0086-the-comment-gate-applies-every-rule-to-tests-and-rejects-every-artifact-citation.md) - closed
 * [0087 — Remove the TUI leftovers: redundant overlay-close reset, stale dead-code allows, unreachable footer hint branches](0087-remove-the-tui-leftovers-redundant-overlay-close-reset-stale-dead-code-allows-unreachable-footer-hint-branches.md) - closed
+* [0089 — Pin the Rust toolchain and raise it deliberately](0089-pin-the-rust-toolchain-and-raise-it-deliberately.md) - closed

@@ -31,6 +31,7 @@ service mounts `./` and sets `working_dir` to `/app`. Therefore:
      rustc warnings — not clippy-specific lints — so test-code clippy denials
      slip past the local gate and fail CI.)
    - `docker compose run --rm dev cargo fmt --check`
+   - `docker compose run --rm dev cargo llvm-cov --lcov --output-path coverage/lcov.info -- --test-threads=1` (writes `coverage/lcov.info` from the full suite; run `se-gates qg coverage-receipt` right after it so `se-gates check` reads the fresh coverage; an image built before this change needs `docker compose build dev` first)
    - `docker compose build` / `docker compose run --rm build` (release)
 2. **NEVER prefix a command with `cd`.** The shell's working directory is already
    the repo root and persists between commands. `cd` (especially combined with a
