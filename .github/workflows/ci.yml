@@ -11,6 +11,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-node@v4
+        with:
+          # node --test runs the OpenCode plugin's .ts without a build, which needs type stripping (Node 22.18+).
+          node-version: 24
+
+      - name: Skill copies, names and versions
+        run: |
+          sh scripts/test-check-skill-stubs.sh
+          sh scripts/check-skill-stubs.sh
+          node --test packages/opencode/
+
       - name: Install the pinned Rust toolchain
         run: rustup toolchain install
 
