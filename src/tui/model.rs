@@ -2241,13 +2241,10 @@ fn handle_quit(mut model: Model) -> Model {
 /// viewer's Esc/q, a picker's cancel).
 fn close_detail_overlay(mut model: Model) -> Model {
     if let Some(Screen::Detail {
-        ref mut overlay,
-        ref mut rendered_width,
-        ..
+        ref mut overlay, ..
     }) = model.top_mut()
     {
         *overlay = DetailOverlay::None;
-        *rendered_width = usize::MAX;
     }
     model
 }

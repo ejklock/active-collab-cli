@@ -10068,3 +10068,71 @@ fn status_confirm_overlay_swallows_q_instead_of_quitting() {
     );
     assert!(msg.is_none(), "q must not reach the browse map's quit");
 }
+
+fn frame_after_shell_reflow(model: &mut Model) -> String {
+    use crate::tui::view::view;
+    use ratatui::{backend::TestBackend, Terminal};
+
+    model.reflow_detail(78);
+    let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+    let mut targets = Vec::new();
+    let mut modal_targets = Vec::new();
+    terminal
+        .draw(|f| view(model, f, &mut targets, &mut modal_targets))
+        .unwrap();
+    let buf = terminal.backend().buffer().clone();
+    let area = buf.area();
+    let mut out = String::new();
+    for y in 0..area.height {
+        for x in 0..area.width {
+            out.push_str(buf.cell((x, y)).unwrap().symbol());
+        }
+        out.push('\n');
+    }
+    out
+}
+
+fn overlay_close_model() -> Model {
+    let task = serde_json::json!({
+        "name": "Closing overlays keeps the body",
+        "id": 42,
+        "project_id": 10,
+        "is_completed": false
+    });
+    detail_model_with_task_and_users("inst", 10, 42, task, users_two())
+}
+
+#[test]
+fn closing_the_assignee_picker_overlay_shows_the_same_detail_body_on_the_next_frame() {
+    let mut m = overlay_close_model();
+    let before = frame_after_shell_reflow(&mut m);
+    assert!(before.contains("Closing overlays keeps the body"));
+    let mut m = update(m, Msg::AssigneePickerOpen).0;
+    let open = frame_after_shell_reflow(&mut m);
+    assert_ne!(open, before, "the picker must be visible while open");
+    let mut m = update(m, Msg::AssigneePickerCancel).0;
+    assert_eq!(frame_after_shell_reflow(&mut m), before);
+}
+
+#[test]
+fn closing_the_task_list_picker_overlay_shows_the_same_detail_body_on_the_next_frame() {
+    let mut m = overlay_close_model();
+    let before = frame_after_shell_reflow(&mut m);
+    let mut m = update(m, Msg::TaskListPickerOpen).0;
+    let open = frame_after_shell_reflow(&mut m);
+    assert_ne!(open, before, "the picker must be visible while open");
+    let mut m = update(m, Msg::TaskListPickerCancel).0;
+    assert_eq!(frame_after_shell_reflow(&mut m), before);
+}
+
+#[test]
+fn closing_the_image_viewer_overlay_shows_the_same_detail_body_on_the_next_frame() {
+    let mut m = overlay_close_model();
+    let before = frame_after_shell_reflow(&mut m);
+    let asset = image_asset("photo.png", "https://example.test/photo.png");
+    let mut m = apply_detail_click_target(m, DetailClickTarget::ViewImage(asset)).0;
+    let open = frame_after_shell_reflow(&mut m);
+    assert_ne!(open, before, "the viewer must be visible while open");
+    let mut m = update(m, Msg::Back).0;
+    assert_eq!(frame_after_shell_reflow(&mut m), before);
+}

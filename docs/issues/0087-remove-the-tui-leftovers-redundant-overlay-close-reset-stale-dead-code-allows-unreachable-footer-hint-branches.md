@@ -2,9 +2,9 @@
 type: Issue
 title: "Remove the TUI leftovers: redundant overlay-close reset, stale dead-code allows, unreachable footer hint branches"
 description: Remove the redundant rendered_width reset, the stale allow(dead_code) in theme.rs and the detail_hint branches no caller reaches, with the TUI unchanged.
-status: open
+status: closed
 labels: [tui, tech-debt]
-blocked_by: [0086]
+blocked_by: []
 timestamp: 2026-11-12T16:34:57Z
 ---
 
@@ -32,6 +32,7 @@ Excluded: any key, render or text change a user sees.
 
 - Removal is proved by behavior, not by a test of the removed line: the existing TUI suite stays green and a rendered Detail frame after closing each overlay matches the frame before the change.
 - A dead item is deleted, not kept for later; a later need brings it back from history.
+- Removing the `theme.rs` allows exposed dead `Palette` fields `border` and `info`, `theme_to_str` and `badge_style` (both used only by their own tests), and `Mode::Light`. The first four are deleted with their tests; `Mode::Light` keeps one allow with a why-comment, so the three complete light palettes stay for when a setting selects light mode (owner, 2026-11-13). Not taken: deleting light mode with its palettes; keeping every dead item behind a commented allow.
 
 ### Acceptance
 

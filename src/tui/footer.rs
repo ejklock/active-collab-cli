@@ -7,10 +7,7 @@
 
 use crate::i18n::t;
 use crate::render::{display_width, wrap_text};
-use crate::tui::model::{
-    AssigneePickerView, Compose, DownloadOutcome, DownloadState, EditStatus, EstimateForm,
-    LogTimeForm, Screen,
-};
+use crate::tui::model::{Compose, DownloadOutcome, DownloadState, Screen};
 
 /// Reformat a BRT timestamp `YYYY-MM-DDTHH:MM:SS` into `DD/MM/YYYY HH:MM`.
 /// Returns None when the input is too short or cannot be sliced at the expected offsets.
@@ -27,18 +24,6 @@ pub(crate) fn format_br_datetime(iso: &str) -> Option<String> {
     Some(format!("{}/{}/{} {}:{}", day, month, year, hour, minute))
 }
 
-/// Overlay-derived hint sources for the Detail footer's one-home suppression.
-/// Each field is `Some` only when its overlay is active AND does
-/// not already own its own in-modal hint.
-pub(crate) struct DetailHintOverlays<'a> {
-    pub(crate) compose: Option<&'a Compose>,
-    pub(crate) log_time: Option<&'a LogTimeForm>,
-    pub(crate) estimate: Option<&'a EstimateForm>,
-    pub(crate) status_confirm: Option<(bool, &'a EditStatus)>,
-    pub(crate) assignee_picker: Option<AssigneePickerView<'a>>,
-    pub(crate) confirm_delete: Option<i64>,
-}
-
 /// Footer hint for the given screen.
 ///
 /// When a compose modal is open the modal owns the compose hint.
@@ -51,50 +36,18 @@ pub(crate) fn hint_for_screen(screen: &Screen) -> String {
             comments,
             current_user_id,
             ..
-        } => {
-            // Every Detail overlay owns its own in-modal hint, so none feeds the footer.
-            let overlays = DetailHintOverlays {
-                compose: None,
-                log_time: None,
-                estimate: None,
-                status_confirm: None,
-                assignee_picker: None,
-                confirm_delete: None,
-            };
-            detail_hint(&overlays, *focused_comment, comments, *current_user_id)
-        }
+        } => detail_hint(*focused_comment, comments, *current_user_id),
         _ => t("↑/↓ navigate  Enter select  r refresh  H report  Esc/b back  q quit"),
     }
 }
 
-/// Derive the context-aware instruction hint for the Detail screen.
-///
-/// Priority order: composing/logging-time/editing-estimate
-/// beats confirming-delete beats own-comment-focused beats the browsing default.
-pub(crate) fn detail_hint(
-    overlays: &DetailHintOverlays,
+/// Derive the instruction hint for the Detail screen. Every Detail overlay owns
+/// its own in-modal hint, so the footer shows only the own-comment or browsing hint.
+fn detail_hint(
     focused_comment: Option<usize>,
     comments: &[serde_json::Value],
     current_user_id: Option<i64>,
 ) -> String {
-    if overlays.compose.is_some() {
-        return t("Ctrl+S send · Esc cancel");
-    }
-    if overlays.log_time.is_some() {
-        return t("Ctrl+S send · Tab switch field · Esc cancel");
-    }
-    if overlays.estimate.is_some() {
-        return t("Ctrl+S send · Esc cancel");
-    }
-    if overlays.status_confirm.is_some() {
-        return t("Enter/Ctrl+S confirm · Esc cancel");
-    }
-    if overlays.assignee_picker.is_some() {
-        return t("↑/↓ · j/k move · Enter/Ctrl+S confirm · Esc cancel");
-    }
-    if overlays.confirm_delete.is_some() {
-        return t("Enter/click confirm · Esc cancel");
-    }
     if is_own_comment_focused(focused_comment, comments, current_user_id) {
         return t("↑/↓ · j/k move · Ctrl+click edit/delete · c new");
     }

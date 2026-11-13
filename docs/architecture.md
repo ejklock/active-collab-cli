@@ -169,8 +169,8 @@ flowchart TD
   vertically into three regions — a one-line identity header (`app_header_style`:
   white on cyan, bold), a variable-height content area, and a footer.  The footer
   itself is **two stacked regions** ([ADR 0038](/adr/0038-detail-footer-contextual-hint-and-status-line.md)):
-  a **contextual instruction line** whose Detail-screen text changes by mode
-  (browsing / composing / confirming-delete / own-comment-focused, via `detail_hint`),
+  a **contextual instruction line** whose Detail-screen text is the browsing or
+  own-comment-focused hint (each overlay shows its own hint inside the modal),
   and a **thin status line** that surfaces one derived transient
   string (`Enviando…`, a write error, `Copiado ✓`) and is blank — collapsing the row —
   when idle.  The whole footer decision — hint selection (with the modal one-home
