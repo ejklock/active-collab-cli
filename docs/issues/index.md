@@ -91,3 +91,4 @@ TUI/UX work (V/R/ARCH slices), tracing to
 * [0079 — Paint the ac mine TUI rows before the hours requests finish](0079-paint-the-ac-mine-tui-rows-before-the-hours-requests-finish.md) - closed
 * [0080 — Move the MCP attachment download to its own ac_download_attachments tool](0080-move-the-mcp-attachment-download-to-its-own-ac-download-attachments-tool.md) - closed
 * [0081 — Concurrent cache writes fail with database is locked under WAL](0081-concurrent-cache-writes-fail-with-database-is-locked-under-wal.md) - closed
+* [0084 — Replay the live acceptance criteria as terminal walkthroughs against a mock ActiveCollab](0084-replay-the-live-acceptance-criteria-as-terminal-walkthroughs-against-a-mock-activecollab.md) - closed

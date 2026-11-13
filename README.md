@@ -399,6 +399,28 @@ ACTIVE_COLLAB_DB=/custom/path/active-collab.db ac get 665/75159
 
 ---
 
+## Terminal walkthroughs
+
+`qa/*.walkthrough.json` replay four flows (`ac mine` hours, `ac mcp` read
+through the MCP Inspector, `ac get --download-attachments`, `ac task set
+--list`) with `qa-walkthrough` against a throwaway mock
+ActiveCollab (`examples/mock_collab.rs`):
+
+```sh
+bash qa/run-walkthroughs.sh
+```
+
+The script builds `ac` and the mock natively into `target/native`, installs the
+pinned MCP Inspector (2.15.0) under `qa/.run/tools` with `npm ci` from the
+lockfile committed in `qa/tools` (the only network fetch),
+then checks and replays every walkthrough. Each walkthrough uses its own store,
+`HOME` and `TMPDIR` under `qa/.run/<name>/` and the mock's loopback address; it
+never opens `~/.config/active-collab` and never reaches your real instance. The
+script fails if that store's modification time changes, if a mock outlives the
+run, or if another replay holds `qa/.run/replay.lock`.
+
+---
+
 ## Security
 
 - The API token is stored only in the local SQLite database with directory

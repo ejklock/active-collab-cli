@@ -1,0 +1,79 @@
+{
+	"flow": "Baixar anexos de comentários com ac get",
+	"language": "pt-BR",
+	"kind": "feature",
+	"summary": "O comando ac get --download-attachments baixa o anexo de um comentário e mostra quantos arquivos foram baixados e para onde.",
+	"setup": {
+		"target": {
+			"kind": "terminal",
+			"engine": "host",
+			"terminal": {
+				"cols": 150,
+				"env": {
+					"ACTIVE_COLLAB_DB": ".run/download-attachment/ac.db",
+					"HOME": ".run/download-attachment/home",
+					"TMPDIR": ".run/download-attachment/tmp",
+					"ACTIVE_COLLAB_LANG": "en"
+				}
+			}
+		},
+		"hooks": [
+			"hooks/download-attachment.ts"
+		]
+	},
+	"scenarios": [
+		{
+			"title": "Baixar o anexo de um comentário",
+			"narration": "A tarefa 10/101 do ActiveCollab de teste tem um comentário com um arquivo anexado.",
+			"steps": [
+				{
+					"title": "Baixar com ac get",
+					"narration": "O binário ac desta ramificação baixa o anexo para a pasta temporária da execução; o final | tail -n 1 deixa só a linha de resumo.",
+					"actions": [
+						{
+							"action": "type",
+							"value": "../target/native/debug/ac get 10/101 --download-attachments | tail -n 1"
+						},
+						{
+							"action": "press",
+							"value": "Enter"
+						},
+						{
+							"action": "waitFor",
+							"target": {
+								"text": "Downloaded 1 of 1 attachment(s) to"
+							}
+						}
+					]
+				},
+				{
+					"title": "Ler o arquivo baixado",
+					"narration": "O arquivo está na pasta da execução e tem os bytes que o ActiveCollab de teste serviu.",
+					"actions": [
+						{
+							"action": "type",
+							"value": "cat .run/download-attachment/tmp/ac-attachments/10-101/report.txt"
+						},
+						{
+							"action": "press",
+							"value": "Enter"
+						},
+						{
+							"action": "waitFor",
+							"target": {
+								"text": "Quarterly report attachment served by the mock ActiveCollab."
+							}
+						}
+					]
+				}
+			]
+		}
+	],
+	"outcome": {
+		"assert": "text",
+		"target": {
+			"text": "Quarterly report attachment served by the mock ActiveCollab."
+		},
+		"expected": "Quarterly report attachment served by the mock ActiveCollab."
+	}
+}

@@ -1,0 +1,83 @@
+{
+	"flow": "Horas por tarefa em ac mine",
+	"language": "pt-BR",
+	"kind": "feature",
+	"summary": "O comando ac mine mostra, para cada tarefa aberta, a estimativa, as horas lançadas na semana e as horas lançadas no total.",
+	"setup": {
+		"target": {
+			"kind": "terminal",
+			"engine": "host",
+			"terminal": {
+				"cols": 120,
+				"env": {
+					"ACTIVE_COLLAB_DB": ".run/mine-hours/ac.db",
+					"HOME": ".run/mine-hours/home",
+					"TMPDIR": ".run/mine-hours/tmp",
+					"ACTIVE_COLLAB_LANG": "en"
+				}
+			}
+		},
+		"hooks": ["hooks/mine-hours.ts"]
+	},
+	"scenarios": [
+		{
+			"title": "Listar as tarefas com as horas",
+			"narration": "Com o ActiveCollab de teste no ar, o comando ac mine lista as tarefas abertas com estimativa, semana e total.",
+			"steps": [
+				{
+					"title": "Executar ac mine",
+					"narration": "O binário ac desta ramificação roda pelo caminho da pasta de build, nunca o ac instalado no PATH. O final | cat faz o ac mine imprimir a tabela em vez de abrir a tela interativa.",
+					"actions": [
+						{ "action": "type", "value": "../target/native/debug/ac mine | cat" },
+						{ "action": "press", "value": "Enter" },
+						{
+							"action": "waitFor",
+							"target": { "text": "Plan the team offsite" }
+						}
+					]
+				},
+				{
+					"title": "Horas na semana e antes dela",
+					"narration": "A primeira tarefa tem estimativa de 8 horas, 2,5 horas na semana e 6 no total.",
+					"actions": [
+						{
+							"action": "expect",
+							"assert": "text",
+							"target": { "text": "101        8        2.5      6        Draft the quarterly report" },
+							"expected": "101        8        2.5      6        Draft the quarterly report"
+						}
+					]
+				},
+				{
+					"title": "Horas apenas antes da semana",
+					"narration": "A segunda tarefa tem estimativa de 4 horas, nenhuma hora na semana e 3 no total.",
+					"actions": [
+						{
+							"action": "expect",
+							"assert": "text",
+							"target": { "text": "102        4        0        3        Review the vendor contract" },
+							"expected": "102        4        0        3        Review the vendor contract"
+						}
+					]
+				},
+				{
+					"title": "Sem estimativa e sem horas",
+					"narration": "A terceira tarefa não tem estimativa, então mostra um traço, e não tem horas lançadas.",
+					"actions": [
+						{
+							"action": "expect",
+							"assert": "text",
+							"target": { "text": "103        –        0        0        Plan the team offsite" },
+							"expected": "103        –        0        0        Plan the team offsite"
+						}
+					]
+				}
+			]
+		}
+	],
+	"outcome": {
+		"assert": "text",
+		"target": { "text": "No due date (3) · EST 12 · WEEK 2.5 · TOTAL 9" },
+		"expected": "No due date (3) · EST 12 · WEEK 2.5 · TOTAL 9"
+	}
+}

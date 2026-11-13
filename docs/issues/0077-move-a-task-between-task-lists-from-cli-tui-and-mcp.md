@@ -42,12 +42,14 @@ Excluded: creating, renaming or reordering task lists; moving between projects; 
 - Confirming the current list closes the picker and sends no write. Confirming another list emits the shared `Cmd::SubmitTaskEdit` with only `task_list_id` set; success refreshes the Detail from the server as the other task edits do.
 - The picker reuses the assignee picker's filtering and navigation instead of copying it; the assignee picker's behavior is unchanged. A failed lists read shows the failure in the picker. A 401 takes the existing re-authentication path and also ends the picker's loading state with the re-authentication text, so the picker never waits forever. A lists result reaching a picker that is no longer loading (already loaded, failed or reopened) is ignored. While the picker loads or after its read failed, its hint names only Esc.
 
+- The live acceptance criterion verifies against the mock ActiveCollab of [issue 0084](/issues/0084-replay-the-live-acceptance-criteria-as-terminal-walkthroughs-against-a-mock-activecollab.md) (owner, 2026-11-12): the owner's `ac` is connected to the real instance, which no check may touch. Risk accepted: the mock returns the JSON shapes `tests/mcp_stdio.rs` mounts, so a real API that diverges from them still passes the walkthrough. Not taken: the mock plus live read-only reads.
+
 ### Acceptance
 
 - AC1: `--list` resolves by id or unique name, and an unknown or ambiguous name exits 2 without a write. (`verify_by: test`)
 - AC2: the PUT carries `task_list_id` to the instance host only. (`verify_by: test`)
 - AC3: the TUI picker filters, confirms and refreshes; the transitions live in the pure update core. (`verify_by: test`)
-- AC4: the owner moves a real task between two lists on collab.base.digital and the web UI shows the new column. (`verify_by: command`)
+- AC4: against the mock ActiveCollab, `ac task set --list` moves a task to another list: the write result names the new list and the mock records the PUT, replayed by a `qa-walkthrough` terminal walkthrough. (`verify_by: command`)
 - CC: no superfluous comments, banners or commented-out code. (`verify_by: inspection`)
 
 ### Verification commands
