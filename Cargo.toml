@@ -2,6 +2,13 @@
 name = "ac"
 version = "0.12.1"
 edition = "2021"
+description = "Unofficial ActiveCollab CLI, terminal UI and MCP server: read tasks, log time and export hours from the terminal or an AI coding agent"
+license = "MIT"
+repository = "https://github.com/ejklock/active-collab-cli"
+homepage = "https://github.com/ejklock/active-collab-cli"
+readme = "README.md"
+keywords = ["activecollab", "cli", "tui", "mcp", "project-management"]
+categories = ["command-line-utilities"]
 
 [[bin]]
 name = "ac"
