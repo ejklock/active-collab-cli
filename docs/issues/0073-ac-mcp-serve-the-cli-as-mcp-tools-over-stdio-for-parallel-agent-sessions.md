@@ -2,7 +2,7 @@
 type: Issue
 title: "ac mcp: serve the CLI as MCP tools over stdio for parallel agent sessions"
 description: Add ac mcp, an MCP stdio server whose read and write tools are adapters over the existing command cores, returning the --json contract; switch the store to WAL.
-status: open
+status: closed
 labels: [cli, agent, mcp, slice]
 timestamp: 2026-11-11T21:40:56Z
 ---
