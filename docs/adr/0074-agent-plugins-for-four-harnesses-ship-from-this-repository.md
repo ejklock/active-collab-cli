@@ -15,7 +15,7 @@ The `ac` binary reaches agent harnesses through two manual steps: `claude mcp ad
 
 ## Decision
 
-- The agent plugins live inside this repository, versioned and released with the binary: `plugins/active-collab/` is the Claude Code and Codex plugin (MCP server `ac mcp` plus the `active-collab` skill), listed by `.claude-plugin/marketplace.json` and `.agents/plugins/marketplace.json` at the root; `packages/opencode/` and `packages/pi/` are npm packages in one npm workspace.
+- The agent plugins live inside this repository, versioned and released with the binary: `plugins/active-collab/` is the Claude Code and Codex plugin (MCP server `ac mcp` plus the `active-collab` skill), listed by `.claude-plugin/marketplace.json` and `.agents/plugins/marketplace.json` at the root; `packages/active-collab-agent/` is the one npm package for OpenCode (MCP server and skill) and Pi (skill only), in this repository's npm workspace.
 - Every plugin ships the same thin-pointer skill stub that `install-skill.sh` writes: two copies, the `install-skill.sh` heredoc and the plugin's `SKILL.md`, kept byte-equal by `scripts/check-skill-stubs.sh`, which CI runs.
 - No plugin bundles the binary. Each requires an installed `ac` that has the `mcp` subcommand, installed by `install.sh`.
 - Publishing to npm and pushing the marketplace are outward-facing and need the owner's word each time.
