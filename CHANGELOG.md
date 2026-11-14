@@ -11,6 +11,37 @@ pre-cutover Python package's history is preserved verbatim under
 version numbers are a separate line and do not continue into the Rust crate
 (issue 0055).
 
+## [0.12.0] - 2026-11-13
+
+### Added
+
+- `ac mcp` serves the CLI as MCP tools over stdio: `ac_read`, `ac_write` and
+  `ac_download_attachments`, each operation returning what the matching
+  `--json` command prints. Every agent session starts its own server; all of
+  them share the local cache (issues 0073, 0080, 0091).
+- Plugins install the skill and the `ac mcp` server in one step: Claude Code
+  and Codex from this repository's marketplace, OpenCode with the
+  `opencode-active-collab` npm package; Pi installs the skill with
+  `pi-active-collab` (issue 0090).
+- `ac mine` shows each task's estimate and the hours logged this week and in
+  total, and groups the tasks by due date (overdue, today, this week, later,
+  no due date) in the table, the JSON and the TUI list. The TUI shows the rows
+  before the hours arrive (issues 0074, 0075, 0079).
+- Comment attachments count as task assets; `D` in the TUI task detail
+  downloads them to `~/Downloads` (issue 0076).
+- `ac task set --list` and `l` in the TUI task detail move a task to another
+  task list (issue 0077).
+
+### Fixed
+
+- Open-task entries without an id or project id are skipped instead of
+  failing the whole list (issue 0078).
+- Concurrent store opens no longer fail with `database is locked` while the
+  cache switches to WAL (issue 0081).
+- Messages are translated before their values are filled in (issue 0082).
+- A `--no-comments` read no longer hides the comments from later reads of the
+  same task (issue 0085).
+
 ## [0.11.0] - 2026-10-30
 
 ### Added
