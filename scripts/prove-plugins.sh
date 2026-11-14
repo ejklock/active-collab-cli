@@ -1,7 +1,11 @@
 #!/bin/sh
 # Proves the ac plugin installs from this checkout with each harness's own CLI:
-# install, assert the skill and the MCP server are listed (Pi: skill only), uninstall.
-# Codex is asserted through its own app-server plugin/read (needs jq).
+# install, assert the skill and the MCP server are listed (Pi: skill only, and no
+# extension from the package, read from its RPC get_commands), uninstall.
+# The Pi extension check sees only extensions that register a command: Pi 1.5.2
+# has no command that lists loaded extensions, so one registering only tools or
+# hooks passes it. Codex is asserted through its own app-server plugin/read.
+# Both the Codex assertion and the Pi extension check need jq.
 # Every harness command runs with its home and config variables pointing into a
 # temporary directory, so no real home is read or written.
 # A harness whose CLI is not on PATH is skipped. Overrides: PROVE_ROOT (the tree
@@ -99,7 +103,7 @@ prove_opencode() {
   export HOME="${home}" XDG_CONFIG_HOME="${home}/xdg-config" XDG_DATA_HOME="${home}/xdg-data" \
     XDG_CACHE_HOME="${home}/xdg-cache" XDG_STATE_HOME="${home}/xdg-state"
   cd "${home}/project" || return 1
-  printf '{"plugin":["file://%s/packages/opencode"]}\n' "${root}" >opencode.json
+  printf '{"plugin":["file://%s/packages/active-collab-agent"]}\n' "${root}" >opencode.json
   status=0
   skills="$("${opencode_bin}" debug skill 2>&1)"
   expect "opencode skill" '"name": "active-collab"' "${skills}" || status=1
@@ -119,15 +123,17 @@ prove_pi() {
   export HOME="${home}" PI_CODING_AGENT_DIR="${home}/agent" XDG_CONFIG_HOME="${home}/xdg-config" \
     XDG_DATA_HOME="${home}/xdg-data" XDG_CACHE_HOME="${home}/xdg-cache" XDG_STATE_HOME="${home}/xdg-state"
   cd "${root}" || return 1
-  "${pi_bin}" install "${root}/packages/pi" >/dev/null 2>&1 || return 1
+  "${pi_bin}" install "${root}/packages/active-collab-agent" >/dev/null 2>&1 || return 1
   status=0
   listed="$("${pi_bin}" list 2>&1)"
-  expect "pi package" 'packages/pi' "${listed}" || status=1
+  expect "pi package" 'packages/active-collab-agent' "${listed}" || status=1
   commands="$(printf '{"type":"get_commands"}\n' | timeout 60 "${pi_bin}" --mode rpc --offline 2>&1)"
   expect "pi skill" 'skill:active-collab' "${commands}" || status=1
-  "${pi_bin}" remove "${root}/packages/pi" >/dev/null 2>&1 || status=1
+  extensions="$(printf '%s\n' "${commands}" | grep '^{"type":"response"' | jq -r '.data.commands[] | select(.source == "extension" and (.sourceInfo.path | contains("active-collab-agent"))) | .name')"
+  expect_absent "pi extension from the package" '.' "${extensions}" || status=1
+  "${pi_bin}" remove "${root}/packages/active-collab-agent" >/dev/null 2>&1 || status=1
   listed="$("${pi_bin}" list 2>&1)"
-  expect_absent "pi package after remove" 'packages/pi' "${listed}" || status=1
+  expect_absent "pi package after remove" 'packages/active-collab-agent' "${listed}" || status=1
   return "${status}"
 }
 
