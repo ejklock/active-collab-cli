@@ -2,7 +2,7 @@
 type: Issue
 title: Show estimate and logged hours (this week and total) per task in ac mine
 description: ac mine table, TUI cards, JSON and the MCP ac_read mine operation show each task's estimate, the user's hours logged this week and the task's total logged hours.
-status: open
+status: closed
 labels: [cli, tui, agent, slice]
 blocked_by: [0073]
 timestamp: 2026-11-11T21:40:56Z
