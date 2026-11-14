@@ -328,7 +328,7 @@ pi profile, use `--scope project --dir ~/.pi/agent-profiles/<name>`.
 ### Plugins
 
 The Claude Code, Codex and OpenCode plugins install the skill **and** the `ac mcp` server
-into a harness in one step (the Pi package installs the skill only).
+into a harness in one step (on Pi, the package installs the skill only).
 Install `ac` first (`install.sh`, above): each of these plugins starts the `ac` found on your
 `PATH`, and needs `ac` 0.12.0 or later (earlier releases lack the `mcp` subcommand).
 
@@ -345,18 +345,18 @@ codex plugin add active-collab@active-collab
 OpenCode: add the package to the `plugin` list in `opencode.json`:
 
 ```json
-{ "plugin": ["opencode-active-collab"] }
+{ "plugin": ["active-collab-agent"] }
 ```
 
 Pi installs the skill only (it has no MCP client):
 
 ```sh
-pi install npm:pi-active-collab
+pi install npm:active-collab-agent
 ```
 
 To install from a clone of this repository instead of npm: for Pi, run
-`pi install ./packages/pi`; for OpenCode, list the absolute path
-`"file:///path/to/active-collab-cli/packages/opencode"` in `plugin`.
+`pi install ./packages/active-collab-agent`; for OpenCode, list the absolute path
+`"file:///path/to/active-collab-cli/packages/active-collab-agent"` in `plugin`.
 
 `scripts/prove-plugins.sh` installs and removes each plugin from a checkout in a
 temporary home, with the harness CLIs it finds on `PATH` (`PI_BIN` names the real `pi`

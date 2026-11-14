@@ -11,6 +11,15 @@ pre-cutover Python package's history is preserved verbatim under
 version numbers are a separate line and do not continue into the Rust crate
 (issue 0055).
 
+## [Unreleased]
+
+### Changed
+
+- One npm package, `active-collab-agent`, replaces `opencode-active-collab` and
+  `pi-active-collab`: OpenCode gets the `ac` MCP server and the skill, Pi gets
+  the skill only. Install with `pi install npm:active-collab-agent` or list
+  `active-collab-agent` in OpenCode's `plugin`.
+
 ## [0.12.0] - 2026-11-13
 
 ### Added

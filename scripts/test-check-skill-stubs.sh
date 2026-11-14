@@ -25,7 +25,7 @@ fresh_tree() {
   cp "${repo}/install-skill.sh" "${repo}/Cargo.toml" "${tree}/"
   cp -R "${repo}/plugins" "${repo}/.claude-plugin" "${repo}/.agents" "${tree}/"
   mkdir -p "${tree}/packages"
-  cp -R "${repo}/packages/opencode" "${repo}/packages/pi" "${tree}/packages/"
+  cp -R "${repo}/packages/active-collab-agent" "${tree}/packages/"
   echo "${tree}"
 }
 
@@ -136,47 +136,25 @@ test_skill_stub_change_fails() {
   expect_red skill_stub_change_fails "plugin SKILL.md differs from the install-skill.sh stub"
 }
 
-test_opencode_skill_stub_change_fails() {
+test_package_skill_stub_change_fails() {
   t="$(fresh_tree)"
-  s="${t}/packages/opencode/skills/active-collab/SKILL.md"
-  printf 'x\n' >>"${s}"
+  printf 'x\n' >>"${t}/packages/active-collab-agent/skills/active-collab/SKILL.md"
   run_check "${t}"
-  expect_red opencode_skill_stub_change_fails "opencode SKILL.md differs from the install-skill.sh stub"
+  expect_red package_skill_stub_change_fails "packages/active-collab-agent SKILL.md differs from the install-skill.sh stub"
 }
 
-test_opencode_version_drift_fails() {
+test_package_version_drift_fails() {
   t="$(fresh_tree)"
-  edit "${t}" packages/opencode/package.json '.version = "99.0.0"'
+  edit "${t}" packages/active-collab-agent/package.json '.version = "99.0.0"'
   run_check "${t}"
-  expect_red opencode_version_drift_fails "packages/opencode/package.json: .version is '99.0.0'"
+  expect_red package_version_drift_fails "packages/active-collab-agent/package.json: .version is '99.0.0'"
 }
 
-test_opencode_name_drift_fails() {
+test_package_name_drift_fails() {
   t="$(fresh_tree)"
-  edit "${t}" packages/opencode/package.json '.name = "other"'
+  edit "${t}" packages/active-collab-agent/package.json '.name = "other"'
   run_check "${t}"
-  expect_red opencode_name_drift_fails "packages/opencode/package.json: .name is 'other'"
-}
-
-test_pi_skill_stub_change_fails() {
-  t="$(fresh_tree)"
-  printf 'x\n' >>"${t}/packages/pi/skills/active-collab/SKILL.md"
-  run_check "${t}"
-  expect_red pi_skill_stub_change_fails "pi SKILL.md differs from the install-skill.sh stub"
-}
-
-test_pi_version_drift_fails() {
-  t="$(fresh_tree)"
-  edit "${t}" packages/pi/package.json '.version = "99.0.0"'
-  run_check "${t}"
-  expect_red pi_version_drift_fails "packages/pi/package.json: .version is '99.0.0'"
-}
-
-test_pi_name_drift_fails() {
-  t="$(fresh_tree)"
-  edit "${t}" packages/pi/package.json '.name = "other"'
-  run_check "${t}"
-  expect_red pi_name_drift_fails "packages/pi/package.json: .name is 'other'"
+  expect_red package_name_drift_fails "packages/active-collab-agent/package.json: .name is 'other'"
 }
 
 test_failing_installer_fails() {
@@ -206,12 +184,9 @@ for t in \
   test_moved_entry_is_blamed_by_its_own_position \
   test_missing_plugin_entry_fails \
   test_skill_stub_change_fails \
-  test_opencode_skill_stub_change_fails \
-  test_opencode_version_drift_fails \
-  test_opencode_name_drift_fails \
-  test_pi_skill_stub_change_fails \
-  test_pi_version_drift_fails \
-  test_pi_name_drift_fails \
+  test_package_skill_stub_change_fails \
+  test_package_version_drift_fails \
+  test_package_name_drift_fails \
   test_failing_installer_fails \
   test_unrelated_root_variable_is_ignored; do
   "$t"

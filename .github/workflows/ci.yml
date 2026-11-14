@@ -20,7 +20,7 @@ jobs:
         run: |
           sh scripts/test-check-skill-stubs.sh
           sh scripts/check-skill-stubs.sh
-          node --test packages/opencode/
+          node --test packages/active-collab-agent/
 
       - name: Install the pinned Rust toolchain
         run: rustup toolchain install
