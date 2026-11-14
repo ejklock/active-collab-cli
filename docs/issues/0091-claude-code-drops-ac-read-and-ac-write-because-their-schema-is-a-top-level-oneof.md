@@ -2,7 +2,7 @@
 type: Issue
 title: Claude Code drops ac_read and ac_write because their schema is a top-level oneOf
 description: ac_read and ac_write publish a flat object schema with an operation enum so Claude Code lists them, and the stale active_collab.py setup hint becomes ac setup add.
-status: open
+status: closed
 timestamp: 2026-11-13T19:19:16Z
 ---
 
@@ -35,3 +35,7 @@ Excluded: splitting the tools per operation; changing operations, their fields o
 - AC4: Claude Code lists `ac_read`, `ac_write` and `ac_download_attachments` from the plugin. (`verify_by: manual`)
 - AC5: no message or test mentions `active_collab.py`; the hint reads `ac setup add`; `ac mcp --help` names the three tools. (`verify_by: test`)
 - CC: no superfluous comments, banners or commented-out code. (`verify_by: inspection`)
+
+### Outcome
+
+Delivered in 32a0a98. Proof: `docker compose run --rm dev cargo test -- --test-threads=1` covers AC1, AC2, AC3 and AC5 (`tests/mcp_stdio.rs`, `tests/unit/mcp.rs`). AC4 checked by hand on 2026-11-13: with the branch build installed as `~/.local/bin/ac` and the plugin reloaded, Claude Code lists `ac_read`, `ac_write` and `ac_download_attachments`, and an `ac_read` call with `operation: mine` returns the `ac mine --json` payload.
