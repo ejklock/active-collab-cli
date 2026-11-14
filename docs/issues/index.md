@@ -26,11 +26,6 @@ TUI/UX work (V/R/ARCH slices), tracing to
 * [0066 — Comment writes preserve paragraph breaks — encode newlines as HTML before POST/PUT](0066-comment-writes-preserve-paragraph-breaks-encode-newlines-as-html-before-post-put.md) - open
 * [0070 — TUI assignee-picker gains a live search/filter field](0070-assignee-picker-search-filter.md) - open
 * [0071 — Comment writes can send formatted bodies — add a raw HTML option and fix the stale skill text](0071-comment-writes-can-send-formatted-bodies-add-a-raw-html-option-and-fix-the-stale-skill-text.md) - open
-* [0073 — ac mcp: serve the CLI as MCP tools over stdio for parallel agent sessions](0073-ac-mcp-serve-the-cli-as-mcp-tools-over-stdio-for-parallel-agent-sessions.md) - open
-* [0074 — Show estimate and logged hours (this week and total) per task in ac mine](0074-show-estimate-and-logged-hours-this-week-and-total-per-task-in-ac-mine.md) - open
-* [0076 — Download comment attachments in the CLI and from a TUI key](0076-download-comment-attachments-in-the-cli-and-from-a-tui-key.md) - in-progress
-* [0077 — Move a task between task lists from CLI, TUI and MCP](0077-move-a-task-between-task-lists-from-cli-tui-and-mcp.md) - in-progress
-* [0091 — Claude Code drops ac_read and ac_write because their schema is a top-level oneOf](0091-claude-code-drops-ac-read-and-ac-write-because-their-schema-is-a-top-level-oneof.md) - closed
 
 ## Closed
 
@@ -85,7 +80,11 @@ TUI/UX work (V/R/ARCH slices), tracing to
 * [0067 — Log time on a task — add a time entry from CLI and TUI](0067-log-time-on-a-task-add-a-time-entry-from-cli-and-tui.md) - closed
 * [0068 — Edit task fields — status, assignee, time estimate from CLI and TUI](0068-edit-task-fields-status-assignee-time-estimate-from-cli-and-tui.md) - closed
 * [0072 — Export the hours report for a period as XLSX or CSV (ac time report and TUI modal)](0072-export-the-hours-report-for-a-period-as-xlsx-or-csv-ac-time-report-and-tui-modal.md) - closed
+* [0073 — ac mcp: serve the CLI as MCP tools over stdio for parallel agent sessions](0073-ac-mcp-serve-the-cli-as-mcp-tools-over-stdio-for-parallel-agent-sessions.md) - closed
+* [0074 — Show estimate and logged hours (this week and total) per task in ac mine](0074-show-estimate-and-logged-hours-this-week-and-total-per-task-in-ac-mine.md) - closed
 * [0075 — Group ac mine by due date: overdue, today, this week, later, no due date](0075-group-ac-mine-by-due-date-overdue-today-this-week-later-no-due-date.md) - closed
+* [0076 — Download comment attachments in the CLI and from a TUI key](0076-download-comment-attachments-in-the-cli-and-from-a-tui-key.md) - closed
+* [0077 — Move a task between task lists from CLI, TUI and MCP](0077-move-a-task-between-task-lists-from-cli-tui-and-mcp.md) - closed
 * [0078 — Skip open-task entries without an id or project id at the parse boundary](0078-skip-open-task-entries-without-an-id-or-project-id-at-the-parse-boundary.md) - closed
 * [0079 — Paint the ac mine TUI rows before the hours requests finish](0079-paint-the-ac-mine-tui-rows-before-the-hours-requests-finish.md) - closed
 * [0080 — Move the MCP attachment download to its own ac_download_attachments tool](0080-move-the-mcp-attachment-download-to-its-own-ac-download-attachments-tool.md) - closed
@@ -99,3 +98,4 @@ TUI/UX work (V/R/ARCH slices), tracing to
 * [0088 — The mock ActiveCollab fixtures are the single source of the automated end-to-end tests](0088-the-mock-activecollab-fixtures-are-the-single-source-of-the-automated-end-to-end-tests.md) - closed
 * [0089 — Pin the Rust toolchain and raise it deliberately](0089-pin-the-rust-toolchain-and-raise-it-deliberately.md) - closed
 * [0090 — Install ac in Claude Code, Codex, OpenCode and Pi as a plugin](0090-install-ac-in-claude-code-codex-opencode-and-pi-as-a-plugin.md) - closed
+* [0091 — Claude Code drops ac_read and ac_write because their schema is a top-level oneOf](0091-claude-code-drops-ac-read-and-ac-write-because-their-schema-is-a-top-level-oneof.md) - closed
