@@ -41,3 +41,9 @@ OpenCode and Pi install `ac` from two npm packages, `opencode-active-collab` and
 - `sh scripts/check-skill-stubs.sh`
 - `node --test packages/active-collab-agent/`
 - `npm pack --dry-run -w packages/active-collab-agent`
+
+### Outcome
+
+Delivered in da50988. Proof: `PI_BIN=/usr/bin/pi sh scripts/prove-plugins.sh` prints ok for Claude Code, Codex, OpenCode and Pi from `packages/active-collab-agent`; the stub test fails when any of the skill, name or version checks is removed; `node --test packages/active-collab-agent/` passes 5 cases; `npm pack --dry-run` lists `index.ts`, `package.json` and the skill.
+
+Found in review: on Pi 1.5.2 the `pi` key is explicit but not load-bearing (Pi finds `skills/` by convention and never treats a root `index.ts` as an extension); the Pi no-extension check sees only extensions that register a command, a limit now written in the script header. Not done here: `npm deprecate` of the two 0.12.0 packages (owner, after `active-collab-agent` is published); README says Pi has no MCP client, but `pi --help` lists `pi mcp`, so whether Pi gets `ac mcp` is a separate decision.
