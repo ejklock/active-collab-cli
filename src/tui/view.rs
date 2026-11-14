@@ -4,9 +4,10 @@ use crate::render::{display_width, wrap_text};
 use crate::tui::detail_geometry::Selection;
 use crate::tui::footer::{self, FooterPlan};
 use crate::tui::model::{
-    filter_assignee_candidates, ClickTarget, Compose, ComposeKind, ComposeStatus, EditStatus,
-    EstimateForm, ImageAssetRef, ImageStatus, LogTimeField, LogTimeForm, LogTimeStatus,
+    filter_assignee_candidates, ClickTarget, Compose, ComposeKind, ComposeStatus, DetailOverlay,
+    EditStatus, EstimateForm, ImageAssetRef, ImageStatus, LogTimeField, LogTimeForm, LogTimeStatus,
     ModalButtonTarget, Model, ReportField, ReportForm, ReportPeriodChoice, ReportStatus, Screen,
+    TaskListLoad, TaskListPicker,
 };
 use crate::tui::screens::{draw_detail, draw_projects, draw_tasks, DetailParams};
 use crate::tui::theme;
@@ -20,7 +21,7 @@ use ratatui::{
 
 /// Margin (cells) between the near-full image-viewer box and the detail
 /// content area it sits inside — distinguishes it from `render_modal`'s
-/// centered ~70% box (ADR 0065).
+/// centered ~70% box.
 const IMAGE_VIEWER_MARGIN: u16 = 1;
 
 const MIN_WIDTH: u16 = 24;
@@ -162,7 +163,7 @@ pub fn view(
             card_heights,
             card_offsets,
             rendered_width,
-            ..
+            due_today,
         } => {
             let today = chrono::Local::now().date_naive();
             draw_tasks(
@@ -178,6 +179,7 @@ pub fn view(
                 card_heights,
                 card_offsets,
                 *rendered_width,
+                *due_today,
             );
         }
         Screen::Detail {
@@ -209,30 +211,14 @@ pub fn view(
                     comment_spans,
                 },
             );
-            if let Some(ref sel) = model.selection {
-                draw_selection_highlight(frame, sel);
-            }
-            if let Some(cp) = overlay.compose() {
-                render_compose_modal(frame, area, cp);
-            }
-            if let Some(form) = overlay.log_time() {
-                render_log_time_modal(frame, area, form);
-            }
-            if let Some(form) = overlay.estimate_edit() {
-                render_estimate_modal(frame, area, form);
-            }
-            if let Some((completed_target, status)) = overlay.status_confirm() {
-                render_status_confirm_modal(frame, area, completed_target, status);
-            }
-            if let Some((candidates, filter, selected, status)) = overlay.assignee_picker() {
-                render_assignee_picker_modal(frame, area, candidates, filter, selected, status);
-            }
-            if overlay.is_confirm() {
-                render_confirm_modal(frame, area, modal_btn_targets);
-            }
-            if let Some((asset, status)) = overlay.image_viewer() {
-                render_image_viewer(frame, area, chunks[1], asset, status);
-            }
+            render_detail_overlays(
+                frame,
+                area,
+                chunks[1],
+                model.selection.as_ref(),
+                overlay,
+                modal_btn_targets,
+            );
         }
     }
 
@@ -241,6 +227,40 @@ pub fn view(
     }
 
     render_footer(frame, chunks[2], footer_plan, theme::footer_style());
+}
+
+/// Draw the Detail screen's text-selection highlight and whichever modal
+/// overlay is open, in that order so a modal covers the highlight.
+fn render_detail_overlays(
+    frame: &mut Frame,
+    area: Rect,
+    content_area: Rect,
+    selection: Option<&Selection>,
+    overlay: &DetailOverlay,
+    modal_btn_targets: &mut Vec<ModalButtonTarget>,
+) {
+    if let Some(sel) = selection {
+        draw_selection_highlight(frame, sel);
+    }
+    if let Some(cp) = overlay.compose() {
+        render_compose_modal(frame, area, cp);
+    }
+    if let Some(form) = overlay.log_time() {
+        render_log_time_modal(frame, area, form);
+    }
+    if let Some(form) = overlay.estimate_edit() {
+        render_estimate_modal(frame, area, form);
+    }
+    if let Some((completed_target, status)) = overlay.status_confirm() {
+        render_status_confirm_modal(frame, area, completed_target, status);
+    }
+    render_picker_overlays(frame, area, overlay);
+    if overlay.is_confirm() {
+        render_confirm_modal(frame, area, modal_btn_targets);
+    }
+    if let Some((asset, status)) = overlay.image_viewer() {
+        render_image_viewer(frame, area, content_area, asset, status);
+    }
 }
 
 fn compose_modal_title(cp: &Compose) -> String {
@@ -293,7 +313,7 @@ fn log_time_field_line(label: &str, value: &str, is_focused: bool) -> String {
 
 /// Render the log-time modal chrome via `render_modal`: the Hours and Summary
 /// fields as labeled rows, plus the hint/status line. Both fields are plain-text
-/// buffers (ADR 0064 does not apply — single-line, no caret/undo needs), so they
+/// buffers (single-line, no caret/undo needs), so they
 /// render as static rows rather than a `TextArea` widget.
 fn render_log_time_modal(frame: &mut Frame, frame_area: ratatui::layout::Rect, form: &LogTimeForm) {
     use crate::tui::widgets::modal::render_modal;
@@ -416,7 +436,7 @@ fn estimate_modal_hint(form: &EstimateForm) -> String {
 
 /// Render the estimate-edit modal chrome via `render_modal`: the estimate field as
 /// a single labeled row, plus the hint/status line. Single line, plain-text buffer
-/// (ADR 0064 does not apply — no caret/undo needs), so it renders as a static row
+/// (no caret/undo needs), so it renders as a static row
 /// rather than a `TextArea` widget.
 fn render_estimate_modal(
     frame: &mut Frame,
@@ -477,7 +497,7 @@ fn render_status_confirm_modal(
     );
 }
 
-fn assignee_picker_modal_hint(status: &EditStatus) -> String {
+fn picker_modal_hint(status: &EditStatus) -> String {
     match assignee_picker_modal_status(status) {
         Some(status) => status,
         None => t("↑/↓ move · type to filter · Enter/Ctrl+S confirm · Esc cancel"),
@@ -485,69 +505,115 @@ fn assignee_picker_modal_hint(status: &EditStatus) -> String {
 }
 
 /// Mark the highlighted candidate row with a leading indicator, mirroring the
-/// focused-field marker convention used by the log-time modal.
-fn assignee_candidate_line(name: &str, is_selected: bool) -> String {
+/// focused-field marker convention used by the log-time modal, and tag the row of
+/// the value the task already has.
+fn picker_row_line(name: &str, is_selected: bool, is_current: bool) -> String {
     let marker = if is_selected { ">" } else { " " };
-    format!("{marker} {name}")
+    let current = if is_current {
+        format!(" ({})", t("current"))
+    } else {
+        String::new()
+    };
+    format!("{marker} {name}{current}")
 }
 
-/// Build the assignee-picker modal body: a search line reflecting the current
-/// filter, then either the filtered candidate rows (highlighted row marked), an
-/// empty-directory line when the user directory has no candidates at all, or a
-/// distinct empty-match line when the filter excludes every candidate.
-fn assignee_picker_modal_lines(
+/// The picker's search line, then either the filtered candidate rows (highlighted
+/// row marked, `current_id` tagged), the `empty` line when there are no candidates
+/// at all, or the `no_match` line when the filter excludes every candidate.
+fn picker_modal_lines(
     candidates: &[(i64, String)],
-    filter: &str,
-    selected: usize,
+    (filter, selected, current_id): (&str, usize, Option<i64>),
+    (empty, no_match): (String, String),
 ) -> Vec<String> {
-    let search_line = format!("{}: {}", t("Search"), filter);
-    let mut lines = vec![search_line];
+    let mut lines = vec![format!("{}: {}", t("Search"), filter)];
     if candidates.is_empty() {
-        lines.push(t("No assignable users"));
+        lines.push(empty);
         return lines;
     }
     let filtered = filter_assignee_candidates(candidates, filter);
     if filtered.is_empty() {
-        lines.push(t("No matching users"));
+        lines.push(no_match);
         return lines;
     }
     lines.extend(
         filtered
             .iter()
             .enumerate()
-            .map(|(i, (_, name))| assignee_candidate_line(name, i == selected)),
+            .map(|(i, (id, name))| picker_row_line(name, i == selected, current_id == Some(*id))),
     );
     lines
 }
 
-/// Render the assignee-picker modal chrome via `render_modal`: the search line,
-/// the filtered candidate list with the highlighted row marked, an empty-directory
-/// or empty-match line as appropriate, plus the hint/status line.
-fn render_assignee_picker_modal(
+/// Render whichever picker overlay is open: the assignee picker or the task-list
+/// picker.
+fn render_picker_overlays(frame: &mut Frame, area: Rect, overlay: &DetailOverlay) {
+    if let Some((candidates, filter, selected, status)) = overlay.assignee_picker() {
+        let lines = picker_modal_lines(
+            candidates,
+            (filter, selected, None),
+            (t("No assignable users"), t("No matching users")),
+        );
+        let hint = picker_modal_hint(status);
+        render_picker_modal(frame, area, (&t("Assign task"), &lines), &hint);
+    }
+    if let Some(picker) = overlay.task_list_picker() {
+        render_picker_modal(
+            frame,
+            area,
+            (&t("Move to list"), &task_list_picker_lines(picker)),
+            &task_list_picker_hint(picker),
+        );
+    }
+}
+
+/// The task-list picker body: its lists once loaded, otherwise the loading or
+/// failure line, followed by the last write error when there is one.
+fn task_list_picker_lines(picker: &TaskListPicker) -> Vec<String> {
+    let mut lines = match &picker.load {
+        TaskListLoad::Ready => picker_modal_lines(
+            &picker.candidates,
+            (&picker.filter, picker.selected, picker.current_id),
+            (t("No task lists"), t("No matching task lists")),
+        ),
+        TaskListLoad::Loading => vec![t("Loading task lists…")],
+        TaskListLoad::Failed(message) => vec![message.clone()],
+    };
+    lines.extend(picker.error.clone());
+    lines
+}
+
+/// The task-list picker's hint: only Esc while its lists load or failed to load,
+/// since nothing can be moved, filtered or confirmed yet.
+fn task_list_picker_hint(picker: &TaskListPicker) -> String {
+    match picker.load {
+        TaskListLoad::Ready => picker_modal_hint(&picker.status),
+        TaskListLoad::Loading | TaskListLoad::Failed(_) => t("Esc cancel"),
+    }
+}
+
+/// Render a picker modal chrome via `render_modal`: the body lines under the title
+/// plus the hint/status line.
+fn render_picker_modal(
     frame: &mut Frame,
-    frame_area: ratatui::layout::Rect,
-    candidates: &[(i64, String)],
-    filter: &str,
-    selected: usize,
-    status: &EditStatus,
+    frame_area: Rect,
+    (title, lines): (&str, &[String]),
+    hint: &str,
 ) {
     use crate::tui::widgets::modal::render_modal;
-    let hint = assignee_picker_modal_hint(status);
-    let lines = assignee_picker_modal_lines(candidates, filter, selected);
     render_modal(
         frame,
         frame_area,
         ModalContent {
-            title: &t("Assign task"),
-            lines: &lines,
-            hint: Some(&hint),
+            title,
+            lines,
+            hint: Some(hint),
         },
     );
 }
 
 /// Render the delete-confirm modal overlay and register the two button click targets.
 ///
-/// Uses the shared `render_modal` primitive (ADR 0039) to dim the backdrop and draw a
+/// Uses the shared `render_modal` primitive to dim the backdrop and draw a
 /// centered bordered box. The button row in the hint line shows `[Sim]  [Não]`;
 /// their absolute cell Rects are derived from the body Rect `render_modal` returns so
 /// the hit-test geometry is single-sourced (never recomputed independently).
@@ -610,7 +676,7 @@ fn register_confirm_button_targets(
 /// Unlike `render_modal`'s centered ~70% box, this sizes the box to the
 /// near-full detail content area (`content_area` minus `IMAGE_VIEWER_MARGIN`)
 /// so a real image fills as much of the screen as possible once ratatui-image
-/// lands (slice 0059). `frame_area` (the whole frame) is what gets dimmed,
+/// lands. `frame_area` (the whole frame) is what gets dimmed,
 /// matching the other Detail overlays.
 fn render_image_viewer(
     frame: &mut Frame,
@@ -676,7 +742,7 @@ fn draw_image_viewer_box(
 ///
 /// Loading shows a status line + the filename; Error shows the failure message;
 /// Ready is a placeholder too in this slice — the real `ratatui-image` render
-/// replaces it in slice 0059.
+/// replaces it.
 fn draw_image_viewer_body(
     frame: &mut Frame,
     inner: Rect,

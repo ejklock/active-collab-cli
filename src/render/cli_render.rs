@@ -1,4 +1,4 @@
-//! Non-TTY CLI string output adapter (ADR 0049).
+//! Non-TTY CLI string output adapter.
 //!
 //! Owns the `render_*_to_str` family and `html_to_text`. These produce plain
 //! `String`s for the CLI's non-interactive commands; the byte-for-byte parity

@@ -552,6 +552,44 @@ fn parse_task_set_with_all_flags() {
 }
 
 #[test]
+fn parse_task_set_list_alone_carries_the_list_value() {
+    let cli = parse(&["task", "set", "10/99", "--list", "In progress"]).unwrap();
+    let Command::Task(opts) = cli.command.unwrap() else {
+        panic!("expected Task")
+    };
+    let TaskCmd::Set(set) = opts.subcommand;
+    assert_eq!(set.task_ref.as_deref(), Some("10/99"));
+    assert_eq!(set.list.as_deref(), Some("In progress"));
+    assert!(set.status.is_none() && set.assignee.is_none() && set.estimate.is_none());
+}
+
+#[test]
+fn parse_task_set_list_combines_with_status_assignee_and_estimate() {
+    let cli = parse(&[
+        "task",
+        "set",
+        "10/99",
+        "--status",
+        "done",
+        "--assignee",
+        "9",
+        "--estimate",
+        "2",
+        "--list",
+        "12",
+    ])
+    .unwrap();
+    let Command::Task(opts) = cli.command.unwrap() else {
+        panic!("expected Task")
+    };
+    let TaskCmd::Set(set) = opts.subcommand;
+    assert_eq!(set.status.as_deref(), Some("done"));
+    assert_eq!(set.assignee.as_deref(), Some("9"));
+    assert_eq!(set.estimate, Some(2.0));
+    assert_eq!(set.list.as_deref(), Some("12"));
+}
+
+#[test]
 fn parse_task_set_without_task_ref_defaults_to_none() {
     let cli = parse(&["task", "set", "--status", "open"]).unwrap();
     let Command::Task(opts) = cli.command.unwrap() else {
@@ -685,4 +723,16 @@ fn comment_help_lists_html_flag() {
         help.contains("--html"),
         "comment help must list --html: {help}"
     );
+}
+
+#[test]
+fn parse_mcp_subcommand_takes_no_arguments() {
+    let cli = parse(&["mcp"]).unwrap();
+    assert!(matches!(cli.command, Some(Command::Mcp)));
+    assert!(parse(&["mcp", "extra"]).is_err());
+}
+
+#[test]
+fn normalize_argv_keeps_mcp_as_a_command_not_a_task_ref() {
+    assert_eq!(normalize_argv(&argv(&["mcp"]), None), argv(&["mcp"]));
 }

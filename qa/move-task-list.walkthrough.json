@@ -1,0 +1,115 @@
+{
+	"flow": "Mover tarefa de lista com ac task set",
+	"language": "pt-BR",
+	"kind": "feature",
+	"summary": "O comando ac task set --list move a tarefa para outra lista de tarefas do projeto; um nome desconhecido sai com código 2 e não envia escrita.",
+	"setup": {
+		"target": {
+			"kind": "terminal",
+			"engine": "host",
+			"terminal": {
+				"cols": 150,
+				"env": {
+					"ACTIVE_COLLAB_DB": ".run/move-task-list/ac.db",
+					"HOME": ".run/move-task-list/home",
+					"TMPDIR": ".run/move-task-list/tmp",
+					"ACTIVE_COLLAB_LANG": "en"
+				}
+			}
+		},
+		"hooks": [
+			"hooks/move-task-list.ts"
+		]
+	},
+	"scenarios": [
+		{
+			"title": "Mover a tarefa de lista",
+			"narration": "A tarefa 10/101 do ActiveCollab de teste começa na lista To do.",
+			"steps": [
+				{
+					"title": "Nome desconhecido",
+					"narration": "Um nome que não existe sai com código 2, mostra as listas do projeto e o ActiveCollab de teste não recebe nenhum PUT.",
+					"actions": [
+						{
+							"action": "type",
+							"value": "../target/native/debug/ac task set 10/101 --list nowhere; echo \"exit=$?\"; echo \"PUT sent: $(grep -c '^PUT' .run/move-task-list/requests.log)\""
+						},
+						{
+							"action": "press",
+							"value": "Enter"
+						},
+						{
+							"action": "waitFor",
+							"target": {
+								"text": "PUT sent: 0"
+							}
+						},
+						{
+							"action": "expect",
+							"assert": "text",
+							"target": {
+								"text": "exit=2"
+							},
+							"expected": "exit=2"
+						},
+						{
+							"action": "expect",
+							"assert": "text",
+							"target": {
+								"text": "6 Review"
+							},
+							"expected": "6 Review"
+						}
+					]
+				},
+				{
+					"title": "Mover para Review",
+					"narration": "O nome da lista vale em qualquer caixa de letras: review move a tarefa para Review.",
+					"actions": [
+						{
+							"action": "type",
+							"value": "../target/native/debug/ac task set 10/101 --list review"
+						},
+						{
+							"action": "press",
+							"value": "Enter"
+						},
+						{
+							"action": "waitFor",
+							"target": {
+								"text": "Task updated (task 10/101): list=Review."
+							}
+						}
+					]
+				},
+				{
+					"title": "O ActiveCollab de teste recebeu a escrita",
+					"narration": "O registro de requisições do ActiveCollab de teste mostra o PUT que moveu a tarefa.",
+					"actions": [
+						{
+							"action": "type",
+							"value": "grep '^PUT' .run/move-task-list/requests.log"
+						},
+						{
+							"action": "press",
+							"value": "Enter"
+						},
+						{
+							"action": "waitFor",
+							"target": {
+								"text": "PUT /api/v1/projects/10/tasks/101 instance-token sent"
+							}
+						}
+					]
+				}
+			]
+		}
+	],
+	"outcome": {
+		"assert": "text",
+		"target": {
+			"text": "PUT /api/v1/projects/10/tasks/101 instance-token sent"
+		},
+		"expected": "PUT /api/v1/projects/10/tasks/101 instance-token sent"
+	}
+}

@@ -20,7 +20,7 @@ impl std::fmt::Display for Unauthorized {
 impl std::error::Error for Unauthorized {}
 
 /// Typed outcome of a comment-write call (create/update/delete), classified
-/// once by the client instead of by each caller (ADR 0054).
+/// once by the client instead of by each caller.
 #[derive(Debug)]
 pub enum CommentWriteOutcome {
     /// 2xx — carries the response body when present (`None` for delete).
@@ -32,7 +32,7 @@ pub enum CommentWriteOutcome {
 }
 
 /// Typed outcome of a time-record write call, classified the same way as
-/// `CommentWriteOutcome` (ADR 0054).
+/// `CommentWriteOutcome`.
 #[derive(Debug)]
 pub enum TimeWriteOutcome {
     /// 2xx — carries the response body when present.
@@ -52,6 +52,32 @@ pub enum TimeRecordsOutcome {
     Unauthorized,
     /// Any other status.
     Failed(u16),
+}
+
+/// One of a project's open task lists: the workflow column a task sits in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskList {
+    pub id: i64,
+    pub name: String,
+}
+
+/// Typed outcome of the project task-lists read.
+#[derive(Debug)]
+pub enum TaskListsOutcome {
+    /// 200 — the lists in server order.
+    Ok(Vec<TaskList>),
+    /// HTTP 401.
+    Unauthorized,
+    /// Any other status.
+    Failed(u16),
+}
+
+/// A task-lists entry as the server sends it; entries missing a field are
+/// dropped when converted to `TaskList`.
+#[derive(serde::Deserialize)]
+struct RawTaskList {
+    id: Option<i64>,
+    name: Option<String>,
 }
 
 /// The three buckets every write response falls into, shared by every
@@ -94,7 +120,7 @@ fn classify_time_write(status: u16, body: Option<Value>) -> TimeWriteOutcome {
 }
 
 /// Typed outcome of a task-field write call (completion or field update),
-/// classified the same way as `CommentWriteOutcome` (ADR 0054).
+/// classified the same way as `CommentWriteOutcome`.
 #[derive(Debug)]
 pub enum TaskWriteOutcome {
     /// 2xx — carries the response body when present.
@@ -129,8 +155,7 @@ pub fn pick_default_job_type(job_types: &[JobType]) -> Option<i64> {
 
 /// How `create_comment` prepares a caller-supplied body before it is posted.
 /// `Text` runs it through `encode_comment_body`; `Html` sends it unchanged,
-/// so the caller who asks for raw HTML is responsible for its markup
-/// (issue 0071).
+/// so the caller who asks for raw HTML is responsible for its markup.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BodyFormat {
     Text,
@@ -141,7 +166,7 @@ pub enum BodyFormat {
 /// escaped, blank-line-separated paragraphs become `<p>...</p>` blocks, and a
 /// single in-paragraph newline becomes `<br>` — newlines carry no meaning in
 /// the rendered HTML, so without this the server flattens every paragraph
-/// break the user typed (issue 0066).
+/// break the user typed.
 fn encode_comment_body(body: &str) -> String {
     let escaped = html_escape::encode_text(body).into_owned();
     let mut paragraphs: Vec<String> = Vec::new();
@@ -267,6 +292,36 @@ impl ActiveCollabClient {
         Ok(result)
     }
 
+    /// GET /api/v1/projects/{project_id}/task-lists. 200 -> the lists in
+    /// server order (entries without an id or name are skipped; a body that
+    /// is not an array is an error, never an empty list), 401 ->
+    /// Unauthorized, else -> Failed(status).
+    pub async fn fetch_task_lists(&self, project_id: i64) -> Result<TaskListsOutcome> {
+        let base = self.instance.base_url.trim_end_matches('/');
+        let url = format!("{}/api/v1/projects/{}/task-lists", base, project_id);
+        let (status, body) = self
+            .http
+            .authed_get(&url, &self.instance.base_url, &self.instance.token)
+            .await?;
+        match status {
+            200 => {
+                let raw: Vec<RawTaskList> = serde_json::from_slice(&body)?;
+                let lists = raw
+                    .into_iter()
+                    .filter_map(|entry| {
+                        Some(TaskList {
+                            id: entry.id?,
+                            name: entry.name?,
+                        })
+                    })
+                    .collect();
+                Ok(TaskListsOutcome::Ok(lists))
+            }
+            HTTP_UNAUTHORIZED => Ok(TaskListsOutcome::Unauthorized),
+            other => Ok(TaskListsOutcome::Failed(other)),
+        }
+    }
+
     /// GET /api/v1/job-types. Returns an empty list on any non-200 response.
     pub async fn fetch_job_types(&self) -> Result<Vec<JobType>> {
         let base = self.instance.base_url.trim_end_matches('/');
@@ -324,7 +379,8 @@ impl ActiveCollabClient {
     }
 
     /// Fetch open tasks assigned to this user. Returns empty on missing user_id
-    /// or non-200 response. Excludes is_completed and is_trashed tasks.
+    /// or non-200 response. Excludes is_completed and is_trashed tasks, and
+    /// entries without an integer id or project_id.
     pub async fn fetch_open_tasks(&self) -> Result<Vec<MineTask>> {
         let user_id = match self.instance.user_id {
             Some(uid) if uid != 0 => uid,
@@ -361,7 +417,7 @@ impl ActiveCollabClient {
                         .and_then(|v| v.as_bool())
                         .unwrap_or(false)
             })
-            .map(|t| MineTask::from_api(t, &self.instance.name))
+            .filter_map(|t| MineTask::from_api(t, &self.instance.name))
             .collect();
         Ok(tasks)
     }
@@ -441,7 +497,7 @@ impl ActiveCollabClient {
 
     /// POST /api/v1/comments/task/{task_id}. `format` controls whether `body`
     /// is run through `encode_comment_body` (`BodyFormat::Text`) or sent
-    /// unchanged (`BodyFormat::Html`, issue 0071). Classifies the response
+    /// unchanged (`BodyFormat::Html`). Classifies the response
     /// into a `CommentWriteOutcome`: (200..=299) -> Ok(Some(comment)), 401 ->
     /// Unauthorized, else -> Failed(status).
     pub async fn create_comment(
@@ -507,8 +563,8 @@ impl ActiveCollabClient {
     }
 
     /// PUT /api/v1/projects/{project_id}/tasks/{task_id}. Serializes only the
-    /// provided fields: `assignee_id` and/or `estimate`, each omitted when
-    /// `None`. Classifies the response into a `TaskWriteOutcome`: (200..=299)
+    /// provided fields: `assignee_id`, `estimate` and/or `task_list_id`, each
+    /// omitted when `None`. Classifies the response into a `TaskWriteOutcome`: (200..=299)
     /// -> Ok(Some(task)), 401 -> Unauthorized, else -> Failed(status).
     pub async fn update_task(
         &self,
@@ -516,6 +572,7 @@ impl ActiveCollabClient {
         task_id: i64,
         assignee_id: Option<i64>,
         estimate: Option<f64>,
+        task_list_id: Option<i64>,
     ) -> Result<TaskWriteOutcome> {
         let base = self.instance.base_url.trim_end_matches('/');
         let url = format!("{}/api/v1/projects/{}/tasks/{}", base, project_id, task_id);
@@ -525,6 +582,9 @@ impl ActiveCollabClient {
         }
         if let Some(estimate) = estimate {
             payload.insert("estimate".to_string(), Value::from(estimate));
+        }
+        if let Some(task_list_id) = task_list_id {
+            payload.insert("task_list_id".to_string(), Value::from(task_list_id));
         }
         let (status, body) = self.put_json_write(&url, &Value::Object(payload)).await?;
         Ok(classify_task_write(status, body))

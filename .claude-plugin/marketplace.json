@@ -1,0 +1,11 @@
+{
+  "name": "active-collab",
+  "description": "Read ActiveCollab tasks, assignments, comments and projects through the ac CLI: the ac MCP server and the active-collab skill.",
+  "owner": { "name": "Evaldo Klock" },
+  "plugins": [
+    {
+      "name": "active-collab",
+      "source": "./plugins/active-collab"
+    }
+  ]
+}

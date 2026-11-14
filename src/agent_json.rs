@@ -1,9 +1,11 @@
+use crate::client::TaskList;
 use crate::controller::extract_assets;
+use crate::render::buckets::{due_bucket, group_by_bucket};
 use crate::render::{fmt_date, fmt_hours, fmt_ts, html_to_text};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 
-/// Build the ADR 0011 get/current task object for agent/LLM consumption.
+/// Build the get/current task object for agent/LLM consumption.
 ///
 /// Pure: no network, no I/O.  All fields are derived from the same helpers
 /// used by the human renderer so JSON and text stay in sync.
@@ -121,7 +123,7 @@ fn shape_comment(c: &Value) -> Value {
     })
 }
 
-/// Build the ADR 0040 write-result for a newly posted comment.
+/// Build the write-result for a newly posted comment.
 ///
 /// Returns a minified single-line JSON string on success:
 /// `{"ok":true,"comment_id":N,"task_id":N,"project_id":N}`
@@ -134,7 +136,7 @@ pub fn comment_result(comment_id: i64, task_id: i64, project_id: i64) -> String 
     )
 }
 
-/// Build the ADR 0040 error object for a failed comment write.
+/// Build the error object for a failed comment write.
 ///
 /// Returns a minified single-line JSON string:
 /// `{"ok":false,"error":"<reason>"}`
@@ -157,17 +159,18 @@ pub fn time_result(time_record_id: i64, task_id: i64, project_id: i64, hours: f6
     )
 }
 
-/// Build the write-result for an applied task field edit (issue 0068 slice 2).
+/// Build the write-result for an applied task field edit.
 ///
 /// Returns a minified single-line JSON string on success, carrying only the
 /// fields the caller actually applied:
-/// `{"ok":true,"task_id":N,"project_id":N[,"status":"completed"|"open"][,"assignee_id":N][,"estimate":H]}`
+/// `{"ok":true,"task_id":N,"project_id":N[,"status":"completed"|"open"][,"assignee_id":N][,"estimate":H][,"task_list_id":N,"task_list":"name"]}`
 pub fn task_result(
     task_id: i64,
     project_id: i64,
     completed: Option<bool>,
     assignee_id: Option<i64>,
     estimate: Option<f64>,
+    task_list: Option<&TaskList>,
 ) -> String {
     let mut line = format!(
         r#"{{"ok":true,"task_id":{task_id},"project_id":{project_id}"#,
@@ -187,11 +190,18 @@ pub fn task_result(
     if let Some(estimate) = estimate {
         line.push_str(&format!(r#","estimate":{estimate}"#, estimate = estimate));
     }
+    if let Some(list) = task_list {
+        line.push_str(&format!(
+            r#","task_list_id":{id},"task_list":{name}"#,
+            id = list.id,
+            name = Value::from(list.name.as_str()),
+        ));
+    }
     line.push('}');
     line
 }
 
-/// Build the ADR 0011 browse schema for agent/LLM consumption.
+/// Build the browse schema for agent/LLM consumption.
 ///
 /// Pure: no network, no I/O. Accepts the same `ProjectGroup` slice the TUI
 /// browser receives so JSON and TUI stay in sync.
@@ -221,27 +231,58 @@ fn browse_task_object(group_project_id: i64, row: &crate::tui::model::TaskRow) -
     })
 }
 
-/// Build the ADR 0011 mine schema for agent/LLM consumption.
+/// Build the mine schema for agent/LLM consumption.
 ///
 /// Pure: no network, no I/O. Accepts the same `MineTableRow` slice the human
 /// renderer receives so JSON and table stay in sync.
 pub fn mine_object(rows: &[crate::render::MineTableRow]) -> Value {
+    mine_object_on(rows, chrono::Local::now().date_naive())
+}
+
+/// `mine_object` with an explicit "today" for the due-date buckets.
+pub fn mine_object_on(rows: &[crate::render::MineTableRow], today: chrono::NaiveDate) -> Value {
+    let buckets: Vec<Value> = group_by_bucket(rows, today)
+        .iter()
+        .map(|group| {
+            json!({
+                "key": group.bucket.key(),
+                "count": group.items.len(),
+                "estimate_hours": hours_or_null(group.sums.estimate),
+                "logged_week_hours": hours_or_null(group.sums.logged_week),
+                "logged_total_hours": hours_or_null(group.sums.logged_total),
+            })
+        })
+        .collect();
     json!({
         "count": rows.len(),
-        "tasks": rows.iter().map(mine_task_object).collect::<Vec<_>>(),
+        "tasks": rows.iter().map(|row| mine_task_object(row, today)).collect::<Vec<_>>(),
+        "buckets": buckets,
     })
 }
 
-fn mine_task_object(row: &crate::render::MineTableRow) -> Value {
+fn mine_task_object(row: &crate::render::MineTableRow, today: chrono::NaiveDate) -> Value {
     let ref_ = format!("{}/{}", row.project_id, row.task_id);
     json!({
+        "due_bucket": due_bucket(row.due_on.as_deref(), today).key(),
         "ref": ref_,
         "instance": row.instance,
         "project_id": row.project_id,
         "task_number": row.task_number,
         "task_id": row.task_id,
         "name": row.name,
+        "due_on": row.due_on,
+        "estimate_hours": hours_or_null(row.estimate),
+        "logged_week_hours": hours_or_null(row.logged_week),
+        "logged_total_hours": hours_or_null(row.logged_total),
     })
+}
+
+/// Hours formatted as in the task JSON (`fmt_hours`), or null when unknown.
+fn hours_or_null(hours: Option<f64>) -> Value {
+    match hours {
+        Some(h) => Value::String(fmt_hours(&json!(h))),
+        None => Value::Null,
+    }
 }
 
 #[cfg(test)]

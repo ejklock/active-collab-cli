@@ -64,13 +64,20 @@
 * [0063 — Styled panel titles — accent + bold labels in the top rule](0063-styled-panel-titles.md) - Accepted
 * [0064 — The comment compose editor adopts tui-textarea — a full caret/selection/undo editor behind one ComposeInput(Input) message](0064-comment-compose-adopts-tui-textarea.md) - Accepted
 * [0065 — Image attachments open in a dedicated full-area viewer overlay (ratatui-image) — pure lifecycle in the Model, non-pure protocol state quarantined in the shell](0065-image-attachment-viewer-modal-overlay.md) - Accepted
-* [0066 — ac get/current --download-attachments: fetch task assets to a local temp dir for agent/LLM analysis](0066-agent-attachment-download-to-local-temp-dir.md) - Accepted
 * [0067 — Origin-gated API token header (scheme + host + port)](0067-origin-gated-api-token-header-scheme-host-port.md) - Proposed
 * [0068 — Control characters stripped at the untrusted-text render boundary](0068-control-characters-stripped-at-the-untrusted-text-render-boundary.md) - Proposed
 * [0069 — active-collab-cli becomes a limited write client](0069-active-collab-cli-becomes-a-limited-write-client.md) - Accepted
+* [0071 — Task list joins the bounded set of editable task fields](0071-task-list-joins-the-bounded-set-of-editable-task-fields.md) - Accepted
+* [0072 — ac mcp exposes downloads as a third tool with honest annotations](0072-ac-mcp-exposes-downloads-as-a-third-tool-with-honest-annotations.md) - Accepted
+* [0073 — Attachment downloads take comment attachments and the TUI saves to Downloads](0073-attachment-downloads-take-comment-attachments-and-the-tui-saves-to-downloads.md) - Accepted
+* [0074 — Agent plugins for four harnesses ship from this repository](0074-agent-plugins-for-four-harnesses-ship-from-this-repository.md) - Accepted
 
 ## Superseded
 
-* [0001 — Replace the curses TUI with Textual](0001-replace-curses-tui-with-textual.md) - Superseded
-* [0012 — Toggle terminal mouse capture so native text selection works on demand](0012-mouse-capture-toggle-for-text-selection.md) - Superseded
-* [0024 — Anexos/Artefatos card breathing room — per-link separators, interior padding, named height ceiling](0024-asset-card-breathing-room.md) - Superseded
+_History only. Do not act on these records — run `living-docs read` for what is in force._
+
+* [0001 — Replace the curses TUI with Textual](0001-replace-curses-tui-with-textual.md) - Superseded by [0002](0002-rewrite-in-rust-with-ratatui.md)
+* [0012 — Toggle terminal mouse capture so native text selection works on demand](0012-mouse-capture-toggle-for-text-selection.md) - Superseded by [0021](0021-app-managed-text-selection-clipboard.md)
+* [0024 — Anexos/Artefatos card breathing room — per-link separators, interior padding, named height ceiling](0024-asset-card-breathing-room.md) - Superseded by [0029](0029-assets-inline-in-scrollable-detail-content.md)
+* [0066 — ac get/current --download-attachments: fetch task assets to a local temp dir for agent/LLM analysis](0066-agent-attachment-download-to-local-temp-dir.md) - Superseded by [0073](0073-attachment-downloads-take-comment-attachments-and-the-tui-saves-to-downloads.md)
+* [0070 — ac mcp serves MCP over stdio as an adapter over the command cores](0070-ac-mcp-serves-mcp-over-stdio-as-an-adapter-over-the-command-cores.md) - Superseded by [0072](0072-ac-mcp-exposes-downloads-as-a-third-tool-with-honest-annotations.md)

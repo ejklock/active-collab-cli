@@ -24,6 +24,10 @@ flowchart TD
     tui --> events["tui/events.rs\ncrossterm Event → Msg mapping"]
     tui --> view["tui/view.rs\nview()\nframe Layout split: header + content + footer"]
     view --> screens["tui/screens/\nprojects.rs · tasks.rs · detail.rs\neach owns its draw_* fn\n(responsive Table · detail wraps text + assets panel)"]
+    screens --> task_layout["tui/task_layout.rs\npure Tasks card layout: card heights · first_visible\nbucket header rows (bucket_starts · slot_heights · bucket_header)"]
+    task_layout --> buckets
+    model --> task_layout
+    model --> buckets
     view --> drawer["tui/drawer.rs\nshared widget builders (render_table)"]
     view --> theme["tui/theme.rs\ncentralized Style / Color constants"]
     view --> widgets["tui/widgets/modal.rs\nreusable centered modal overlay\n(DIM backdrop + Clear + bordered box)\ncompose · delete-confirm · image-viewer · hours-report"]
@@ -35,13 +39,16 @@ flowchart TD
     screens --> theme
     main --> cli["cli (clap)"]
     cli --> commands
+    main --> mcp["mcp/mod.rs\nac mcp · rmcp stdio server\nac_read · ac_write (flat schema, operation enum) · ac_download_attachments"]
+    mcp --> commands
     subgraph commands["commands/ — three masters (ADR 0055)"]
         direction TB
+        cmd_context["context.rs\nsetup_instance_client · open_store_and_http\ncurrent_git_branch (shared by main and mcp)"]
         cmd_setup["setup.rs\nsetup list·remove·language·test·add"]
         cmd_task["task.rs\nget · current"]
         cmd_comment["comment.rs\ncomment_core"]
         cmd_hours["hours_report.rs\nexport_hours_report · time_report_core · resolve_period · render_hours_report_csv · render_hours_report_xlsx"]
-        cmd_mine["mine.rs\nmine_core · collect_mine_rows"]
+        cmd_mine["mine.rs\nmine_core · collect_mine_task_lists · mine_rows_of · collect_mine_hours"]
         cmd_skill["skill.rs\nskill_output · SKILL registry\n(body = include_str! canonical SKILL.md)"]
         cmd_resolve["resolve.rs (master 1)\ninput resolution\nparse_task_ref · branch · pick_instance"]
         cmd_presenter["presenter.rs (master 3)\nuser-facing strings\nreauth_message · write_comment_*"]
@@ -52,6 +59,8 @@ flowchart TD
         cmd_mine --> cmd_presenter
         cmd_hours --> cmd_presenter
     end
+    cmd_context --> store
+    cmd_context --> client
     commands --> controller["controller\n(async orchestration)"]
     model --> controller
     controller --> client["client\n(ActiveCollab API)"]
@@ -68,6 +77,7 @@ flowchart TD
     cli_render --> richtext["richtext\nHTML → structured rich text\n(TUI detail: lists · headings · emphasis · links)"]
     detail_render --> richtext
     render_root["render/mod\nCLI stdout write seams"] --> sanitize["sanitize\nstrip_control_chars\n(untrusted text → terminal)"]
+    render_root --> buckets["render/buckets\npure due-date bucket core\n(due_bucket · bucket_sums · group_by_bucket)"]
     richtext --> sanitize
     cmd_task --> sanitize
     commands --> i18n["i18n (en · pt-BR)"]
@@ -126,6 +136,22 @@ flowchart TD
   `install-skill.sh`. `skill` is in `KNOWN_COMMANDS` so a bare `ac skill …` is not
   rewritten to `get`. Fitness: the registry body equals the embedded `SKILL.md` bytes
   (a unit test pins it), and `skill_output` takes no store/HTTP dependency.
+- **`ac mcp` is a driving adapter over the command cores**
+  ([ADR 0070](/adr/0070-ac-mcp-serves-mcp-over-stdio-as-an-adapter-over-the-command-cores.md)):
+  `src/mcp/mod.rs` serves MCP over stdio with `rmcp` and exposes three tools, `ac_read`
+  (`readOnlyHint`: `get` · `current` · `mine`), `ac_write` (`destructiveHint`: `comment` ·
+  `log_time` · `set_task` · `time_report`), each selecting a core by an `operation` field, and
+  `ac_download_attachments` (writes files; neither read-only nor destructive, idempotent; `get`
+  never downloads, see [ADR 0072](/adr/0072-ac-mcp-exposes-downloads-as-a-third-tool-with-honest-annotations.md)). An
+  operation calls the existing `*_core` with `json = true` and in-memory writers, returns `out`
+  on exit 0 and `err` as an `isError` result otherwise; no tool builds JSON or an HTTP request,
+  so the `--json` contract and the host-gated write seam have one home. The instance, store and
+  client setup that `main.rs` and `mcp` both need lives once in `commands/context.rs`. While the
+  server runs, stdout belongs to JSON-RPC: cores write only to their injected writers. Each
+  session is its own process; the SQLite cache (`journal_mode=WAL`) is the shared state.
+  Fitness: `tests/mcp_stdio.rs` drives the built binary over stdio and asserts the tool list,
+  byte-identical output against the `--json` commands, error mapping, and that every stdout line
+  is a JSON-RPC frame.
 - **tui/model.update** is pure — no terminal, no async, no I/O. Gate-checked by unit
   tests (BDR 0001) and `cargo test` running headless.
 - **client/http** is the only outbound-network boundary; **token host isolation**
@@ -134,12 +160,17 @@ flowchart TD
 - **mine and browse share one TEA core**: `run_app` (async) seeds from `mine_model`
   (rows already fetched, no init_cmds) or `init_browse` (LoadTasksByProject on start).
   Enter/click on the mine Tasks screen opens Detail through the same `update` path.
+- **the mine Tasks screen groups its cards under due-date bucket headers**: with
+  `Screen::Tasks.due_today` set (mine; browse leaves it `None`), `update` keeps the task
+  vector in `render/buckets::group_by_bucket` order, and one header row per non-empty bucket
+  (label, count, estimate, week and total sums) is counted inside the height of the bucket's
+  first task, so card offsets, `first_visible`, selection and clicks stay on task indices.
 - **the view layer is responsive and theme-centralized**: `view()` splits the frame
   vertically into three regions — a one-line identity header (`app_header_style`:
   white on cyan, bold), a variable-height content area, and a footer.  The footer
   itself is **two stacked regions** ([ADR 0038](/adr/0038-detail-footer-contextual-hint-and-status-line.md)):
-  a **contextual instruction line** whose Detail-screen text changes by mode
-  (browsing / composing / confirming-delete / own-comment-focused, via `detail_hint`),
+  a **contextual instruction line** whose Detail-screen text is the browsing or
+  own-comment-focused hint (each overlay shows its own hint inside the modal),
   and a **thin status line** that surfaces one derived transient
   string (`Enviando…`, a write error, `Copiado ✓`) and is blank — collapsing the row —
   when idle.  The whole footer decision — hint selection (with the modal one-home
@@ -278,6 +309,33 @@ Background results (e.g. `Msg::LoadedTasksByProject`) are delivered over a
 loop. The model is updated and the screen repainted as soon as the result
 arrives — no input event is required.
 
+## MCP tool-call data flow
+
+```mermaid
+sequenceDiagram
+    participant Agent as agent harness
+    participant Mcp as ac mcp (rmcp stdio)
+    participant Core as commands/*_core
+    participant Cache as store (WAL)
+    participant API as client/http
+
+    Agent->>Mcp: tools/call ac_read | ac_write {operation, ...} | ac_download_attachments {ref, ...}
+    alt unknown operation, missing field or unknown parameter
+        Mcp-->>Agent: JSON-RPC invalid_params
+    else valid
+        Mcp->>Core: setup_instance_client (mine: open_store_and_http), then *_core(json = true, Vec writers)
+        Core->>Cache: read/write task cache
+        Core->>API: request (token only to instance host)
+        API-->>Core: payload | 401 | error
+        Core-->>Mcp: exit code + out + err buffers
+        alt exit 0
+            Mcp-->>Agent: result text = out (the --json line)
+        else non-zero
+            Mcp-->>Agent: isError result text = err
+        end
+    end
+```
+
 ## Write / comment-mutation data flow
 
 The app's first **write** path ([PRD 0002](/prd/0002-task-comment-authoring.md))
@@ -358,9 +416,20 @@ sequenceDiagram
   with only `assignee_id: Some(selected)` set, reusing the overlay/effect pair unchanged. The
   shell (`spawn_task_edit`) calls
   `client.set_task_completion` when `completion` is given, then `client.update_task` when
-  `assignee_id` and/or `estimate` are given, stopping at the first non-Ok outcome; `TaskEditOk`
-  clears the overlay and emits the same `Cmd::LoadDetail { refresh: true }` via
-  `refresh_detail_after_write`.
+  `assignee_id`, `estimate` and/or `task_list_id` are given, stopping at the first non-Ok
+  outcome; `TaskEditOk` clears the overlay and emits the same `Cmd::LoadDetail { refresh: true }`
+  via `refresh_detail_after_write`.
+- **Moving a task between lists (issue 0077) adds a read effect to the same overlay family**: the
+  `l` key opens `TaskListPicker { candidates, current_id, filter, selected, status, load, error }`
+  in a loading state and emits `Cmd::LoadTaskLists { instance, project_id, task_id }`. The shell
+  (`spawn_task_lists_read`) calls `client.fetch_task_lists` and answers `Msg::TaskListsLoaded`
+  carrying the same instance, project id and task id (a 401 answers `AuthExpired`, any other
+  failure a failed result); the pure core applies it only while the open Detail is that task and
+  the picker still waits, then marks and pre-selects the current list. The picker shares its
+  filtering and navigation with the assignee picker through `PickerKind` accessors, which expose a
+  view only once the lists are loaded. Confirming another list emits `Cmd::SubmitTaskEdit` with only
+  `task_list_id` set; the current list closes the picker without a write; `TaskEditErr` keeps the
+  picker open with its `error` for a retry.
 - **the hours-report modal is a model-level overlay**, not a `DetailOverlay` variant, because it
   opens from Projects, Tasks and Detail: `Model.report: Option<ReportForm>`. `H` emits
   `Msg::ReportOpen`; while the form is open the shell's `route_key_event` sends every key to
@@ -377,6 +446,14 @@ sequenceDiagram
   → `Ready`, `Msg::ImageLoadErr` → `Error`, and `Esc`/`q` → `None`. The pure Model tracks only
   this lifecycle metadata; the byte fetch, decode, and `ratatui-image` render are the shell's
   (slice 0059), so the viewer currently draws a centered placeholder over the dimmed backdrop.
+- **`D` on a task detail downloads its attachments:** the pure `update()` builds the asset set with
+  `controller::downloadable_assets` (task and comment attachments, inline images) and emits one
+  `Cmd::DownloadAttachments`, setting `Screen::Detail.download` to `Running`; a task with no
+  downloadable asset sets `NoAttachments` and emits nothing, and `D` while a download runs does nothing.
+  The shell resolves the home directory, runs `controller::download_task_attachments` into
+  `~/Downloads/ac-attachments/<project_id>-<task_id>/` and answers `Msg::AttachmentsDownloaded`, which
+  the same asset-effects handler as the image viewer applies to the Detail of the same task only. The
+  footer status row shows the outcome below an auth error and above the copied note.
 - **No optimistic mutation:** the mutation arms construct no synthetic comment; the
   thread is always re-derived from the server after a 2xx
   ([ADR 0035](/adr/0035-server-truth-refresh-after-comment-mutation.md)). Gate-checked by
@@ -423,4 +500,10 @@ idempotent `setup add`), not a token refresh; there is no in-app re-auth modal.
 
 ## Quality gates
 
-The Rust crate enforces a comment policy via the `comment_policy` integration test (`tests/comment_policy.rs`), run as part of `cargo test`. It forbids banner/divider comments (e.g. `// ----`, `// === Section ===`, box-drawing chars) and commented-out Rust code, while allowing doc comments (`///`, `//!`) and ordinary prose why-comments that explain non-obvious intent.
+The Rust crate enforces a comment policy via the `comment_policy` integration test (`tests/comment_policy.rs`), run as part of `cargo test`. It scans every `.rs` file under three roots, `src/`, `tests/` and `examples/`, and applies three rules to `//`, `///` and `//!` comments:
+
+- **Banners:** a divider run (`// ----`, `// === Section ===`), a run of three or more box-drawing glyphs (`// ── Section ──`), or a comment made mostly of them. Prose that names one glyph (`the │ border`) and a bare `//` between two comment lines are allowed.
+- **Commented-out code:** a comment that reads as Rust code (`// let x = 1;`, `// return x;`).
+- **Artifact citations:** a record and number (`ADR 0012`, `issue #45`), a numberless `the ADR/BDR/PRD`, a criterion id `AC4`, a scenario id `Sc.8`, `slice 3`, or a task id such as `ek-0061`.
+
+`/* */` block comments get the citation rule only. Doc comments and ordinary prose why-comments that explain non-obvious intent are allowed. The gate and the translation policy (`tests/i18n_policy.rs`, which forbids `t(&format!(...))`) read source through one lexer in `tests/common/mod.rs`, so comment markers inside strings, raw strings and char literals and after lifetime ticks are read correctly.

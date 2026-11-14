@@ -1,0 +1,18 @@
+{
+  "name": "opencode-active-collab",
+  "version": "0.11.0",
+  "description": "Registers the ac MCP server and the active-collab skill in OpenCode",
+  "license": "MIT",
+  "repository": { "type": "git", "url": "git+https://github.com/ejklock/active-collab-cli.git", "directory": "packages/opencode" },
+  "homepage": "https://github.com/ejklock/active-collab-cli#plugins",
+  "type": "module",
+  "main": "./index.ts",
+  "exports": {
+    ".": "./index.ts",
+    "./server": "./index.ts"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "files": ["index.ts", "skills"]
+}

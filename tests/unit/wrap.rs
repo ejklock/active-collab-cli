@@ -40,7 +40,7 @@ fn wrap_text_preserves_embedded_newlines_as_independent_wraps() {
     assert_eq!(result, vec!["foo bar", "baz qux"], "got: {:?}", result);
 }
 
-/// Blank line between paragraphs preserved (ADR 0048's canonical wrap contract) — a
+/// Blank line between paragraphs preserved (the canonical wrap contract) — a
 /// mutant that drops the wordless-segment fallback would collapse the empty middle
 /// segment, producing 2 lines instead of 3.
 #[test]
@@ -78,8 +78,6 @@ fn wrap_text_multibyte_chars_counted_by_char_not_byte() {
         );
     }
 }
-
-// --- D1-A3: wrap_text wraps by DISPLAY width ---
 
 #[test]
 fn wrap_text_cjk_no_line_exceeds_display_width() {

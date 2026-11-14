@@ -3,7 +3,7 @@ services:
     build:
       context: ./
       dockerfile: Dockerfile
-      target: builder
+      target: dev
     volumes:
       - ./:/app
       - cargo-registry:/usr/local/cargo/registry

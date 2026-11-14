@@ -173,6 +173,10 @@ open tasks aggregated across all configured instances. Select a task to view its
 detail or open/download its assets. When output is piped or redirected (non-TTY),
 `mine` falls back to a plain table suitable for scripts.
 
+Each task shows its estimate, the hours you logged on it this week (Monday to
+Sunday) and its total logged hours. An hour value the server does not return
+stays blank and never fails the list.
+
 ### time report — export your hours for a period as XLSX or CSV
 
 ```sh
@@ -226,7 +230,7 @@ The task detail view shows:
   Assignee, Start, Due, Estimate, and Logged.
 - **Description** — the task body; falls back to `(no description)` when empty.
 - **Artifacts panel** — lists each image / attachment / link as `[n] name` with
-  its URL. Press `1`–`9` to open the matching artifact in your browser.
+  its URL.
 - **Comments** — one panel per comment (author · date as the panel title).
 
 The detail view scrolls vertically when content exceeds the screen. The TUI
@@ -241,24 +245,8 @@ the detail view to bypass the cache and re-fetch from the API.
 
 | Screen | Keys |
 |---|---|
-| Projects / Tasks lists | `↑`/`↓` or `k`/`j` move · `Enter` select · `q` quit · `b` back · `s` settings |
-| Task detail | `↑`/`↓` or `k`/`j` scroll · `PgUp`/`PgDn` page · `a` assets · `r` refresh · `1`–`9` open artifact · `q`/`b` back |
-| Settings | `↑`/`↓` or `k`/`j` move · `Enter` select · `q`/`b` back |
-| Assets | `↑`/`↓` or `k`/`j` move · `o` open in browser · `d` download · `q`/`b` back |
-
-**Settings screen** — press `[s]` from any list screen to open the Settings panel.
-It offers two pickers:
-
-- **Language** — choose `en` (English) or `pt_BR` (Portuguese (Brazil)). The
-  selection persists to SQLite and takes effect immediately without restarting.
-- **Active instance** — choose which configured instance `browse` uses by default
-  when you have more than one. The selection persists to SQLite.
-
-- **Assets** — image, attachment, and link URLs extracted from the task body,
-  comments, and attachments. `o` opens the URL in your browser; `d` downloads
-  it. The `X-Angie-AuthApiToken` header is attached **only** when the asset
-  URL's scheme and host match the configured instance — foreign hosts are
-  fetched without credentials.
+| Projects / Tasks lists (including `mine`) | `↑`/`↓` move · `Enter` select · `r` refresh · `H` hours report · `q` quit · `Esc`/`b` back (quits from the first screen) · `Ctrl+C` quit |
+| Task detail | `↑`/`↓` or `k`/`j` move between comments · `PgUp`/`PgDn` page · `r` refresh · `c` new comment · `t` log time · `e` edit estimate · `s` toggle status · `a` assignee picker · `l` task list picker · `H` hours report · `D` download attachments · `Esc`/`b` back · `q` quit · `Ctrl+C` quit |
 
 ### Bare-invocation shortcuts
 
@@ -334,8 +322,83 @@ installer directly in a terminal (not via `curl | sh`) prompts for project-vs-gl
 piped one-liner stays non-interactive and defaults to project. To install into a specific
 pi profile, use `--scope project --dir ~/.pi/agent-profiles/<name>`.
 
-> This tool only ever **reads** your ActiveCollab tasks over the `--json` contract; the
-> skill grants an agent no write access beyond the CLI commands you already run yourself.
+> The skill grants an agent no access beyond the CLI commands you already run
+> yourself, including the ones that write (`ac comment`, `ac time log`, `ac task set`).
+
+### Plugins
+
+The Claude Code, Codex and OpenCode plugins install the skill **and** the `ac mcp` server
+into a harness in one step (the Pi package installs the skill only).
+Install `ac` first (`install.sh`, above): each of these plugins starts the `ac` found on your
+`PATH`, and needs a release that has the `mcp` subcommand (releases up to 0.11.0 lack it).
+
+```sh
+# Claude Code
+claude plugin marketplace add ejklock/active-collab-cli
+claude plugin install active-collab@active-collab
+
+# Codex
+codex plugin marketplace add ejklock/active-collab-cli
+codex plugin add active-collab@active-collab
+```
+
+OpenCode: add the package to the `plugin` list in `opencode.json`:
+
+```json
+{ "plugin": ["opencode-active-collab"] }
+```
+
+Pi installs the skill only (it has no MCP client):
+
+```sh
+pi install npm:pi-active-collab
+```
+
+The `opencode-active-collab` and `pi-active-collab` npm packages are **not published
+yet**. Until they are, install them from a clone of this repository: for Pi, run
+`pi install ./packages/pi`; for OpenCode, list the absolute path
+`"file:///path/to/active-collab-cli/packages/opencode"` in `plugin`.
+
+`scripts/prove-plugins.sh` installs and removes each plugin from a checkout in a
+temporary home, with the harness CLIs it finds on `PATH` (`PI_BIN` names the real `pi`
+binary when yours is a wrapper). `install-skill.sh` remains the way to install the skill
+for GitHub Copilot and Cursor, which have no plugin here.
+
+### MCP server — `ac mcp`
+
+`ac mcp` serves the same commands as MCP tools over stdio, so an agent calls them
+with typed parameters instead of composing shell commands. Each agent session
+starts its own `ac mcp` process; all of them share the local cache. Every result is
+exactly what the matching `--json` command prints.
+
+| Tool | Operations |
+|---|---|
+| `ac_read` | `get`, `current`, `mine` |
+| `ac_write` | `comment`, `log_time`, `set_task`, `time_report` |
+| `ac_download_attachments` | downloads a task's attachments to a local directory (`ref`, `attachments_dir`, `instance`) |
+
+`ac_download_attachments` writes files on the machine running `ac mcp`, so it is
+marked neither read-only nor destructive; `ac_read` `get` does not download. See
+[ADR 0072](docs/adr/0072-ac-mcp-exposes-downloads-as-a-third-tool-with-honest-annotations.md).
+
+`ac_write` changes data on your ActiveCollab instance as the logged-in user and is
+marked destructive, so a harness that honours MCP tool hints asks before calling it.
+The Claude Code, Codex and OpenCode plugins above register the server for you. To register it by hand instead, once per harness:
+
+```sh
+# Claude Code
+claude mcp add active-collab -- ac mcp
+```
+
+```toml
+# Codex, in ~/.codex/config.toml
+[mcp_servers.active-collab]
+command = "ac"
+args = ["mcp"]
+```
+
+The parameters of each operation are in `ac skill active-collab`. See
+[ADR 0070](docs/adr/0070-ac-mcp-serves-mcp-over-stdio-as-an-adapter-over-the-command-cores.md).
 
 ---
 
@@ -361,10 +424,6 @@ ACTIVE_COLLAB_LANG=pt_BR ac browse
 
 **Resolution order:** `ACTIVE_COLLAB_LANG` env var → SQLite setting → `en`.
 
-The language can also be changed interactively from inside `browse` — press `[s]`
-to open Settings and select a language; the change takes effect immediately without
-restarting.
-
 ---
 
 ## Configuration
@@ -376,6 +435,28 @@ Override with the `ACTIVE_COLLAB_DB` environment variable:
 ```sh
 ACTIVE_COLLAB_DB=/custom/path/active-collab.db ac get 665/75159
 ```
+
+---
+
+## Terminal walkthroughs
+
+`qa/*.walkthrough.json` replay four flows (`ac mine` hours, `ac mcp` read
+through the MCP Inspector, `ac get --download-attachments`, `ac task set
+--list`) with `qa-walkthrough` against a throwaway mock
+ActiveCollab (`examples/mock_collab.rs`):
+
+```sh
+bash qa/run-walkthroughs.sh
+```
+
+The script builds `ac` and the mock natively into `target/native`, installs the
+pinned MCP Inspector (2.15.0) under `qa/.run/tools` with `npm ci` from the
+lockfile committed in `qa/tools` (the only network fetch),
+then checks and replays every walkthrough. Each walkthrough uses its own store,
+`HOME` and `TMPDIR` under `qa/.run/<name>/` and the mock's loopback address; it
+never opens `~/.config/active-collab` and never reaches your real instance. The
+script fails if that store's modification time changes, if a mock outlives the
+run, or if another replay holds `qa/.run/replay.lock`.
 
 ---
 
@@ -417,6 +498,11 @@ docker compose run --rm dev cargo clippy -- -D warnings
 # Format check
 docker compose run --rm dev cargo fmt --check
 ```
+
+The Rust version is pinned in `rust-toolchain.toml`; the Docker images and both
+workflows read it from there. To raise it, edit that file, rebuild the image
+with `docker compose build`, and fix whatever the new clippy lints report, all
+in one change.
 
 The TUI core (`src/app.rs` `update`) is a pure function with no terminal or
 network dependency — it is unit-tested directly without a TTY.

@@ -4,7 +4,7 @@ use crate::i18n::t;
 use crate::models::JobType;
 use std::io::Write;
 
-/// Non-interactive time log (issue 0067).
+/// Non-interactive time log.
 ///
 /// Resolves the task, guards against non-positive hours, resolves the job
 /// type (instance default or `--job-type` override), defaults the record

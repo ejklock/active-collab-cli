@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::io::Write;
 use std::sync::OnceLock;
 
+pub mod buckets;
 mod cli_render;
 mod detail_render;
 mod text_measure;
@@ -74,33 +75,30 @@ pub struct StyleRun {
 ///
 /// `Edit(comment_id)` and `Delete(comment_id)` carry the id of the targeted comment.
 /// `Edit` opens the compose area pre-filled with the comment body; `Delete` requests
-/// a confirmation via the modal overlay (ADR 0039). The modal's [confirmar]/[cancelar]
+/// a confirmation via the modal overlay. The modal's [confirmar]/[cancelar]
 /// buttons are a separate registry (`Model.modal_button_targets`), registered by
 /// `view::register_confirm_button_targets` from the `Rect` that `render_modal` returns,
 /// and resolved by `model::dispatch_confirm_modal_click` on a plain click — single-sourced
 /// geometry that does not go through this scroll-aware affordance list.
 ///
 /// `OpenAsset(url)` carries the asset's url; emitted once per asset content row (including
-/// every wrapped continuation line) by `build_detail_content` at layout time (ADR 0043 §1).
+/// every wrapped continuation line) by `build_detail_content` at layout time.
 /// Resolved by `asset_panel_cmd_at` on Ctrl/Cmd+click.
 ///
-/// `OpenUrl(url)` carries an inline body-link url; populated by slice 0046. Defined here
+/// `OpenUrl(url)` carries an inline body-link url. Defined here
 /// to keep the enum stable across the two slices.
 ///
 /// `ViewImage { url, label }` is emitted instead of `OpenAsset` for an asset row whose
-/// derived filename ([ADR 0023]) is a raster image (png/jpg/jpeg/gif/webp/bmp,
-/// case-insensitive); non-image rows keep `OpenAsset` (ADR 0025 external open). Carries
+/// derived filename is a raster image (png/jpg/jpeg/gif/webp/bmp,
+/// case-insensitive); non-image rows keep `OpenAsset` (external open). Carries
 /// plain fields rather than `tui::model::ImageAssetRef` because `render` sits below `tui`
-/// in the module graph; `hit_test::target_for` rebuilds the typed ref from these fields
-/// (ADR 0065 §1).
-///
-/// [ADR 0023]: /adr/0023-asset-label-derivation.md
+/// in the module graph; `hit_test::target_for` rebuilds the typed ref from these fields.
 #[derive(Debug, Clone, PartialEq)]
 pub enum AffordanceKind {
     Edit(i64),
     Delete(i64),
     OpenAsset(String),
-    /// Populated at layout time by `build_body_lines` (ADR 0043 §2): one span per
+    /// Populated at layout time by `build_body_lines`: one span per
     /// wrapped fragment of an openable inline URL/email token.
     /// Resolved by `body_link_cmd_at` on Ctrl/Cmd+click.
     OpenUrl(String),
@@ -114,7 +112,7 @@ impl AffordanceKind {
     /// Returns true when the whole row is the click target, not just the link span.
     ///
     /// `OpenAsset` and `ViewImage` spans cover only the link text column range, but
-    /// ADR 0029 specifies that any Ctrl/Cmd+click anywhere on the asset row should
+    /// any Ctrl/Cmd+click anywhere on the asset row should
     /// trigger the row's action. All other kinds require the click to fall within
     /// `[col_start, col_end)`.
     pub fn is_row_target(&self) -> bool {
@@ -407,27 +405,68 @@ pub struct MineTableRow {
     pub due_on: Option<String>,
     #[serde(default)]
     pub project_name: Option<String>,
+    /// Estimated hours; `None` when the task has no estimate.
+    #[serde(default)]
+    pub estimate: Option<f64>,
+    /// The user's hours on the task this week; `None` when unknown.
+    #[serde(default)]
+    pub logged_week: Option<f64>,
+    /// All hours logged on the task; `None` when unknown.
+    #[serde(default)]
+    pub logged_total: Option<f64>,
 }
 
 /// Parity: render.py render_mine_table.
 ///
-/// Returns the formatted table as a String (header + separator + rows).
+/// Returns the formatted table as a String (header + separator, then each
+/// non-empty due bucket's header line followed by its rows).
 pub fn render_mine_table(rows: &[MineTableRow]) -> String {
+    render_mine_table_on(rows, chrono::Local::now().date_naive())
+}
+
+/// `render_mine_table` with an explicit "today" for the due-date buckets.
+pub fn render_mine_table_on(rows: &[MineTableRow], today: chrono::NaiveDate) -> String {
     let header = format!(
-        "{:<15} {:<10} {:<8} {:<10} {}",
+        "{:<15} {:<10} {:<8} {:<10} {:<8} {:<8} {:<8} {}",
         t("INSTANCE"),
         t("PROJECT"),
         t("TASK#"),
         t("TASK_ID"),
+        t("EST"),
+        t("WEEK"),
+        t("TOTAL"),
         t("NAME")
     );
     let separator = "-".repeat(80);
     let mut lines = vec![header, separator];
-    for row in rows {
+    for group in buckets::group_by_bucket(rows, today) {
+        if group.items.is_empty() {
+            continue;
+        }
         lines.push(format!(
-            "{:<15} {:<10} {:<8} {:<10} {}",
-            row.instance, row.project_id, row.task_number, row.task_id, row.name
+            "{} ({}) · {} {} · {} {} · {} {}",
+            group.bucket.label(),
+            group.items.len(),
+            t("EST"),
+            fmt_hours_or_dash(group.sums.estimate),
+            t("WEEK"),
+            fmt_hours_or_dash(group.sums.logged_week),
+            t("TOTAL"),
+            fmt_hours_or_dash(group.sums.logged_total),
         ));
+        for row in group.items {
+            lines.push(format!(
+                "{:<15} {:<10} {:<8} {:<10} {:<8} {:<8} {:<8} {}",
+                row.instance,
+                row.project_id,
+                row.task_number,
+                row.task_id,
+                fmt_hours_or_dash(row.estimate),
+                fmt_hours_or_dash(row.logged_week),
+                fmt_hours_or_dash(row.logged_total),
+                row.name
+            ));
+        }
     }
     crate::sanitize::strip_control_chars(&lines.join("\n"))
 }
@@ -487,6 +526,11 @@ pub fn normalize_due_to_ymd(value: &Value) -> Option<String> {
     } else {
         Some(s)
     }
+}
+
+/// Hours for a list cell: the `fmt_hours` text, or `–` when unknown.
+pub fn fmt_hours_or_dash(hours: Option<f64>) -> String {
+    hours.map_or_else(|| "–".to_owned(), |h| fmt_hours(&Value::from(h)))
 }
 
 /// Parity: render.py fmt_hours.

@@ -1,0 +1,153 @@
+{
+	"flow": "Ferramentas MCP do ac",
+	"language": "pt-BR",
+	"kind": "feature",
+	"summary": "O comando ac mcp expõe as ferramentas ac_read, ac_write e ac_download_attachments, e o Inspector do MCP lê as tarefas do ActiveCollab de teste por ac_read.",
+	"setup": {
+		"target": {
+			"kind": "terminal",
+			"engine": "host",
+			"terminal": {
+				"cols": 150,
+				"env": {
+					"ACTIVE_COLLAB_DB": ".run/mcp-read/ac.db",
+					"HOME": ".run/mcp-read/home",
+					"TMPDIR": ".run/mcp-read/tmp",
+					"ACTIVE_COLLAB_LANG": "en"
+				}
+			}
+		},
+		"hooks": [
+			"hooks/mcp-read.ts"
+		]
+	},
+	"scenarios": [
+		{
+			"title": "Listar as ferramentas e ler tarefas pelo MCP",
+			"narration": "O Inspector do MCP, na versão fixada em 2.15.0, inicia o ac mcp e conversa com ele como um agente faria.",
+			"steps": [
+				{
+					"title": "Preparar o Inspector",
+					"narration": "A função ins chama o Inspector instalado na pasta .run/tools pelo script de replay e repassa a ele, com -e, o banco, o idioma e a pasta temporária de teste: o cliente MCP inicia o servidor com um ambiente reduzido e, sem o -e, o ac mcp não receberia ACTIVE_COLLAB_DB.",
+					"actions": [
+						{
+							"action": "type",
+							"value": "ins() { .run/tools/node_modules/.bin/mcp-inspector --cli -e ACTIVE_COLLAB_DB=.run/mcp-read/ac.db -e ACTIVE_COLLAB_LANG=en -e TMPDIR=.run/mcp-read/tmp \"$@\" -- ../target/native/debug/ac mcp 2>/dev/null; }"
+						},
+						{
+							"action": "press",
+							"value": "Enter"
+						}
+					]
+				},
+				{
+					"title": "Listar as ferramentas",
+					"narration": "A lista de ferramentas do ac mcp tem as três ferramentas.",
+					"actions": [
+						{
+							"action": "type",
+							"value": "ins --method tools/list | grep '\"name\": \"ac_'"
+						},
+						{
+							"action": "press",
+							"value": "Enter"
+						},
+						{
+							"action": "waitFor",
+							"target": {
+								"text": "\"name\": \"ac_write\""
+							}
+						},
+						{
+							"action": "expect",
+							"assert": "text",
+							"target": {
+								"text": "\"name\": \"ac_download_attachments\""
+							},
+							"expected": "\"name\": \"ac_download_attachments\""
+						},
+						{
+							"action": "expect",
+							"assert": "text",
+							"target": {
+								"text": "\"name\": \"ac_read\""
+							},
+							"expected": "\"name\": \"ac_read\""
+						},
+						{
+							"action": "expect",
+							"assert": "text",
+							"target": {
+								"text": "\"name\": \"ac_write\""
+							},
+							"expected": "\"name\": \"ac_write\""
+						}
+					]
+				},
+				{
+					"title": "Ler as tarefas abertas",
+					"narration": "A operação mine de ac_read responde com as três tarefas do ActiveCollab de teste.",
+					"actions": [
+						{
+							"action": "type",
+							"value": "ins --method tools/call --tool-name ac_read --tool-arg operation=mine | grep -o '\\\\\"name\\\\\":\\\\\"[^\\\\]*'"
+						},
+						{
+							"action": "press",
+							"value": "Enter"
+						},
+						{
+							"action": "waitFor",
+							"target": {
+								"text": "Plan the team offsite"
+							}
+						},
+						{
+							"action": "expect",
+							"assert": "text",
+							"target": {
+								"text": "Draft the quarterly report"
+							},
+							"expected": "Draft the quarterly report"
+						},
+						{
+							"action": "expect",
+							"assert": "text",
+							"target": {
+								"text": "Review the vendor contract"
+							},
+							"expected": "Review the vendor contract"
+						}
+					]
+				},
+				{
+					"title": "Ler uma tarefa",
+					"narration": "A operação get de ac_read devolve a tarefa 10/101 do ActiveCollab de teste.",
+					"actions": [
+						{
+							"action": "type",
+							"value": "ins --method tools/call --tool-name ac_read --tool-arg operation=get --tool-arg ref=10/101 | grep -o '\\\\\"ref\\\\\":\\\\\"[^\\\\]*'"
+						},
+						{
+							"action": "press",
+							"value": "Enter"
+						},
+						{
+							"action": "waitFor",
+							"target": {
+								"text": "\"ref\\\":\\\"10/101"
+							}
+						}
+					]
+				}
+			]
+		}
+	],
+	"outcome": {
+		"assert": "text",
+		"target": {
+			"text": "\"ref\\\":\\\"10/101"
+		},
+		"expected": "\"ref\\\":\\\"10/101"
+	}
+}

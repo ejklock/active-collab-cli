@@ -1,7 +1,5 @@
 use super::*;
 
-// --- display_width ---
-
 #[test]
 fn display_width_ascii_counts_one_col_per_char() {
     assert_eq!(display_width("hello"), 5);
@@ -26,8 +24,6 @@ fn display_width_emoji_counts_two_cols() {
 fn display_width_mixed_ascii_and_cjk() {
     assert_eq!(display_width("ab你好"), 6);
 }
-
-// --- slice_by_display_cols ---
 
 #[test]
 fn slice_by_display_cols_ascii_window_returns_expected_substring() {
@@ -62,8 +58,6 @@ fn slice_by_display_cols_start_at_or_past_end_of_string_returns_empty() {
     assert_eq!(slice_by_display_cols("hi", 2, 5), "");
 }
 
-// --- box_inner_content ---
-
 #[test]
 fn box_inner_content_boxed_line_strips_border_and_hpad() {
     let line = "\u{2502} content \u{2502}";
@@ -97,8 +91,6 @@ fn box_inner_content_empty_string_returns_none() {
     assert_eq!(box_inner_content(""), None);
 }
 
-// --- fit_to_display_width ---
-
 #[test]
 fn fit_to_display_width_pads_short_strings() {
     assert_eq!(fit_to_display_width("hi", 5), "hi   ");
@@ -114,8 +106,6 @@ fn fit_to_display_width_exact_width_is_unchanged() {
     assert_eq!(fit_to_display_width("hello", 5), "hello");
 }
 
-// --- truncate_to_display_width ---
-
 #[test]
 fn truncate_to_display_width_never_pads_short_strings() {
     assert_eq!(truncate_to_display_width("hi", 5), "hi");
@@ -130,8 +120,6 @@ fn truncate_to_display_width_clips_long_strings() {
 fn truncate_to_display_width_zero_width_returns_empty() {
     assert_eq!(truncate_to_display_width("hello", 0), "");
 }
-
-// --- panel_content_width ---
 
 #[test]
 fn panel_content_width_subtracts_border_and_hpad() {

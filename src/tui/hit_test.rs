@@ -7,7 +7,7 @@ use crate::tui::model::{ImageAssetRef, Model, Screen};
 /// appropriate TEA effect without performing any coordinate math itself.
 ///
 /// `ViewImage` is produced by `target_for` from an `AffordanceKind::ViewImage`
-/// span (ADR 0065 §1) and consumed by `apply_detail_click_target`, which opens
+/// span and consumed by `apply_detail_click_target`, which opens
 /// the viewer overlay.
 pub enum DetailClickTarget {
     CommentEdit(i64),
@@ -24,7 +24,7 @@ pub enum DetailClickTarget {
 /// - the top screen is not a Detail screen,
 /// - `row` falls outside the scrollable body area (delegated to `detail_geometry::row_to_line_idx`),
 /// - the resolved `line_idx` is past the end of `lines` (the guard that
-///   `affordance_at` previously lacked, closing AC5).
+///   `affordance_at` previously lacked).
 fn viewport_to_line_col(model: &Model, column: u16, row: u16) -> Option<(usize, usize)> {
     let Screen::Detail { lines, offset, .. } = model.top()? else {
         return None;
@@ -48,7 +48,7 @@ fn viewport_to_line_col(model: &Model, column: u16, row: u16) -> Option<(usize, 
 /// - the resolved `line_idx` is past `lines.len()` (bounds guard),
 /// - no affordance span covers the coordinate.
 ///
-/// The asset whole-row rule (ADR 0029) is implemented via `AffordanceKind::is_row_target`:
+/// The asset whole-row rule is implemented via `AffordanceKind::is_row_target`:
 /// an `OpenAsset` affordance matches any column on its line, while all other kinds
 /// require the click to fall within `[col_start, col_end)`.
 ///

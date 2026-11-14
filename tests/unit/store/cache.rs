@@ -237,7 +237,7 @@ fn project_names_cache_write_with_fetched_at_stamps_supplied_timestamp() {
     );
 }
 
-// ADR 0052: read_fresh returns Some for a recently-written entry when
+// read_fresh returns Some for a recently-written entry when
 // max_age_secs is large enough to cover its age.
 #[test]
 fn project_names_cache_read_fresh_returns_some_for_recent_entry() {
@@ -256,7 +256,7 @@ fn project_names_cache_read_fresh_returns_some_for_recent_entry() {
     );
 }
 
-// ADR 0052: read_fresh returns None for a stale entry when max_age_secs is
+// read_fresh returns None for a stale entry when max_age_secs is
 // smaller than the entry's age.
 #[test]
 fn project_names_cache_read_fresh_returns_none_for_stale_entry() {
@@ -272,7 +272,7 @@ fn project_names_cache_read_fresh_returns_none_for_stale_entry() {
     );
 }
 
-// ADR 0052: read_fresh returns None when no entry has been written.
+// read_fresh returns None when no entry has been written.
 #[test]
 fn project_names_cache_read_fresh_returns_none_when_absent() {
     let (_dir, store) = make_store();
@@ -281,7 +281,7 @@ fn project_names_cache_read_fresh_returns_none_when_absent() {
     assert!(result.is_none());
 }
 
-// ADR 0052: entry exactly at the max_age boundary reads Some (age ==
+// Entry exactly at the max_age boundary reads Some (age ==
 // max_age_secs), mirroring the TaskListCache boundary test below — the
 // read_fresh comparison must be inclusive, not strict.
 #[test]
@@ -432,4 +432,62 @@ fn task_list_cache_row_within_max_age_reads_some() {
         Some(r#"["fresh"]"#),
         "row 60s old with max_age=3600 must be a hit"
     );
+}
+
+fn insert_raw_task_entry(store: &Store, fields_json: &str) {
+    store
+        .conn()
+        .execute(
+            "INSERT OR REPLACE INTO ticket_cache \
+             (instance, project_id, task_id, fields_json, fetched_at) \
+             VALUES ('acme', 1, 1, ?1, '2026-01-01T00:00:00Z')",
+            rusqlite::params![fields_json],
+        )
+        .unwrap();
+}
+
+#[test]
+fn cache_read_hides_the_format_key_from_fields() {
+    let (_dir, store) = make_store();
+    let cache = TaskCache::new(store.conn());
+    cache
+        .write("acme", 1, 1, &json!({"id": 1}), &json!([{"body": "x"}]))
+        .unwrap();
+    let result = cache.read("acme", 1, 1).unwrap().unwrap();
+    assert!(result.fields.get("_ac_cache_format").is_none());
+    assert_eq!(result.fields["comments"][0]["body"], "x");
+}
+
+#[test]
+fn cache_read_is_a_miss_for_an_entry_without_the_format_key() {
+    let (_dir, store) = make_store();
+    insert_raw_task_entry(&store, r#"{"id":1,"comments":[]}"#);
+    let cache = TaskCache::new(store.conn());
+    assert!(cache.read("acme", 1, 1).unwrap().is_none());
+}
+
+#[test]
+fn cache_read_is_a_miss_for_an_entry_with_another_format_value() {
+    let (_dir, store) = make_store();
+    insert_raw_task_entry(&store, r#"{"id":1,"comments":[],"_ac_cache_format":2}"#);
+    let cache = TaskCache::new(store.conn());
+    assert!(cache.read("acme", 1, 1).unwrap().is_none());
+}
+
+#[test]
+fn cache_read_accepts_an_entry_with_format_value_one() {
+    let (_dir, store) = make_store();
+    insert_raw_task_entry(&store, r#"{"id":1,"comments":[],"_ac_cache_format":1}"#);
+    let cache = TaskCache::new(store.conn());
+    let result = cache.read("acme", 1, 1).unwrap().unwrap();
+    assert_eq!(result.fields["id"], 1);
+    assert!(result.fields.get("_ac_cache_format").is_none());
+}
+
+#[test]
+fn cache_read_is_a_miss_for_a_stored_value_that_is_not_an_object() {
+    let (_dir, store) = make_store();
+    insert_raw_task_entry(&store, "[1,2]");
+    let cache = TaskCache::new(store.conn());
+    assert!(cache.read("acme", 1, 1).unwrap().is_none());
 }

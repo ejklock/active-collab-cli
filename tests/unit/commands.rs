@@ -5,7 +5,7 @@ use crate::render;
 use crate::store::Store;
 use std::sync::Mutex;
 use tempfile::TempDir;
-use wiremock::matchers::{body_json, header, method, path};
+use wiremock::matchers::{body_json, header, method, path, path_regex};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 fn mine_outcome_code(outcome: MineOutcome) -> i32 {
@@ -60,7 +60,7 @@ fn setup_list_empty_prints_no_instances_message() {
         "got: {}",
         output_str(&out)
     );
-    assert!(output_str(&out).contains("active_collab.py setup add"));
+    assert!(output_str(&out).contains("ac setup add"));
 }
 
 #[test]
@@ -1449,6 +1449,321 @@ async fn do_get_task_json_mode_includes_downloaded_attachments_when_flag_set() {
     assert!(downloaded[0]["error"].is_null());
 }
 
+async fn get_task_json_with_comment_attachment(
+    comment_status: u16,
+) -> (serde_json::Value, TempDir, String) {
+    let server = MockServer::start().await;
+    let task_url = format!("{}/task-note.txt", server.uri());
+    let comment_url = format!("{}/comment-note.txt", server.uri());
+    Mock::given(method("GET"))
+        .and(path("/api/v1/projects/5/tasks/10"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "single": task_with_attachment(10, "Attachment task", &task_url),
+            "tracked_time": 0,
+            "comments": [{
+                "id": 1,
+                "body": "see file",
+                "created_by_id": 1,
+                "created_on": 1700000000,
+                "attachments": [{
+                    "name": "comment-note.txt",
+                    "download_url": comment_url,
+                    "mime_type": "text/plain",
+                    "size": 7
+                }]
+            }]
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/task-note.txt"))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(b"task-bytes".to_vec()))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/comment-note.txt"))
+        .respond_with(
+            ResponseTemplate::new(comment_status).set_body_bytes(b"comment-bytes".to_vec()),
+        )
+        .mount(&server)
+        .await;
+
+    let (_dir, store) = make_store();
+    let cache = TaskCache::new(store.conn());
+    let inst = make_inst(&server.uri());
+    let client = ActiveCollabClient::new(inst.clone(), make_http());
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    let dest = TempDir::new().unwrap();
+    let flags = DisplayFlags {
+        json: true,
+        download_attachments: true,
+        attachments_dir: Some(dest.path().to_string_lossy().to_string()),
+        ..default_flags()
+    };
+
+    let code = do_get_task(&inst, &cache, &client, 5, 10, &flags, &mut out, &mut err).await;
+    assert_eq!(code, 0);
+    let obj: serde_json::Value = serde_json::from_str(output_str(&out).trim_end()).unwrap();
+    (obj, dest, comment_url)
+}
+
+#[tokio::test]
+async fn comment_attachments_are_downloaded_next_to_task_attachments() {
+    let (obj, dest, comment_url) = get_task_json_with_comment_attachment(200).await;
+    let downloaded = obj["downloaded_attachments"].as_array().unwrap();
+    assert_eq!(downloaded.len(), 2, "{downloaded:?}");
+    assert_eq!(downloaded[0]["name"], "note.txt");
+    assert_eq!(downloaded[1]["url"], comment_url);
+    let expected = [b"task-bytes".to_vec(), b"comment-bytes".to_vec()];
+    for (entry, bytes) in downloaded.iter().zip(expected) {
+        let file = std::path::PathBuf::from(entry["path"].as_str().unwrap());
+        assert!(file.starts_with(dest.path()), "{file:?}");
+        assert_eq!(std::fs::read(&file).unwrap(), bytes);
+    }
+}
+
+#[tokio::test]
+async fn comment_attachments_download_failure_keeps_task_attachment() {
+    let (obj, dest, _) = get_task_json_with_comment_attachment(404).await;
+    let downloaded = obj["downloaded_attachments"].as_array().unwrap();
+    assert_eq!(downloaded.len(), 2, "{downloaded:?}");
+    let task_file = std::path::PathBuf::from(downloaded[0]["path"].as_str().unwrap());
+    assert!(task_file.starts_with(dest.path()));
+    assert_eq!(std::fs::read(&task_file).unwrap(), b"task-bytes");
+    assert!(downloaded[1]["path"].is_null(), "{downloaded:?}");
+    assert!(downloaded[1]["error"].as_str().is_some(), "{downloaded:?}");
+}
+
+struct CommentedTaskServer {
+    server: MockServer,
+    comment_url: String,
+}
+
+async fn commented_task_server(
+    comments: serde_json::Value,
+    task_requests: u64,
+) -> CommentedTaskServer {
+    let server = MockServer::start().await;
+    let task_url = format!("{}/task-note.txt", server.uri());
+    let comment_url = format!("{}/comment-note.txt", server.uri());
+    let comments = if comments.is_null() {
+        serde_json::json!([{
+            "id": 1,
+            "body": "see the attached file",
+            "created_by_id": 1,
+            "created_on": 1700000000,
+            "attachments": [{
+                "name": "comment-note.txt",
+                "download_url": comment_url,
+                "mime_type": "text/plain",
+                "size": 7
+            }]
+        }])
+    } else {
+        comments
+    };
+    Mock::given(method("GET"))
+        .and(path("/api/v1/projects/5/tasks/10"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "single": task_with_attachment(10, "Attachment task", &task_url),
+            "tracked_time": 0,
+            "comments": comments
+        })))
+        .expect(task_requests)
+        .mount(&server)
+        .await;
+    for (route, bytes) in [
+        ("/task-note.txt", "task-bytes"),
+        ("/comment-note.txt", "comment-bytes"),
+    ] {
+        Mock::given(method("GET"))
+            .and(path(route))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(bytes.as_bytes().to_vec()))
+            .mount(&server)
+            .await;
+    }
+    CommentedTaskServer {
+        server,
+        comment_url,
+    }
+}
+
+async fn read_task(
+    server: &MockServer,
+    cache: &TaskCache<'_>,
+    flags: &DisplayFlags,
+) -> (String, String) {
+    let inst = make_inst(&server.uri());
+    let client = ActiveCollabClient::new(inst.clone(), make_http());
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    let code = do_get_task(&inst, cache, &client, 5, 10, flags, &mut out, &mut err).await;
+    assert_eq!(code, 0, "{}", output_str(&err));
+    (output_str(&out).to_owned(), output_str(&err).to_owned())
+}
+
+fn download_flags(dest: &TempDir, no_comments: bool) -> DisplayFlags {
+    DisplayFlags {
+        no_comments,
+        download_attachments: true,
+        attachments_dir: Some(dest.path().to_string_lossy().to_string()),
+        ..default_flags()
+    }
+}
+
+#[tokio::test]
+async fn full_read_after_no_comments_read_prints_the_comment_from_the_cache() {
+    let fixture = commented_task_server(serde_json::Value::Null, 1).await;
+    let (_dir, store) = make_store();
+    let cache = TaskCache::new(store.conn());
+    let no_comments = DisplayFlags {
+        no_comments: true,
+        ..default_flags()
+    };
+
+    let (first, _) = read_task(&fixture.server, &cache, &no_comments).await;
+    let (second, _) = read_task(&fixture.server, &cache, &default_flags()).await;
+
+    assert!(!first.contains("see the attached file"), "{first}");
+    assert!(second.contains("see the attached file"), "{second}");
+    fixture.server.verify().await;
+}
+
+#[tokio::test]
+async fn download_after_no_comments_read_fetches_the_comment_attachment_from_the_cache() {
+    let fixture = commented_task_server(serde_json::Value::Null, 1).await;
+    let (_dir, store) = make_store();
+    let cache = TaskCache::new(store.conn());
+    let no_comments = DisplayFlags {
+        no_comments: true,
+        ..default_flags()
+    };
+    read_task(&fixture.server, &cache, &no_comments).await;
+
+    let dest = TempDir::new().unwrap();
+    let (second, _) = read_task(&fixture.server, &cache, &download_flags(&dest, false)).await;
+
+    assert!(
+        second.contains("Downloaded 2 of 2 attachment(s)"),
+        "{second}"
+    );
+    assert_eq!(
+        std::fs::read(dest.path().join("comment-note.txt")).unwrap(),
+        b"comment-bytes",
+        "{}",
+        fixture.comment_url
+    );
+    fixture.server.verify().await;
+}
+
+#[tokio::test]
+async fn full_read_after_no_comments_read_of_a_task_without_comments_prints_none() {
+    let fixture = commented_task_server(serde_json::json!([]), 1).await;
+    let (_dir, store) = make_store();
+    let cache = TaskCache::new(store.conn());
+    let no_comments = DisplayFlags {
+        no_comments: true,
+        ..default_flags()
+    };
+    read_task(&fixture.server, &cache, &no_comments).await;
+
+    let (second, err) = read_task(&fixture.server, &cache, &default_flags()).await;
+
+    assert!(second.contains("Attachment task"), "{second}");
+    assert!(!second.contains("see the attached file"), "{second}");
+    assert!(err.is_empty(), "{err}");
+    fixture.server.verify().await;
+}
+
+#[tokio::test]
+async fn a_comments_value_that_is_not_a_list_reads_as_no_comments_and_is_cached() {
+    let fixture = commented_task_server(serde_json::json!("unexpected"), 1).await;
+    let (_dir, store) = make_store();
+    let cache = TaskCache::new(store.conn());
+
+    let (first, first_err) = read_task(&fixture.server, &cache, &default_flags()).await;
+    let (second, _) = read_task(&fixture.server, &cache, &default_flags()).await;
+
+    assert!(first.contains("Attachment task"), "{first}");
+    assert!(!first.contains("unexpected"), "{first}");
+    assert!(first_err.is_empty(), "{first_err}");
+    assert_eq!(first, second);
+    fixture.server.verify().await;
+}
+
+#[tokio::test]
+async fn no_comments_download_skips_comment_attachments_on_a_miss_and_on_a_hit() {
+    let fixture = commented_task_server(serde_json::Value::Null, 1).await;
+    let (_dir, store) = make_store();
+    let cache = TaskCache::new(store.conn());
+
+    let miss_dest = TempDir::new().unwrap();
+    let (miss, _) = read_task(&fixture.server, &cache, &download_flags(&miss_dest, true)).await;
+    let hit_dest = TempDir::new().unwrap();
+    let (hit, _) = read_task(&fixture.server, &cache, &download_flags(&hit_dest, true)).await;
+
+    for (output, dest) in [(&miss, &miss_dest), (&hit, &hit_dest)] {
+        assert!(
+            output.contains("Downloaded 1 of 1 attachment(s)"),
+            "{output}"
+        );
+        assert!(dest.path().join("note.txt").exists());
+        assert!(!dest.path().join("comment-note.txt").exists());
+    }
+    fixture.server.verify().await;
+}
+
+#[tokio::test]
+async fn no_comments_read_after_a_full_read_prints_no_comment_text() {
+    let fixture = commented_task_server(serde_json::Value::Null, 1).await;
+    let (_dir, store) = make_store();
+    let cache = TaskCache::new(store.conn());
+    let full = read_task(&fixture.server, &cache, &default_flags()).await.0;
+    assert!(full.contains("see the attached file"), "{full}");
+
+    let plain = DisplayFlags {
+        no_comments: true,
+        ..default_flags()
+    };
+    let (plain_out, _) = read_task(&fixture.server, &cache, &plain).await;
+    let json = DisplayFlags {
+        json: true,
+        no_comments: true,
+        ..default_flags()
+    };
+    let (json_out, _) = read_task(&fixture.server, &cache, &json).await;
+
+    assert!(!plain_out.contains("see the attached file"), "{plain_out}");
+    assert!(!json_out.contains("see the attached file"), "{json_out}");
+    let obj: serde_json::Value = serde_json::from_str(json_out.trim_end()).unwrap();
+    assert_eq!(obj["comments"], serde_json::json!([]));
+    fixture.server.verify().await;
+}
+
+#[tokio::test]
+async fn cache_entry_in_the_old_shape_is_fetched_once_then_served_from_the_cache() {
+    let fixture = commented_task_server(serde_json::Value::Null, 1).await;
+    let (_dir, store) = make_store();
+    store
+        .conn()
+        .execute(
+            "INSERT INTO ticket_cache (instance, project_id, task_id, fields_json, fetched_at) \
+             VALUES ('testinst', 5, 10, ?1, '2026-01-01T00:00:00Z')",
+            rusqlite::params![r#"{"id":10,"name":"Stale","comments":[]}"#],
+        )
+        .unwrap();
+    let cache = TaskCache::new(store.conn());
+
+    let (first, _) = read_task(&fixture.server, &cache, &default_flags()).await;
+    let (second, _) = read_task(&fixture.server, &cache, &default_flags()).await;
+
+    assert!(first.contains("see the attached file"), "{first}");
+    assert!(first.contains("Attachment task"), "{first}");
+    assert!(second.contains("see the attached file"), "{second}");
+    fixture.server.verify().await;
+}
+
 #[tokio::test]
 async fn do_get_task_json_mode_omits_downloaded_attachments_when_flag_absent() {
     let server = MockServer::start().await;
@@ -1869,7 +2184,7 @@ async fn collect_mine_rows_aggregates_across_two_instances() {
     };
 
     let http = make_http();
-    let rows = collect_mine_rows(&[inst_a, inst_b], &http).await;
+    let rows = mine_rows_of(&collect_mine_task_lists(&[inst_a, inst_b], &http).await);
 
     assert_eq!(rows.len(), 2, "should aggregate both instances");
     assert_eq!(rows[0].instance, "alpha");
@@ -1882,7 +2197,7 @@ async fn collect_mine_rows_aggregates_across_two_instances() {
     assert_eq!(rows[1].name, "Beta task");
 }
 
-// S5.3 tests: concurrent collect_mine_rows
+// S5.3 tests: concurrent mine task lists
 
 #[tokio::test]
 async fn collect_mine_rows_concurrent_aggregates_all_instances() {
@@ -1920,7 +2235,7 @@ async fn collect_mine_rows_concurrent_aggregates_all_instances() {
         user_id: Some(2),
     };
 
-    let rows = collect_mine_rows(&[inst_a, inst_b], &make_http()).await;
+    let rows = mine_rows_of(&collect_mine_task_lists(&[inst_a, inst_b], &make_http()).await);
 
     assert_eq!(rows.len(), 2, "must aggregate from both instances");
     let names: Vec<&str> = rows.iter().map(|r| r.name.as_str()).collect();
@@ -1970,7 +2285,8 @@ async fn collect_mine_rows_preserves_instance_order() {
         user_id: Some(2),
     };
 
-    let rows = collect_mine_rows(&[inst_first, inst_second], &make_http()).await;
+    let rows =
+        mine_rows_of(&collect_mine_task_lists(&[inst_first, inst_second], &make_http()).await);
 
     assert_eq!(rows.len(), 2);
     assert_eq!(
@@ -1980,6 +2296,34 @@ async fn collect_mine_rows_preserves_instance_order() {
     assert_eq!(rows[0].name, "First Instance Task");
     assert_eq!(rows[1].instance, "second", "instance[1] rows must follow");
     assert_eq!(rows[1].name, "Second Instance Task");
+}
+
+#[tokio::test]
+async fn collect_mine_task_lists_puts_the_first_instance_first() {
+    let first = MockServer::start().await;
+    let second = MockServer::start().await;
+    for (server, id, name) in [(&first, 1, "One"), (&second, 2, "Two")] {
+        Mock::given(method("GET"))
+            .and(path("/api/v1/users/42/tasks"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(tasks_response(
+                serde_json::json!([{ "id": id, "task_number": id, "name": name, "project_id": 1 }]),
+            )))
+            .mount(server)
+            .await;
+    }
+    let targets = [
+        mine_hours_instance(&first),
+        Instance {
+            name: "second".to_owned(),
+            ..mine_hours_instance(&second)
+        },
+    ];
+
+    let lists = collect_mine_task_lists(&targets, &make_http()).await;
+
+    let order: Vec<&str> = lists.iter().map(|(inst, _)| inst.name.as_str()).collect();
+    assert_eq!(order, vec!["hours", "second"]);
+    assert_eq!(mine_rows_of(&lists)[0].name, "One");
 }
 
 #[tokio::test]
@@ -2016,7 +2360,7 @@ async fn collect_mine_rows_failing_instance_yields_no_rows_for_it() {
         user_id: Some(2),
     };
 
-    let rows = collect_mine_rows(&[inst_ok, inst_err], &make_http()).await;
+    let rows = mine_rows_of(&collect_mine_task_lists(&[inst_ok, inst_err], &make_http()).await);
 
     assert_eq!(rows.len(), 1, "failing instance must yield no rows");
     assert_eq!(rows[0].name, "Healthy Task");
@@ -2042,7 +2386,7 @@ async fn collect_mine_rows_falls_back_task_number_to_id_when_absent() {
         token: "tok".to_owned(),
         user_id: Some(42),
     };
-    let rows = collect_mine_rows(&[inst], &make_http()).await;
+    let rows = mine_rows_of(&collect_mine_task_lists(&[inst], &make_http()).await);
     assert_eq!(rows.len(), 2);
     assert_eq!(
         rows[0].task_number, 55,
@@ -2067,7 +2411,7 @@ async fn mine_core_empty_instances_returns_exit2_with_message() {
     assert_eq!(code, 2);
     let e = output_str(&err);
     assert!(e.contains("no instances configured"), "err: {e}");
-    assert!(e.contains("active_collab.py setup add"), "err: {e}");
+    assert!(e.contains("ac setup add"), "err: {e}");
 }
 
 #[tokio::test]
@@ -2297,6 +2641,9 @@ async fn mine_core_non_tty_writes_render_mine_table_exactly_and_returns_done() {
         name: "Table row task".to_owned(),
         due_on: None,
         project_name: None,
+        estimate: None,
+        logged_week: None,
+        logged_total: None,
     }]);
     let s = output_str(&out);
     assert!(
@@ -2324,7 +2671,7 @@ fn setup_list_empty_emits_pt_br_message_when_language_is_pt_br() {
         "expected pt-BR message, got: {s}"
     );
     assert!(
-        s.contains("Execute: active_collab.py setup add"),
+        s.contains("Execute: ac setup add"),
         "expected pt-BR command hint, got: {s}"
     );
 }
@@ -2340,8 +2687,6 @@ async fn browse_async_inside_active_runtime_returns_i32_without_panic() {
         "no-TTY path must return exit code 1 (terminal setup fails)"
     );
 }
-
-// --- J2-A2: mine --json prints minified mine line, never launches TUI, exit 0 ---
 
 #[tokio::test]
 async fn mine_core_json_mode_prints_minified_line_and_never_calls_launch() {
@@ -2820,11 +3165,11 @@ async fn collect_mine_rows_401_returns_empty_via_unwrap_or_default_seam() {
         token: "bad-token".to_owned(),
         user_id: Some(42),
     };
-    let rows = collect_mine_rows(&[inst], &make_http()).await;
+    let rows = mine_rows_of(&collect_mine_task_lists(&[inst], &make_http()).await);
 
     assert!(
         rows.is_empty(),
-        "collect_mine_rows on 401 must yield empty rows (TUI non-breaking seam)"
+        "a 401 task list must yield empty rows (TUI non-breaking seam)"
     );
 }
 
@@ -2944,7 +3289,7 @@ async fn comment_core_http_failure_with_json_flag_emits_error_object() {
     );
 }
 
-// AC1: get/current 401 → re-auth message, non-zero exit, no "task not found"
+// get/current 401 → re-auth message, non-zero exit, no "task not found"
 #[tokio::test]
 async fn do_get_task_401_prints_reauth_message_and_returns_nonzero() {
     let server = MockServer::start().await;
@@ -2987,7 +3332,7 @@ async fn do_get_task_401_prints_reauth_message_and_returns_nonzero() {
     );
 }
 
-// AC1: load_task 401 writes re-auth message to the err writer
+// load_task 401 writes re-auth message to the err writer
 #[tokio::test]
 async fn load_task_401_writes_reauth_to_err_and_returns_none() {
     let server = MockServer::start().await;
@@ -3025,7 +3370,7 @@ async fn load_task_401_writes_reauth_to_err_and_returns_none() {
     );
 }
 
-// AC2: comment 401 → re-auth message, non-zero exit
+// comment 401 → re-auth message, non-zero exit
 #[tokio::test]
 async fn comment_core_401_prints_reauth_message_and_returns_nonzero() {
     let server = MockServer::start().await;
@@ -3068,7 +3413,7 @@ async fn comment_core_401_prints_reauth_message_and_returns_nonzero() {
     );
 }
 
-// AC2: comment 401 with --json → failure shape (no "ok": true)
+// comment 401 with --json → failure shape (no "ok": true)
 #[tokio::test]
 async fn comment_core_401_json_emits_failure_shape_without_ok_true() {
     let server = MockServer::start().await;
@@ -3115,7 +3460,7 @@ async fn comment_core_401_json_emits_failure_shape_without_ok_true() {
     );
 }
 
-// AC3: non-401 errors (404/500) keep existing output, no re-auth message
+// non-401 errors (404/500) keep existing output, no re-auth message
 #[tokio::test]
 async fn do_get_task_404_prints_not_found_without_reauth_message() {
     let server = MockServer::start().await;
@@ -3199,7 +3544,7 @@ async fn comment_core_404_keeps_existing_output_without_reauth_message() {
     );
 }
 
-// Issue 0071 AC2: with --html, the posted body equals the caller's input
+// With --html, the posted body equals the caller's input
 // byte for byte — no escaping, no paragraph wrapping — reaching the server
 // through the same client.create_comment seam the TUI uses.
 #[tokio::test]
@@ -3248,7 +3593,7 @@ async fn comment_core_html_flag_posts_body_verbatim() {
     }
 }
 
-// Issue 0071 AC3: an empty or whitespace-only body under --html still exits
+// An empty or whitespace-only body under --html still exits
 // 2 with the existing message and sends no request — the html flag changes
 // encoding, never the empty-body guard.
 #[tokio::test]
@@ -3286,7 +3631,7 @@ async fn comment_core_html_flag_whitespace_only_body_returns_exit2() {
     }
 }
 
-// Issue 0071: a markup-only body such as `<p></p>` is accepted under --html
+// A markup-only body such as `<p></p>` is accepted under --html
 // (owner decision) — the empty-body guard stays `str::trim`, which does not
 // treat markup as blank.
 #[tokio::test]
@@ -3322,7 +3667,7 @@ async fn comment_core_html_flag_markup_only_body_is_posted() {
     assert_eq!(code, 0, "err: {}", output_str(&err));
 }
 
-// Issue 0071 AC5: --html changes only the posted body, never the --json
+// --html changes only the posted body, never the --json
 // output shape, the HTTP-4xx failure path or the 401 re-auth message.
 #[tokio::test]
 async fn comment_core_html_flag_json_output_is_unchanged() {
@@ -3443,7 +3788,7 @@ async fn comment_core_html_flag_401_prints_reauth_message() {
     );
 }
 
-// AC4: i18n — message resolves through t(); pt-BR maps to translated string
+// i18n — message resolves through t(); pt-BR maps to translated string
 #[test]
 fn reauth_message_resolves_in_pt_br() {
     let _guard = LANG_MUTEX.lock().unwrap();
@@ -3879,8 +4224,6 @@ async fn time_log_core_http_failure_with_json_flag_emits_error_object() {
     assert!(obj.get("error").is_some());
 }
 
-// --- task_set_core (issue 0068 slice 2) ---
-
 fn task_write_response(id: i64) -> serde_json::Value {
     serde_json::json!({ "id": id })
 }
@@ -3916,6 +4259,7 @@ async fn task_set_core_status_done_puts_to_complete_endpoint() {
         Some("done"),
         None,
         None,
+        None,
         &client,
         false,
         &mut out,
@@ -3946,6 +4290,7 @@ async fn task_set_core_status_open_puts_to_open_endpoint() {
         Some("524/75346"),
         None,
         Some("open"),
+        None,
         None,
         None,
         &client,
@@ -3981,6 +4326,7 @@ async fn task_set_core_numeric_assignee_updates_task_without_directory_fetch() {
         None,
         None,
         Some("9"),
+        None,
         None,
         &client,
         false,
@@ -4024,6 +4370,7 @@ async fn task_set_core_named_assignee_resolves_via_user_directory() {
         None,
         Some("alice smith"),
         None,
+        None,
         &client,
         false,
         &mut out,
@@ -4057,6 +4404,7 @@ async fn task_set_core_estimate_only_updates_task_with_estimate_body() {
         None,
         None,
         Some(8.0),
+        None,
         &client,
         false,
         &mut out,
@@ -4098,6 +4446,7 @@ async fn task_set_core_combined_fields_issues_both_writes() {
         Some("completed"),
         Some("9"),
         Some(8.0),
+        None,
         &client,
         true,
         &mut out,
@@ -4129,6 +4478,7 @@ async fn task_set_core_no_field_given_returns_exit2_without_network_call() {
         None,
         None,
         None,
+        None,
         &client,
         false,
         &mut out,
@@ -4138,6 +4488,7 @@ async fn task_set_core_no_field_given_returns_exit2_without_network_call() {
 
     assert_eq!(code, 2, "no field given must return exit code 2");
     assert!(output_str(&err).contains("--status"));
+    assert!(output_str(&err).contains("--list"));
     assert!(output_str(&out).is_empty());
 }
 
@@ -4152,6 +4503,7 @@ async fn task_set_core_invalid_status_returns_exit2_without_network_call() {
         Some("524/75346"),
         None,
         Some("frozen"),
+        None,
         None,
         None,
         &client,
@@ -4188,6 +4540,7 @@ async fn task_set_core_unknown_assignee_name_returns_exit2_without_update() {
         None,
         Some("nobody"),
         None,
+        None,
         &client,
         false,
         &mut out,
@@ -4212,6 +4565,7 @@ async fn task_set_core_negative_estimate_returns_exit2_without_network_call() {
         None,
         None,
         Some(-1.0),
+        None,
         &client,
         false,
         &mut out,
@@ -4241,6 +4595,7 @@ async fn task_set_core_401_prints_reauth_message_and_returns_nonzero() {
         Some("524/75346"),
         None,
         Some("completed"),
+        None,
         None,
         None,
         &client,
@@ -4274,6 +4629,7 @@ async fn task_set_core_http_failure_with_json_flag_emits_error_object() {
         Some("524/75346"),
         None,
         Some("completed"),
+        None,
         None,
         None,
         &client,
@@ -4320,6 +4676,7 @@ async fn task_set_core_second_write_failure_stops_after_first_write() {
         Some("completed"),
         Some("9"),
         None,
+        None,
         &client,
         false,
         &mut out,
@@ -4332,6 +4689,343 @@ async fn task_set_core_second_write_failure_stops_after_first_write() {
         code, 0,
         "the second write's failure must surface as a non-zero exit"
     );
+}
+
+async fn mount_task_lists(server: &MockServer, status: u16, body: serde_json::Value) {
+    Mock::given(method("GET"))
+        .and(path("/api/v1/projects/524/task-lists"))
+        .respond_with(ResponseTemplate::new(status).set_body_json(body))
+        .expect(1)
+        .mount(server)
+        .await;
+}
+
+fn project_task_lists() -> serde_json::Value {
+    serde_json::json!([
+        { "id": 12, "name": "In progress" },
+        { "id": 11, "name": "Revisão" },
+        { "id": 13, "name": "Done" }
+    ])
+}
+
+async fn mount_task_put(server: &MockServer, route: &str) {
+    Mock::given(method("PUT"))
+        .and(path(route))
+        .respond_with(ResponseTemplate::new(200).set_body_json(task_write_response(75346)))
+        .mount(server)
+        .await;
+}
+
+async fn put_requests(server: &MockServer) -> Vec<(String, serde_json::Value)> {
+    server
+        .received_requests()
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|r| r.method.as_str() == "PUT")
+        .map(|r| {
+            let body = serde_json::from_slice(&r.body).unwrap();
+            (r.url.path().to_string(), body)
+        })
+        .collect()
+}
+
+struct TaskSetRun {
+    code: i32,
+    out: String,
+    err: String,
+}
+
+async fn run_task_set(
+    server: &MockServer,
+    status: Option<&str>,
+    assignee: Option<&str>,
+    estimate: Option<f64>,
+    list: Option<&str>,
+    json: bool,
+) -> TaskSetRun {
+    let inst = comment_inst(&server.uri());
+    let client = ActiveCollabClient::new(inst, make_http());
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    let code = task_set_core(
+        Some("524/75346"),
+        None,
+        status,
+        assignee,
+        estimate,
+        list,
+        &client,
+        json,
+        &mut out,
+        &mut err,
+    )
+    .await;
+    TaskSetRun {
+        code,
+        out: output_str(&out).to_string(),
+        err: output_str(&err).to_string(),
+    }
+}
+
+async fn assert_list_resolves_to(list: &str, expected_id: i64) {
+    let server = MockServer::start().await;
+    mount_task_lists(&server, 200, project_task_lists()).await;
+    mount_task_put(&server, "/api/v1/projects/524/tasks/75346").await;
+
+    let run = run_task_set(&server, None, None, None, Some(list), false).await;
+
+    assert_eq!(run.code, 0, "list {list:?}: {}", run.err);
+    assert_eq!(
+        put_requests(&server).await,
+        vec![(
+            "/api/v1/projects/524/tasks/75346".to_string(),
+            serde_json::json!({ "task_list_id": expected_id })
+        )],
+        "list {list:?}"
+    );
+    server.verify().await;
+}
+
+async fn assert_list_refused(list: &str, candidates: &[&str], absent: &[&str]) {
+    let server = MockServer::start().await;
+    mount_task_lists(&server, 200, project_task_lists()).await;
+
+    let run = run_task_set(&server, None, None, None, Some(list), false).await;
+
+    assert_eq!(run.code, 2, "list {list:?}: {}", run.err);
+    for candidate in candidates {
+        assert!(
+            run.err.contains(candidate),
+            "{candidate:?} in {:?}",
+            run.err
+        );
+    }
+    for other in absent {
+        assert!(!run.err.contains(other), "{other:?} in {:?}", run.err);
+    }
+    assert!(put_requests(&server).await.is_empty(), "list {list:?}");
+    server.verify().await;
+}
+
+#[tokio::test]
+async fn task_set_core_list_id_of_a_project_list_moves_the_task() {
+    assert_list_resolves_to("12", 12).await;
+}
+
+#[tokio::test]
+async fn task_set_core_list_id_outside_the_project_is_refused_with_candidates() {
+    assert_list_refused("99", &["12 In progress", "11 Revisão", "13 Done"], &[]).await;
+}
+
+#[tokio::test]
+async fn task_set_core_list_name_matches_case_insensitively_with_non_ascii_letters() {
+    assert_list_resolves_to("revisão", 11).await;
+    assert_list_resolves_to("REVISÃO", 11).await;
+    assert_list_resolves_to("  in PROGRESS \t", 12).await;
+}
+
+#[tokio::test]
+async fn task_set_core_list_partial_name_matches_nothing() {
+    assert_list_refused("prog", &["12 In progress"], &[]).await;
+}
+
+#[tokio::test]
+async fn task_set_core_list_unknown_name_lists_every_candidate() {
+    assert_list_refused(
+        "Backlog",
+        &["Backlog", "12 In progress", "11 Revisão", "13 Done"],
+        &[],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn task_set_core_list_name_shared_by_two_lists_is_ambiguous() {
+    let server = MockServer::start().await;
+    mount_task_lists(
+        &server,
+        200,
+        serde_json::json!([
+            { "id": 1, "name": "Review" },
+            { "id": 2, "name": "review" },
+            { "id": 3, "name": "Done" }
+        ]),
+    )
+    .await;
+
+    let run = run_task_set(&server, None, None, None, Some("REVIEW"), false).await;
+
+    assert_eq!(run.code, 2, "{}", run.err);
+    assert!(run.err.contains("1 Review"), "{}", run.err);
+    assert!(run.err.contains("2 review"), "{}", run.err);
+    assert!(!run.err.contains("3 Done"), "{}", run.err);
+    assert!(put_requests(&server).await.is_empty());
+}
+
+#[tokio::test]
+async fn task_set_core_list_read_unauthorized_prints_reauth_and_sends_no_write() {
+    let server = MockServer::start().await;
+    mount_task_lists(&server, 401, serde_json::json!({})).await;
+
+    let run = run_task_set(&server, None, None, None, Some("12"), false).await;
+
+    assert_eq!(run.code, 1, "{}", run.err);
+    assert!(run.err.contains("ac setup add"), "{}", run.err);
+    assert!(put_requests(&server).await.is_empty());
+}
+
+#[tokio::test]
+async fn task_set_core_list_read_server_error_fails_and_sends_no_write() {
+    let server = MockServer::start().await;
+    mount_task_lists(&server, 500, serde_json::json!({})).await;
+
+    let run = run_task_set(&server, None, None, None, Some("12"), false).await;
+
+    assert_eq!(run.code, 1, "{}", run.err);
+    assert!(run.err.contains("500"), "{}", run.err);
+    assert!(put_requests(&server).await.is_empty());
+}
+
+async fn assert_list_read_failure_is_json_error(
+    status: u16,
+    body: serde_json::Value,
+    reason_fragments: &[&str],
+) {
+    let server = MockServer::start().await;
+    mount_task_lists(&server, status, body).await;
+
+    let run = run_task_set(&server, None, None, None, Some("12"), true).await;
+
+    assert_eq!(run.code, 1, "{}", run.err);
+    let obj: serde_json::Value = serde_json::from_str(run.out.trim_end()).unwrap();
+    assert_eq!(obj["ok"], false, "{}", run.out);
+    let reason = obj["error"].to_string();
+    for fragment in reason_fragments {
+        assert!(reason.contains(fragment), "{fragment:?} in {reason}");
+    }
+    assert!(run.err.is_empty(), "{}", run.err);
+    assert!(put_requests(&server).await.is_empty());
+}
+
+#[tokio::test]
+async fn task_set_core_list_read_unauthorized_with_json_flag_emits_error_object() {
+    assert_list_read_failure_is_json_error(401, serde_json::json!({}), &["ac setup add"]).await;
+}
+
+#[tokio::test]
+async fn task_set_core_list_read_server_error_with_json_flag_emits_error_object() {
+    assert_list_read_failure_is_json_error(500, serde_json::json!({}), &["HTTP 500", "524"]).await;
+}
+
+#[tokio::test]
+async fn task_set_core_list_read_malformed_body_with_json_flag_emits_error_object() {
+    assert_list_read_failure_is_json_error(200, serde_json::json!({ "task_lists": [] }), &[]).await;
+}
+
+#[tokio::test]
+async fn task_set_core_list_read_malformed_body_fails_instead_of_matching_nothing() {
+    let server = MockServer::start().await;
+    mount_task_lists(&server, 200, serde_json::json!({ "task_lists": [] })).await;
+
+    let run = run_task_set(&server, None, None, None, Some("Review"), false).await;
+
+    assert_eq!(run.code, 1, "{}", run.err);
+    assert!(!run.err.contains("no task list matches"), "{}", run.err);
+    assert!(put_requests(&server).await.is_empty());
+}
+
+#[tokio::test]
+async fn task_set_core_status_and_list_send_completion_then_one_task_put() {
+    let server = MockServer::start().await;
+    mount_task_lists(&server, 200, project_task_lists()).await;
+    mount_task_put(&server, "/api/v1/complete/task/75346").await;
+    mount_task_put(&server, "/api/v1/projects/524/tasks/75346").await;
+
+    let run = run_task_set(&server, Some("done"), None, None, Some("Revisão"), false).await;
+
+    assert_eq!(run.code, 0, "{}", run.err);
+    assert_eq!(
+        put_requests(&server).await,
+        vec![
+            (
+                "/api/v1/complete/task/75346".to_string(),
+                serde_json::json!({})
+            ),
+            (
+                "/api/v1/projects/524/tasks/75346".to_string(),
+                serde_json::json!({ "task_list_id": 11 })
+            ),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn task_set_core_assignee_estimate_and_list_share_one_put() {
+    let server = MockServer::start().await;
+    mount_task_lists(&server, 200, project_task_lists()).await;
+    mount_task_put(&server, "/api/v1/projects/524/tasks/75346").await;
+
+    let run = run_task_set(&server, None, Some("9"), Some(2.0), Some("13"), false).await;
+
+    assert_eq!(run.code, 0, "{}", run.err);
+    assert_eq!(
+        put_requests(&server).await,
+        vec![(
+            "/api/v1/projects/524/tasks/75346".to_string(),
+            serde_json::json!({ "assignee_id": 9, "estimate": 2.0, "task_list_id": 13 })
+        )]
+    );
+}
+
+#[tokio::test]
+async fn task_set_core_unresolved_list_blocks_the_completion_write_too() {
+    let server = MockServer::start().await;
+    mount_task_lists(&server, 200, project_task_lists()).await;
+    mount_task_put(&server, "/api/v1/complete/task/75346").await;
+
+    let run = run_task_set(&server, Some("done"), None, None, Some("Backlog"), false).await;
+
+    assert_eq!(run.code, 2, "{}", run.err);
+    assert!(put_requests(&server).await.is_empty());
+}
+
+#[tokio::test]
+async fn task_set_core_list_move_is_reported_in_json_and_human_output() {
+    let server = MockServer::start().await;
+    mount_task_lists(&server, 200, project_task_lists()).await;
+    mount_task_put(&server, "/api/v1/projects/524/tasks/75346").await;
+    let run = run_task_set(&server, None, None, None, Some("12"), true).await;
+    assert_eq!(run.code, 0, "{}", run.err);
+    let obj: serde_json::Value = serde_json::from_str(run.out.trim_end()).unwrap();
+    assert_eq!(obj["task_list_id"], 12);
+    assert_eq!(obj["task_list"], "In progress");
+
+    let server = MockServer::start().await;
+    mount_task_lists(&server, 200, project_task_lists()).await;
+    mount_task_put(&server, "/api/v1/projects/524/tasks/75346").await;
+    let run = run_task_set(&server, None, None, None, Some("12"), false).await;
+    assert_eq!(run.code, 0, "{}", run.err);
+    assert!(run.out.contains("list=In progress"), "{}", run.out);
+}
+
+#[tokio::test]
+async fn task_set_core_without_list_never_reads_the_task_lists() {
+    let server = MockServer::start().await;
+    mount_task_put(&server, "/api/v1/projects/524/tasks/75346").await;
+
+    let run = run_task_set(&server, None, Some("9"), None, None, true).await;
+
+    assert_eq!(run.code, 0, "{}", run.err);
+    assert!(!run.out.contains("task_list"), "{}", run.out);
+    let gets = server
+        .received_requests()
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|r| r.method.as_str() == "GET")
+        .count();
+    assert_eq!(gets, 0);
 }
 
 const REPORT_BOM: &str = "\u{FEFF}";
@@ -5699,4 +6393,1488 @@ fn hours_report_period_week_runs_monday_to_sunday() {
             "today {today:?}"
         );
     }
+}
+
+fn mine_hours_instance(server: &MockServer) -> Instance {
+    Instance {
+        name: "hours".to_owned(),
+        base_url: server.uri(),
+        email: "x@x.com".to_owned(),
+        token: "tok".to_owned(),
+        user_id: Some(42),
+    }
+}
+
+async fn mount_mine_tasks(server: &MockServer, tasks: serde_json::Value) {
+    Mock::given(method("GET"))
+        .and(path("/api/v1/users/42/tasks"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(tasks_response(tasks)))
+        .mount(server)
+        .await;
+}
+
+async fn mount_mine_records(server: &MockServer, response: ResponseTemplate) {
+    Mock::given(method("GET"))
+        .and(path("/api/v1/users/42/time-records/filtered-by-date"))
+        .respond_with(response)
+        .mount(server)
+        .await;
+}
+
+async fn mount_mine_total(
+    server: &MockServer,
+    project: i64,
+    task: i64,
+    response: ResponseTemplate,
+) {
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v1/projects/{project}/tasks/{task}")))
+        .respond_with(response)
+        .mount(server)
+        .await;
+}
+
+async fn mine_json_run(server: &MockServer) -> (i32, serde_json::Value) {
+    let (_dir, store) = make_store();
+    InstanceRepository::new(store.conn())
+        .save(&mine_hours_instance(server))
+        .unwrap();
+    let repo = InstanceRepository::new(store.conn());
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let outcome = mine_core(&repo, &make_http(), None, true, false, &mut out, &mut err).await;
+    let code = mine_outcome_code(outcome);
+    let value = serde_json::from_str(output_str(&out).trim()).unwrap_or(serde_json::Value::Null);
+    (code, value)
+}
+
+fn record(id: i64, value: f64, parent_type: &str, parent_id: i64) -> serde_json::Value {
+    serde_json::json!({
+        "id": id, "value": value, "record_date": 1_762_819_200,
+        "summary": "", "parent_type": parent_type, "parent_id": parent_id
+    })
+}
+
+fn two_open_tasks() -> serde_json::Value {
+    serde_json::json!([
+        { "id": 10, "task_number": 1, "name": "A", "project_id": 5, "estimate": 4.0 },
+        { "id": 11, "task_number": 2, "name": "B", "project_id": 5, "estimate": 0.0 }
+    ])
+}
+
+#[tokio::test]
+async fn mine_week_hours_sums_the_users_task_records_of_the_task() {
+    let server = MockServer::start().await;
+    mount_mine_tasks(&server, two_open_tasks()).await;
+    mount_mine_records(
+        &server,
+        ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "time_records": [
+                record(1, 1.5, "Task", 10),
+                record(2, 2.0, "Task", 10),
+                record(3, 9.0, "Task", 99),
+                record(4, 8.0, "Project", 11)
+            ],
+            "related": []
+        })),
+    )
+    .await;
+    let (code, v) = mine_json_run(&server).await;
+    assert_eq!(code, 0);
+    assert_eq!(v["tasks"][0]["logged_week_hours"], "3.5");
+    assert_eq!(v["tasks"][1]["logged_week_hours"], "0");
+}
+
+#[tokio::test]
+async fn mine_week_hours_is_unknown_when_the_records_request_fails() {
+    for status in [500u16, 401] {
+        let server = MockServer::start().await;
+        mount_mine_tasks(&server, two_open_tasks()).await;
+        mount_mine_records(&server, ResponseTemplate::new(status)).await;
+        let (code, v) = mine_json_run(&server).await;
+        assert_eq!(code, 0, "status {status}");
+        assert_eq!(v["count"], 2, "status {status}: list must survive");
+        for task in v["tasks"].as_array().unwrap() {
+            assert!(task["logged_week_hours"].is_null(), "status {status}");
+        }
+    }
+}
+
+#[tokio::test]
+async fn mine_week_hours_requests_this_weeks_range_once_per_instance() {
+    let (from, to) = resolve_period(PeriodPreset::Week, chrono::Local::now().date_naive());
+    let server = MockServer::start().await;
+    mount_mine_tasks(&server, two_open_tasks()).await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/users/42/time-records/filtered-by-date"))
+        .and(wiremock::matchers::query_param(
+            "from",
+            from.format("%Y-%m-%d").to_string(),
+        ))
+        .and(wiremock::matchers::query_param(
+            "to",
+            to.format("%Y-%m-%d").to_string(),
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "time_records": [record(1, 2.5, "Task", 10)],
+            "related": []
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let (_, v) = mine_json_run(&server).await;
+    assert_eq!(v["tasks"][0]["logged_week_hours"], "2.5");
+    server.verify().await;
+}
+
+#[tokio::test]
+async fn mine_total_hours_is_the_tracked_time_of_the_task_payload() {
+    let server = MockServer::start().await;
+    mount_mine_tasks(&server, two_open_tasks()).await;
+    mount_mine_total(
+        &server,
+        5,
+        10,
+        ResponseTemplate::new(200).set_body_json(serde_json::json!({ "tracked_time": 7.25 })),
+    )
+    .await;
+    mount_mine_total(
+        &server,
+        5,
+        11,
+        ResponseTemplate::new(200).set_body_json(serde_json::json!({ "tracked_time": 0 })),
+    )
+    .await;
+    let (_, v) = mine_json_run(&server).await;
+    assert_eq!(v["tasks"][0]["logged_total_hours"], "7.25");
+    assert_eq!(v["tasks"][1]["logged_total_hours"], "0");
+}
+
+#[tokio::test]
+async fn mine_total_hours_is_unknown_for_a_failing_task_and_filled_for_the_rest() {
+    for status in [500u16, 404, 401] {
+        let server = MockServer::start().await;
+        mount_mine_tasks(&server, two_open_tasks()).await;
+        mount_mine_total(&server, 5, 10, ResponseTemplate::new(status)).await;
+        mount_mine_total(
+            &server,
+            5,
+            11,
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({ "tracked_time": 3 })),
+        )
+        .await;
+        let (code, v) = mine_json_run(&server).await;
+        assert_eq!(code, 0, "status {status}");
+        assert_eq!(v["count"], 2, "status {status}: list must survive");
+        assert!(
+            v["tasks"][0]["logged_total_hours"].is_null(),
+            "status {status}"
+        );
+        assert_eq!(v["tasks"][1]["logged_total_hours"], "3", "status {status}");
+    }
+}
+
+#[tokio::test]
+async fn mine_total_hours_is_unknown_without_tracked_time_or_with_an_unreadable_payload() {
+    let server = MockServer::start().await;
+    mount_mine_tasks(&server, two_open_tasks()).await;
+    mount_mine_total(
+        &server,
+        5,
+        10,
+        ResponseTemplate::new(200).set_body_json(serde_json::json!({ "id": 10 })),
+    )
+    .await;
+    mount_mine_total(
+        &server,
+        5,
+        11,
+        ResponseTemplate::new(200).set_body_string("not json"),
+    )
+    .await;
+    let (_, v) = mine_json_run(&server).await;
+    assert_eq!(v["count"], 2);
+    assert!(v["tasks"][0]["logged_total_hours"].is_null());
+    assert!(v["tasks"][1]["logged_total_hours"].is_null());
+}
+
+#[tokio::test]
+async fn mine_json_keeps_existing_keys_and_adds_the_four_hour_keys() {
+    let server = MockServer::start().await;
+    mount_mine_tasks(
+        &server,
+        serde_json::json!([
+            { "id": 10, "task_number": 1, "name": "A", "project_id": 5, "estimate": 4.0, "due_on": 1_762_819_200 },
+            { "id": 11, "task_number": 2, "name": "B", "project_id": 5, "estimate": 0.0 },
+            { "id": 12, "task_number": 3, "name": "C", "project_id": 5 }
+        ]),
+    )
+    .await;
+    mount_mine_records(
+        &server,
+        ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "time_records": [record(1, 1.5, "Task", 10)], "related": []
+        })),
+    )
+    .await;
+    mount_mine_total(
+        &server,
+        5,
+        10,
+        ResponseTemplate::new(200).set_body_json(serde_json::json!({ "tracked_time": 7.25 })),
+    )
+    .await;
+    let (code, v) = mine_json_run(&server).await;
+    assert_eq!(code, 0);
+    let first = v["tasks"][0].as_object().unwrap();
+    let mut keys: Vec<&str> = first.keys().map(String::as_str).collect();
+    keys.sort_unstable();
+    assert_eq!(
+        keys,
+        [
+            "due_bucket",
+            "due_on",
+            "estimate_hours",
+            "instance",
+            "logged_total_hours",
+            "logged_week_hours",
+            "name",
+            "project_id",
+            "ref",
+            "task_id",
+            "task_number"
+        ]
+    );
+    assert_eq!(first["estimate_hours"], "4");
+    assert_eq!(first["due_on"], "2025-11-11");
+    assert_eq!(first["logged_week_hours"], "1.5");
+    assert_eq!(first["logged_total_hours"], "7.25");
+    for idx in [1, 2] {
+        assert!(v["tasks"][idx]["estimate_hours"].is_null(), "task {idx}");
+    }
+    assert!(v["tasks"][1]["due_on"].is_null());
+}
+
+fn mine_date(y: i32, m: u32, d: u32) -> chrono::NaiveDate {
+    chrono::NaiveDate::from_ymd_opt(y, m, d).unwrap()
+}
+
+#[tokio::test]
+async fn mine_week_hours_requests_the_monday_to_sunday_range_of_the_given_day() {
+    let cases = [
+        ((2026, 11, 11), "2026-11-09", "2026-11-15"),
+        ((2026, 11, 15), "2026-11-09", "2026-11-15"),
+        ((2026, 11, 16), "2026-11-16", "2026-11-22"),
+        ((2026, 12, 30), "2026-12-28", "2027-01-03"),
+    ];
+    for ((y, m, d), from, to) in cases {
+        let server = MockServer::start().await;
+        mount_mine_tasks(&server, two_open_tasks()).await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/users/42/time-records/filtered-by-date"))
+            .and(wiremock::matchers::query_param("from", from))
+            .and(wiremock::matchers::query_param("to", to))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "time_records": [record(1, 2.5, "Task", 10)],
+                "related": []
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let rows = super::mine::fetch_mine_rows_checked_on(
+            &[mine_hours_instance(&server)],
+            &make_http(),
+            mine_date(y, m, d),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            rows[0].logged_week,
+            Some(2.5),
+            "range {from}..{to} was not requested for {y}-{m}-{d}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn mine_week_hours_is_zero_without_records_and_unknown_for_an_unreadable_body() {
+    let server = MockServer::start().await;
+    mount_mine_tasks(&server, two_open_tasks()).await;
+    mount_mine_records(
+        &server,
+        ResponseTemplate::new(200)
+            .set_body_json(serde_json::json!({ "time_records": [], "related": [] })),
+    )
+    .await;
+    let (_, v) = mine_json_run(&server).await;
+    assert_eq!(v["tasks"][0]["logged_week_hours"], "0");
+
+    let broken = MockServer::start().await;
+    mount_mine_tasks(&broken, two_open_tasks()).await;
+    mount_mine_records(
+        &broken,
+        ResponseTemplate::new(200).set_body_string("<html>"),
+    )
+    .await;
+    let (code, v) = mine_json_run(&broken).await;
+    assert_eq!(code, 0);
+    assert_eq!(v["count"], 2);
+    assert!(v["tasks"][0]["logged_week_hours"].is_null());
+}
+
+#[tokio::test]
+async fn mine_week_hours_are_rounded_to_two_decimals() {
+    let cases: [(&[f64], &str); 7] = [
+        (&[0.1, 0.2], "0.3"),
+        (&[1.5, 2.0], "3.5"),
+        (&[0.125], "0.13"),
+        (&[0.124], "0.12"),
+        (&[0.004], "0"),
+        (&[7.333], "7.33"),
+        (&[], "0"),
+    ];
+    for (values, want) in cases {
+        let server = MockServer::start().await;
+        mount_mine_tasks(&server, two_open_tasks()).await;
+        let records: Vec<serde_json::Value> = values
+            .iter()
+            .enumerate()
+            .map(|(i, v)| record(i as i64 + 1, *v, "Task", 10))
+            .collect();
+        mount_mine_records(
+            &server,
+            ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({ "time_records": records, "related": [] })),
+        )
+        .await;
+        let (_, v) = mine_json_run(&server).await;
+        assert_eq!(
+            v["tasks"][0]["logged_week_hours"], want,
+            "records {values:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn mine_week_hours_are_unknown_without_a_user_id_and_the_list_is_kept() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path_regex("filtered-by-date"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(0)
+        .mount(&server)
+        .await;
+    let mut inst = mine_hours_instance(&server);
+    inst.user_id = None;
+    let rows = super::mine::fill_task_hours(
+        &inst,
+        &make_http(),
+        vec![crate::models::MineTask::from_api(
+            &serde_json::json!({ "id": 10, "project_id": 5, "estimate": 4.0 }),
+            "hours",
+        )
+        .unwrap()],
+        mine_date(2026, 11, 11),
+    )
+    .await;
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].logged_week, None);
+    server.verify().await;
+}
+
+#[tokio::test]
+async fn mine_total_hours_is_unknown_when_the_server_is_unreachable() {
+    let dead = Instance {
+        name: "dead".to_owned(),
+        base_url: "http://127.0.0.1:1".to_owned(),
+        email: "x@x.com".to_owned(),
+        token: "tok".to_owned(),
+        user_id: Some(42),
+    };
+    let rows = super::mine::fill_task_hours(
+        &dead,
+        &make_http(),
+        vec![crate::models::MineTask::from_api(
+            &serde_json::json!({ "id": 10, "project_id": 5, "estimate": 4.0 }),
+            "dead",
+        )
+        .unwrap()],
+        mine_date(2026, 11, 11),
+    )
+    .await;
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].logged_total, None);
+    assert_eq!(rows[0].logged_week, None);
+    assert_eq!(rows[0].estimate, Some(4.0));
+}
+
+/// Switches the process-wide language to pt_BR and restores en on drop, so an
+/// assertion failure cannot leak pt_BR into a later test.
+struct PtBrLanguage;
+
+impl PtBrLanguage {
+    fn on() -> Self {
+        set_language("pt_BR");
+        PtBrLanguage
+    }
+}
+
+impl Drop for PtBrLanguage {
+    fn drop(&mut self) {
+        set_language("en");
+    }
+}
+
+type Captured = (i32, String, String);
+
+fn captured(status: i32, out: &[u8], err: &[u8]) -> Captured {
+    (
+        status,
+        output_str(out).to_owned(),
+        output_str(err).to_owned(),
+    )
+}
+
+fn run_setup_language(code: Option<&str>) -> Captured {
+    let (_dir, store) = make_store();
+    let settings = SettingsRepository::new(store.conn());
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let status = setup_language(&settings, code, &mut out, &mut err);
+    captured(status, &out, &err)
+}
+
+fn run_setup_theme(code: Option<&str>) -> Captured {
+    let (_dir, store) = make_store();
+    let settings = SettingsRepository::new(store.conn());
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let status = setup_theme(&settings, code, &mut out, &mut err);
+    captured(status, &out, &err)
+}
+
+fn run_setup_remove(name: &str, existing: bool) -> Captured {
+    let (_dir, store) = make_store();
+    if existing {
+        sample_instance(&store, name);
+    }
+    let repo = InstanceRepository::new(store.conn());
+    let cache = TaskCache::new(store.conn());
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let status = setup_remove(&repo, &cache, name, &mut out, &mut err);
+    captured(status, &out, &err)
+}
+
+async fn run_setup_test_named(name: &str) -> Captured {
+    let (_dir, store) = make_store();
+    let repo = InstanceRepository::new(store.conn());
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let status = setup_test(&repo, Some(name), make_http(), &mut out, &mut err).await;
+    captured(status, &out, &err)
+}
+
+async fn run_connectivity_rows(base_url: &str) -> String {
+    let (_dir, store) = make_store();
+    let inst = Instance {
+        name: "inst".to_owned(),
+        base_url: base_url.to_owned(),
+        email: String::new(),
+        token: "tok".to_owned(),
+        user_id: None,
+    };
+    InstanceRepository::new(store.conn()).save(&inst).unwrap();
+    let repo = InstanceRepository::new(store.conn());
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    setup_test(&repo, None, make_http(), &mut out, &mut err).await;
+    output_str(&out).to_owned()
+}
+
+async fn mount_token_exchange(server: &MockServer, body: serde_json::Value) {
+    Mock::given(method("POST"))
+        .and(path("/api/v1/issue-token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(body))
+        .mount(server)
+        .await;
+}
+
+async fn mount_users_and_projects(server: &MockServer, projects_status: u16) {
+    Mock::given(method("GET"))
+        .and(path("/api/v1/users"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+        .mount(server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/projects"))
+        .respond_with(ResponseTemplate::new(projects_status).set_body_json(serde_json::json!([])))
+        .mount(server)
+        .await;
+}
+
+async fn run_setup_add(name: &str, url: &str, check_connectivity: bool) -> Captured {
+    let (_dir, store) = make_store();
+    let repo = InstanceRepository::new(store.conn());
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let status = setup_add(
+        SetupAddFields {
+            name: Some(name.to_owned()),
+            url: Some(url.to_owned()),
+            email: Some("u@u.com".to_owned()),
+        },
+        Some("pw".to_owned()),
+        &repo,
+        make_http(),
+        check_connectivity,
+        &mut out,
+        &mut err,
+    )
+    .await;
+    captured(status, &out, &err)
+}
+
+#[tokio::test]
+async fn setup_add_empty_name_url_or_email_each_return_exit2_with_required_message() {
+    let cases = [
+        ("", "https://x.com", "a@b.com"),
+        ("work", "", "a@b.com"),
+        ("work", "https://x.com", ""),
+    ];
+    for (name, url, email) in cases {
+        let (_dir, store) = make_store();
+        let repo = InstanceRepository::new(store.conn());
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        let code = setup_add(
+            SetupAddFields {
+                name: Some(name.to_owned()),
+                url: Some(url.to_owned()),
+                email: Some(email.to_owned()),
+            },
+            Some("pw".to_owned()),
+            &repo,
+            make_http(),
+            false,
+            &mut out,
+            &mut err,
+        )
+        .await;
+        assert_eq!(code, 2, "case {name:?} {url:?} {email:?}");
+        assert_eq!(
+            output_str(&err),
+            "Error: --name, --url and --email are required.\n",
+            "case {name:?} {url:?} {email:?}"
+        );
+        assert_eq!(output_str(&out), "");
+    }
+}
+
+#[tokio::test]
+async fn setup_add_missing_password_prints_exact_message() {
+    let (status, _, err) = run_setup_add_with_password("n", "https://x.com", None).await;
+    assert_eq!(status, 2);
+    assert_eq!(err, "Error: password is required.\n");
+}
+
+async fn run_setup_add_with_password(name: &str, url: &str, password: Option<&str>) -> Captured {
+    let (_dir, store) = make_store();
+    let repo = InstanceRepository::new(store.conn());
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let status = setup_add(
+        SetupAddFields {
+            name: Some(name.to_owned()),
+            url: Some(url.to_owned()),
+            email: Some("u@u.com".to_owned()),
+        },
+        password.map(str::to_owned),
+        &repo,
+        make_http(),
+        false,
+        &mut out,
+        &mut err,
+    )
+    .await;
+    captured(status, &out, &err)
+}
+
+const UNREACHABLE_URL: &str = "http://127.0.0.1:1";
+
+fn client_for(base_url: &str) -> ActiveCollabClient {
+    let inst = Instance {
+        name: "inst".to_owned(),
+        base_url: base_url.to_owned(),
+        email: "u@u.com".to_owned(),
+        token: "tok".to_owned(),
+        user_id: None,
+    };
+    ActiveCollabClient::new(inst, make_http())
+}
+
+/// The Display text of the transport error the real client reports for an
+/// unroutable loopback port; the expected value for every printed error line.
+async fn unreachable_projects_error() -> String {
+    let err = client_for(UNREACHABLE_URL).test_connectivity().await;
+    err.expect_err("port 1 refuses connections").to_string()
+}
+
+async fn unreachable_exchange_error() -> String {
+    let result = client_for(UNREACHABLE_URL)
+        .exchange_token(UNREACHABLE_URL, "u@u.com", "pw")
+        .await;
+    result.expect_err("port 1 refuses connections").to_string()
+}
+
+async fn run_connectivity_check_output(base_url: &str) -> String {
+    let mut out = Vec::new();
+    setup::run_connectivity_check(&client_for(base_url), &mut out).await;
+    output_str(&out).to_owned()
+}
+
+fn ok_token() -> serde_json::Value {
+    serde_json::json!({ "is_ok": true, "token": "tok" })
+}
+
+#[test]
+fn setup_remove_message_is_translated_with_value_filled() {
+    let _lang = PtBrLanguage::on();
+    let (status, out, _) = run_setup_remove("{code}", true);
+    assert_eq!(status, 0);
+    assert_eq!(out, "Instância '{code}' removida.\n");
+}
+
+#[test]
+fn setup_remove_message_stays_english_under_en() {
+    let (status, out, _) = run_setup_remove("work", true);
+    assert_eq!(status, 0);
+    assert_eq!(out, "Instance 'work' removed.\n");
+}
+
+#[test]
+fn setup_remove_not_found_is_translated_and_keeps_non_ascii_name() {
+    let _lang = PtBrLanguage::on();
+    let (status, _, err) = run_setup_remove("ação", false);
+    assert_eq!(status, 2);
+    assert_eq!(err, "Erro: instância 'ação' não encontrada.\n");
+}
+
+#[test]
+fn setup_remove_not_found_stays_english_under_en() {
+    let (status, _, err) = run_setup_remove("ação", false);
+    assert_eq!(status, 2);
+    assert_eq!(err, "Error: instance 'ação' not found.\n");
+}
+
+#[test]
+fn setup_language_messages_are_translated_with_values_filled() {
+    let _lang = PtBrLanguage::on();
+    assert_eq!(run_setup_language(None).1, "Idioma atual: en\n");
+    assert_eq!(
+        run_setup_language(Some("pt_BR")).1,
+        "Idioma definido como 'pt_BR'.\n"
+    );
+}
+
+#[test]
+fn setup_language_unsupported_is_translated_and_value_is_not_refilled() {
+    let _lang = PtBrLanguage::on();
+    let (status, _, err) = run_setup_language(Some("{supported}"));
+    assert_eq!(status, 2);
+    assert_eq!(
+        err,
+        "Erro: idioma não suportado '{supported}'. Suportados: en, pt_BR.\n"
+    );
+}
+
+#[test]
+fn setup_language_unsupported_prints_placeholder_like_code_literally_under_en() {
+    let (status, _, err) = run_setup_language(Some("{supported}"));
+    assert_eq!(status, 2);
+    assert_eq!(
+        err,
+        "Error: unsupported language '{supported}'. Supported: en, pt_BR.\n"
+    );
+}
+
+#[test]
+fn setup_theme_unsupported_prints_placeholder_like_code_literally_under_en() {
+    let (status, _, err) = run_setup_theme(Some("{list}"));
+    assert_eq!(status, 2);
+    assert_eq!(
+        err,
+        "Error: unsupported theme '{list}'. Supported: angie, slate, nord.\n"
+    );
+}
+
+#[test]
+fn setup_language_messages_stay_english_under_en() {
+    assert_eq!(run_setup_language(None).1, "Current language: en\n");
+    assert_eq!(
+        run_setup_language(Some("pt_BR")).1,
+        "Language set to 'pt_BR'.\n"
+    );
+    assert_eq!(
+        run_setup_language(Some("xx")).2,
+        "Error: unsupported language 'xx'. Supported: en, pt_BR.\n"
+    );
+}
+
+#[test]
+fn setup_theme_messages_are_translated_with_values_filled() {
+    let _lang = PtBrLanguage::on();
+    assert_eq!(run_setup_theme(None).1, "Tema atual: angie\n");
+    assert_eq!(
+        run_setup_theme(Some("slate")).1,
+        "Tema definido para 'slate'.\n"
+    );
+}
+
+#[test]
+fn setup_theme_unsupported_is_translated_and_value_is_not_refilled() {
+    let _lang = PtBrLanguage::on();
+    let (status, _, err) = run_setup_theme(Some("{list}"));
+    assert_eq!(status, 2);
+    assert_eq!(
+        err,
+        "Erro: tema '{list}' não suportado. Suportados: angie, slate, nord.\n"
+    );
+}
+
+#[test]
+fn setup_theme_messages_stay_english_under_en() {
+    assert_eq!(run_setup_theme(None).1, "Current theme: angie\n");
+    assert_eq!(run_setup_theme(Some("nord")).1, "Theme set to 'nord'.\n");
+    assert_eq!(
+        run_setup_theme(Some("neon")).2,
+        "Error: unsupported theme 'neon'. Supported: angie, slate, nord.\n"
+    );
+}
+
+#[tokio::test]
+async fn setup_test_not_found_is_translated_with_placeholder_like_name_literal() {
+    let _lang = PtBrLanguage::on();
+    let (status, _, err) = run_setup_test_named("{name}").await;
+    assert_eq!(status, 2);
+    assert_eq!(err, "Erro: instância '{name}' não encontrada.\n");
+}
+
+#[tokio::test]
+async fn setup_test_not_found_stays_english_under_en() {
+    let (_, _, err) = run_setup_test_named("ação").await;
+    assert_eq!(err, "Error: instance 'ação' not found.\n");
+}
+
+#[tokio::test]
+async fn setup_test_results_are_translated_under_pt_br() {
+    let ok = MockServer::start().await;
+    mount_users_and_projects(&ok, 200).await;
+    let denied = MockServer::start().await;
+    mount_users_and_projects(&denied, 403).await;
+
+    let _lang = PtBrLanguage::on();
+    assert_eq!(run_connectivity_rows(&ok.uri()).await, "  inst: OK (200)\n");
+    assert_eq!(
+        run_connectivity_rows(&denied.uri()).await,
+        "  inst: FALHOU (HTTP 403)\n"
+    );
+    let exc = unreachable_projects_error().await;
+    assert_eq!(
+        run_connectivity_rows(UNREACHABLE_URL).await,
+        format!("  inst: FALHOU ({exc})\n")
+    );
+}
+
+#[tokio::test]
+async fn setup_test_results_stay_english_under_en() {
+    let ok = MockServer::start().await;
+    mount_users_and_projects(&ok, 200).await;
+    let denied = MockServer::start().await;
+    mount_users_and_projects(&denied, 403).await;
+
+    assert_eq!(run_connectivity_rows(&ok.uri()).await, "  inst: OK (200)\n");
+    assert_eq!(
+        run_connectivity_rows(&denied.uri()).await,
+        "  inst: FAILED (HTTP 403)\n"
+    );
+    let exc = unreachable_projects_error().await;
+    assert_eq!(
+        run_connectivity_rows(UNREACHABLE_URL).await,
+        format!("  inst: FAILED ({exc})\n")
+    );
+}
+
+#[tokio::test]
+async fn setup_add_saved_message_is_translated_with_placeholder_like_name_literal() {
+    let server = MockServer::start().await;
+    mount_token_exchange(&server, ok_token()).await;
+    mount_users_and_projects(&server, 200).await;
+
+    let _lang = PtBrLanguage::on();
+    let (status, out, _) = run_setup_add("{code}", &server.uri(), false).await;
+    assert_eq!(status, 0);
+    assert_eq!(out, "Instância '{code}' salva.\n");
+}
+
+#[tokio::test]
+async fn setup_add_saved_message_stays_english_under_en() {
+    let server = MockServer::start().await;
+    mount_token_exchange(&server, ok_token()).await;
+    mount_users_and_projects(&server, 200).await;
+
+    let (status, out, _) = run_setup_add("ação", &server.uri(), false).await;
+    assert_eq!(status, 0);
+    assert_eq!(out, "Instance 'ação' saved.\n");
+}
+
+#[tokio::test]
+async fn setup_add_token_failure_detail_is_translated_and_kept_literal() {
+    let server = MockServer::start().await;
+    mount_token_exchange(
+        &server,
+        serde_json::json!({ "is_ok": false, "message": "bad {status} ação" }),
+    )
+    .await;
+
+    let _lang = PtBrLanguage::on();
+    let (status, _, err) = run_setup_add("n", &server.uri(), false).await;
+    assert_eq!(status, 1);
+    assert_eq!(err, "Erro: bad {status} ação\n");
+}
+
+#[tokio::test]
+async fn setup_add_token_failure_detail_stays_english_under_en() {
+    let server = MockServer::start().await;
+    mount_token_exchange(
+        &server,
+        serde_json::json!({ "is_ok": false, "message": "bad" }),
+    )
+    .await;
+
+    let (_, _, err) = run_setup_add("n", &server.uri(), false).await;
+    assert_eq!(err, "Error: bad\n");
+}
+
+#[tokio::test]
+async fn setup_add_exchange_transport_error_is_translated_under_pt_br() {
+    let _lang = PtBrLanguage::on();
+    let (status, _, err) = run_setup_add("n", UNREACHABLE_URL, false).await;
+    assert_eq!(status, 1);
+    assert_eq!(
+        err,
+        format!("Erro: {}\n", unreachable_exchange_error().await)
+    );
+}
+
+#[tokio::test]
+async fn setup_add_exchange_transport_error_stays_english_under_en() {
+    let (status, _, err) = run_setup_add("n", UNREACHABLE_URL, false).await;
+    assert_eq!(status, 1);
+    assert_eq!(
+        err,
+        format!("Error: {}\n", unreachable_exchange_error().await)
+    );
+}
+
+#[tokio::test]
+async fn setup_connectivity_check_transport_error_is_translated_under_pt_br() {
+    let _lang = PtBrLanguage::on();
+    let exc = unreachable_projects_error().await;
+    assert_eq!(
+        run_connectivity_check_output(UNREACHABLE_URL).await,
+        format!("Conectividade: FALHOU ({exc})\n")
+    );
+}
+
+#[tokio::test]
+async fn setup_connectivity_check_transport_error_stays_english_under_en() {
+    let exc = unreachable_projects_error().await;
+    assert_eq!(
+        run_connectivity_check_output(UNREACHABLE_URL).await,
+        format!("Connectivity: FAILED ({exc})\n")
+    );
+}
+
+#[tokio::test]
+async fn setup_add_connectivity_failure_is_translated_under_pt_br() {
+    let denied = MockServer::start().await;
+    mount_token_exchange(&denied, ok_token()).await;
+    mount_users_and_projects(&denied, 403).await;
+
+    let _lang = PtBrLanguage::on();
+    let (_, out, _) = run_setup_add("n", &denied.uri(), true).await;
+    assert!(
+        out.ends_with("Conectividade: FALHOU (HTTP 403)\n"),
+        "got: {out}"
+    );
+}
+
+#[tokio::test]
+async fn setup_add_connectivity_failure_stays_english_under_en() {
+    let denied = MockServer::start().await;
+    mount_token_exchange(&denied, ok_token()).await;
+    mount_users_and_projects(&denied, 403).await;
+
+    let (_, out, _) = run_setup_add("n", &denied.uri(), true).await;
+    assert!(
+        out.ends_with("Connectivity: FAILED (HTTP 403)\n"),
+        "got: {out}"
+    );
+}
+
+fn instance_named(name: &str) -> Instance {
+    Instance {
+        name: name.to_owned(),
+        base_url: format!("https://{name}.example.com"),
+        email: "u@u.com".to_owned(),
+        token: "[MASKED by secret-mask: original value hidden for security]".to_owned(),
+        user_id: None,
+    }
+}
+
+fn first_line(text: &str) -> &str {
+    text.lines().next().unwrap_or("")
+}
+
+#[test]
+fn pick_instance_unknown_name_is_translated_and_keeps_placeholder_text_literal() {
+    let _lang = PtBrLanguage::on();
+    let instances = vec![instance_named("alpha"), instance_named("{name}")];
+    let mut err = Vec::new();
+    assert_eq!(pick_instance(&instances, Some("{known}"), &mut err), Err(2));
+    assert_eq!(
+        output_str(&err),
+        "Erro: instância '{known}' não encontrada. Conhecidas: alpha, {name}\n"
+    );
+}
+
+#[test]
+fn pick_instance_unknown_name_stays_english_under_en() {
+    let instances = vec![instance_named("alpha"), instance_named("{name}")];
+    let mut err = Vec::new();
+    assert_eq!(pick_instance(&instances, Some("{known}"), &mut err), Err(2));
+    assert_eq!(
+        output_str(&err),
+        "Error: instance '{known}' not found. Known: alpha, {name}\n"
+    );
+}
+
+#[test]
+fn pick_instance_multiple_without_name_is_translated_with_names_filled() {
+    let _lang = PtBrLanguage::on();
+    let instances = vec![instance_named("{names}"), instance_named("b")];
+    let mut err = Vec::new();
+    assert_eq!(pick_instance(&instances, None, &mut err), Err(2));
+    assert_eq!(
+        output_str(&err),
+        "Erro: múltiplas instâncias configuradas ({names}, b). Use --instance NOME.\n"
+    );
+}
+
+#[test]
+fn pick_instance_multiple_without_name_stays_english_under_en() {
+    let instances = vec![instance_named("{names}"), instance_named("b")];
+    let mut err = Vec::new();
+    assert_eq!(pick_instance(&instances, None, &mut err), Err(2));
+    assert_eq!(
+        output_str(&err),
+        "Error: multiple instances configured ({names}, b). Use --instance NAME.\n"
+    );
+}
+
+#[test]
+fn parse_task_ref_failure_is_translated_with_ref_kept_literal() {
+    let _lang = PtBrLanguage::on();
+    let mut err = Vec::new();
+    assert_eq!(parse_task_ref("{branch}", &mut err), Err(2));
+    assert_eq!(
+        output_str(&err),
+        "Erro: não foi possível interpretar a referência de tarefa '{branch}'. Use URL ou PROJECT_ID/TASK_ID (ex: 665/75159).\n"
+    );
+}
+
+#[test]
+fn parse_task_ref_failure_stays_english_under_en() {
+    let mut err = Vec::new();
+    assert_eq!(parse_task_ref("ação", &mut err), Err(2));
+    assert_eq!(
+        output_str(&err),
+        "Error: cannot parse task ref 'ação'. Use URL or PROJECT_ID/TASK_ID (e.g. 665/75159).\n"
+    );
+}
+
+#[test]
+fn comment_ref_from_unmatched_branch_is_translated_with_branch_kept_literal() {
+    let _lang = PtBrLanguage::on();
+    let mut err = Vec::new();
+    assert_eq!(
+        resolve_task_ref_for_comment(None, Some("{ref}"), &mut err),
+        Err(2)
+    );
+    assert_eq!(
+        output_str(&err),
+        "Erro: nenhuma referência de tarefa informada e a branch '{ref}' não corresponde ao padrão esperado (feature|hotfix|fix)/PROJECT_ID-TASK_ID.\n"
+    );
+}
+
+#[test]
+fn comment_ref_from_unmatched_branch_stays_english_under_en() {
+    let mut err = Vec::new();
+    assert_eq!(
+        resolve_task_ref_for_comment(None, Some("main"), &mut err),
+        Err(2)
+    );
+    assert_eq!(
+        output_str(&err),
+        "Error: no task ref given and branch 'main' does not match expected pattern (feature|hotfix|fix)/PROJECT_ID-TASK_ID.\n"
+    );
+}
+
+async fn run_mine_with_instance_filter(filter: &str) -> Captured {
+    let (_dir, store) = make_store();
+    sample_instance(&store, "work");
+    sample_instance(&store, "{name}");
+    let repo = InstanceRepository::new(store.conn());
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let outcome = mine_core(
+        &repo,
+        &make_http(),
+        Some(filter),
+        false,
+        false,
+        &mut out,
+        &mut err,
+    )
+    .await;
+    captured(mine_outcome_code(outcome), &out, &err)
+}
+
+#[tokio::test]
+async fn mine_unknown_instance_is_translated_and_keeps_placeholder_text_literal() {
+    let _lang = PtBrLanguage::on();
+    let (status, _, err) = run_mine_with_instance_filter("{known}").await;
+    assert_eq!(status, 2);
+    assert_eq!(
+        err,
+        "Erro: instância '{known}' não encontrada. Conhecidas: work, {name}\n"
+    );
+}
+
+#[tokio::test]
+async fn mine_unknown_instance_stays_english_under_en() {
+    let (status, _, err) = run_mine_with_instance_filter("{known}").await;
+    assert_eq!(status, 2);
+    assert_eq!(
+        err,
+        "Error: instance '{known}' not found. Known: work, {name}\n"
+    );
+}
+
+#[test]
+fn instance_not_found_message_is_translated_and_keeps_placeholder_text_literal() {
+    let _lang = PtBrLanguage::on();
+    let instances = vec![instance_named("work"), instance_named("{name}")];
+    assert_eq!(
+        instance_not_found_message("{known}", &instances),
+        "Erro: instância '{known}' não encontrada. Conhecidas: work, {name}"
+    );
+}
+
+#[test]
+fn load_targets_with_a_name_keeps_only_that_instance() {
+    let (_dir, store) = make_store();
+    sample_instance(&store, "work");
+    sample_instance(&store, "personal");
+    let repo = InstanceRepository::new(store.conn());
+    let targets = load_targets(&repo, Some("work"))
+        .ok()
+        .expect("a configured name is a target");
+    let names: Vec<&str> = targets.iter().map(|i| i.name.as_str()).collect();
+    assert_eq!(names, vec!["work"]);
+}
+
+#[test]
+fn load_targets_unreadable_store_exits_1_with_the_load_error() {
+    let (_dir, store) = make_store();
+    store.conn().execute("DROP TABLE instances", []).unwrap();
+    let repo = InstanceRepository::new(store.conn());
+    let failure = load_targets(&repo, None)
+        .err()
+        .expect("a missing instances table fails the load");
+    assert_eq!(failure.code, 1);
+    assert!(
+        failure.message.starts_with("Error loading instances: "),
+        "message: {}",
+        failure.message
+    );
+}
+
+#[test]
+fn instance_not_found_message_stays_english_under_en() {
+    let instances = vec![instance_named("work"), instance_named("{name}")];
+    assert_eq!(
+        instance_not_found_message("{known}", &instances),
+        "Error: instance '{known}' not found. Known: work, {name}"
+    );
+}
+
+#[test]
+fn presenter_success_lines_are_translated_with_values_filled() {
+    let _lang = PtBrLanguage::on();
+    let mut out = Vec::new();
+    presenter::write_comment_success(7, 75346, 524, false, &mut out);
+    presenter::write_time_success(8, 75346, 524, 1.5, false, &mut out);
+    presenter::write_task_success(75346, 524, None, None, None, None, false, &mut out);
+    assert_eq!(
+        output_str(&out),
+        "Comentário publicado (comment_id=7, tarefa 524/75346).\n\
+         Tempo registrado (time_record_id=8, 1.5 horas, tarefa 524/75346).\n\
+         Tarefa atualizada (tarefa 524/75346).\n"
+    );
+}
+
+#[test]
+fn presenter_success_lines_stay_english_under_en() {
+    let mut out = Vec::new();
+    presenter::write_comment_success(7, 75346, 524, false, &mut out);
+    presenter::write_time_success(8, 75346, 524, 1.5, false, &mut out);
+    presenter::write_task_success(75346, 524, None, None, None, None, false, &mut out);
+    assert_eq!(
+        output_str(&out),
+        "Comment posted (comment_id=7, task 524/75346).\n\
+         Time logged (time_record_id=8, 1.5 hours, task 524/75346).\n\
+         Task updated (task 524/75346).\n"
+    );
+}
+
+#[test]
+fn presenter_task_changes_are_filled_as_a_value_and_never_refilled() {
+    let list = crate::client::TaskList {
+        id: 3,
+        name: "{project_id}".to_owned(),
+    };
+    let mut en = Vec::new();
+    presenter::write_task_success(
+        75346,
+        524,
+        Some(true),
+        Some(9),
+        Some(2.5),
+        Some(&list),
+        false,
+        &mut en,
+    );
+    assert_eq!(
+        output_str(&en),
+        "Task updated (task 524/75346): status=completed, assignee_id=9, estimate=2.5, list={project_id}.\n"
+    );
+
+    let _lang = PtBrLanguage::on();
+    let mut pt = Vec::new();
+    presenter::write_task_success(
+        75346,
+        524,
+        Some(true),
+        Some(9),
+        Some(2.5),
+        Some(&list),
+        false,
+        &mut pt,
+    );
+    assert_eq!(
+        output_str(&pt),
+        "Tarefa atualizada (tarefa 524/75346): status=completed, assignee_id=9, estimate=2.5, list={project_id}.\n"
+    );
+}
+
+async fn run_current_with_branch(branch: &str) -> Captured {
+    let (_dir, store) = make_store();
+    let cache = TaskCache::new(store.conn());
+    let inst = make_inst("http://127.0.0.1:1");
+    let client = ActiveCollabClient::new(inst.clone(), make_http());
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let status = current_core(
+        Some(branch),
+        &inst,
+        &cache,
+        &client,
+        &default_flags(),
+        &mut out,
+        &mut err,
+    )
+    .await;
+    captured(status, &out, &err)
+}
+
+#[tokio::test]
+async fn current_unmatched_branch_is_translated_with_branch_kept_literal() {
+    let _lang = PtBrLanguage::on();
+    let (status, _, err) = run_current_with_branch("{ref}").await;
+    assert_eq!(status, 2);
+    assert_eq!(
+        err,
+        "Erro: branch '{ref}' não corresponde ao padrão esperado (feature|hotfix|fix)/PROJECT_ID-TASK_ID (ex: feature/665-75159).\n"
+    );
+}
+
+#[tokio::test]
+async fn current_unmatched_branch_stays_english_under_en() {
+    let (status, _, err) = run_current_with_branch("{ref}").await;
+    assert_eq!(status, 2);
+    assert_eq!(
+        err,
+        "Error: branch '{ref}' does not match expected pattern (feature|hotfix|fix)/PROJECT_ID-TASK_ID (e.g. feature/665-75159).\n"
+    );
+}
+
+async fn run_load_task_not_found() -> String {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/projects/10/tasks/99"))
+        .respond_with(ResponseTemplate::new(404).set_body_string("missing"))
+        .mount(&server)
+        .await;
+    let (_dir, store) = make_store();
+    let cache = TaskCache::new(store.conn());
+    let client = ActiveCollabClient::new(make_inst(&server.uri()), make_http());
+    let mut err = Vec::new();
+    let result = load_task(&cache, &client, "inst", 10, 99, false, false, &mut err).await;
+    assert!(result.is_none());
+    output_str(&err).to_owned()
+}
+
+#[tokio::test]
+async fn load_task_not_found_is_translated_with_values_filled() {
+    let _lang = PtBrLanguage::on();
+    assert_eq!(
+        run_load_task_not_found().await,
+        "Erro: tarefa 10/99 não encontrada (HTTP 404).\n"
+    );
+}
+
+#[tokio::test]
+async fn load_task_not_found_stays_english_under_en() {
+    assert_eq!(
+        run_load_task_not_found().await,
+        "Error: task 10/99 not found (HTTP 404).\n"
+    );
+}
+
+async fn run_download_summary(failing: bool, dir_name: &str) -> (String, String) {
+    let server = MockServer::start().await;
+    let attachment_url = format!("{}/note.txt", server.uri());
+    Mock::given(method("GET"))
+        .and(path("/api/v1/projects/5/tasks/10"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "single": task_with_attachment(10, "Attachment task", &attachment_url),
+            "tracked_time": 0,
+            "comments": []
+        })))
+        .mount(&server)
+        .await;
+    let note = if failing {
+        ResponseTemplate::new(404).set_body_string("not found")
+    } else {
+        ResponseTemplate::new(200).set_body_bytes(b"hello".to_vec())
+    };
+    Mock::given(method("GET"))
+        .and(path("/note.txt"))
+        .respond_with(note)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/users"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+        .mount(&server)
+        .await;
+
+    let (_dir, store) = make_store();
+    let cache = TaskCache::new(store.conn());
+    let inst = make_inst(&server.uri());
+    let client = ActiveCollabClient::new(inst.clone(), make_http());
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let dest_root = TempDir::new().unwrap();
+    let dest = dest_root
+        .path()
+        .join(dir_name)
+        .to_string_lossy()
+        .to_string();
+    let flags = DisplayFlags {
+        download_attachments: true,
+        attachments_dir: Some(dest.clone()),
+        ..default_flags()
+    };
+    let code = do_get_task(&inst, &cache, &client, 5, 10, &flags, &mut out, &mut err).await;
+    assert_eq!(code, 0);
+    let line = output_str(&out)
+        .lines()
+        .find(|l| l.starts_with("Downloaded") || l.starts_with("Baixado"))
+        .unwrap_or_default()
+        .to_owned();
+    (line, dest)
+}
+
+#[tokio::test]
+async fn download_summary_is_translated_with_counts_and_directory_filled() {
+    let _lang = PtBrLanguage::on();
+    let (line, dest) = run_download_summary(false, "{failures}").await;
+    assert_eq!(line, format!("Baixado(s) 1 de 1 anexo(s) para {dest}"));
+}
+
+#[tokio::test]
+async fn download_summary_stays_english_under_en() {
+    let (line, dest) = run_download_summary(false, "{failures}").await;
+    assert_eq!(line, format!("Downloaded 1 of 1 attachment(s) to {dest}"));
+}
+
+#[tokio::test]
+async fn download_summary_fills_the_failure_suffix_as_a_value() {
+    let (en, dest) = run_download_summary(true, "{ok}").await;
+    let suffix = en
+        .strip_prefix(&format!("Downloaded 0 of 1 attachment(s) to {dest}"))
+        .unwrap_or_else(|| panic!("unexpected english line: {en}"))
+        .to_owned();
+    assert!(suffix.starts_with(" (failed: note.txt: "), "{suffix}");
+
+    let _lang = PtBrLanguage::on();
+    let (pt, dest) = run_download_summary(true, "{ok}").await;
+    assert_eq!(
+        pt,
+        format!("Baixado(s) 0 de 1 anexo(s) para {dest}{suffix}")
+    );
+}
+
+#[tokio::test]
+async fn task_set_unrecognized_status_is_translated_with_value_kept_literal() {
+    let server = MockServer::start().await;
+    let _lang = PtBrLanguage::on();
+    let run = run_task_set(&server, Some("{list}"), None, None, None, false).await;
+    assert_eq!(run.code, 2);
+    assert_eq!(
+        run.err,
+        "Erro: valor de --status não reconhecido '{list}'. Use complete, completed, done, closed, open, reopen ou todo.\n"
+    );
+}
+
+#[tokio::test]
+async fn task_set_unrecognized_status_stays_english_under_en() {
+    let server = MockServer::start().await;
+    let run = run_task_set(&server, Some("{list}"), None, None, None, false).await;
+    assert_eq!(run.code, 2);
+    assert_eq!(
+        run.err,
+        "Error: unrecognized --status value '{list}'. Use complete, completed, done, closed, open, reopen, or todo.\n"
+    );
+}
+
+#[tokio::test]
+async fn task_set_unknown_list_is_translated_with_value_kept_literal() {
+    let server = MockServer::start().await;
+    mount_task_lists(&server, 200, project_task_lists()).await;
+    let _lang = PtBrLanguage::on();
+    let run = run_task_set(&server, None, None, None, Some("{status}"), false).await;
+    assert_eq!(run.code, 2);
+    assert_eq!(
+        first_line(&run.err),
+        "Erro: nenhuma lista de tarefas corresponde a '{status}'. Listas de tarefas deste projeto:"
+    );
+}
+
+#[tokio::test]
+async fn task_set_unknown_list_stays_english_under_en() {
+    let server = MockServer::start().await;
+    mount_task_lists(&server, 200, project_task_lists()).await;
+    let run = run_task_set(&server, None, None, None, Some("{status}"), false).await;
+    assert_eq!(run.code, 2);
+    assert_eq!(
+        first_line(&run.err),
+        "Error: no task list matches '{status}'. Task lists of this project:"
+    );
+}
+
+async fn run_task_set_with_duplicate_list_names() -> TaskSetRun {
+    let server = MockServer::start().await;
+    mount_task_lists(
+        &server,
+        200,
+        serde_json::json!([
+            { "id": 1, "name": "{status}" },
+            { "id": 2, "name": "{STATUS}" }
+        ]),
+    )
+    .await;
+    run_task_set(&server, None, None, None, Some("{status}"), false).await
+}
+
+#[tokio::test]
+async fn task_set_ambiguous_list_is_translated_with_value_kept_literal() {
+    let _lang = PtBrLanguage::on();
+    let run = run_task_set_with_duplicate_list_names().await;
+    assert_eq!(run.code, 2);
+    assert_eq!(
+        first_line(&run.err),
+        "Erro: a lista de tarefas '{status}' corresponde a mais de uma lista; use o id numérico:"
+    );
+}
+
+#[tokio::test]
+async fn task_set_ambiguous_list_stays_english_under_en() {
+    let run = run_task_set_with_duplicate_list_names().await;
+    assert_eq!(run.code, 2);
+    assert_eq!(
+        first_line(&run.err),
+        "Error: task list '{status}' matches more than one list; use the numeric id instead:"
+    );
+}
+
+async fn run_task_set_with_assignee_directory(users: serde_json::Value) -> TaskSetRun {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/users"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(users))
+        .mount(&server)
+        .await;
+    run_task_set(&server, None, Some("{list}"), None, None, false).await
+}
+
+fn alice_directory() -> serde_json::Value {
+    serde_json::json!([user_directory_response(9, "Alice Smith")])
+}
+
+fn duplicate_assignee_directory() -> serde_json::Value {
+    serde_json::json!([
+        user_directory_response(1, "{list}"),
+        user_directory_response(2, "{LIST}")
+    ])
+}
+
+#[tokio::test]
+async fn task_set_unknown_assignee_is_translated_with_value_kept_literal() {
+    let _lang = PtBrLanguage::on();
+    let run = run_task_set_with_assignee_directory(alice_directory()).await;
+    assert_eq!(run.code, 2);
+    assert_eq!(
+        run.err,
+        "Erro: nenhum usuário corresponde ao responsável '{list}'.\n"
+    );
+}
+
+#[tokio::test]
+async fn task_set_unknown_assignee_stays_english_under_en() {
+    let run = run_task_set_with_assignee_directory(alice_directory()).await;
+    assert_eq!(run.code, 2);
+    assert_eq!(run.err, "Error: no user matches assignee '{list}'.\n");
+}
+
+#[tokio::test]
+async fn task_set_ambiguous_assignee_is_translated_with_value_kept_literal() {
+    let _lang = PtBrLanguage::on();
+    let run = run_task_set_with_assignee_directory(duplicate_assignee_directory()).await;
+    assert_eq!(run.code, 2);
+    assert_eq!(
+        run.err,
+        "Erro: o responsável '{list}' corresponde a mais de um usuário; use o id numérico.\n"
+    );
+}
+
+#[tokio::test]
+async fn task_set_ambiguous_assignee_stays_english_under_en() {
+    let run = run_task_set_with_assignee_directory(duplicate_assignee_directory()).await;
+    assert_eq!(run.code, 2);
+    assert_eq!(
+        run.err,
+        "Error: assignee '{list}' matches more than one user; use the numeric id instead.\n"
+    );
 }

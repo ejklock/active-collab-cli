@@ -1,7 +1,7 @@
-//! TUI detail-content output adapter (ADR 0049).
+//! TUI detail-content output adapter.
 //!
 //! Owns `build_detail_content` and its builders: the header/meta panel, the
-//! wrapped description body (with inline URL affordances, ADR 0043 §2), the
+//! wrapped description body (with inline URL affordances), the
 //! comment cards, and the shared rounded-panel primitives (`panel_box`,
 //! `panel_box_rich`, `comment_box`). The `DetailContent` type and the
 //! affordance emission contract are unchanged by this module split.
@@ -77,7 +77,7 @@ fn bracket_depth(s: &str) -> i32 {
 /// Bracketed `[url]` tokens are handled by bracket-counting: lines with an unmatched
 /// `[` are joined with their continuations until the group closes. Raw `https?://…`
 /// tokens that reach the right edge of a full-width line are joined with the next line
-/// so their complete URL is recovered. Both strategies fix the OBS-35 over-join bug by
+/// so their complete URL is recovered. Both strategies fix the over-join bug by
 /// stopping at a structural boundary (closing `]` or URL terminator) instead of at
 /// display-width.
 ///
@@ -292,10 +292,10 @@ pub(crate) fn format_asset_row(prefix: &str, label: &str, width: usize) -> Vec<S
     result
 }
 
-/// Raster image extensions the in-TUI viewer can display (ADR 0065 §1).
+/// Raster image extensions the in-TUI viewer can display.
 const IMAGE_EXTENSIONS: [&str; 6] = ["png", "jpg", "jpeg", "gif", "webp", "bmp"];
 
-/// Returns true when `name`'s derived filename (ADR 0023) ends in a viewable raster
+/// Returns true when `name`'s derived filename ends in a viewable raster
 /// extension, matched case-insensitively. Extensionless names and non-raster
 /// extensions (e.g. `pdf`, `docx`, `txt`) return false.
 pub(crate) fn is_image_filename(name: &str) -> bool {
@@ -373,7 +373,7 @@ pub fn panel_box_rich(
 ///
 /// Shared by `panel_box` (which draws the fitted label into the border) and
 /// `panel_title_run` (which styles that same span) so the two can never drift
-/// apart (ADR 0063).
+/// apart.
 pub(crate) fn fit_panel_header(label: &str, width: usize) -> (String, usize) {
     let inner = width.saturating_sub(2);
     let header_text = format!(" {} ", label);
@@ -849,7 +849,7 @@ fn build_comment_card(ctx: CommentCardCtx<'_>) -> CommentCard {
 /// Push `StyleRun`s for the edit and delete affordance spans onto `line_styles[0]`.
 ///
 /// Reuses the exact (start, len) coordinates already computed for the hit-test
-/// (single source of truth, ADR 0032 / ADR 0041). No-op when a span is `None`.
+/// (single source of truth). No-op when a span is `None`.
 fn push_affordance_style_runs(
     line_styles: &mut [Vec<StyleRun>],
     edit_span: Option<(usize, usize)>,
@@ -945,7 +945,7 @@ fn extract_comment_body_rich(comment: &Value) -> Vec<crate::richtext::RichLine> 
 /// When `current_user_id` is `Some(id)`, comments authored by `id` receive
 /// `[editar]` and `[excluir]` affordance tokens in their header; spans are recorded
 /// in `affordances` (kind `Edit`/`Delete`) for hit-testing.
-/// The delete-confirm UI is rendered by the modal overlay (ADR 0039 §4), not here.
+/// The delete-confirm UI is rendered by the modal overlay, not here.
 /// Pure: no I/O, no async, no time access.
 pub fn build_detail_content(
     task: &Value,
@@ -1032,13 +1032,11 @@ pub fn build_detail_content(
 /// `ViewImage` or `OpenAsset` affordance per asset row) to the running
 /// `lines`/`line_styles`/`affordances` vecs kept by `build_detail_content`.
 ///
-/// An asset row emits `ViewImage` when its derived filename is a raster image
-/// ([ADR 0065] §1); every other row keeps `OpenAsset` (ADR 0025 external open).
+/// An asset row emits `ViewImage` when its derived filename is a raster image;
+/// every other row keeps `OpenAsset` (external open).
 ///
 /// Called only when the asset list is non-empty; the blank separator line is
 /// included here so the caller's index alignment invariant is preserved.
-///
-/// [ADR 0065]: /adr/0065-image-attachment-viewer-modal-overlay.md
 fn splice_asset_section(
     assets: &[Asset],
     inner_width: usize,

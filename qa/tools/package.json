@@ -1,0 +1,8 @@
+{
+  "name": "qa-tools",
+  "private": true,
+  "description": "Pinned tools the walkthrough replay installs under qa/.run/tools",
+  "dependencies": {
+    "@modelcontextprotocol/inspector": "2.15.0"
+  }
+}
