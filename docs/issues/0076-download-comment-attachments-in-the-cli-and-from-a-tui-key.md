@@ -2,7 +2,7 @@
 type: Issue
 title: Download comment attachments in the CLI and from a TUI key
 description: Comment attachments join the downloadable and listed assets, and a TUI key D saves a task's attachments to ~/Downloads/ac-attachments.
-status: in-progress
+status: closed
 labels: [cli, tui, attachments, agent, slice]
 blocked_by: [0073]
 timestamp: 2026-11-11T21:40:56Z

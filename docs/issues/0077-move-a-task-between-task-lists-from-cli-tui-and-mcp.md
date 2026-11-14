@@ -2,7 +2,7 @@
 type: Issue
 title: Move a task between task lists from CLI, TUI and MCP
 description: ac task set --list, a TUI picker on key l and the MCP ac_write set_task operation move a task to another task list of its project.
-status: in-progress
+status: closed
 labels: [cli, tui, agent, write, slice]
 blocked_by: [0073]
 timestamp: 2026-11-11T21:40:56Z
