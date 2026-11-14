@@ -11,6 +11,16 @@ pre-cutover Python package's history is preserved verbatim under
 version numbers are a separate line and do not continue into the Rust crate
 (issue 0055).
 
+## [0.12.2] - 2026-11-14
+
+### Changed
+
+- The `active-collab-agent` npm package ships its own README with the OpenCode
+  and Pi install steps, and the crate, npm package and Claude Code plugin
+  manifests carry a description, keywords, license and repository link.
+- The project README leads with the features and a table of the three ways to
+  connect an AI agent, and lists the Linux arm64 download.
+
 ## [0.12.1] - 2026-11-13
 
 ### Changed
