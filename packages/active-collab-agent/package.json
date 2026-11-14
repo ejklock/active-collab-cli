@@ -1,7 +1,7 @@
 {
   "name": "active-collab-agent",
   "version": "0.12.1",
-  "description": "Gives OpenCode the ac MCP server and the active-collab skill, and Pi the active-collab skill",
+  "description": "ActiveCollab for AI coding agents: gives OpenCode the ac MCP server and the active-collab skill, and Pi the active-collab skill",
   "license": "MIT",
   "repository": { "type": "git", "url": "git+https://github.com/ejklock/active-collab-cli.git", "directory": "packages/active-collab-agent" },
   "homepage": "https://github.com/ejklock/active-collab-cli#plugins",
@@ -11,10 +11,10 @@
     ".": "./index.ts",
     "./server": "./index.ts"
   },
-  "keywords": ["pi-package"],
+  "keywords": ["pi-package", "opencode", "opencode-plugin", "activecollab", "mcp", "model-context-protocol", "ai-agent", "skill", "project-management", "time-tracking"],
   "pi": { "skills": ["skills"] },
   "scripts": {
     "test": "node --test"
   },
-  "files": ["index.ts", "skills"]
+  "files": ["index.ts", "skills", "README.md"]
 }

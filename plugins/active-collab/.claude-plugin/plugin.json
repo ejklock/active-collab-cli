@@ -4,6 +4,8 @@
   "description": "Read ActiveCollab tasks, assignments, comments and projects through the ac CLI: the ac MCP server and the active-collab skill.",
   "author": { "name": "Evaldo Klock" },
   "license": "MIT",
+  "repository": "https://github.com/ejklock/active-collab-cli",
+  "keywords": ["activecollab", "mcp", "project-management", "tasks", "time-tracking"],
   "homepage": "https://github.com/ejklock/active-collab-cli",
   "mcpServers": "./mcp.json"
 }

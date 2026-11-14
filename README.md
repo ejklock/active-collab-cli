@@ -1,12 +1,39 @@
-# active-collab-cli
+# active-collab-cli — ActiveCollab CLI, terminal UI and MCP server
 
-**Unofficial** command-line tool and interactive terminal UI (TUI) for reading
-and browsing [ActiveCollab](https://activecollab.com) tasks from self-hosted
-instances. Supports multi-instance configuration, SQLite-backed token storage,
-and outputs human-readable or JSON task views.
+[![CI](https://github.com/ejklock/active-collab-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/ejklock/active-collab-cli/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/ejklock/active-collab-cli)](https://github.com/ejklock/active-collab-cli/releases/latest)
+[![npm: active-collab-agent](https://img.shields.io/npm/v/active-collab-agent?label=npm%20active-collab-agent)](https://www.npmjs.com/package/active-collab-agent)
+[![License: MIT](https://img.shields.io/github/license/ejklock/active-collab-cli)](LICENSE)
 
-The application ships as a single self-contained binary (`ac`) built with Rust
-(ratatui + crossterm + tokio). No interpreter or runtime is required on the target.
+**Unofficial** command-line client, interactive terminal UI (TUI) and
+[MCP](https://modelcontextprotocol.io) server for self-hosted
+[ActiveCollab](https://activecollab.com). Read your tasks, comments and
+projects, log time, export hours reports and download attachments from the
+terminal, or let an AI coding agent (Claude Code, Codex, OpenCode, Pi, Cursor,
+GitHub Copilot) do it for you through the `ac mcp` server and the
+`active-collab` skill.
+
+One self-contained Rust binary (`ac`, built with ratatui, crossterm and tokio)
+for Linux, macOS and Windows. No interpreter or runtime is required.
+
+**Features**
+
+- `ac mine`: your open tasks grouped by due date, with estimate and the hours
+  logged this week and in total.
+- `ac` / `ac get`: the task for your current git branch, or any task by URL or
+  short ref, with comments and attachments.
+- `ac browse`: a keyboard-driven TUI over projects, task lists, tasks, comments
+  and attachments; comment, log time, move a task to another task list, download
+  attachments.
+- `ac time log` and `ac time report`: log hours, and export a period's hours as
+  XLSX or CSV.
+- `--json` on every read command, for scripts and agents.
+- `ac mcp`: the same commands as MCP tools (`ac_read`, `ac_write`,
+  `ac_download_attachments`), installed in one step by the
+  [Claude Code, Codex, OpenCode and Pi plugins](#plugins).
+- Several ActiveCollab instances at once; API tokens stored locally in SQLite,
+  passwords never stored.
+- English and Brazilian Portuguese interface.
 
 > ## ⚠️ Unofficial — not affiliated with ActiveCollab
 >
@@ -43,6 +70,14 @@ ac setup add --name collab --url https://collab.example.com --email you@example.
 
 # 3 · List the open tasks assigned to you
 ac mine
+```
+
+To let an AI coding agent use it, add the plugin to your harness (see
+[Plugins](#plugins) for Codex, OpenCode and Pi):
+
+```sh
+claude plugin marketplace add ejklock/active-collab-cli
+claude plugin install active-collab@active-collab
 ```
 
 Then, day to day:
@@ -94,6 +129,7 @@ Windows.
 | Platform | Asset |
 |---|---|
 | Linux x86\_64 | `active-collab-linux-x86_64` |
+| Linux arm64 | `active-collab-linux-arm64` |
 | macOS x86\_64 (Intel) | `active-collab-macos-x86_64` |
 | macOS arm64 (Apple Silicon) | `active-collab-macos-arm64` |
 | Windows x86\_64 | `active-collab-windows-x86_64.exe` |
@@ -267,7 +303,21 @@ ac               # same as: ac current (when branch matches)
 
 ---
 
-## Agent skill
+## AI agents — plugins, MCP server and skill
+
+Three ways to give an AI coding agent your ActiveCollab tasks, from the most to
+the least integrated:
+
+| Way | Harnesses | What the agent gets |
+|---|---|---|
+| [Plugins](#plugins) | Claude Code, Codex, OpenCode, Pi | The `ac mcp` tools and the skill in one install step (Pi: the skill) |
+| [MCP server](#mcp-server--ac-mcp) by hand | Any MCP client | The `ac_read`, `ac_write` and `ac_download_attachments` tools |
+| [Skill installer](#install-the-skill-into-your-agent-harness) | Claude Code, Codex, OpenCode, Pi, Cursor, GitHub Copilot | The skill, which drives `ac --json` |
+
+All three need `ac` installed first ([Install](#install)), and `ac setup add` run
+once for your instance.
+
+### The skill
 
 `ac` ships a self-describing **agent skill** for the `--json` read contract, so an
 LLM coding agent can learn how to read your ActiveCollab tasks non-interactively.
@@ -348,7 +398,7 @@ OpenCode: add the package to the `plugin` list in `opencode.json`:
 { "plugin": ["active-collab-agent"] }
 ```
 
-Pi installs the skill only (it has no MCP client):
+Pi: the package gives Pi the skill, which drives `ac` with `--json`:
 
 ```sh
 pi install npm:active-collab-agent
