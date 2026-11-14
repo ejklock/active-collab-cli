@@ -1,11 +1,11 @@
-//! The greedy word-wrap engine shared by plain and rich text (ADR 0048).
+//! The greedy word-wrap engine shared by plain and rich text.
 //!
 //! Owns `greedy_wrap` and the `WrapCell`/`WrapLine` traits that let one core
 //! algorithm operate over both a plain `char` stream and a styled
 //! `(char, RichStyle)` stream, plus the two public adapters `wrap_text` and
 //! `wrap_rich`. Depends on `text_measure`-equivalent width math (via
 //! `unicode_width` directly, unchanged from before the split) and on
-//! `richtext` for the rich adapter's cell/line types (ADR 0049).
+//! `richtext` for the rich adapter's cell/line types.
 
 /// A single wrap-stream cell — a `char` for plain text, `(char, RichStyle)` for rich
 /// text. `greedy_wrap` only needs to measure and classify a cell, never its concrete type.
@@ -87,7 +87,7 @@ impl WrapLine for crate::richtext::RichLine {
     }
 }
 
-/// The one greedy word-wrap algorithm shared by `wrap_text` and `wrap_rich` (ADR 0048).
+/// The one greedy word-wrap algorithm shared by `wrap_text` and `wrap_rich`.
 ///
 /// `cells` is split on newline cells into segments; every segment yields at least one
 /// output line, so an empty segment (a blank line between paragraphs) produces one empty
@@ -201,7 +201,7 @@ fn hard_split<C: WrapCell, L: WrapLine<Cell = C>>(
 /// Display width is measured via unicode-width (same crate ratatui uses), so CJK and
 /// combining characters are handled correctly. A single word wider than `width` is
 /// hard-split by accumulated display width. Existing line breaks are preserved, including
-/// blank lines between them (ADR 0048). Empty input yields an empty Vec.
+/// blank lines between them. Empty input yields an empty Vec.
 pub fn wrap_text(text: &str, width: usize) -> Vec<String> {
     if text.is_empty() || width == 0 {
         return vec![];
@@ -212,11 +212,11 @@ pub fn wrap_text(text: &str, width: usize) -> Vec<String> {
 
 /// Greedy word-wrap for a `RichLine`, preserving span emphasis across breaks.
 ///
-/// Shares `wrap_text`'s greedy display-width core (ADR 0048) over `(char, RichStyle)`
+/// Shares `wrap_text`'s greedy display-width core over `(char, RichStyle)`
 /// cells, so a span whose style is Bold/Italic/Code carries that style on every wrapped
 /// fragment, and blank lines between paragraphs are preserved rather than dropped. Style
 /// is threaded per-character so repeated words with different emphasis and substring words
-/// each keep their own style (ADR 0030, BDR 0023). Empty input yields an empty Vec.
+/// each keep their own style. Empty input yields an empty Vec.
 pub fn wrap_rich(line: &crate::richtext::RichLine, width: usize) -> Vec<crate::richtext::RichLine> {
     if line.is_empty() || width == 0 {
         return vec![];

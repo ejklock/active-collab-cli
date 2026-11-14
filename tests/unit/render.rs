@@ -2,8 +2,6 @@ use super::*;
 use serde_json::json;
 use unicode_width::UnicodeWidthStr;
 
-// --- D3: link_segments ---
-
 #[test]
 fn link_segments_no_url_returns_single_non_link_segment() {
     let segs = link_segments("plain text with no URL");
@@ -137,8 +135,6 @@ fn link_segments_segments_reconstruct_original_line() {
         "concatenated segments must equal original line"
     );
 }
-
-// --- V5-A1: link_segments handles bracketed [url] tokens ---
 
 #[test]
 fn link_segments_bracketed_url_inner_is_link_brackets_are_not() {
@@ -695,9 +691,12 @@ fn render_mine_table_row_left_aligns_integers() {
         name: "A task".to_owned(),
         due_on: None,
         project_name: None,
+        estimate: None,
+        logged_week: None,
+        logged_total: None,
     }];
     let s = render_mine_table(&rows);
-    let data_line = s.lines().nth(2).unwrap();
+    let data_line = s.lines().nth(3).unwrap();
     // project_id 42 is left-aligned in a 10-wide column: "42        "
     assert!(
         data_line.contains("42        "),
@@ -721,6 +720,9 @@ fn render_mine_table_multi_row_body_order_preserved() {
             name: "First".to_owned(),
             due_on: None,
             project_name: None,
+            estimate: None,
+            logged_week: None,
+            logged_total: None,
         },
         MineTableRow {
             instance: "beta".to_owned(),
@@ -730,15 +732,22 @@ fn render_mine_table_multi_row_body_order_preserved() {
             name: "Second".to_owned(),
             due_on: None,
             project_name: None,
+            estimate: None,
+            logged_week: None,
+            logged_total: None,
         },
     ];
     let s = render_mine_table(&rows);
     let lines: Vec<&str> = s.lines().collect();
-    assert_eq!(lines.len(), 4, "header + separator + 2 rows = 4 lines");
-    assert!(lines[2].contains("alpha"), "first row: {}", lines[2]);
-    assert!(lines[2].contains("First"), "first row name: {}", lines[2]);
-    assert!(lines[3].contains("beta"), "second row: {}", lines[3]);
-    assert!(lines[3].contains("Second"), "second row name: {}", lines[3]);
+    assert_eq!(
+        lines.len(),
+        5,
+        "header + separator + bucket header + 2 rows = 5 lines"
+    );
+    assert!(lines[3].contains("alpha"), "first row: {}", lines[3]);
+    assert!(lines[3].contains("First"), "first row name: {}", lines[3]);
+    assert!(lines[4].contains("beta"), "second row: {}", lines[4]);
+    assert!(lines[4].contains("Second"), "second row name: {}", lines[4]);
 }
 
 #[test]
@@ -755,8 +764,6 @@ fn char_width(s: &str) -> usize {
 fn dw(s: &str) -> usize {
     UnicodeWidthStr::width(s)
 }
-
-// --- U10: panel_box ---
 
 #[test]
 fn panel_box_returns_empty_when_width_less_than_4() {
@@ -932,8 +939,6 @@ fn panel_box_empty_inner_lines_produces_empty_body_line() {
     );
 }
 
-// --- D1-A1: panel_box display-width invariant (every line exactly `width` DISPLAY cols) ---
-
 #[test]
 fn panel_box_every_line_exactly_width_display_cols_ascii() {
     let width = 40usize;
@@ -1016,8 +1021,6 @@ fn panel_box_over_long_inner_line_right_border_closes() {
     );
 }
 
-// --- D1-A2: panel_box horizontal + vertical padding invariants ---
-
 #[test]
 fn panel_box_vpad_first_and_last_body_rows_are_blank() {
     let width = 30usize;
@@ -1053,8 +1056,6 @@ fn panel_box_hpad_separates_content_from_borders() {
         "char before BOX_V must be HPAD space"
     );
 }
-
-// --- U10: comment_box regression (delegates to panel_box, output byte-identical) ---
 
 #[test]
 fn comment_box_returns_empty_when_width_less_than_4() {
@@ -1193,8 +1194,6 @@ fn comment_box_multiline_body_each_middle_line_exactly_width() {
         );
     }
 }
-
-// --- U10: build_header_lines (Details panel) ---
 
 #[test]
 fn build_header_lines_returns_panel_with_details_label() {
@@ -1416,8 +1415,6 @@ fn build_header_lines_2_column_alignment() {
     }
 }
 
-// --- D1a: Título row, Projeto populated, long-title wraps ---
-
 #[test]
 fn build_header_lines_project_row_shows_fallback_when_project_name_absent() {
     let task = json!({
@@ -1434,7 +1431,7 @@ fn build_header_lines_project_row_shows_fallback_when_project_name_absent() {
 
 #[test]
 fn build_header_lines_long_title_wraps_within_panel() {
-    // BDR 0016 Sc.4: a value wider than the panel content width must wrap to continuation
+    // A value wider than the panel content width must wrap to continuation
     // lines with a hanging indent. No U+2026 ellipsis may appear anywhere in the meta rows.
     let long_title = "A very long task title that exceeds the narrow panel inner width for sure";
     let task = json!({
@@ -1522,8 +1519,6 @@ fn build_header_lines_long_title_wraps_within_panel() {
     );
 }
 
-// --- U10: build_body_lines (Description panel) ---
-
 #[test]
 fn build_body_lines_is_panel_with_description_label() {
     let task = json!({ "id": 1, "body": "<p>Hello world</p>" });
@@ -1603,8 +1598,6 @@ fn build_body_lines_no_line_exceeds_inner_width() {
         );
     }
 }
-
-// --- U10: build_comment_lines (Comments panel) ---
 
 #[test]
 fn build_comment_lines_empty_for_zero_comments() {
@@ -1704,8 +1697,6 @@ fn build_comment_lines_no_line_exceeds_inner_width() {
         );
     }
 }
-
-// --- U10: build_detail_content (full detail layout) ---
 
 #[test]
 fn build_detail_lines_first_line_is_details_panel_top_border() {
@@ -2016,8 +2007,6 @@ fn truncate_cell_cjk_truncates_on_char_boundary_without_panic() {
     );
 }
 
-// --- U11: looks_like_filename and asset_link_line ---
-
 #[test]
 fn looks_like_filename_accepts_real_filename() {
     assert!(
@@ -2230,8 +2219,6 @@ fn asset_link_line_index_is_1_based_and_matches_position() {
     );
 }
 
-// --- V5-A2: build_detail_content (inline URLs) ---
-
 #[test]
 fn build_detail_content_url_in_description_renders_inline() {
     let task = json!({
@@ -2273,8 +2260,6 @@ fn build_detail_content_no_url_produces_lines_with_no_url() {
         "no URL in body must produce no URL in lines: {joined}"
     );
 }
-
-// --- V5-A3: url_at resolves click column to URL ---
 
 #[test]
 fn url_at_bracketed_url_returns_inner_without_brackets() {
@@ -2322,8 +2307,6 @@ fn url_at_plain_text_returns_none() {
         "url_at on plain text must return None: {result:?}"
     );
 }
-
-// --- S4 / ADR 0063: layout-emitted PanelTitle StyleRun on section panel headers ---
 
 #[test]
 fn description_panel_top_border_carries_panel_title_run() {
@@ -2404,7 +2387,7 @@ fn panel_title_run_start_and_len_match_fit_panel_header() {
 
 #[test]
 fn comment_card_header_has_no_panel_title_run() {
-    // ADR 0063 constraint: the title run is emitted only at the three build_* sites,
+    // The title run is emitted only at the three build_* sites,
     // NOT inside panel_box_rich — comment-card headers keep only their own affordance
     // runs, never PanelTitle.
     use crate::richtext::RichStyle;
@@ -2484,8 +2467,6 @@ fn url_at_col_past_end_returns_none() {
     let result = url_at("hello", 9999);
     assert!(result.is_none(), "url_at past end of line must return None");
 }
-
-// --- R3a: build_body_lines richtext structure (TUI path) ---
 
 #[test]
 fn build_body_lines_ul_produces_bullet_lines() {
@@ -2574,7 +2555,7 @@ fn build_detail_content_comment_with_list_body_produces_bullet_lines() {
     );
 }
 
-// --- R3a-A4 / BDR 0003: CLI path unchanged ——————————————————————————————
+// --- CLI path unchanged ——————————————————————————————
 
 #[test]
 fn render_task_to_str_uses_html_to_text_not_richtext_for_list_body() {
@@ -2616,8 +2597,6 @@ fn render_comments_to_str_uses_html_to_text_not_richtext() {
     );
 }
 
-// --- V5-A4: url_at with bordered/padded lines (panel body simulation) ---
-
 #[test]
 fn url_at_col_on_border_char_returns_none() {
     let url = "https://example.com/info";
@@ -2634,7 +2613,7 @@ fn url_at_inside_bracketed_url_in_bordered_padded_line() {
     // "│ [https://example.com] │" — url starts at col 3 (│=1, space=1, [=1)
     let url = "https://example.com";
     let line = format!("\u{2502} [{url}] \u{2502}");
-    let col_inside_url = 3; // first char of the URL (after '│ [')
+    let col_inside_url = 3; // first char of the URL (after '| [')
     let result = url_at(&line, col_inside_url);
     assert_eq!(
         result.as_deref(),
@@ -2642,8 +2621,6 @@ fn url_at_inside_bracketed_url_in_bordered_padded_line() {
         "url_at inside bordered bracketed URL must return URL: {result:?}"
     );
 }
-
-// --- D1b: asset_link_line with pre-derived labels (BDR 0017) ---
 
 // D1b-A1: asset with host label (from derive_asset_label) renders as host
 #[test]
@@ -2690,8 +2667,6 @@ fn asset_link_line_with_derived_anchor_text_label() {
         "anchor text label must render as-is: {line:?}"
     );
 }
-
-// --- V6-A7c: slice_by_display_cols ---
 
 // Pure ASCII: window [2, 5) returns chars at display cols 2,3,4.
 #[test]
@@ -2784,8 +2759,6 @@ fn slice_by_display_cols_emoji_then_accented_text() {
         "after a 2-wide emoji, cols [2,12) must yield the next 10 chars: got {result:?}"
     );
 }
-
-// ── AC3: Affordance StyleRun structural equality (ADR 0032 / ADR 0041) ────────
 
 // Own-comment: build_detail_content emits an EditAffordance StyleRun on the card
 // header line whose (start, len) equals the hit-test affordance's (col_start,
@@ -2880,9 +2853,7 @@ fn own_comment_delete_style_run_coords_equal_affordance_coords() {
     );
 }
 
-// --- AC1: structural OpenUrl affordance emission (ADR 0043 / task ek-0046) ---
-
-// AC1-A1: single-line URL in body emits exactly one OpenUrl affordance with
+// single-line URL in body emits exactly one OpenUrl affordance with
 // the complete URL; its col_start is inside the content area (>= BODY_LEFT_CHROME_COLS).
 #[test]
 fn build_detail_content_single_line_url_emits_one_open_url_affordance() {
@@ -2921,7 +2892,7 @@ fn build_detail_content_single_line_url_emits_one_open_url_affordance() {
     );
 }
 
-// AC1-A2: a URL that wraps across two fragments emits two OpenUrl affordances,
+// a URL that wraps across two fragments emits two OpenUrl affordances,
 // both carrying the COMPLETE URL (not just the fragment text).
 #[test]
 fn build_detail_content_wrapped_url_emits_two_affordances_with_complete_url() {
@@ -2976,7 +2947,7 @@ fn build_detail_content_wrapped_url_emits_two_affordances_with_complete_url() {
     );
 }
 
-// AC1-A3: OBS-35 case — the second fragment line is exactly content_width wide
+// Boundary case — the second fragment line is exactly content_width wide
 // but the affordance still carries the COMPLETE URL (not truncated by the old
 // over-join bug that treated a word-boundary line as a hard-split continuation).
 // For inner_width=40, content_width=36; frag1 "ge]" is 3 chars < 36, so the
@@ -3000,14 +2971,14 @@ fn build_detail_content_obs35_last_fragment_carries_complete_url() {
         };
         assert_eq!(
             stored_url, url,
-            "every OpenUrl affordance must carry the complete URL (OBS-35 guard); \
+            "every OpenUrl affordance must carry the complete URL (over-join guard); \
              got {stored_url:?} at line {}, cols [{}, {})",
             aff.line_idx, aff.col_start, aff.col_end
         );
     }
 }
 
-// AC1-A4: a bare email anchor in the body emits an OpenUrl affordance with
+// a bare email anchor in the body emits an OpenUrl affordance with
 // the mailto: prefix.
 #[test]
 fn build_detail_content_bare_email_emits_mailto_affordance() {
@@ -3031,7 +3002,7 @@ fn build_detail_content_bare_email_emits_mailto_affordance() {
     );
 }
 
-// AC1-A5: a non-URL bracketed token in the body (e.g. [note]) does NOT produce
+// a non-URL bracketed token in the body (e.g. [note]) does NOT produce
 // any OpenUrl affordance — only URL/email tokens are openable.
 #[test]
 fn build_detail_content_non_url_bracket_token_emits_no_open_url_affordance() {
@@ -3089,7 +3060,7 @@ fn other_comment_has_no_affordance_style_runs_and_no_affordances() {
     );
 }
 
-// ADR 0068 / issue 0062 C1 — render_task and render_mine_table must never write a raw
+// render_task and render_mine_table must never write a raw
 // 0x1B (ESC) byte to stdout for server-supplied text, whether it arrives as an HTML
 // entity (decoded by html_to_text), a raw byte in a field that skips html_to_text
 // entirely (body_plain_text, name), or a table row name.
@@ -3145,10 +3116,206 @@ fn render_mine_table_raw_esc_in_row_name_produces_no_raw_esc_byte() {
         name: "evil\u{001b}[2J".to_owned(),
         due_on: None,
         project_name: None,
+        estimate: None,
+        logged_week: None,
+        logged_total: None,
     }];
     let s = render_mine_table(&rows);
     assert!(
         !s.contains('\u{001b}'),
         "raw ESC byte reached the mine table via row name: {s:?}"
     );
+}
+
+fn mine_hours_row(
+    estimate: Option<f64>,
+    logged_week: Option<f64>,
+    logged_total: Option<f64>,
+) -> MineTableRow {
+    MineTableRow {
+        instance: "inst".to_owned(),
+        project_id: 5,
+        task_number: 7,
+        task_id: 100,
+        name: "Hours task".to_owned(),
+        due_on: None,
+        project_name: None,
+        estimate,
+        logged_week,
+        logged_total,
+    }
+}
+
+fn mine_hours_cells(table: &str) -> Vec<String> {
+    let line = table.lines().nth(3).unwrap();
+    let before_name = line.split("Hours task").next().unwrap();
+    before_name
+        .split_whitespace()
+        .skip(4)
+        .map(str::to_owned)
+        .collect()
+}
+
+static MINE_HOURS_LANG: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[test]
+fn mine_hours_display_table_shows_estimate_week_and_total() {
+    let _guard = MINE_HOURS_LANG.lock().unwrap();
+    crate::i18n::set_language("en");
+    let table = render_mine_table(&[mine_hours_row(Some(4.0), Some(1.5), Some(7.25))]);
+    let header = table.lines().next().unwrap();
+    assert!(
+        header.contains("EST") && header.contains("WEEK") && header.contains("TOTAL"),
+        "header: {header}"
+    );
+    assert_eq!(mine_hours_cells(&table), ["4", "1.5", "7.25"]);
+}
+
+#[test]
+fn mine_hours_display_table_marks_unknown_and_not_estimated_with_a_dash() {
+    let _guard = MINE_HOURS_LANG.lock().unwrap();
+    crate::i18n::set_language("en");
+    let table = render_mine_table(&[mine_hours_row(None, None, None)]);
+    assert_eq!(mine_hours_cells(&table), ["–", "–", "–"]);
+    let table = render_mine_table(&[mine_hours_row(Some(2.0), Some(0.0), None)]);
+    assert_eq!(mine_hours_cells(&table), ["2", "0", "–"]);
+}
+
+#[test]
+fn mine_hours_display_table_separator_covers_the_header_in_both_languages() {
+    let _guard = MINE_HOURS_LANG.lock().unwrap();
+    for lang in ["en", "pt_BR"] {
+        crate::i18n::set_language(lang);
+        let table = render_mine_table(&[mine_hours_row(Some(4.0), Some(1.5), Some(7.25))]);
+        crate::i18n::set_language("en");
+        let mut lines = table.lines();
+        let header = lines.next().unwrap();
+        let separator = lines.next().unwrap();
+        assert!(
+            separator.chars().all(|c| c == '-'),
+            "{lang}: separator: {separator}"
+        );
+        assert!(
+            separator.chars().count() >= header.trim_end().chars().count(),
+            "{lang}: separator narrower than header:\n{header}\n{separator}"
+        );
+    }
+}
+
+#[test]
+fn mine_hours_display_table_header_is_translated_in_pt_br() {
+    let _guard = MINE_HOURS_LANG.lock().unwrap();
+    crate::i18n::set_language("pt_BR");
+    let table = render_mine_table(&[mine_hours_row(Some(4.0), Some(1.5), Some(7.25))]);
+    crate::i18n::set_language("en");
+    let header = table.lines().next().unwrap();
+    assert!(
+        header.contains("EST") && header.contains("SEMANA") && header.contains("TOTAL"),
+        "header: {header}"
+    );
+}
+
+fn bucket_row(
+    name: &str,
+    due_on: Option<&str>,
+    estimate: Option<f64>,
+    logged_week: Option<f64>,
+    logged_total: Option<f64>,
+) -> MineTableRow {
+    MineTableRow {
+        instance: "inst".to_owned(),
+        project_id: 5,
+        task_number: 7,
+        task_id: 100,
+        name: name.to_owned(),
+        due_on: due_on.map(str::to_owned),
+        project_name: None,
+        estimate,
+        logged_week,
+        logged_total,
+    }
+}
+
+fn bucket_today() -> chrono::NaiveDate {
+    chrono::NaiveDate::from_ymd_opt(2026, 11, 11).unwrap()
+}
+
+#[test]
+fn mine_table_buckets_show_only_the_non_empty_buckets_in_order() {
+    let _guard = MINE_HOURS_LANG.lock().unwrap();
+    crate::i18n::set_language("en");
+    let rows = [
+        bucket_row("No date", None, None, Some(1.0), Some(2.0)),
+        bucket_row("Late", Some("2026-11-01"), Some(2.0), Some(1.0), Some(3.0)),
+    ];
+    let table = render_mine_table_on(&rows, bucket_today());
+    let lines: Vec<&str> = table.lines().collect();
+    assert_eq!(lines.len(), 6, "table: {table}");
+    assert!(lines[0].contains("EST") && lines[0].contains("NAME"));
+    assert!(lines[1].chars().all(|c| c == '-'));
+    assert_eq!(lines[2], "Overdue (1) · EST 2 · WEEK 1 · TOTAL 3");
+    assert!(lines[3].ends_with("Late"));
+    assert_eq!(lines[4], "No due date (1) · EST – · WEEK 1 · TOTAL 2");
+    assert!(lines[5].ends_with("No date"));
+    for absent in ["Today", "This week", "Later"] {
+        assert!(!table.contains(absent), "unexpected {absent}: {table}");
+    }
+}
+
+#[test]
+fn mine_table_buckets_show_a_dash_for_an_unknown_week_sum() {
+    let _guard = MINE_HOURS_LANG.lock().unwrap();
+    crate::i18n::set_language("en");
+    let rows = [
+        bucket_row("A", Some("2026-11-11"), Some(1.5), None, Some(1.0)),
+        bucket_row("B", Some("2026-11-11"), None, Some(1.0), Some(1.0)),
+    ];
+    let table = render_mine_table_on(&rows, bucket_today());
+    assert_eq!(
+        table.lines().nth(2).unwrap(),
+        "Today (2) · EST 1.5 · WEEK – · TOTAL 2"
+    );
+}
+
+#[test]
+fn mine_table_buckets_without_rows_print_only_header_and_separator() {
+    let _guard = MINE_HOURS_LANG.lock().unwrap();
+    crate::i18n::set_language("en");
+    let table = render_mine_table_on(&[], bucket_today());
+    assert_eq!(table.lines().count(), 2, "table: {table}");
+}
+
+#[test]
+fn mine_table_buckets_use_the_pt_br_labels() {
+    let _guard = MINE_HOURS_LANG.lock().unwrap();
+    crate::i18n::set_language("pt_BR");
+    let rows = [
+        bucket_row("a", Some("2026-11-01"), None, None, None),
+        bucket_row("b", Some("2026-11-11"), None, None, None),
+        bucket_row("c", Some("2026-11-12"), None, None, None),
+        bucket_row("d", Some("2026-11-30"), None, None, None),
+        bucket_row("e", None, None, None, None),
+    ];
+    let table = render_mine_table_on(&rows, bucket_today());
+    crate::i18n::set_language("en");
+    let headers: Vec<&str> = table.lines().filter(|l| l.contains(" · ")).collect();
+    let labels: Vec<&str> = headers
+        .iter()
+        .map(|l| l.split(" (").next().unwrap())
+        .collect();
+    assert_eq!(
+        labels,
+        ["Atrasadas", "Hoje", "Esta semana", "Depois", "Sem prazo"]
+    );
+    assert!(headers[0].contains("SEMANA"), "header: {}", headers[0]);
+}
+
+#[test]
+fn mine_table_buckets_strip_control_characters() {
+    let _guard = MINE_HOURS_LANG.lock().unwrap();
+    crate::i18n::set_language("en");
+    let rows = [bucket_row("evil\u{001b}[2J", None, None, None, None)];
+    let table = render_mine_table_on(&rows, bucket_today());
+    assert!(!table.contains('\u{001b}'), "table: {table:?}");
+    assert!(table.contains("No due date (1)"));
 }

@@ -7,9 +7,7 @@
 
 use crate::i18n::t;
 use crate::render::{display_width, wrap_text};
-use crate::tui::model::{
-    AssigneePickerView, Compose, EditStatus, EstimateForm, LogTimeForm, Screen,
-};
+use crate::tui::model::{Compose, DownloadOutcome, DownloadState, Screen};
 
 /// Reformat a BRT timestamp `YYYY-MM-DDTHH:MM:SS` into `DD/MM/YYYY HH:MM`.
 /// Returns None when the input is too short or cannot be sliced at the expected offsets.
@@ -26,113 +24,34 @@ pub(crate) fn format_br_datetime(iso: &str) -> Option<String> {
     Some(format!("{}/{}/{} {}:{}", day, month, year, hour, minute))
 }
 
-/// Overlay-derived hint sources for the Detail footer's one-home suppression
-/// (ADR 0039 §5). Each field is `Some` only when its overlay is active AND does
-/// not already own its own in-modal hint.
-pub(crate) struct DetailHintOverlays<'a> {
-    pub(crate) compose: Option<&'a Compose>,
-    pub(crate) log_time: Option<&'a LogTimeForm>,
-    pub(crate) estimate: Option<&'a EstimateForm>,
-    pub(crate) status_confirm: Option<(bool, &'a EditStatus)>,
-    pub(crate) assignee_picker: Option<AssigneePickerView<'a>>,
-    pub(crate) confirm_delete: Option<i64>,
-}
-
 /// Footer hint for the given screen.
 ///
-/// When a compose modal is open the modal owns the compose hint (ADR 0039 §5).
+/// When a compose modal is open the modal owns the compose hint.
 /// When the confirm-delete modal is open the modal owns its hint; the footer
 /// shows no confirm hint (one-home rule). Falls through to own-focused or browse.
 pub(crate) fn hint_for_screen(screen: &Screen) -> String {
     match screen {
         Screen::Detail {
-            overlay,
             focused_comment,
             comments,
             current_user_id,
             ..
-        } => {
-            let overlays = DetailHintOverlays {
-                // The compose modal owns its hint when active; pass None to footer.
-                compose: if overlay.is_compose() {
-                    None
-                } else {
-                    overlay.compose()
-                },
-                // The log-time modal owns its hint when active; pass None to
-                // footer, same one-home rule as compose.
-                log_time: if overlay.is_log_time() {
-                    None
-                } else {
-                    overlay.log_time()
-                },
-                // The estimate-edit modal owns its hint when active; pass None
-                // to footer, same one-home rule as compose and log time.
-                estimate: if overlay.is_estimate_edit() {
-                    None
-                } else {
-                    overlay.estimate_edit()
-                },
-                // The status-confirm modal owns its hint when active; pass None
-                // to footer, same one-home rule as estimate.
-                status_confirm: if overlay.is_status_confirm() {
-                    None
-                } else {
-                    overlay.status_confirm()
-                },
-                // The assignee-picker modal owns its hint when active; pass None
-                // to footer, same one-home rule as status confirm.
-                assignee_picker: if overlay.is_assignee_picker() {
-                    None
-                } else {
-                    overlay.assignee_picker()
-                },
-                // The confirm modal owns its hint; pass None so the footer does
-                // not duplicate it (ADR 0039 §5 one-home suppression).
-                confirm_delete: if overlay.is_confirm() {
-                    None
-                } else {
-                    overlay.confirm_delete_id()
-                },
-            };
-            detail_hint(&overlays, *focused_comment, comments, *current_user_id)
-        }
+        } => detail_hint(*focused_comment, comments, *current_user_id),
         _ => t("↑/↓ navigate  Enter select  r refresh  H report  Esc/b back  q quit"),
     }
 }
 
-/// Derive the context-aware instruction hint for the Detail screen.
-///
-/// Priority order matches ADR 0038 §1: composing/logging-time/editing-estimate
-/// beats confirming-delete beats own-comment-focused beats the browsing default.
-pub(crate) fn detail_hint(
-    overlays: &DetailHintOverlays,
+/// Derive the instruction hint for the Detail screen. Every Detail overlay owns
+/// its own in-modal hint, so the footer shows only the own-comment or browsing hint.
+fn detail_hint(
     focused_comment: Option<usize>,
     comments: &[serde_json::Value],
     current_user_id: Option<i64>,
 ) -> String {
-    if overlays.compose.is_some() {
-        return t("Ctrl+S send · Esc cancel");
-    }
-    if overlays.log_time.is_some() {
-        return t("Ctrl+S send · Tab switch field · Esc cancel");
-    }
-    if overlays.estimate.is_some() {
-        return t("Ctrl+S send · Esc cancel");
-    }
-    if overlays.status_confirm.is_some() {
-        return t("Enter/Ctrl+S confirm · Esc cancel");
-    }
-    if overlays.assignee_picker.is_some() {
-        return t("↑/↓ · j/k move · Enter/Ctrl+S confirm · Esc cancel");
-    }
-    if overlays.confirm_delete.is_some() {
-        return t("Enter/click confirm · Esc cancel");
-    }
     if is_own_comment_focused(focused_comment, comments, current_user_id) {
         return t("↑/↓ · j/k move · Ctrl+click edit/delete · c new");
     }
-    t("↑/↓ · j/k move · c comment · t log time · e estimate · s status · r refresh · a assignee · H report · Esc/b back · q quit")
+    t("↑/↓ · j/k move · c comment · t log time · e estimate · s status · r refresh · D download · a assignee · l list · H report · Esc/b back · q quit")
 }
 
 pub(crate) fn is_own_comment_focused(
@@ -153,18 +72,22 @@ pub(crate) fn is_own_comment_focused(
 
 /// Derive the transient status string for the Detail footer status row.
 ///
-/// Priority (highest first): auth_error > copied_feedback.
-/// When `compose` is `Some`, the modal overlay owns the compose hint/status (ADR 0039 §5).
+/// Priority (highest first): auth_error > attachment download > copied_feedback.
+/// When `compose` is `Some`, the modal overlay owns the compose hint/status.
 /// The footer still shows auth_error or copied_feedback if either is set.
 pub(crate) fn detail_status_line(
     compose: Option<&Compose>,
     copied_feedback: bool,
     auth_error: bool,
+    download: Option<&DownloadState>,
 ) -> Option<String> {
     if auth_error {
         return Some(t(
             "Token invalid or revoked — run `ac setup add` to re-authenticate.",
         ));
+    }
+    if let Some(state) = download {
+        return Some(download_status_text(state));
     }
     if compose.is_some() {
         return if copied_feedback {
@@ -177,6 +100,21 @@ pub(crate) fn detail_status_line(
         return Some(t("Copiado ✓"));
     }
     None
+}
+
+/// The footer status text of an attachment download.
+fn download_status_text(state: &DownloadState) -> String {
+    match state {
+        DownloadState::Running => t("Downloading attachments…"),
+        DownloadState::NoAttachments => t("No attachments to download"),
+        DownloadState::Finished(DownloadOutcome::Failed(message)) => message.clone(),
+        DownloadState::Finished(DownloadOutcome::Done { saved, total, dir }) => {
+            t("Downloaded {saved} of {total} attachment(s) to {dir}")
+                .replace("{saved}", &saved.to_string())
+                .replace("{total}", &total.to_string())
+                .replace("{dir}", &dir.display().to_string())
+        }
+    }
 }
 
 /// Number of wrapped lines a text occupies at the given display-column width.
@@ -268,7 +206,7 @@ impl FooterPlan {
 
 /// Compose the whole footer decision for the given screen + footer state + width.
 ///
-/// Single deep entry (ADR 0053): selects the hint, derives the transient status
+/// Single deep entry: selects the hint, derives the transient status
 /// line (the `Screen::Detail` destructuring lives here, not in `view()`), and
 /// computes the layout plan.
 pub(crate) fn plan(
@@ -281,10 +219,16 @@ pub(crate) fn plan(
     let status_line = if let Screen::Detail {
         overlay,
         auth_error,
+        download,
         ..
     } = screen
     {
-        detail_status_line(overlay.compose(), copied_feedback, *auth_error)
+        detail_status_line(
+            overlay.compose(),
+            copied_feedback,
+            *auth_error,
+            download.as_ref(),
+        )
     } else {
         None
     };

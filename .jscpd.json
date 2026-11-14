@@ -2,6 +2,16 @@
   "ignore": [
     "tests/**",
     "**/tests/**",
-    "target/**"
+    "examples/**",
+    "qa/**",
+    "coverage/**",
+    "docs/**",
+    "target/**",
+    ".claude/**",
+    ".codex/**",
+    ".cursor/**",
+    ".github/skills/**",
+    ".opencode/**",
+    ".pi/**"
   ]
 }

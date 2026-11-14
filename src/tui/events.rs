@@ -37,15 +37,24 @@ pub fn map_browse_key_event(key: crossterm::event::KeyEvent) -> Option<Msg> {
         KeyCode::Esc | KeyCode::Char('b') => Some(Msg::Back),
         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => Some(Msg::Quit),
         KeyCode::Char('c') => Some(Msg::ComposeOpen),
+        KeyCode::Char('r') => Some(Msg::Refresh),
+        KeyCode::Enter => Some(Msg::Select),
+        code => map_action_key(code),
+    })
+}
+
+/// The browse keys that open a modal or start an effect on the current screen.
+fn map_action_key(code: KeyCode) -> Option<Msg> {
+    match code {
         KeyCode::Char('t') => Some(Msg::LogTimeOpen),
         KeyCode::Char('e') => Some(Msg::EstimateOpen),
         KeyCode::Char('s') => Some(Msg::StatusToggleOpen),
         KeyCode::Char('a') => Some(Msg::AssigneePickerOpen),
-        KeyCode::Char('r') => Some(Msg::Refresh),
+        KeyCode::Char('l') => Some(Msg::TaskListPickerOpen),
         KeyCode::Char('H') => Some(Msg::ReportOpen),
-        KeyCode::Enter => Some(Msg::Select),
+        KeyCode::Char('D') => Some(Msg::DownloadAttachments),
         _ => None,
-    })
+    }
 }
 
 /// Map a key event when compose mode is active.
@@ -54,7 +63,7 @@ pub fn map_browse_key_event(key: crossterm::event::KeyEvent) -> Option<Msg> {
 /// they reach the editor. Every other key (printable chars, Enter, caret movement,
 /// Backspace/Delete, undo/redo, ...) converts to the backend-neutral
 /// `tui_textarea::Input` and is carried by `Msg::ComposeInput` for `update()` to
-/// apply via `TextArea::input` (ADR 0064).
+/// apply via `TextArea::input`.
 pub fn map_compose_key_event(key: crossterm::event::KeyEvent) -> Option<Msg> {
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
     match key.code {
@@ -155,6 +164,21 @@ pub fn map_assignee_picker_key_event(key: crossterm::event::KeyEvent) -> Option<
         KeyCode::Char(c) => Some(Msg::AssigneePickerChar(c)),
         _ => None,
     }
+}
+
+/// Map a key event when the task-list picker is active.
+///
+/// The keys are the assignee picker's, addressed to the task-list picker.
+pub fn map_task_list_picker_key_event(key: crossterm::event::KeyEvent) -> Option<Msg> {
+    map_assignee_picker_key_event(key).map(|msg| match msg {
+        Msg::AssigneePickerSubmit => Msg::TaskListPickerSubmit,
+        Msg::AssigneePickerCancel => Msg::TaskListPickerCancel,
+        Msg::AssigneePickerDown => Msg::TaskListPickerDown,
+        Msg::AssigneePickerUp => Msg::TaskListPickerUp,
+        Msg::AssigneePickerBackspace => Msg::TaskListPickerBackspace,
+        Msg::AssigneePickerChar(c) => Msg::TaskListPickerChar(c),
+        other => other,
+    })
 }
 
 pub fn map_browse_mouse_event(mouse: crossterm::event::MouseEvent) -> Option<Msg> {

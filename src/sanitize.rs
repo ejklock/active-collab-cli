@@ -1,8 +1,8 @@
-//! Untrusted-text render boundary (ADR 0068).
+//! Untrusted-text render boundary.
 //!
 //! Server-supplied task and comment text reaches this module before it is written
 //! to a terminal, so a collaborator cannot smuggle ANSI/OSC escape sequences into a
-//! victim's terminal via a task body, comment, or name (issue 0062 C1).
+//! victim's terminal via a task body, comment, or name.
 
 /// Remove control characters from server-supplied text before it reaches a terminal.
 ///

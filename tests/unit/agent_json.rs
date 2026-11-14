@@ -47,15 +47,11 @@ fn sample_comments() -> Vec<Value> {
     })]
 }
 
-// --- J1-A1: ref form ---
-
 #[test]
 fn task_object_ref_equals_project_id_slash_task_id() {
     let obj = task_object(&open_task(), &[], &user_map_with_12(), "work", false);
     assert_eq!(obj["ref"], "665/75159", "ref must be project_id/task_id");
 }
-
-// --- J1-A1: status literal ---
 
 #[test]
 fn task_object_open_status_is_literal_open() {
@@ -71,8 +67,6 @@ fn task_object_completed_status_is_literal_completed() {
         "completed task must have status 'completed'"
     );
 }
-
-// --- J1-A1: assignee resolved name vs null ---
 
 #[test]
 fn task_object_assignee_resolved_from_user_map() {
@@ -113,8 +107,6 @@ fn task_object_assignee_and_id_null_when_no_assignee_id() {
     );
 }
 
-// --- J1-A1 / J1-A2: no_comments => comments [] ---
-
 #[test]
 fn task_object_no_comments_flag_yields_empty_comments_array() {
     let obj = task_object(
@@ -150,8 +142,6 @@ fn task_object_with_comments_includes_them_when_flag_false() {
     assert_eq!(arr[0]["author_id"], 7);
     assert_eq!(arr[0]["body"], "Nice");
 }
-
-// --- J1-A1: absent start_on/due_on => JSON null ---
 
 #[test]
 fn task_object_absent_dates_are_json_null() {
@@ -191,8 +181,6 @@ fn task_object_present_dates_are_strings() {
     );
 }
 
-// --- J1-A1: assets shape ---
-
 #[test]
 fn task_object_assets_each_have_name_and_url() {
     let task = json!({
@@ -213,8 +201,6 @@ fn task_object_assets_each_have_name_and_url() {
     assert_eq!(assets[0]["url"], "https://cdn.example.com/spec.pdf");
 }
 
-// --- J1-A1: description is HTML-stripped ---
-
 #[test]
 fn task_object_description_strips_html() {
     let obj = task_object(&open_task(), &[], &user_map_with_12(), "work", false);
@@ -228,8 +214,6 @@ fn task_object_description_strips_html() {
         "description must contain text content"
     );
 }
-
-// --- J1-A2: output is single line (no embedded newline) ---
 
 #[test]
 fn task_object_serializes_to_single_minified_line() {
@@ -251,8 +235,6 @@ fn task_object_serializes_to_single_minified_line() {
     );
 }
 
-// --- url field ---
-
 #[test]
 fn task_object_url_contains_project_and_task_ids() {
     let obj = task_object(
@@ -272,8 +254,6 @@ fn task_object_url_contains_project_and_task_ids() {
         "url must start with instance base: {url}"
     );
 }
-
-// --- instance + field presence ---
 
 #[test]
 fn task_object_carries_instance_name() {
@@ -310,8 +290,6 @@ fn task_object_has_all_required_top_level_keys() {
     }
 }
 
-// --- J2-A1: mine_object shape ---
-
 fn sample_mine_rows() -> Vec<crate::render::MineTableRow> {
     vec![
         crate::render::MineTableRow {
@@ -322,6 +300,9 @@ fn sample_mine_rows() -> Vec<crate::render::MineTableRow> {
             name: "Fix the widget".to_owned(),
             due_on: None,
             project_name: None,
+            estimate: None,
+            logged_week: None,
+            logged_total: None,
         },
         crate::render::MineTableRow {
             instance: "personal".to_owned(),
@@ -331,6 +312,9 @@ fn sample_mine_rows() -> Vec<crate::render::MineTableRow> {
             name: "Another task".to_owned(),
             due_on: None,
             project_name: None,
+            estimate: None,
+            logged_week: None,
+            logged_total: None,
         },
     ]
 }
@@ -417,8 +401,6 @@ fn mine_object_empty_rows_yields_count_zero_and_empty_tasks() {
     assert!(tasks.is_empty(), "empty rows must yield empty tasks array");
 }
 
-// --- J3-A1: browse_object shape and fields ---
-
 fn sample_task_row(
     task_id: i64,
     task_number: i64,
@@ -433,6 +415,9 @@ fn sample_task_row(
         project_id,
         due_on: None,
         project_name: None,
+        estimate: None,
+        logged_week: None,
+        logged_total: None,
     }
 }
 
@@ -574,8 +559,6 @@ fn browse_object_empty_groups_yields_empty_projects_array() {
     );
 }
 
-// --- ADR 0040: comment_result and comment_error shapes ---
-
 #[test]
 fn comment_result_exact_minified_string() {
     let line = comment_result(123, 75346, 524);
@@ -632,8 +615,6 @@ fn comment_error_is_single_minified_line() {
     );
 }
 
-// --- time_result shape (issue 0067) ---
-
 #[test]
 fn time_result_exact_minified_string() {
     let line = time_result(901, 75346, 524, 1.5);
@@ -654,11 +635,9 @@ fn time_result_is_valid_json_with_ok_true() {
     assert_eq!(obj["hours"], 4.0);
 }
 
-// --- task_result shape (issue 0068 slice 2) ---
-
 #[test]
 fn task_result_status_only_carries_only_status() {
-    let line = task_result(75346, 524, Some(true), None, None);
+    let line = task_result(75346, 524, Some(true), None, None, None);
     assert_eq!(
         line, r#"{"ok":true,"task_id":75346,"project_id":524,"status":"completed"}"#,
         "task_result must carry only the applied status field"
@@ -667,7 +646,7 @@ fn task_result_status_only_carries_only_status() {
 
 #[test]
 fn task_result_open_status_renders_open_literal() {
-    let line = task_result(75346, 524, Some(false), None, None);
+    let line = task_result(75346, 524, Some(false), None, None, None);
     assert_eq!(
         line,
         r#"{"ok":true,"task_id":75346,"project_id":524,"status":"open"}"#,
@@ -676,7 +655,7 @@ fn task_result_open_status_renders_open_literal() {
 
 #[test]
 fn task_result_assignee_only_carries_only_assignee_id() {
-    let line = task_result(75346, 524, None, Some(9), None);
+    let line = task_result(75346, 524, None, Some(9), None, None);
     assert_eq!(
         line,
         r#"{"ok":true,"task_id":75346,"project_id":524,"assignee_id":9}"#,
@@ -685,7 +664,7 @@ fn task_result_assignee_only_carries_only_assignee_id() {
 
 #[test]
 fn task_result_estimate_only_carries_only_estimate() {
-    let line = task_result(75346, 524, None, None, Some(8.5));
+    let line = task_result(75346, 524, None, None, Some(8.5), None);
     assert_eq!(
         line,
         r#"{"ok":true,"task_id":75346,"project_id":524,"estimate":8.5}"#,
@@ -694,7 +673,7 @@ fn task_result_estimate_only_carries_only_estimate() {
 
 #[test]
 fn task_result_all_fields_present_when_all_applied() {
-    let line = task_result(75346, 524, Some(true), Some(9), Some(8.0));
+    let line = task_result(75346, 524, Some(true), Some(9), Some(8.0), None);
     let obj: serde_json::Value = serde_json::from_str(&line).expect("must be valid JSON");
     assert_eq!(obj["ok"], true);
     assert_eq!(obj["task_id"], 75346);
@@ -706,13 +685,13 @@ fn task_result_all_fields_present_when_all_applied() {
 
 #[test]
 fn task_result_no_fields_applied_omits_every_optional_key() {
-    let line = task_result(75346, 524, None, None, None);
+    let line = task_result(75346, 524, None, None, None, None);
     assert_eq!(line, r#"{"ok":true,"task_id":75346,"project_id":524}"#,);
 }
 
 #[test]
 fn task_result_is_single_minified_line() {
-    let line = task_result(75346, 524, Some(true), Some(9), Some(8.0));
+    let line = task_result(75346, 524, Some(true), Some(9), Some(8.0), None);
     assert!(
         !line.contains('\n'),
         "task_result must not contain newlines: {line:?}"
@@ -721,6 +700,31 @@ fn task_result_is_single_minified_line() {
         !line.contains("  "),
         "task_result must not contain 2-space indent: {line:?}"
     );
+}
+
+#[test]
+fn task_result_list_move_adds_id_and_name_after_the_other_keys() {
+    let list = TaskList {
+        id: 12,
+        name: "In progress".to_string(),
+    };
+    let line = task_result(75346, 524, Some(true), Some(9), Some(8.0), Some(&list));
+    assert_eq!(
+        line,
+        r#"{"ok":true,"task_id":75346,"project_id":524,"status":"completed","assignee_id":9,"estimate":8,"task_list_id":12,"task_list":"In progress"}"#,
+    );
+}
+
+#[test]
+fn task_result_list_name_with_quote_and_backslash_round_trips() {
+    let list = TaskList {
+        id: 7,
+        name: r#"Q "A" \ Revisão"#.to_string(),
+    };
+    let line = task_result(75346, 524, None, None, None, Some(&list));
+    let obj: serde_json::Value = serde_json::from_str(&line).expect("must be valid JSON");
+    assert_eq!(obj["task_list_id"], 7);
+    assert_eq!(obj["task_list"], list.name.as_str());
 }
 
 #[test]
@@ -733,5 +737,165 @@ fn time_result_is_single_minified_line() {
     assert!(
         !line.contains("  "),
         "time_result must not contain 2-space indent: {line:?}"
+    );
+}
+
+fn mine_row_with_hours(
+    estimate: Option<f64>,
+    logged_week: Option<f64>,
+    logged_total: Option<f64>,
+    due_on: Option<&str>,
+) -> crate::render::MineTableRow {
+    crate::render::MineTableRow {
+        instance: "personal".to_owned(),
+        project_id: 5,
+        task_number: 1,
+        task_id: 10,
+        name: "A".to_owned(),
+        due_on: due_on.map(str::to_owned),
+        project_name: None,
+        estimate,
+        logged_week,
+        logged_total,
+    }
+}
+
+#[test]
+fn mine_json_hours_use_the_get_formatting() {
+    let obj = mine_object(&[mine_row_with_hours(
+        Some(4.0),
+        Some(1.5),
+        Some(7.25),
+        Some("2026-11-20"),
+    )]);
+    let task = &obj["tasks"][0];
+    assert_eq!(task["estimate_hours"], "4");
+    assert_eq!(task["logged_week_hours"], "1.5");
+    assert_eq!(task["logged_total_hours"], "7.25");
+    assert_eq!(task["due_on"], "2026-11-20");
+}
+
+#[test]
+fn mine_json_hours_are_null_when_unknown_and_zero_stays_zero() {
+    let obj = mine_object(&[mine_row_with_hours(None, Some(0.0), None, None)]);
+    let task = &obj["tasks"][0];
+    assert!(task["estimate_hours"].is_null());
+    assert_eq!(task["logged_week_hours"], "0");
+    assert!(task["logged_total_hours"].is_null());
+    assert!(task["due_on"].is_null());
+}
+
+#[test]
+fn mine_json_keeps_the_existing_task_keys() {
+    let obj = mine_object(&[mine_row_with_hours(None, None, None, None)]);
+    let task = &obj["tasks"][0];
+    assert_eq!(task["ref"], "5/10");
+    assert_eq!(task["instance"], "personal");
+    assert_eq!(task["project_id"], 5);
+    assert_eq!(task["task_number"], 1);
+    assert_eq!(task["task_id"], 10);
+    assert_eq!(task["name"], "A");
+    assert_eq!(task.as_object().unwrap().len(), 11);
+}
+
+fn bucket_today() -> chrono::NaiveDate {
+    chrono::NaiveDate::from_ymd_opt(2026, 11, 11).unwrap()
+}
+
+#[test]
+fn mine_json_buckets_of_no_rows_are_five_empty_buckets_in_order() {
+    let obj = mine_object_on(&[], bucket_today());
+    let buckets = obj["buckets"].as_array().unwrap();
+    let keys: Vec<&str> = buckets.iter().map(|b| b["key"].as_str().unwrap()).collect();
+    assert_eq!(keys, ["overdue", "today", "this_week", "later", "none"]);
+    for bucket in buckets {
+        assert_eq!(bucket["count"], 0);
+        assert!(bucket["estimate_hours"].is_null());
+        assert_eq!(bucket["logged_week_hours"], "0");
+        assert_eq!(bucket["logged_total_hours"], "0");
+    }
+}
+
+#[test]
+fn mine_json_buckets_carry_counts_and_hours_per_bucket() {
+    let rows = [
+        mine_row_with_hours(Some(2.0), None, Some(3.0), Some("2026-11-01")),
+        mine_row_with_hours(Some(1.5), Some(1.0), Some(0.5), Some("2026-11-02")),
+    ];
+    let obj = mine_object_on(&rows, bucket_today());
+    let overdue = &obj["buckets"][0];
+    assert_eq!(overdue["count"], 2);
+    assert_eq!(overdue["estimate_hours"], "3.5");
+    assert!(overdue["logged_week_hours"].is_null());
+    assert_eq!(overdue["logged_total_hours"], "3.5");
+    assert_eq!(obj["buckets"][1]["count"], 0);
+}
+
+#[test]
+fn mine_json_buckets_tag_each_task_and_keep_the_input_order() {
+    let rows = [
+        mine_row_with_hours(None, None, None, Some("2026-12-30")),
+        mine_row_with_hours(None, None, None, Some("2026-11-11")),
+        mine_row_with_hours(None, None, None, None),
+        mine_row_with_hours(None, None, None, Some("2026-11-12")),
+    ];
+    let obj = mine_object_on(&rows, bucket_today());
+    let tagged: Vec<&str> = obj["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["due_bucket"].as_str().unwrap())
+        .collect();
+    assert_eq!(tagged, ["later", "today", "none", "this_week"]);
+    let dues: Vec<&Value> = obj["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| &t["due_on"])
+        .collect();
+    assert_eq!(dues[0], "2026-12-30");
+    assert_eq!(dues[1], "2026-11-11");
+    assert_eq!(obj["count"], 4);
+}
+
+#[test]
+fn mine_json_buckets_add_only_the_buckets_key_and_the_due_bucket_key() {
+    let obj = mine_object_on(
+        &[mine_row_with_hours(None, None, None, None)],
+        bucket_today(),
+    );
+    let mut top: Vec<&String> = obj.as_object().unwrap().keys().collect();
+    top.sort();
+    assert_eq!(top, ["buckets", "count", "tasks"]);
+    let mut task: Vec<&String> = obj["tasks"][0].as_object().unwrap().keys().collect();
+    task.sort();
+    assert_eq!(
+        task,
+        [
+            "due_bucket",
+            "due_on",
+            "estimate_hours",
+            "instance",
+            "logged_total_hours",
+            "logged_week_hours",
+            "name",
+            "project_id",
+            "ref",
+            "task_id",
+            "task_number"
+        ]
+    );
+    let first = &obj["buckets"][0];
+    let mut bucket_keys: Vec<&String> = first.as_object().unwrap().keys().collect();
+    bucket_keys.sort();
+    assert_eq!(
+        bucket_keys,
+        [
+            "count",
+            "estimate_hours",
+            "key",
+            "logged_total_hours",
+            "logged_week_hours"
+        ]
     );
 }

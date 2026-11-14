@@ -114,15 +114,13 @@ fn try_project_names_cache_write(
     }
 }
 
-/// Resolve each row's `project_name` from the per-instance project-names cache
-/// (ADR 0014).
+/// Resolve each row's `project_name` from the per-instance project-names cache.
 ///
 /// The cache is read at most once per distinct instance (memoised in a local map).
 /// When a cache entry is absent (cold cache) or the project id is not present,
-/// `project_name` is left as `None` — never wrong, gracefully absent
-/// (ADR 0026 amendment).
+/// `project_name` is left as `None` — never wrong, gracefully absent.
 ///
-/// Per-instance isolation (ADR 0018 / B1): a project id cached under instance A
+/// Per-instance isolation: a project id cached under instance A
 /// is never resolved for a row on instance B.
 pub fn attach_project_names(db_path: &Path, rows: Vec<MineTableRow>) -> Vec<MineTableRow> {
     let mut instance_cache: HashMap<String, Option<HashMap<i64, String>>> = HashMap::new();
@@ -172,7 +170,7 @@ fn build_groups(
     let mut groups: HashMap<(String, i64), ProjectGroup> = HashMap::new();
 
     for (task, instance_name) in tasks {
-        let pid = task.project_id.unwrap_or(0);
+        let pid = task.project_id;
         let project_name = project_names
             .get(&(instance_name.clone(), pid))
             .cloned()
@@ -194,6 +192,9 @@ fn build_groups(
             project_id: pid,
             due_on: None,
             project_name: None,
+            estimate: None,
+            logged_week: None,
+            logged_total: None,
         });
     }
 
@@ -284,7 +285,7 @@ pub(crate) fn derive_asset_label(url: &str, anchor_text: Option<&str>) -> String
 
 /// Extract inline `<img src>` assets from HTML — the shared regex walk behind
 /// both `assets_from_html` (all assets) and `downloadable_assets` (attachments
-/// + images only, never anchor hyperlinks; ADR 0066).
+/// + images only, never anchor hyperlinks).
 fn image_assets_from_html(html: &str) -> Vec<Asset> {
     img_src_re()
         .captures_iter(html)
@@ -357,19 +358,26 @@ pub fn extract_assets(task: &Value, comments: &[Value]) -> Vec<Asset> {
         }
     }
 
-    if let Some(attachments) = task.get("attachments") {
-        for asset in assets_from_attachments(attachments) {
-            add(asset);
-        }
+    for asset in attachment_assets(task, comments) {
+        add(asset);
     }
 
     result
 }
 
+/// Attachment entries of the task, then of each comment in comment order.
+fn attachment_assets(task: &Value, comments: &[Value]) -> Vec<Asset> {
+    std::iter::once(task)
+        .chain(comments)
+        .filter_map(|source| source.get("attachments"))
+        .flat_map(assets_from_attachments)
+        .collect()
+}
+
 /// Extract the narrower set of assets worth downloading as files: real
-/// `task.attachments` entries plus inline `<img src>` sources from the task
-/// body and comments. Never includes anchor-hyperlink assets — a comment
-/// author's link is not necessarily a file ActiveCollab is hosting (ADR 0066).
+/// `task.attachments` and comment `attachments` entries plus inline
+/// `<img src>` sources from the task body and comments. Never includes anchor-hyperlink assets — a comment
+/// author's link is not necessarily a file ActiveCollab is hosting.
 ///
 /// Deduplicates by URL, preserving first-seen order.
 pub fn downloadable_assets(task: &Value, comments: &[Value]) -> Vec<Asset> {
@@ -394,10 +402,8 @@ pub fn downloadable_assets(task: &Value, comments: &[Value]) -> Vec<Asset> {
         }
     }
 
-    if let Some(attachments) = task.get("attachments") {
-        for asset in assets_from_attachments(attachments) {
-            add(asset);
-        }
+    for asset in attachment_assets(task, comments) {
+        add(asset);
     }
 
     result
@@ -406,7 +412,7 @@ pub fn downloadable_assets(task: &Value, comments: &[Value]) -> Vec<Asset> {
 const FALLBACK_ASSET_PREFIX: &str = "asset_";
 
 /// Sanitize an untrusted attachment display name into a safe on-disk file
-/// name (ADR 0066): keeps only the final path component — splitting on `/`
+/// name: keeps only the final path component — splitting on `/`
 /// and `\\` and dropping empty segments so a trailing separator collapses
 /// like a real path — and falls back to `asset_{fallback_index}` when that
 /// component is empty, `.`, `..`, or made up only of dots. Those are the
@@ -438,7 +444,7 @@ fn is_safe_filename(name: &str) -> bool {
 
 /// Default destination directory for `download_task_attachments`: a stable,
 /// per-task path under the OS temp dir so repeated runs land in the same
-/// place (ADR 0066).
+/// place.
 pub fn default_attachments_dir(project_id: i64, task_id: i64) -> PathBuf {
     std::env::temp_dir()
         .join("ac-attachments")
@@ -455,7 +461,7 @@ pub struct DownloadedAsset {
     pub error: Option<String>,
 }
 
-/// Fixed per-asset body size cap (ADR 0066) — no streaming/Content-Length
+/// Fixed per-asset body size cap — no streaming/Content-Length
 /// short-circuit, an oversized body is rejected after the full fetch.
 const MAX_ATTACHMENT_BYTES: u64 = 25 * 1024 * 1024;
 
@@ -465,7 +471,7 @@ const MAX_ATTACHMENT_BYTES: u64 = 25 * 1024 * 1024;
 /// Each asset gets an independent outcome, in input order: a transport
 /// error, a non-200 response, an oversized body (`MAX_ATTACHMENT_BYTES`), an
 /// unsafe write path, or an I/O error produces an `error` entry for that
-/// asset only — no other asset is skipped or aborted (ADR 0066).
+/// asset only — no other asset is skipped or aborted.
 pub async fn download_task_attachments(
     client: &ActiveCollabClient,
     assets: &[Asset],
@@ -576,7 +582,7 @@ async fn fetch_and_write_asset(
 
 /// Join `dest_dir`/`file_name` and verify the result stays inside `dest_dir`
 /// once resolved — defense in depth against a sanitizer gap or a pre-existing
-/// symlink escape (ADR 0066). Never writes; only computes the target path.
+/// symlink escape. Never writes; only computes the target path.
 fn contained_write_path(dest_dir: &Path, file_name: &str) -> Result<PathBuf, String> {
     if file_name.is_empty() || file_name.contains(['/', '\\']) {
         return Err(format!("unsafe file name: {file_name}"));
@@ -634,7 +640,7 @@ pub async fn load_task_core(
     }
 }
 
-/// Injects `project_name` into `task`, resolving it on a cache miss (ADR 0056).
+/// Injects `project_name` into `task`, resolving it on a cache miss.
 ///
 /// A fresh cache hit for `project_id` is used with no network call. On a miss the
 /// name is fetched via one `GET /api/v1/projects/{id}`, written back to
@@ -834,7 +840,7 @@ fn try_cache_write(
     }
 }
 
-fn parse_task_payload(payload: Value) -> (Value, Vec<Value>) {
+pub(crate) fn parse_task_payload(payload: Value) -> (Value, Vec<Value>) {
     let mut task = payload
         .get("single")
         .cloned()

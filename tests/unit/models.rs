@@ -110,11 +110,11 @@ fn mine_task_from_api_sets_instance_name() {
         "is_trashed": false,
         "project_id": 10
     });
-    let mine = MineTask::from_api(&data, "my-instance");
+    let mine = MineTask::from_api(&data, "my-instance").unwrap();
     assert_eq!(mine.id, 55);
     assert_eq!(mine.task_number, Some(3));
     assert_eq!(mine.name, "A task");
-    assert_eq!(mine.project_id, Some(10));
+    assert_eq!(mine.project_id, 10);
     assert_eq!(mine.instance_name, "my-instance");
     assert!(!mine.is_completed);
     assert!(!mine.is_trashed);
@@ -122,12 +122,12 @@ fn mine_task_from_api_sets_instance_name() {
 
 #[test]
 fn mine_task_from_api_defaults_on_missing_fields() {
-    let data = json!({ "id": 1 });
-    let mine = MineTask::from_api(&data, "inst");
+    let data = json!({ "id": 1, "project_id": 4 });
+    let mine = MineTask::from_api(&data, "inst").unwrap();
     assert_eq!(mine.id, 1);
     assert_eq!(mine.name, "");
     assert_eq!(mine.task_number, None);
-    assert_eq!(mine.project_id, None);
+    assert_eq!(mine.project_id, 4);
     assert!(!mine.is_completed);
     assert!(!mine.is_trashed);
     assert_eq!(mine.instance_name, "inst");
@@ -135,35 +135,115 @@ fn mine_task_from_api_defaults_on_missing_fields() {
 
 #[test]
 fn mine_task_from_api_null_name_yields_empty_string() {
-    let data = json!({ "id": 2, "name": null });
-    let mine = MineTask::from_api(&data, "x");
+    let data = json!({ "id": 2, "project_id": 1, "name": null });
+    let mine = MineTask::from_api(&data, "x").unwrap();
     assert_eq!(mine.name, "");
 }
 
 #[test]
 fn mine_task_from_api_due_on_unix_timestamp_normalizes_to_ymd() {
-    let data = json!({ "id": 10, "due_on": 1700000000i64 });
-    let mine = MineTask::from_api(&data, "inst");
+    let data = json!({ "id": 10, "project_id": 1, "due_on": 1700000000i64 });
+    let mine = MineTask::from_api(&data, "inst").unwrap();
     assert_eq!(mine.due_on, Some("2023-11-14".to_owned()));
 }
 
 #[test]
 fn mine_task_from_api_due_on_iso_string_passes_through() {
-    let data = json!({ "id": 11, "due_on": "2026-07-01" });
-    let mine = MineTask::from_api(&data, "inst");
+    let data = json!({ "id": 11, "project_id": 1, "due_on": "2026-07-01" });
+    let mine = MineTask::from_api(&data, "inst").unwrap();
     assert_eq!(mine.due_on, Some("2026-07-01".to_owned()));
 }
 
 #[test]
 fn mine_task_from_api_due_on_null_yields_none() {
-    let data = json!({ "id": 12, "due_on": null });
-    let mine = MineTask::from_api(&data, "inst");
+    let data = json!({ "id": 12, "project_id": 1, "due_on": null });
+    let mine = MineTask::from_api(&data, "inst").unwrap();
     assert_eq!(mine.due_on, None);
 }
 
 #[test]
 fn mine_task_from_api_due_on_missing_yields_none() {
-    let data = json!({ "id": 13 });
-    let mine = MineTask::from_api(&data, "inst");
+    let data = json!({ "id": 13, "project_id": 1 });
+    let mine = MineTask::from_api(&data, "inst").unwrap();
     assert_eq!(mine.due_on, None);
+}
+
+#[test]
+fn mine_task_from_api_estimate_is_the_positive_number_or_none() {
+    for (estimate, want) in [
+        (json!(4), Some(4.0)),
+        (json!(2.5), Some(2.5)),
+        (json!(0.0), None),
+        (json!(null), None),
+    ] {
+        let data = json!({ "id": 14, "project_id": 1, "estimate": estimate });
+        assert_eq!(MineTask::from_api(&data, "inst").unwrap().estimate, want);
+    }
+    assert_eq!(
+        MineTask::from_api(&json!({ "id": 15, "project_id": 1 }), "inst")
+            .unwrap()
+            .estimate,
+        None
+    );
+}
+
+#[test]
+fn open_task_entry_with_integer_id_and_project_id_is_parsed() {
+    let data = json!({
+        "id": 55,
+        "task_number": 3,
+        "name": "A task",
+        "project_id": 10,
+        "due_on": "2026-07-01",
+        "estimate": 2.5
+    });
+    let mine = MineTask::from_api(&data, "inst").expect("entry with both ids parses");
+    assert_eq!(mine.id, 55);
+    assert_eq!(mine.project_id, 10);
+    assert_eq!(mine.task_number, Some(3));
+    assert_eq!(mine.name, "A task");
+    assert_eq!(mine.due_on, Some("2026-07-01".to_owned()));
+    assert_eq!(mine.estimate, Some(2.5));
+    assert_eq!(mine.instance_name, "inst");
+}
+
+#[test]
+fn open_task_entry_without_a_usable_project_id_is_skipped() {
+    for project_id in [
+        None,
+        Some(json!(null)),
+        Some(json!("665")),
+        Some(json!(1.5)),
+    ] {
+        let mut data = json!({ "id": 7 });
+        if let Some(value) = project_id.clone() {
+            data["project_id"] = value;
+        }
+        assert!(
+            MineTask::from_api(&data, "inst").is_none(),
+            "project_id {project_id:?} must skip the entry"
+        );
+    }
+}
+
+#[test]
+fn open_task_entry_without_a_usable_id_is_skipped() {
+    for id in [None, Some(json!(null)), Some(json!("7"))] {
+        let mut data = json!({ "project_id": 5 });
+        if let Some(value) = id.clone() {
+            data["id"] = value;
+        }
+        assert!(
+            MineTask::from_api(&data, "inst").is_none(),
+            "id {id:?} must skip the entry"
+        );
+    }
+}
+
+#[test]
+fn open_task_entry_with_id_zero_keeps_the_api_value() {
+    let mine = MineTask::from_api(&json!({ "id": 0, "project_id": 5 }), "inst")
+        .expect("integer zero is a value");
+    assert_eq!(mine.id, 0);
+    assert_eq!(mine.project_id, 5);
 }

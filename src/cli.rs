@@ -1,7 +1,7 @@
 use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
 
-pub const KNOWN_COMMANDS: [&str; 10] = [
-    "setup", "get", "current", "mine", "list", "browse", "comment", "skill", "time", "task",
+pub const KNOWN_COMMANDS: [&str; 11] = [
+    "setup", "get", "current", "mine", "list", "browse", "comment", "skill", "time", "task", "mcp",
 ];
 
 /// Name used in help, usage, and version output when `argv[0]` is unavailable.
@@ -55,6 +55,8 @@ pub enum Command {
     Task(TaskOpts),
     /// Print an embedded agent skill (ac skill list | ac skill <name>).
     Skill(SkillArgs),
+    /// Serve the CLI as MCP tools over stdio (ac_read, ac_write, ac_download_attachments).
+    Mcp,
 }
 
 /// Wrapper that holds the setup subcommand.
@@ -272,7 +274,7 @@ pub struct TaskOpts {
 
 #[derive(Subcommand, Debug)]
 pub enum TaskCmd {
-    /// Set the status, assignee, and/or time estimate on a task.
+    /// Set the status, assignee, time estimate, and/or task list on a task.
     Set(TaskSetArgs),
 }
 
@@ -289,6 +291,9 @@ pub struct TaskSetArgs {
     /// New time estimate, in hours (zero or positive).
     #[arg(long)]
     pub estimate: Option<f64>,
+    /// Move the task to a task list of its project: a numeric list id, or a list name matched exactly, ignoring case.
+    #[arg(long)]
+    pub list: Option<String>,
     /// Print curated minified JSON write result for agent/LLM consumption.
     #[arg(long)]
     pub json: bool,

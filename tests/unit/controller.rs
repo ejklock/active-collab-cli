@@ -212,9 +212,10 @@ fn build_groups_uses_numeric_fallback_for_unknown_project() {
         name: "X".into(),
         is_completed: false,
         is_trashed: false,
-        project_id: Some(999),
+        project_id: 999,
         due_on: None,
         instance_name: "inst".into(),
+        estimate: None,
     };
     let groups = build_groups(vec![(task, "inst".into())], &HashMap::new());
     assert_eq!(groups.len(), 1);
@@ -230,9 +231,10 @@ fn build_groups_same_project_id_on_two_instances_produces_two_groups() {
         name: "Task A".into(),
         is_completed: false,
         is_trashed: false,
-        project_id: Some(100),
+        project_id: 100,
         due_on: None,
         instance_name: "alpha".into(),
+        estimate: None,
     };
     let task_b = MineTask {
         id: 20,
@@ -240,9 +242,10 @@ fn build_groups_same_project_id_on_two_instances_produces_two_groups() {
         name: "Task B".into(),
         is_completed: false,
         is_trashed: false,
-        project_id: Some(100),
+        project_id: 100,
         due_on: None,
         instance_name: "beta".into(),
+        estimate: None,
     };
     let mut names: HashMap<(String, i64), String> = HashMap::new();
     names.insert(("alpha".to_string(), 100i64), "Shared Project".to_string());
@@ -285,9 +288,10 @@ fn build_groups_instance_field_matches_task_instance() {
         name: "My Task".into(),
         is_completed: false,
         is_trashed: false,
-        project_id: Some(42),
+        project_id: 42,
         due_on: None,
         instance_name: "prod".into(),
+        estimate: None,
     };
     let mut names: HashMap<(String, i64), String> = HashMap::new();
     names.insert(
@@ -310,9 +314,10 @@ fn build_groups_sorted_by_project_name_then_instance() {
         name: "T1".into(),
         is_completed: false,
         is_trashed: false,
-        project_id: Some(1),
+        project_id: 1,
         due_on: None,
         instance_name: "z-inst".into(),
+        estimate: None,
     };
     let task_b_a = MineTask {
         id: 2,
@@ -320,9 +325,10 @@ fn build_groups_sorted_by_project_name_then_instance() {
         name: "T2".into(),
         is_completed: false,
         is_trashed: false,
-        project_id: Some(1),
+        project_id: 1,
         due_on: None,
         instance_name: "a-inst".into(),
+        estimate: None,
     };
     let task_a = MineTask {
         id: 3,
@@ -330,9 +336,10 @@ fn build_groups_sorted_by_project_name_then_instance() {
         name: "T3".into(),
         is_completed: false,
         is_trashed: false,
-        project_id: Some(2),
+        project_id: 2,
         due_on: None,
         instance_name: "m-inst".into(),
+        estimate: None,
     };
     let mut names: HashMap<(String, i64), String> = HashMap::new();
     names.insert(("z-inst".to_string(), 1i64), "Beta Project".to_string());
@@ -980,7 +987,7 @@ async fn load_task_core_enriches_task_with_project_name_from_cache() {
     assert_no_project_fetches(
         &server,
         10,
-        "warm cache hit must issue zero projects/{id} requests (ADR 0014 guarantee)",
+        "warm cache hit must issue zero projects/{id} requests",
     )
     .await;
 }
@@ -995,7 +1002,7 @@ async fn assert_no_project_fetches(server: &wiremock::MockServer, project_id: i6
     assert!(hits.is_empty(), "{context}: got {hits:?}");
 }
 
-// D1a-A5 / AC2: on a cache miss, when the server names the project, load_task_core
+// on a cache miss, when the server names the project, load_task_core
 // resolves the name over the network and issues exactly one request.
 #[tokio::test]
 async fn load_task_core_resolves_project_name_on_cache_miss() {
@@ -1039,7 +1046,7 @@ async fn load_task_core_resolves_project_name_on_cache_miss() {
     server.verify().await;
 }
 
-// D1a-A6 / AC3: after a miss resolves and writes back, a second load_task_core for
+// after a miss resolves and writes back, a second load_task_core for
 // the same project id serves the name from cache with zero further requests.
 #[tokio::test]
 async fn load_task_core_caches_resolved_project_name() {
@@ -1096,7 +1103,7 @@ async fn load_task_core_caches_resolved_project_name() {
     server.verify().await;
 }
 
-// D1a-A4 / AC5: on a cache miss where the server yields no usable name (non-200),
+// on a cache miss where the server yields no usable name (non-200),
 // load_task_core injects the fallback → Projeto row never blank.
 #[tokio::test]
 async fn load_task_core_project_name_fallback_when_cache_miss() {
@@ -1269,7 +1276,7 @@ async fn task_detail_empty_user_cache_fetches_once_then_serves_from_cache() {
     );
 }
 
-// BDR-0008 Scenario 6: two instances both expose project_id=N with DIFFERENT names —
+// Two instances both expose project_id=N with DIFFERENT names —
 // each group must show ITS OWN name; the last-joined instance must not clobber the first.
 #[tokio::test]
 async fn tasks_by_project_colliding_project_ids_show_per_instance_names() {
@@ -1555,9 +1562,7 @@ fn seed_project_names_cache(
         .unwrap();
 }
 
-// --- D1b: derive_asset_label ---
-
-// D1b-A1: URL with query tail → host label (BDR 0017 Sc.1)
+// D1b-A1: URL with query tail → host label
 #[test]
 fn derive_asset_label_query_tail_url_yields_host() {
     let url = "https://docs.google.com/document/d/ABC/edit?tab=t.0";
@@ -1568,7 +1573,7 @@ fn derive_asset_label_query_tail_url_yields_host() {
     );
 }
 
-// D1b-A2: URL ending in a real file → filename label (BDR 0017 Sc.2)
+// D1b-A2: URL ending in a real file → filename label
 #[test]
 fn derive_asset_label_real_filename_yields_filename() {
     let url = "https://x.example.com/uploads/relatorio.pdf";
@@ -1579,7 +1584,7 @@ fn derive_asset_label_real_filename_yields_filename() {
     );
 }
 
-// D1b-A3: anchor text present and different from URL → anchor text wins (BDR 0017 Sc.3)
+// D1b-A3: anchor text present and different from URL → anchor text wins
 #[test]
 fn derive_asset_label_anchor_text_preferred_over_filename() {
     let url = "https://x.example.com/uploads/relatorio.pdf";
@@ -1590,7 +1595,7 @@ fn derive_asset_label_anchor_text_preferred_over_filename() {
     );
 }
 
-// D1b-A4: query tail segment like `edit?tab=t.0` is never a filename (BDR 0017 Sc.4)
+// D1b-A4: query tail segment like `edit?tab=t.0` is never a filename
 #[test]
 fn derive_asset_label_query_tail_segment_is_never_a_filename() {
     let url = "https://docs.google.com/document/d/ABC/edit?tab=t.0";
@@ -1884,8 +1889,6 @@ async fn tasks_by_project_always_fetches_open_tasks() {
     server.verify().await;
 }
 
-// --- extract_assets (moved from render domain to controller domain) ---
-
 #[test]
 fn extract_assets_from_body_html() {
     let task = serde_json::json!({
@@ -1933,8 +1936,6 @@ fn extract_assets_empty_when_no_body_or_attachments() {
     assert!(assets.is_empty());
 }
 
-// --- D2d-i: attach_project_names ---
-
 fn make_mine_row(instance: &str, project_id: i64, task_id: i64) -> crate::render::MineTableRow {
     crate::render::MineTableRow {
         instance: instance.to_owned(),
@@ -1944,10 +1945,13 @@ fn make_mine_row(instance: &str, project_id: i64, task_id: i64) -> crate::render
         name: format!("Task {task_id}"),
         due_on: None,
         project_name: None,
+        estimate: None,
+        logged_week: None,
+        logged_total: None,
     }
 }
 
-// D2d-i AC1: warm cache → Some(name) for a known project_id.
+// warm cache → Some(name) for a known project_id.
 #[test]
 fn attach_project_names_warm_cache_resolves_name() {
     let (_dir, db_path) = make_db_path();
@@ -1965,7 +1969,7 @@ fn attach_project_names_warm_cache_resolves_name() {
     );
 }
 
-// D2d-i AC1 (cold path): cold cache → project_name is None.
+// cold cache → project_name is None.
 #[test]
 fn attach_project_names_cold_cache_yields_none() {
     let (_dir, db_path) = make_db_path();
@@ -1979,7 +1983,7 @@ fn attach_project_names_cold_cache_yields_none() {
     );
 }
 
-// D2d-i AC1 (absent id): project_id present in warm cache but this id is not in the map → None.
+// project_id present in warm cache but this id is not in the map → None.
 #[test]
 fn attach_project_names_absent_id_in_warm_cache_yields_none() {
     let (_dir, db_path) = make_db_path();
@@ -1996,7 +2000,7 @@ fn attach_project_names_absent_id_in_warm_cache_yields_none() {
     );
 }
 
-// D2d-i AC2: per-instance isolation — project_id cached under instance A must NOT
+// per-instance isolation — project_id cached under instance A must NOT
 // resolve for a row on instance B.
 #[test]
 fn attach_project_names_cross_instance_isolation() {
@@ -2039,8 +2043,6 @@ fn attach_project_names_memoises_per_instance_read() {
     assert_eq!(result[0].project_name.as_deref(), Some("Project One"));
     assert_eq!(result[1].project_name.as_deref(), Some("Project Two"));
 }
-
-// --- ek-0061 S1 (ADR 0066): downloadable_assets ---
 
 #[test]
 fn downloadable_assets_includes_attachments_and_inline_images_only() {
@@ -2119,8 +2121,6 @@ fn downloadable_assets_empty_task_yields_empty_set() {
     assert!(assets.is_empty());
 }
 
-// --- sanitize_attachment_filename ---
-
 #[test]
 fn sanitize_attachment_filename_keeps_safe_name_unchanged() {
     assert_eq!(sanitize_attachment_filename("report.pdf", 1), "report.pdf");
@@ -2187,16 +2187,12 @@ fn sanitize_attachment_filename_trailing_slash_collapses_to_basename() {
     assert_eq!(sanitize_attachment_filename("report.pdf/", 1), "report.pdf");
 }
 
-// --- default_attachments_dir ---
-
 #[test]
 fn default_attachments_dir_matches_temp_dir_formula() {
     let result = default_attachments_dir(42, 99);
     let expected = std::env::temp_dir().join("ac-attachments").join("42-99");
     assert_eq!(result, expected);
 }
-
-// --- contained_write_path (write-containment defense in depth) ---
 
 #[test]
 fn contained_write_path_rejects_embedded_separator() {
@@ -2234,8 +2230,6 @@ fn contained_write_path_rejects_symlink_escape() {
         "a pre-existing symlink escaping dest_dir must be rejected, not resolved outside it"
     );
 }
-
-// --- download_task_attachments ---
 
 fn make_download_client(name: &str, base_url: &str) -> ActiveCollabClient {
     ActiveCollabClient::new(make_instance(name, base_url, Some(1)), make_http())
@@ -2403,4 +2397,128 @@ async fn download_task_attachments_dest_dir_creation_failure_errors_every_asset(
             result.error
         );
     }
+}
+
+fn urls_of(assets: &[Asset]) -> Vec<&str> {
+    assets.iter().map(|a| a.url.as_str()).collect()
+}
+
+#[test]
+fn comment_attachments_follow_task_attachments_in_comment_order() {
+    let task = serde_json::json!({
+        "id": 1,
+        "attachments": [{ "name": "task.pdf", "url": "https://example.com/task.pdf" }]
+    });
+    let comments = vec![
+        serde_json::json!({ "attachments": [
+            { "name": "a.png", "download_url": "https://example.com/a.png" },
+            { "name": "b.png", "download_url": "https://example.com/b.png" }
+        ]}),
+        serde_json::json!({ "attachments": [
+            { "name": "c.png", "download_url": "https://example.com/c.png" }
+        ]}),
+    ];
+    let expected = vec![
+        "https://example.com/task.pdf",
+        "https://example.com/a.png",
+        "https://example.com/b.png",
+        "https://example.com/c.png",
+    ];
+    assert_eq!(urls_of(&downloadable_assets(&task, &comments)), expected);
+    assert_eq!(urls_of(&extract_assets(&task, &comments)), expected);
+}
+
+#[test]
+fn comment_attachments_dedup_against_task_comments_and_images() {
+    let task = serde_json::json!({
+        "id": 1,
+        "attachments": [{ "name": "task-name.pdf", "url": "https://example.com/shared.pdf" }]
+    });
+    let comments = vec![
+        serde_json::json!({
+            "body": r#"<img src="https://example.com/inline.png">"#,
+            "attachments": [
+                { "name": "comment-name.pdf", "download_url": "https://example.com/shared.pdf" },
+                { "name": "inline-copy.png", "download_url": "https://example.com/inline.png" },
+                { "name": "twice.zip", "download_url": "https://example.com/twice.zip" }
+            ]
+        }),
+        serde_json::json!({ "attachments": [
+            { "name": "twice-again.zip", "download_url": "https://example.com/twice.zip" }
+        ]}),
+    ];
+    for assets in [
+        downloadable_assets(&task, &comments),
+        extract_assets(&task, &comments),
+    ] {
+        assert_eq!(
+            urls_of(&assets),
+            vec![
+                "https://example.com/inline.png",
+                "https://example.com/shared.pdf",
+                "https://example.com/twice.zip",
+            ]
+        );
+        let shared = assets
+            .iter()
+            .find(|a| a.url == "https://example.com/shared.pdf")
+            .unwrap();
+        assert_eq!(shared.name, "task-name.pdf");
+    }
+}
+
+#[test]
+fn comment_attachments_skip_entries_without_url_and_name_falls_back_to_basename() {
+    let task = serde_json::json!({ "id": 1 });
+    let comments = vec![serde_json::json!({ "attachments": [
+        { "name": "no-url.txt" },
+        { "download_url": "https://example.com/files/unnamed.bin" },
+        { "name": "kept.txt", "url": "https://example.com/kept.txt" }
+    ]})];
+    for assets in [
+        downloadable_assets(&task, &comments),
+        extract_assets(&task, &comments),
+    ] {
+        let pairs: Vec<(&str, &str)> = assets
+            .iter()
+            .map(|a| (a.name.as_str(), a.url.as_str()))
+            .collect();
+        assert_eq!(
+            pairs,
+            vec![
+                ("unnamed.bin", "https://example.com/files/unnamed.bin"),
+                ("kept.txt", "https://example.com/kept.txt"),
+            ]
+        );
+    }
+}
+
+#[test]
+fn comment_attachments_absent_null_or_non_array_yield_nothing() {
+    let task = serde_json::json!({ "id": 1 });
+    let comments = vec![
+        serde_json::json!({ "body": "" }),
+        serde_json::json!({ "attachments": null }),
+        serde_json::json!({ "attachments": "oops" }),
+        serde_json::json!({ "attachments": { "url": "https://example.com/x" } }),
+    ];
+    assert!(downloadable_assets(&task, &comments).is_empty());
+    assert!(extract_assets(&task, &comments).is_empty());
+}
+
+#[test]
+fn comment_attachments_with_anchor_only_body_split_by_function() {
+    let task = serde_json::json!({ "id": 1 });
+    let comments = vec![serde_json::json!({
+        "body": r#"<a href="https://example.com/doc">a doc link</a>"#,
+        "attachments": [{ "name": "f.txt", "download_url": "https://example.com/f.txt" }]
+    })];
+    assert_eq!(
+        urls_of(&downloadable_assets(&task, &comments)),
+        vec!["https://example.com/f.txt"]
+    );
+    assert_eq!(
+        urls_of(&extract_assets(&task, &comments)),
+        vec!["https://example.com/doc", "https://example.com/f.txt"]
+    );
 }

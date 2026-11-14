@@ -33,7 +33,11 @@ chrono = { version = "0.4", default-features = false, features = ["std", "clock"
 
 rust_xlsxwriter = { version = "0.102", features = ["chrono"] }
 
+rmcp = { version = "3.9.0", features = ["server", "macros", "schemars", "transport-io"] }
+schemars = "1"
+
 [dev-dependencies]
+rmcp = { version = "3.9.0", features = ["client", "transport-child-process"] }
 calamine = { version = "0.37", features = ["dates"] }
 tempfile = "3"
 wiremock = "0.6"

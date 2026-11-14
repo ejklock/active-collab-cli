@@ -152,8 +152,8 @@ fn pt_br_catalog_completeness_all_oracle_keys_present() {
         "TASK#",
         "TASK_ID",
         "NAME",
-        "No instances configured. Run: active_collab.py setup add",
-        "Error: no instances configured. Run: active_collab.py setup add",
+        "No instances configured. Run: ac setup add",
+        "Error: no instances configured. Run: ac setup add",
         "Error: no instances configured. Run: active-collab setup add",
         "Error: instance '{name}' not found. Known: {known}",
         "Error: multiple instances configured ({names}). Use --instance NAME.",
@@ -244,4 +244,50 @@ fn pt_br_catalog_completeness_all_oracle_keys_present() {
         missing.is_empty(),
         "pt_BR catalog missing keys from Python oracle: {missing:?}"
     );
+}
+
+#[test]
+fn fill_substitutes_one_placeholder() {
+    assert_eq!(fill("hello {name}!", &[("{name}", "Ana")]), "hello Ana!");
+}
+
+#[test]
+fn fill_substitutes_two_placeholders_in_either_order() {
+    let pairs = [("{a}", "1"), ("{b}", "2")];
+    assert_eq!(fill("{a} then {b}", &pairs), "1 then 2");
+    assert_eq!(fill("{b} then {a}", &pairs), "2 then 1");
+}
+
+#[test]
+fn fill_does_not_substitute_inside_a_value() {
+    let pairs = [("{a}", "{b}"), ("{b}", "x")];
+    assert_eq!(fill("{a} and {b}", &pairs), "{b} and x");
+}
+
+#[test]
+fn fill_keeps_a_placeholder_not_listed() {
+    assert_eq!(fill("{a} {other}", &[("{a}", "1")]), "1 {other}");
+}
+
+#[test]
+fn fill_substitutes_a_repeated_placeholder_at_both_places() {
+    assert_eq!(fill("{a}-{a}", &[("{a}", "z")]), "z-z");
+}
+
+#[test]
+fn fill_accepts_an_empty_value() {
+    assert_eq!(fill("[{a}]", &[("{a}", "")]), "[]");
+}
+
+#[test]
+fn fill_handles_non_ascii_text_and_values() {
+    assert_eq!(
+        fill("não achei {a} — ok", &[("{a}", "ção")]),
+        "não achei ção — ok"
+    );
+}
+
+#[test]
+fn fill_copies_an_unclosed_brace_at_the_end() {
+    assert_eq!(fill("{a} tail {", &[("{a}", "1")]), "1 tail {");
 }

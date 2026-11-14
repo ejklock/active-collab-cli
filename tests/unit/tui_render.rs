@@ -39,6 +39,9 @@ fn make_groups(names: &[&str]) -> Vec<ProjectGroup> {
                 project_id: i as i64,
                 due_on: None,
                 project_name: None,
+                estimate: None,
+                logged_week: None,
+                logged_total: None,
             }],
         })
         .collect()
@@ -60,6 +63,9 @@ fn make_groups_with_instance(names_and_instances: &[(&str, &str)]) -> Vec<Projec
                 project_id: i as i64,
                 due_on: None,
                 project_name: None,
+                estimate: None,
+                logged_week: None,
+                logged_total: None,
             }],
         })
         .collect()
@@ -77,6 +83,9 @@ fn make_tasks(names: &[&str]) -> Vec<TaskRow> {
             project_id: 0,
             due_on: None,
             project_name: None,
+            estimate: None,
+            logged_week: None,
+            logged_total: None,
         })
         .collect()
 }
@@ -145,6 +154,7 @@ fn render_tasks_to_buf_with_today(
                 &[],
                 &[],
                 usize::MAX,
+                None,
             );
         })
         .unwrap();
@@ -283,7 +293,7 @@ fn draw_projects_single_name_column_no_task_count() {
     );
 }
 
-// D2a-AC1: Tasks list renders NO 'NOME' column header; each task is a bordered card.
+// Tasks list renders NO 'NOME' column header; each task is a bordered card.
 // The card content line begins with '#<task_number>' and includes the task name.
 #[test]
 fn draw_tasks_card_layout_no_nome_header_has_bordered_card() {
@@ -309,7 +319,7 @@ fn draw_tasks_card_layout_no_nome_header_has_bordered_card() {
         content.contains("My Task"),
         "card content must contain the task name: {content}"
     );
-    // Card uses squared-corner box chars (ADR 0061)
+    // Card uses squared-corner box chars
     assert!(
         content.contains(BOX_TL) || content.contains(BOX_BL),
         "card must use squared-box border chars: {content}"
@@ -358,6 +368,7 @@ fn draw_my_tasks_title_renders_in_pt_br() {
                 &[],
                 &[],
                 usize::MAX,
+                None,
             );
         })
         .unwrap();
@@ -408,7 +419,7 @@ fn draw_projects_long_name_wraps_on_narrow_terminal() {
     );
 }
 
-// D2a-AC2: A long task name wraps inside the card and the card grows in height.
+// A long task name wraps inside the card and the card grows in height.
 // At width=20, outer block takes 2 cols (borders), card borders take 2 more, HPAD takes 2 more,
 // leaving card_inner_w = 20 - 2 - 2 - 2 = 14.
 // "#1  Alpha Beta Gamma Delta" (len 26) wraps at 14 cols across at least 2 content rows.
@@ -539,7 +550,7 @@ fn draw_projects_selected_row_has_selection_symbol() {
     );
 }
 
-// D2a-AC4: The selected card's border and content rows all carry the selection style.
+// The selected card's border and content rows all carry the selection style.
 // All buffer rows belonging to the selected card (top border, content, bottom border)
 // must have at least one cell with the amber selection background.
 #[test]
@@ -563,6 +574,7 @@ fn draw_tasks_selected_card_all_rows_carry_selection_style() {
                 &[],
                 &[],
                 usize::MAX,
+                None,
             );
         })
         .unwrap();
@@ -582,12 +594,12 @@ fn draw_tasks_selected_card_all_rows_carry_selection_style() {
         });
         assert!(
             has_selection_bg,
-            "selected card row y={y} must have the selection token bg (D2a-AC4)"
+            "selected card row y={y} must have the selection token bg (selection highlight)"
         );
     }
 }
 
-// D2a-AC3: A click on a non-first row of a card resolves to that task's index.
+// A click on a non-first row of a card resolves to that task's index.
 // Card for task 0 occupies at least 3 rows (top border, content, bottom border).
 // Clicking the second row (y_start+1) must still resolve to index 0.
 #[test]
@@ -611,6 +623,7 @@ fn draw_tasks_click_on_non_first_card_row_resolves_to_task_index() {
                 &[],
                 &[],
                 usize::MAX,
+                None,
             );
         })
         .unwrap();
@@ -633,7 +646,7 @@ fn draw_tasks_click_on_non_first_card_row_resolves_to_task_index() {
     assert_eq!(
         resolved,
         Some(0),
-        "clicking non-first row y={click_y} must resolve to card index 0 (D2a-AC3)"
+        "clicking non-first row y={click_y} must resolve to card index 0 (card index from the clicked row)"
     );
 }
 
@@ -673,7 +686,7 @@ fn draw_projects_header_row_present() {
     );
 }
 
-// D2a-AC1: Tasks screen has no column header row; each task is a bordered card.
+// Tasks screen has no column header row; each task is a bordered card.
 #[test]
 fn draw_tasks_no_header_row_only_cards() {
     let tasks = make_tasks(&["My Task"]);
@@ -736,6 +749,7 @@ fn draw_tasks_loading_shows_paragraph_not_table() {
                 &[],
                 &[],
                 usize::MAX,
+                None,
             );
         })
         .unwrap();
@@ -917,7 +931,7 @@ fn build_detail_lines_with_comment_produces_boxed_lines_fitting_width() {
     );
 }
 
-// U8-A1 / ADR 0060: token-driven theme — every style fn reads its Rgb channels
+// Token-driven theme — every style fn reads its Rgb channels
 // from the active palette's named tokens, never a literal hue.
 #[test]
 fn footer_style_is_footer_token_on_raised_band_bold() {
@@ -933,7 +947,7 @@ fn footer_style_is_footer_token_on_raised_band_bold() {
     );
 }
 
-// U8-A1 / ADR 0060: selection_style — selection_fg token on selection token, bold.
+// selection_style — selection_fg token on selection token, bold.
 #[test]
 fn selection_style_is_selection_fg_token_on_selection_token_bold() {
     use ratatui::style::{Modifier, Style};
@@ -948,7 +962,7 @@ fn selection_style_is_selection_fg_token_on_selection_token_bold() {
     );
 }
 
-// U8-A1 / ADR 0060: column_header_style — accent token fg + bold.
+// column_header_style — accent token fg + bold.
 #[test]
 fn column_header_style_is_accent_token_bold() {
     use ratatui::style::{Modifier, Style};
@@ -1133,12 +1147,12 @@ fn draw_tasks_wide_terminal_short_name_no_ellipsis() {
     );
 }
 
-// D2c-AC4: single-line card height grew by exactly one row for line 2.
+// single-line card height grew by exactly one row for line 2.
 // A card with a short name (fits on one line) now occupies 4 rows:
 // top border + name line + due line + bottom border.
 // Derived from the REAL buffer: locate the first card, measure y_end - y_start.
 #[test]
-fn draw_tasks_single_line_card_height_is_four_rows() {
+fn draw_tasks_single_line_card_height_is_five_rows() {
     let tasks = make_tasks(&["Short"]);
     let backend = TestBackend::new(80, 20);
     let mut terminal = Terminal::new(backend).unwrap();
@@ -1158,6 +1172,7 @@ fn draw_tasks_single_line_card_height_is_four_rows() {
                 &[],
                 &[],
                 usize::MAX,
+                None,
             );
         })
         .unwrap();
@@ -1167,12 +1182,12 @@ fn draw_tasks_single_line_card_height_is_four_rows() {
         .expect("click target for card 0 must be recorded");
     let height = card.y_end - card.y_start;
     assert_eq!(
-        height, 4,
-        "single-line card must be exactly 4 rows tall (D2c +1 row for due line): height={height}"
+        height, 5,
+        "single-line card must be exactly 5 rows tall (hours row and due row): height={height}"
     );
 }
 
-// D2c-AC1: line 2 shows the relative due text from relative_due with a FIXED today.
+// line 2 shows the relative due text from relative_due with a FIXED today.
 // Task due in 2 days from today_fixed() (2025-06-15) => due_on = "2025-06-17".
 // Expected label contains the count and the 'Vence em' prefix (pt-BR).
 #[test]
@@ -1187,6 +1202,9 @@ fn draw_tasks_due_line_shows_relative_due_text() {
         project_id: 0,
         due_on: Some("2025-06-17".into()),
         project_name: None,
+        estimate: None,
+        logged_week: None,
+        logged_total: None,
     };
     let buf = render_tasks_to_buf_with_today(&[task], 0, 80, 10, today_fixed());
     set_language("en");
@@ -1201,7 +1219,7 @@ fn draw_tasks_due_line_shows_relative_due_text() {
     );
 }
 
-// D2c-AC2: overdue task's due cells carry the danger fg.
+// overdue task's due cells carry the danger fg.
 #[test]
 fn draw_tasks_overdue_task_due_cells_carry_red_fg() {
     let task = TaskRow {
@@ -1212,6 +1230,9 @@ fn draw_tasks_overdue_task_due_cells_carry_red_fg() {
         project_id: 0,
         due_on: Some("2025-06-10".into()), // 5 days before today_fixed()
         project_name: None,
+        estimate: None,
+        logged_week: None,
+        logged_total: None,
     };
     let backend = TestBackend::new(80, 10);
     let mut terminal = Terminal::new(backend).unwrap();
@@ -1231,6 +1252,7 @@ fn draw_tasks_overdue_task_due_cells_carry_red_fg() {
                 &[],
                 &[],
                 usize::MAX,
+                None,
             );
         })
         .unwrap();
@@ -1247,11 +1269,11 @@ fn draw_tasks_overdue_task_due_cells_carry_red_fg() {
     });
     assert!(
         found_red,
-        "overdue card's due row (y={due_row}) must have at least one danger-token-fg cell (D2c-AC2)"
+        "overdue card's due row (y={due_row}) must have at least one danger-token-fg cell (due row colour)"
     );
 }
 
-// D2c-AC2: near-due task's due cells carry the warning fg.
+// near-due task's due cells carry the warning fg.
 #[test]
 fn draw_tasks_near_due_task_due_cells_carry_yellow_fg() {
     let task = TaskRow {
@@ -1262,6 +1284,9 @@ fn draw_tasks_near_due_task_due_cells_carry_yellow_fg() {
         project_id: 0,
         due_on: Some("2025-06-16".into()), // 1 day after today_fixed() => Near
         project_name: None,
+        estimate: None,
+        logged_week: None,
+        logged_total: None,
     };
     let backend = TestBackend::new(80, 10);
     let mut terminal = Terminal::new(backend).unwrap();
@@ -1281,6 +1306,7 @@ fn draw_tasks_near_due_task_due_cells_carry_yellow_fg() {
                 &[],
                 &[],
                 usize::MAX,
+                None,
             );
         })
         .unwrap();
@@ -1295,11 +1321,11 @@ fn draw_tasks_near_due_task_due_cells_carry_yellow_fg() {
     });
     assert!(
         found_yellow,
-        "near-due card's due row (y={due_row}) must have at least one warning-token-fg cell (D2c-AC2)"
+        "near-due card's due row (y={due_row}) must have at least one warning-token-fg cell (due row colour)"
     );
 }
 
-// D2c-AC3: a task with no due_on shows 'sem data' on line 2 with neither red nor yellow fg.
+// a task with no due_on shows 'sem data' on line 2 with neither red nor yellow fg.
 #[test]
 fn draw_tasks_no_due_shows_sem_data_with_default_style() {
     let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -1312,6 +1338,9 @@ fn draw_tasks_no_due_shows_sem_data_with_default_style() {
         project_id: 0,
         due_on: None,
         project_name: None,
+        estimate: None,
+        logged_week: None,
+        logged_total: None,
     };
     let backend = TestBackend::new(80, 10);
     let mut terminal = Terminal::new(backend).unwrap();
@@ -1331,6 +1360,7 @@ fn draw_tasks_no_due_shows_sem_data_with_default_style() {
                 &[],
                 &[],
                 usize::MAX,
+                None,
             );
         })
         .unwrap();
@@ -1352,11 +1382,11 @@ fn draw_tasks_no_due_shows_sem_data_with_default_style() {
     });
     assert!(
         !has_urgency_color,
-        "no-due task's due row must NOT have danger- or warning-token fg (D2c-AC3): row y={due_row}"
+        "no-due task's due row must NOT have danger- or warning-token fg (no-due row colour): row y={due_row}"
     );
 }
 
-// D2c-AC4: the selected card highlights every row including the due line (line 2),
+// the selected card highlights every row including the due line (line 2),
 // AND the due color (danger/warning) remains visible on the selected row.
 #[test]
 fn draw_tasks_selected_card_due_line_keeps_color_on_selection_bg() {
@@ -1368,6 +1398,9 @@ fn draw_tasks_selected_card_due_line_keeps_color_on_selection_bg() {
         project_id: 0,
         due_on: Some("2025-06-10".into()), // overdue: 5 days before today_fixed()
         project_name: None,
+        estimate: None,
+        logged_week: None,
+        logged_total: None,
     };
     let backend = TestBackend::new(80, 20);
     let mut terminal = Terminal::new(backend).unwrap();
@@ -1387,6 +1420,7 @@ fn draw_tasks_selected_card_due_line_keeps_color_on_selection_bg() {
                 &[],
                 &[],
                 usize::MAX,
+                None,
             );
         })
         .unwrap();
@@ -1404,7 +1438,7 @@ fn draw_tasks_selected_card_due_line_keeps_color_on_selection_bg() {
         });
         assert!(
             has_selection_bg,
-            "selected card row y={y} must have the selection token bg (D2c-AC4 whole-card highlight)"
+            "selected card row y={y} must have the selection token bg (whole-card highlight)"
         );
     }
 
@@ -1417,11 +1451,11 @@ fn draw_tasks_selected_card_due_line_keeps_color_on_selection_bg() {
     });
     assert!(
         has_red_on_due_row,
-        "selected overdue card's due row (y={due_row}) must still carry danger-token fg over the selection bg (D2c-AC4)"
+        "selected overdue card's due row (y={due_row}) must still carry danger-token fg over the selection bg (selection over due colour)"
     );
 }
 
-// D2d-ii-AC1: when TaskRow.project_name is Some(non-empty), card line 2 shows
+// when TaskRow.project_name is Some(non-empty), card line 2 shows
 // '<relative due> · <project name>'. Verified against the REAL TestBackend buffer.
 #[test]
 fn draw_tasks_due_line_with_project_name_shows_due_separator_project() {
@@ -1435,6 +1469,9 @@ fn draw_tasks_due_line_with_project_name_shows_due_separator_project() {
         project_id: 0,
         due_on: Some("2025-06-10".into()), // 5 days before today_fixed() => overdue
         project_name: Some("My Project".into()),
+        estimate: None,
+        logged_week: None,
+        logged_total: None,
     };
     let backend = TestBackend::new(80, 10);
     let mut terminal = Terminal::new(backend).unwrap();
@@ -1454,6 +1491,7 @@ fn draw_tasks_due_line_with_project_name_shows_due_separator_project() {
                 &[],
                 &[],
                 usize::MAX,
+                None,
             );
         })
         .unwrap();
@@ -1481,7 +1519,7 @@ fn draw_tasks_due_line_with_project_name_shows_due_separator_project() {
     );
 }
 
-// D2d-ii-AC2: the due portion of line 2 keeps its DueStyle color (overdue red) while
+// the due portion of line 2 keeps its DueStyle color (overdue red) while
 // the ' · <project>' portion uses the default style (no red fg on project cells).
 // Verified by reading per-cell styles from the REAL buffer.
 #[test]
@@ -1494,6 +1532,9 @@ fn draw_tasks_due_line_project_portion_has_default_style_not_due_color() {
         project_id: 0,
         due_on: Some("2025-06-10".into()), // overdue => red fg on due cells
         project_name: Some("Acme Corp".into()),
+        estimate: None,
+        logged_week: None,
+        logged_total: None,
     };
     let backend = TestBackend::new(80, 10);
     let mut terminal = Terminal::new(backend).unwrap();
@@ -1513,6 +1554,7 @@ fn draw_tasks_due_line_project_portion_has_default_style_not_due_color() {
                 &[],
                 &[],
                 usize::MAX,
+                None,
             );
         })
         .unwrap();
@@ -1545,7 +1587,7 @@ fn draw_tasks_due_line_project_portion_has_default_style_not_due_color() {
     });
     assert!(
         due_cells_have_red,
-        "cells before the separator must carry overdue red fg (D2d-ii-AC2)"
+        "cells before the separator must carry overdue red fg (separator colour)"
     );
 
     // Cells at and after the separator (project portion) must NOT carry red fg.
@@ -1556,11 +1598,11 @@ fn draw_tasks_due_line_project_portion_has_default_style_not_due_color() {
     });
     assert!(
         !proj_cells_have_red,
-        "cells at/after the separator must NOT carry red fg (project uses default style, D2d-ii-AC2)"
+        "cells at/after the separator must NOT carry red fg (project uses default style)"
     );
 }
 
-// D2d-ii-AC3: when TaskRow.project_name is None, card line 2 shows only the due text
+// when TaskRow.project_name is None, card line 2 shows only the due text
 // with NO trailing ' · ' separator (graceful cold-cache degrade).
 #[test]
 fn draw_tasks_due_line_without_project_name_shows_no_separator() {
@@ -1574,6 +1616,9 @@ fn draw_tasks_due_line_without_project_name_shows_no_separator() {
         project_id: 0,
         due_on: Some("2025-06-10".into()), // overdue
         project_name: None,
+        estimate: None,
+        logged_week: None,
+        logged_total: None,
     };
     let backend = TestBackend::new(80, 10);
     let mut terminal = Terminal::new(backend).unwrap();
@@ -1593,6 +1638,7 @@ fn draw_tasks_due_line_without_project_name_shows_no_separator() {
                 &[],
                 &[],
                 usize::MAX,
+                None,
             );
         })
         .unwrap();
@@ -2060,6 +2106,7 @@ fn view_detail_footer_has_no_tab_switch_hint() {
             affordances: vec![],
             focused_comment: None,
             auth_error: false,
+            download: None,
             comment_spans: vec![],
         }],
         should_quit: false,
@@ -2092,7 +2139,7 @@ fn view_detail_footer_has_no_tab_switch_hint() {
         !content.contains("1-9"),
         "Detail footer must NOT contain '1-9 open asset' hint (numeric scheme removed): {content}"
     );
-    // The contextual browsing hint now starts with j/k (ADR 0038 §1).
+    // The contextual browsing hint now starts with j/k.
     assert!(
         content.contains("j/k"),
         "Detail footer (browsing mode) must contain 'j/k' hint: {content}"
@@ -2125,6 +2172,7 @@ fn view_detail_footer_without_assets_has_no_tab_hint() {
             affordances: vec![],
             focused_comment: None,
             auth_error: false,
+            download: None,
             comment_spans: vec![],
         }],
         should_quit: false,
@@ -2438,20 +2486,6 @@ fn view_too_small_suppresses_header_and_footer() {
     );
 }
 
-// U8-A1 (theme): badge_style returns the selection token fg + BOLD modifier.
-#[test]
-fn badge_style_is_selection_token_bold() {
-    use ratatui::style::{Modifier, Style};
-    let style = theme::badge_style();
-    assert_eq!(
-        style,
-        Style::default()
-            .fg(theme::ANGIE_DARK.selection)
-            .add_modifier(Modifier::BOLD),
-        "badge_style must be the selection token + bold"
-    );
-}
-
 // U8-A1 (theme): app_header_style is the accent token on the raised-band token, bold.
 #[test]
 fn app_header_style_is_accent_on_raised_band_bold() {
@@ -2717,6 +2751,9 @@ mod v2b_click_targets {
             project_id: 0,
             due_on: None,
             project_name: None,
+            estimate: None,
+            logged_week: None,
+            logged_total: None,
         }
     }
 
@@ -2838,6 +2875,7 @@ mod v2b_click_targets {
                 card_heights: vec![],
                 card_offsets: vec![],
                 rendered_width: usize::MAX,
+                due_today: None,
             }],
             should_quit: false,
             header: empty_header(),
@@ -2987,6 +3025,7 @@ mod v2b_click_targets {
                 card_heights: vec![],
                 card_offsets: vec![],
                 rendered_width: usize::MAX,
+                due_today: None,
             }],
             should_quit: false,
             header: empty_header(),
@@ -3077,6 +3116,9 @@ mod footer_refresh_hint {
                         project_id: 0,
                         due_on: None,
                         project_name: None,
+                        estimate: None,
+                        logged_week: None,
+                        logged_total: None,
                     }],
                 }],
                 selected: 0,
@@ -3165,6 +3207,7 @@ mod footer_refresh_hint {
                 affordances: vec![],
                 focused_comment: None,
                 auth_error: false,
+                download: None,
                 comment_spans: vec![],
             }],
             should_quit: false,
@@ -3213,6 +3256,7 @@ mod footer_refresh_hint {
                 affordances: vec![],
                 focused_comment: None,
                 auth_error: false,
+                download: None,
                 comment_spans: vec![],
             }],
             should_quit: false,
@@ -3506,6 +3550,7 @@ mod footer_refresh_hint {
                 affordances: vec![],
                 focused_comment: None,
                 auth_error: false,
+                download: None,
                 comment_spans: vec![],
             }],
             should_quit: false,
@@ -3540,8 +3585,6 @@ mod footer_refresh_hint {
         );
     }
 }
-
-// --- V4a: TestBackend render — comment with long URL shows label, not raw URL ---
 
 // V5-A3: a Detail screen whose comment holds a long URL renders the URL inline.
 // The URL cells carry link_style (muted-green + underline). The full URL appears
@@ -3606,8 +3649,6 @@ fn draw_detail_comment_with_long_url_renders_inline_with_link_style() {
         "inline URL cells must carry link_style's fg+underline"
     );
 }
-
-// --- V6: footer indicator and highlight rendering tests ---
 
 mod v6_view {
     use crate::i18n::set_language;
@@ -3678,6 +3719,7 @@ mod v6_view {
                 affordances: vec![],
                 focused_comment: None,
                 auth_error: false,
+                download: None,
                 comment_spans: vec![],
             }],
             should_quit: false,
@@ -3814,8 +3856,6 @@ mod v6_view {
     }
 }
 
-// --- W2: Detail chrome responsiveness — task name header + asset row wrapping ---
-
 // D1a-A2: draw_detail does not inject the task name into the content rows at all.
 // Only the content lines passed in are rendered; `task_name` is used only for the loading state.
 #[test]
@@ -3869,7 +3909,7 @@ fn draw_detail_long_asset_label_wraps_with_hanging_indent_no_clip() {
     );
 }
 
-// D1d-AC3: A task with four assets whose labels each fit on one line shows all
+// A task with four assets whose labels each fit on one line shows all
 // four [n] rows — assets are inline in the scrollable content, no height cap.
 #[test]
 fn draw_detail_four_assets_all_visible_no_clip() {
@@ -3941,8 +3981,6 @@ fn draw_detail_over_scroll_clamp_still_works_with_name_header() {
         "last body line must be visible after over-scroll clamp: {content}"
     );
 }
-
-// --- R3b inline-emphasis style runs ----------------------------------------
 
 fn style_run_matches(run: &StyleRun, expected_style: RichStyle) -> bool {
     run.style == expected_style
@@ -4249,7 +4287,7 @@ fn build_detail_content_structured_path_preserves_plain_text() {
 // R3b-A3: Plain lines (no emphasis HTML) produce no content-emphasis style
 // runs (Bold/Italic/Code/Link/affordances). The structural RichStyle::PanelTitle
 // run on the Details/Description top-border rows is expected by design
-// (ADR 0063) and is not a content-emphasis run, so it is excluded here.
+// and is not a content-emphasis run, so it is excluded here.
 #[test]
 fn plain_body_produces_no_content_emphasis_style_runs() {
     let task = json!({
@@ -4272,7 +4310,7 @@ fn plain_body_produces_no_content_emphasis_style_runs() {
 
     assert!(
         body_lines_with_content_emphasis.is_empty(),
-        "plain HTML body must produce no content-emphasis style runs (structural PanelTitle runs on panel borders are expected per ADR 0063); affected lines: {body_lines_with_content_emphasis:?}"
+        "plain HTML body must produce no content-emphasis style runs (structural PanelTitle runs on panel borders are expected); affected lines: {body_lines_with_content_emphasis:?}"
     );
 }
 
@@ -4381,8 +4419,6 @@ fn projects_title_hides_revalidating_indicator_when_not_revalidating() {
     );
 }
 
-// --- W1: Detail chrome responsiveness — header and footer word-wrap on narrow terminals ---
-
 mod w1_chrome_wrap {
     use crate::tui::model::{Header, Model, Screen};
     use crate::tui::view::view;
@@ -4434,7 +4470,7 @@ mod w1_chrome_wrap {
 
     // W1-A1: At a narrow terminal width the user header bar wraps to multiple lines and the
     // full identity ({name} <{email}> · {instance}) is present in the buffer — no ellipsis,
-    // no right-clip. (BDR 0012 S1)
+    // no right-clip.
     #[test]
     fn narrow_header_wraps_and_full_identity_present_no_clip() {
         // header_line = "Alice <alice@prod.example.com> · production" (44 chars).
@@ -4493,7 +4529,6 @@ mod w1_chrome_wrap {
 
     // W1-A2: At a narrow terminal width the footer (hint + Updated-at timestamp) wraps so
     // both the hint text and the timestamp are fully present in the buffer — nothing clipped.
-    // (BDR 0012 S3)
     #[test]
     fn narrow_footer_wraps_hint_and_timestamp_both_present() {
         // At width=40 the hint "↑/↓ navigate  Enter select  r refresh  Esc/b back  q quit  s selection" (72 chars)
@@ -4534,7 +4569,7 @@ mod w1_chrome_wrap {
     }
 
     // W1-A3: At a wide terminal the user header bar and footer are each a single line at
-    // height 1 (no wrapping, no stray blank line). (BDR 0012 S5)
+    // height 1 (no wrapping, no stray blank line).
     #[test]
     fn wide_terminal_header_and_footer_each_single_line() {
         // At width=120, header "Alice <alice@example.com> · prod" (33 chars) fits on one line.
@@ -4615,7 +4650,7 @@ mod w1_chrome_wrap {
     }
 
     // W1-A4: A single unbreakable token longer than the available display width hard-breaks at
-    // the display-column boundary without overflowing the region. (BDR 0012 S6)
+    // the display-column boundary without overflowing the region.
     #[test]
     fn unbreakable_token_hard_breaks_at_display_column_boundary() {
         // email = "noreply-serviceaccount-admin@very-long-subdomain.example.com" (61 chars)
@@ -4668,9 +4703,7 @@ mod w1_chrome_wrap {
     }
 }
 
-// --- D1f (BDR 0021) render tests ---
-
-// AC2 (BDR 0021 Sc.2): the inline Artifacts section renders the hint text
+// The inline Artifacts section renders the hint text
 // 'Ctrl/Cmd+clique abrir anexo' as an italic row within the scrollable content.
 // Those cells carry the ITALIC modifier. Derived from the REAL buffer.
 #[test]
@@ -4711,11 +4744,11 @@ fn draw_detail_assets_card_last_interior_line_is_italic_hint() {
     });
     assert!(
         has_italic,
-        "hint row (y={hint_y}) must have at least one cell with ITALIC modifier (BDR 0021 Sc.2)"
+        "hint row (y={hint_y}) must have at least one cell with ITALIC modifier"
     );
 }
 
-// AC1 (BDR 0021 Sc.1): hint_for_screen for a Detail screen WITH assets returns the plain
+// hint_for_screen for a Detail screen WITH assets returns the plain
 // scroll hint and contains neither 'Ctrl/Cmd' nor 'abrir anexo'.
 #[test]
 fn hint_for_screen_detail_with_assets_has_no_ctrl_cmd_in_footer() {
@@ -4744,24 +4777,179 @@ fn hint_for_screen_detail_with_assets_has_no_ctrl_cmd_in_footer() {
         affordances: vec![],
         focused_comment: None,
         auth_error: false,
+        download: None,
         comment_spans: vec![],
     };
     let hint = hint_for_screen(&screen);
     assert!(
         !hint.to_lowercase().contains("ctrl") && !hint.to_lowercase().contains("cmd"),
-        "footer hint for Detail-with-assets must NOT contain 'Ctrl/Cmd' (BDR 0021 Sc.1): {hint:?}"
+        "footer hint for Detail-with-assets must NOT contain 'Ctrl/Cmd': {hint:?}"
     );
     assert!(
         !hint.contains("abrir anexo"),
-        "footer hint for Detail-with-assets must NOT contain 'abrir anexo' (BDR 0021 Sc.1): {hint:?}"
+        "footer hint for Detail-with-assets must NOT contain 'abrir anexo': {hint:?}"
     );
     assert!(
         hint.contains("j/k"),
-        "footer hint for Detail must contain 'j/k' navigation (ADR 0038 browsing hint): {hint:?}"
+        "footer hint for Detail must contain 'j/k' navigation: {hint:?}"
     );
 }
 
-// AC1 (ADR 0053): footer::plan for a non-Detail screen yields the browse hint
+fn detail_screen_with_overlay(overlay: DetailOverlay) -> crate::tui::model::Screen {
+    crate::tui::model::Screen::Detail {
+        instance: "inst".into(),
+        project_id: 1,
+        task_id: 1,
+        task: json!({}),
+        comments: vec![],
+        user_map: HashMap::new(),
+        lines: vec![],
+        line_styles: vec![],
+        assets: vec![],
+        offset: 0,
+        loading: false,
+        rendered_width: usize::MAX,
+        overlay,
+        current_user_id: None,
+        affordances: vec![],
+        focused_comment: None,
+        auth_error: false,
+        download: None,
+        comment_spans: vec![],
+    }
+}
+
+// The footer hint for a Detail screen is the browsing hint whichever overlay is open:
+// every overlay owns its own in-modal hint, so none leaks into the footer.
+#[test]
+fn hint_for_screen_detail_shows_browsing_hint_for_every_overlay() {
+    use crate::tui::footer::hint_for_screen;
+    use crate::tui::model::{
+        ComposeKind, ComposeStatus, EditStatus, EstimateForm, ImageAssetRef, ImageStatus,
+        LogTimeField, LogTimeForm, LogTimeStatus, TaskListLoad, TaskListPicker,
+    };
+
+    set_language("en");
+    let browsing = "↑/↓ · j/k move · c comment · t log time · e estimate · s status · r refresh · D download · a assignee · l list · H report · Esc/b back · q quit";
+    let compose = |kind| {
+        DetailOverlay::Compose(crate::tui::model::Compose {
+            kind,
+            editor: tui_textarea::TextArea::default(),
+            status: ComposeStatus::Editing,
+        })
+    };
+    let cases: Vec<(&str, DetailOverlay)> = vec![
+        ("none", DetailOverlay::None),
+        ("compose new", compose(ComposeKind::New)),
+        ("compose edit", compose(ComposeKind::Edit { comment_id: 7 })),
+        (
+            "log time",
+            DetailOverlay::LogTime(LogTimeForm {
+                hours: String::new(),
+                summary: String::new(),
+                field: LogTimeField::Hours,
+                status: LogTimeStatus::Editing,
+            }),
+        ),
+        (
+            "estimate edit",
+            DetailOverlay::EstimateEdit(EstimateForm {
+                value: String::new(),
+                status: EditStatus::Editing,
+            }),
+        ),
+        (
+            "status confirm",
+            DetailOverlay::StatusConfirm {
+                completed_target: true,
+                status: EditStatus::Editing,
+            },
+        ),
+        (
+            "assignee picker",
+            DetailOverlay::AssigneePicker {
+                candidates: vec![(1, "Ana".into())],
+                filter: String::new(),
+                selected: 0,
+                status: EditStatus::Editing,
+            },
+        ),
+        (
+            "task-list picker",
+            DetailOverlay::TaskListPicker(TaskListPicker {
+                candidates: vec![(1, "Backlog".into())],
+                current_id: None,
+                filter: String::new(),
+                selected: 0,
+                status: EditStatus::Editing,
+                load: TaskListLoad::Ready,
+                error: None,
+            }),
+        ),
+        (
+            "confirm delete",
+            DetailOverlay::ConfirmDelete { comment_id: 3 },
+        ),
+        (
+            "image viewer",
+            DetailOverlay::ImageViewer {
+                asset: ImageAssetRef {
+                    url: "https://example.com/a.png".into(),
+                    label: "a.png".into(),
+                },
+                status: ImageStatus::Loading,
+            },
+        ),
+    ];
+    for (name, overlay) in cases {
+        let hint = hint_for_screen(&detail_screen_with_overlay(overlay));
+        assert_eq!(hint, browsing, "overlay {name}");
+    }
+}
+
+#[test]
+fn hint_for_screen_detail_with_an_own_comment_focused_shows_the_edit_delete_hint() {
+    use crate::tui::footer::hint_for_screen;
+    use crate::tui::model::Screen;
+
+    set_language("en");
+    let mut screen = detail_screen_with_overlay(DetailOverlay::None);
+    if let Screen::Detail {
+        comments,
+        focused_comment,
+        current_user_id,
+        ..
+    } = &mut screen
+    {
+        *comments = vec![json!({"created_by_id": 5})];
+        *focused_comment = Some(0);
+        *current_user_id = Some(5);
+    }
+    assert_eq!(
+        hint_for_screen(&screen),
+        "↑/↓ · j/k move · Ctrl+click edit/delete · c new"
+    );
+}
+
+#[test]
+fn hint_for_screen_non_detail_screen_shows_the_list_browse_hint() {
+    use crate::tui::footer::hint_for_screen;
+    use crate::tui::model::Screen;
+
+    set_language("en");
+    let screen = Screen::Projects {
+        groups: vec![],
+        selected: 0,
+        loading: false,
+        revalidating: false,
+    };
+    assert_eq!(
+        hint_for_screen(&screen),
+        "↑/↓ navigate  Enter select  r refresh  H report  Esc/b back  q quit"
+    );
+}
+
+// footer::plan for a non-Detail screen yields the browse hint
 // with status_line None, matching hint_for_screen for the same screen.
 #[test]
 fn footer_plan_projects_screen_yields_browse_hint_with_no_status() {
@@ -4787,7 +4975,7 @@ fn footer_plan_projects_screen_yields_browse_hint_with_no_status() {
     );
 }
 
-// AC1 (ADR 0053): footer::plan for a Detail screen with auth_error true carries
+// footer::plan for a Detail screen with auth_error true carries
 // the re-auth message in status_line, taking priority over copied_feedback.
 #[test]
 fn footer_plan_detail_auth_error_carries_reauth_status() {
@@ -4816,6 +5004,7 @@ fn footer_plan_detail_auth_error_carries_reauth_status() {
         affordances: vec![],
         focused_comment: None,
         auth_error: true,
+        download: None,
         comment_spans: vec![],
     };
     let result = plan(&screen, None, true, 80);
@@ -4832,7 +5021,7 @@ fn footer_plan_detail_auth_error_carries_reauth_status() {
     );
 }
 
-// AC4: Direct unit tests on Vec<PanelRow> — the layout is the test surface.
+// Direct unit tests on Vec<PanelRow> — the layout is the test surface.
 // These assert the composition for all cases required by the acceptance criterion:
 // (a) empty list -> empty vec, (b) single asset, (c) two assets, (d) wrapped label.
 
@@ -5051,8 +5240,6 @@ mod panel_row_layout {
     }
 }
 
-// --- S1: asset_panel inline building blocks (section_lines + asset_index_for_section_row) ---
-//
 // Tests derive expectations from the REAL layout() output to avoid hand-fabricating geometry.
 
 mod asset_panel_inline {
@@ -5069,7 +5256,7 @@ mod asset_panel_inline {
         }
     }
 
-    // AC1: empty assets -> section_lines returns Vec::new() (no header emitted).
+    // empty assets -> section_lines returns Vec::new() (no header emitted).
     #[test]
     fn section_lines_empty_assets_returns_empty() {
         let lines = section_lines(&[], 60);
@@ -5079,7 +5266,7 @@ mod asset_panel_inline {
         );
     }
 
-    // AC1: single asset -> header + layout-derived rows; header carries Bold StyleRun.
+    // single asset -> header + layout-derived rows; header carries Bold StyleRun.
     #[test]
     fn section_lines_single_asset_has_header_then_layout_rows() {
         let assets = vec![make_asset("report.pdf")];
@@ -5122,7 +5309,7 @@ mod asset_panel_inline {
         );
     }
 
-    // AC1: single asset -> Pad/Separator rows map to blank "" with empty style vec;
+    // single asset -> Pad/Separator rows map to blank "" with empty style vec;
     //      Asset rows carry PANEL_HPAD prefix and empty style vec;
     //      Hint row carries PANEL_HPAD prefix and Italic StyleRun over hint text.
     #[test]
@@ -5216,7 +5403,7 @@ mod asset_panel_inline {
         }
     }
 
-    // AC1: two assets -> a blank Separator line appears between the two asset rows.
+    // two assets -> a blank Separator line appears between the two asset rows.
     #[test]
     fn section_lines_two_assets_have_blank_separator_between_them() {
         let assets = vec![make_asset("alpha.pdf"), make_asset("beta.pdf")];
@@ -5251,7 +5438,7 @@ mod asset_panel_inline {
         );
     }
 
-    // AC1: a label that wraps at content_width produces multiple consecutive Asset rows,
+    // a label that wraps at content_width produces multiple consecutive Asset rows,
     //      all with an empty style vec.
     #[test]
     fn section_lines_wrapped_label_produces_multiple_asset_rows_no_styles() {
@@ -5296,7 +5483,7 @@ mod asset_panel_inline {
         }
     }
 
-    // AC2: asset_index_for_section_row -> row 0 (header) always returns None.
+    // asset_index_for_section_row -> row 0 (header) always returns None.
     #[test]
     fn asset_index_for_section_row_header_row_returns_none() {
         let assets = vec![make_asset("file.pdf")];
@@ -5304,7 +5491,7 @@ mod asset_panel_inline {
         assert_eq!(result, None, "interior_row=0 (header) must return None");
     }
 
-    // AC2: asset_index_for_section_row -> pad/separator/hint rows return None.
+    // asset_index_for_section_row -> pad/separator/hint rows return None.
     #[test]
     fn asset_index_for_section_row_non_asset_rows_return_none() {
         let assets = vec![make_asset("file.pdf")];
@@ -5326,7 +5513,7 @@ mod asset_panel_inline {
         }
     }
 
-    // AC2: asset_index_for_section_row -> each asset row returns Some(owning idx).
+    // asset_index_for_section_row -> each asset row returns Some(owning idx).
     #[test]
     fn asset_index_for_section_row_asset_rows_return_some_idx() {
         let assets = vec![make_asset("alpha.pdf"), make_asset("beta.pdf")];
@@ -5346,7 +5533,7 @@ mod asset_panel_inline {
         }
     }
 
-    // AC2: wrapped continuation lines for a multi-row label all return Some(same owning idx).
+    // wrapped continuation lines for a multi-row label all return Some(same owning idx).
     #[test]
     fn asset_index_for_section_row_wrapped_continuation_returns_same_idx() {
         let long_label = "a-very-long-filename-that-wraps-inside-the-content-width-area.pdf";
@@ -5383,7 +5570,7 @@ mod asset_panel_inline {
         }
     }
 
-    // AC2: out-of-range interior_row returns None.
+    // out-of-range interior_row returns None.
     #[test]
     fn asset_index_for_section_row_out_of_range_returns_none() {
         let assets = vec![make_asset("file.pdf")];
@@ -5397,7 +5584,7 @@ mod asset_panel_inline {
         );
     }
 
-    // AC2: empty assets -> asset_index_for_section_row always returns None (even row 0).
+    // empty assets -> asset_index_for_section_row always returns None (even row 0).
     #[test]
     fn asset_index_for_section_row_empty_assets_always_none() {
         assert_eq!(asset_index_for_section_row(&[], 60, 0), None);
@@ -5405,7 +5592,7 @@ mod asset_panel_inline {
         assert_eq!(asset_index_for_section_row(&[], 60, 99), None);
     }
 
-    // AC3: section_lines.len() == 1 + layout().len() for non-empty assets (offset contract).
+    // section_lines.len() == 1 + layout().len() for non-empty assets (offset contract).
     #[test]
     fn section_lines_len_equals_one_plus_layout_len() {
         let assets = vec![
@@ -5425,9 +5612,7 @@ mod asset_panel_inline {
     }
 }
 
-// --- S2b: AC1 render-buffer tests (BDR 0022 Sc.1, 3, 4) ---
-
-// AC1 (BDR 0022 Sc.1): draw_detail renders assets INLINE — assets add no panel box
+// draw_detail renders assets INLINE — assets add no panel box
 // of their own. The fixture legitimately renders 3 top-left corners: outer frame +
 // Details panel + Description panel. If assets ever grew their own panel, this count
 // would increase and the test would fail.
@@ -5456,7 +5641,7 @@ fn draw_detail_assets_inline_adds_no_extra_box() {
     );
 }
 
-// AC1 (BDR 0022 Sc.3): empty asset list yields NO inline section — no "Artifacts" header,
+// Empty asset list yields NO inline section — no "Artifacts" header,
 // no "[1]" marker, and no extra bordered box.
 #[test]
 fn draw_detail_empty_assets_no_inline_section() {
@@ -5481,7 +5666,7 @@ fn draw_detail_empty_assets_no_inline_section() {
     );
 }
 
-// AC1 (BDR 0022 Sc.4): localized pt-BR Artifacts header ("Anexos") appears inline.
+// Localized pt-BR Artifacts header ("Anexos") appears inline.
 // The section header is t("Artifacts") which maps to "Anexos" in pt-BR.
 #[test]
 fn draw_detail_assets_inline_ptbr_artifacts_label() {
@@ -5503,9 +5688,9 @@ fn draw_detail_assets_inline_ptbr_artifacts_label() {
     );
 }
 
-// AC1 (fix-inline-asset-link-style-click): asset row cells carry link_style() (muted green +
+// asset row cells carry link_style() (muted green +
 // UNDERLINED) for a non-URL label.  This is STRUCTURAL styling emitted as a Link StyleRun from
-// section_lines(), not URL-text detection — the exact regression that ADR 0032 fixes.
+// section_lines(), not URL-text detection — the exact regression this guards.
 //
 // The test pins three invariants simultaneously:
 //   1. Asset token cells → link_style fg (muted green) + UNDERLINED modifier.
@@ -5629,7 +5814,7 @@ fn asset_row_cells_carry_link_style_structural_not_url_detection() {
     }
 }
 
-// AC2/AC3/AC5 (BDR 0026): compose renders in a centered modal overlay (ADR 0039).
+// Compose renders in a centered modal overlay.
 // The compose field is no longer appended to the scrollable `lines` by reflow_detail;
 // instead view() renders a modal box over the thread via render_compose_modal.
 
@@ -5686,6 +5871,7 @@ mod compose_render {
                 affordances: vec![],
                 focused_comment: None,
                 auth_error: false,
+                download: None,
                 comment_spans: vec![],
             }],
             should_quit: false,
@@ -5721,7 +5907,7 @@ mod compose_render {
         out
     }
 
-    // AC2 (BDR 0026 Sc.1): with compose active, a centered titled modal renders
+    // With compose active, a centered titled modal renders
     // over the thread via view(); the buffer text and in-box hint appear in the modal.
     #[test]
     fn compose_active_shows_label_buffer_and_hint() {
@@ -5745,7 +5931,7 @@ mod compose_render {
         );
     }
 
-    // AC2 (BDR 0026 Sc.2): multiline compose buffer — both lines visible in the modal.
+    // Multiline compose buffer — both lines visible in the modal.
     #[test]
     fn compose_active_multiline_buffer_both_lines_visible() {
         let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -5766,7 +5952,7 @@ mod compose_render {
         );
     }
 
-    // AC3 (BDR 0026 Sc.3): compose None — compose content absent from scrollable lines
+    // Compose None — compose content absent from scrollable lines
     // and the modal hint does not appear in raw draw_detail output.
     #[test]
     fn compose_inactive_shows_no_compose_content() {
@@ -5786,7 +5972,7 @@ mod compose_render {
         );
     }
 
-    // AC5 (BDR 0026 Sc.6): edit compose opens modal titled 'Edit comment' pre-filled.
+    // Edit compose opens modal titled 'Edit comment' pre-filled.
     #[test]
     fn compose_edit_renders_edit_title_and_prefilled_buffer() {
         let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -5808,7 +5994,7 @@ mod compose_render {
         );
     }
 
-    // AC2 (BDR 0026 Sc.1, pt_BR): compose active shows localized modal title.
+    // Compose active shows localized modal title.
     #[test]
     fn compose_active_shows_localized_hint_in_pt_br() {
         let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -5827,7 +6013,7 @@ mod compose_render {
         );
     }
 
-    // AC2 (slice 0057b, BDR 0026): the compose body is painted by the tui_textarea
+    // The compose body is painted by the tui_textarea
     // `TextArea` widget, not a static `Paragraph` of its lines — so the widget's caret
     // (Modifier::REVERSED cell) and current-line highlight (Modifier::UNDERLINED row)
     // must be visible in the rendered buffer. No other style in this fixture (no
@@ -5868,7 +6054,7 @@ mod compose_render {
         );
     }
 
-    // AC2 (backdrop DIM): backdrop cells outside the modal Rect carry Modifier::DIM.
+    // backdrop cells outside the modal Rect carry Modifier::DIM.
     #[test]
     fn compose_modal_backdrop_cells_carry_dim_modifier() {
         use ratatui::style::Modifier;
@@ -5891,7 +6077,7 @@ mod compose_render {
         );
     }
 
-    // AC1 (slice-1b, BDR 0026 Sc.9): the rendered modal box occupies ≈70% of the frame.
+    // The rendered modal box occupies ≈70% of the frame.
     // On a 100×40 frame the modal width must be in 64..=76 and height in 24..=32
     // (70%±~10%). Box extents are derived from the buffer: border cells with
     // theme::modal_border_style()'s fg isolate the modal from the detail panel
@@ -5959,7 +6145,7 @@ mod compose_render {
         );
     }
 
-    // AC2 (slice-1b, BDR 0026 Sc.1): a backdrop cell at (0,0) carries BOTH Modifier::DIM
+    // A backdrop cell at (0,0) carries BOTH Modifier::DIM
     // AND the dark backdrop background from theme::modal_backdrop_style().
     #[test]
     fn compose_modal_backdrop_cell_carries_dim_and_surface_base_bg() {
@@ -5987,7 +6173,7 @@ mod compose_render {
     }
 }
 
-// AC4 (issue 0067 TUI slice): the log-time modal renders its two labeled fields
+// The log-time modal renders its two labeled fields
 // and hint via the shared modal primitive.
 
 mod log_time_render {
@@ -6031,6 +6217,7 @@ mod log_time_render {
                 affordances: vec![],
                 focused_comment: None,
                 auth_error: false,
+                download: None,
                 comment_spans: vec![],
             }],
             should_quit: false,
@@ -6066,7 +6253,7 @@ mod log_time_render {
         out
     }
 
-    // AC4: the modal shows the title, both labeled fields with their buffers, and
+    // the modal shows the title, both labeled fields with their buffers, and
     // the editing hint.
     #[test]
     fn log_time_active_shows_title_fields_and_hint() {
@@ -6106,7 +6293,7 @@ mod log_time_render {
         );
     }
 
-    // AC4: the modal shows the Submitting status text while the form is submitting.
+    // the modal shows the Submitting status text while the form is submitting.
     #[test]
     fn log_time_submitting_shows_sending_status() {
         let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -6123,7 +6310,7 @@ mod log_time_render {
         );
     }
 
-    // AC2/AC4: log-time inactive — no log-time content leaks into the render.
+    // log-time inactive — no log-time content leaks into the render.
     #[test]
     fn log_time_inactive_shows_no_log_time_content() {
         let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -6139,7 +6326,7 @@ mod log_time_render {
     }
 }
 
-// AC3 (issue 0068 TUI slice): the estimate-edit modal renders its labeled field and
+// The estimate-edit modal renders its labeled field and
 // hint via the shared modal primitive.
 
 mod estimate_edit_render {
@@ -6179,6 +6366,7 @@ mod estimate_edit_render {
                 affordances: vec![],
                 focused_comment: None,
                 auth_error: false,
+                download: None,
                 comment_spans: vec![],
             }],
             should_quit: false,
@@ -6214,7 +6402,7 @@ mod estimate_edit_render {
         out
     }
 
-    // AC3: the modal shows the title, the labeled field with its buffer, and the
+    // the modal shows the title, the labeled field with its buffer, and the
     // editing hint.
     #[test]
     fn estimate_edit_active_shows_title_field_and_hint() {
@@ -6242,7 +6430,7 @@ mod estimate_edit_render {
         );
     }
 
-    // AC3: the modal shows the Submitting status text while the form is submitting.
+    // the modal shows the Submitting status text while the form is submitting.
     #[test]
     fn estimate_edit_submitting_shows_sending_status() {
         let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -6259,7 +6447,7 @@ mod estimate_edit_render {
         );
     }
 
-    // AC3: estimate-edit inactive — no estimate-edit content leaks into the render.
+    // estimate-edit inactive — no estimate-edit content leaks into the render.
     #[test]
     fn estimate_edit_inactive_shows_no_estimate_content() {
         let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -6275,7 +6463,7 @@ mod estimate_edit_render {
     }
 }
 
-// AC3 (issue 0068 TUI slice): the status-confirm modal renders the complete-vs-reopen
+// The status-confirm modal renders the complete-vs-reopen
 // prompt and hint via the shared modal primitive.
 
 mod status_confirm_render {
@@ -6308,6 +6496,7 @@ mod status_confirm_render {
                 affordances: vec![],
                 focused_comment: None,
                 auth_error: false,
+                download: None,
                 comment_spans: vec![],
             }],
             should_quit: false,
@@ -6343,7 +6532,7 @@ mod status_confirm_render {
         out
     }
 
-    // AC3: completed_target=true shows the "mark as completed" prompt.
+    // completed_target=true shows the "mark as completed" prompt.
     #[test]
     fn status_confirm_targeting_completion_shows_complete_prompt() {
         let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -6369,7 +6558,7 @@ mod status_confirm_render {
         );
     }
 
-    // AC3: completed_target=false shows the "reopen" prompt.
+    // completed_target=false shows the "reopen" prompt.
     #[test]
     fn status_confirm_targeting_reopen_shows_reopen_prompt() {
         let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -6387,7 +6576,7 @@ mod status_confirm_render {
         );
     }
 
-    // AC3: the modal shows the Submitting status text while the form is submitting.
+    // the modal shows the Submitting status text while the form is submitting.
     #[test]
     fn status_confirm_submitting_shows_sending_status() {
         let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -6405,7 +6594,7 @@ mod status_confirm_render {
         );
     }
 
-    // AC3: status-confirm inactive — no status-confirm content leaks into the render.
+    // status-confirm inactive — no status-confirm content leaks into the render.
     #[test]
     fn status_confirm_inactive_shows_no_status_confirm_content() {
         let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -6421,7 +6610,7 @@ mod status_confirm_render {
     }
 }
 
-// AC3 (issue 0068 TUI slice): the assignee-picker modal renders the candidate list
+// The assignee-picker modal renders the candidate list
 // with the highlighted row marked, the empty-directory state, and the hint/status
 // via the shared modal primitive.
 
@@ -6435,7 +6624,7 @@ mod assignee_picker_render {
 
     use super::LANG_MUTEX;
 
-    fn make_detail_model(overlay: DetailOverlay) -> Model {
+    pub(super) fn make_detail_model(overlay: DetailOverlay) -> Model {
         Model {
             stack: vec![Screen::Detail {
                 instance: "inst".into(),
@@ -6455,6 +6644,7 @@ mod assignee_picker_render {
                 affordances: vec![],
                 focused_comment: None,
                 auth_error: false,
+                download: None,
                 comment_spans: vec![],
             }],
             should_quit: false,
@@ -6469,7 +6659,11 @@ mod assignee_picker_render {
         }
     }
 
-    fn render_via_view(model: &Model, width: u16, height: u16) -> ratatui::buffer::Buffer {
+    pub(super) fn render_via_view(
+        model: &Model,
+        width: u16,
+        height: u16,
+    ) -> ratatui::buffer::Buffer {
         let backend = TestBackend::new(width, height);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal
@@ -6478,7 +6672,7 @@ mod assignee_picker_render {
         terminal.backend().buffer().clone()
     }
 
-    fn buf_text(buf: &ratatui::buffer::Buffer) -> String {
+    pub(super) fn buf_text(buf: &ratatui::buffer::Buffer) -> String {
         let area = buf.area();
         let mut out = String::new();
         for y in 0..area.height {
@@ -6494,7 +6688,7 @@ mod assignee_picker_render {
         vec![(1i64, "Alice".to_string()), (2i64, "Bob".to_string())]
     }
 
-    // AC3: the modal shows the title, every candidate name, and the navigate/confirm hint.
+    // the modal shows the title, every candidate name, and the navigate/confirm hint.
     #[test]
     fn assignee_picker_active_shows_title_candidates_and_hint() {
         let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -6526,7 +6720,7 @@ mod assignee_picker_render {
         );
     }
 
-    // AC3: the highlighted row is marked distinctly from the non-selected rows.
+    // the highlighted row is marked distinctly from the non-selected rows.
     #[test]
     fn assignee_picker_marks_the_selected_row() {
         let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -6550,7 +6744,7 @@ mod assignee_picker_render {
         );
     }
 
-    // AC3: an empty candidate list shows the empty-directory state.
+    // an empty candidate list shows the empty-directory state.
     #[test]
     fn assignee_picker_with_no_candidates_shows_empty_state() {
         let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -6570,7 +6764,7 @@ mod assignee_picker_render {
         );
     }
 
-    // AC3: the modal shows the Submitting status text while the picker is submitting.
+    // the modal shows the Submitting status text while the picker is submitting.
     #[test]
     fn assignee_picker_submitting_shows_sending_status() {
         let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -6590,7 +6784,7 @@ mod assignee_picker_render {
         );
     }
 
-    // AC6: a non-empty filter renders the search line with the typed text.
+    // a non-empty filter renders the search line with the typed text.
     #[test]
     fn assignee_picker_shows_search_line_with_filter_text() {
         let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -6610,7 +6804,7 @@ mod assignee_picker_render {
         );
     }
 
-    // AC6: the list shows only the filtered rows, with the selected one marked.
+    // the list shows only the filtered rows, with the selected one marked.
     #[test]
     fn assignee_picker_filters_candidates_and_marks_selection() {
         let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -6634,7 +6828,7 @@ mod assignee_picker_render {
         );
     }
 
-    // AC6: a filter that matches nothing shows the empty-match line.
+    // a filter that matches nothing shows the empty-match line.
     #[test]
     fn assignee_picker_with_no_filter_matches_shows_empty_match_state() {
         let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -6658,7 +6852,7 @@ mod assignee_picker_render {
         );
     }
 
-    // AC6: the in-modal hint describes the new keys — move, type to filter, confirm, cancel.
+    // the in-modal hint describes the new keys — move, type to filter, confirm, cancel.
     #[test]
     fn assignee_picker_hint_describes_filter_keys() {
         let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -6686,7 +6880,7 @@ mod assignee_picker_render {
         );
     }
 
-    // AC3: assignee-picker inactive — no assignee-picker content leaks into the render.
+    // assignee-picker inactive — no assignee-picker content leaks into the render.
     #[test]
     fn assignee_picker_inactive_shows_no_assignee_picker_content() {
         let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -6702,7 +6896,177 @@ mod assignee_picker_render {
     }
 }
 
-// AC B1 (slice 0057b): render_modal returns the inner content (body) Rect — the
+// The task-list picker modal renders its search line, the project's lists with the
+// highlighted row and the current list marked, and a line for each non-list state.
+
+mod task_list_picker_render {
+    use super::assignee_picker_render::{buf_text, make_detail_model, render_via_view};
+    use super::LANG_MUTEX;
+    use crate::i18n::set_language;
+    use crate::tui::footer::hint_for_screen;
+    use crate::tui::model::{DetailOverlay, EditStatus, TaskListLoad, TaskListPicker};
+
+    fn picker(load: TaskListLoad, candidates: Vec<(i64, String)>) -> TaskListPicker {
+        TaskListPicker {
+            candidates,
+            current_id: Some(2),
+            filter: String::new(),
+            selected: 0,
+            status: EditStatus::Editing,
+            load,
+            error: None,
+        }
+    }
+
+    fn lists() -> Vec<(i64, String)> {
+        vec![(1, "Backlog".to_string()), (2, "Revisão".to_string())]
+    }
+
+    fn rendered(picker: TaskListPicker, width: u16) -> String {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let model = make_detail_model(DetailOverlay::TaskListPicker(picker));
+        buf_text(&render_via_view(&model, width, 24))
+    }
+
+    #[test]
+    fn task_list_picker_render_shows_search_line_rows_highlight_and_current_marker() {
+        let mut open = picker(TaskListLoad::Ready, lists());
+        open.filter = "o".to_string();
+        let content = rendered(open, 80);
+        assert!(content.contains("Search: o"), "{content}");
+        assert!(content.contains("> Backlog"), "{content}");
+        assert!(content.contains("Revisão (current)"), "{content}");
+        assert!(!content.contains("> Revisão"), "{content}");
+        assert!(content.contains("type to filter"), "{content}");
+    }
+
+    #[test]
+    fn task_list_picker_render_shows_a_loading_line_while_loading() {
+        let content = rendered(picker(TaskListLoad::Loading, vec![]), 80);
+        assert!(content.contains("Loading task lists"), "{content}");
+    }
+
+    #[test]
+    fn task_list_picker_render_hint_names_only_escape_while_loading_or_failed() {
+        for load in [
+            TaskListLoad::Loading,
+            TaskListLoad::Failed("Could not read lists".into()),
+        ] {
+            let content = rendered(picker(load, vec![]), 80);
+            assert!(content.contains("Esc cancel"), "{content}");
+            assert!(!content.contains("type to filter"), "{content}");
+            assert!(!content.contains("Enter/Ctrl+S confirm"), "{content}");
+            assert!(!content.contains("↑/↓ move"), "{content}");
+        }
+    }
+
+    #[test]
+    fn task_list_picker_render_hint_names_only_escape_in_portuguese_while_loading() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("pt_BR");
+        let model = make_detail_model(DetailOverlay::TaskListPicker(picker(
+            TaskListLoad::Loading,
+            vec![],
+        )));
+        let content = buf_text(&render_via_view(&model, 80, 24));
+        set_language("en");
+        assert!(content.contains("Esc cancelar"), "{content}");
+        assert!(!content.contains("filtrar"), "{content}");
+        assert!(!content.contains("confirmar"), "{content}");
+    }
+
+    #[test]
+    fn task_list_picker_render_shows_the_empty_and_no_match_lines() {
+        let content = rendered(picker(TaskListLoad::Ready, vec![]), 80);
+        assert!(content.contains("No task lists"), "{content}");
+        let mut filtered = picker(TaskListLoad::Ready, lists());
+        filtered.filter = "zzz".to_string();
+        let content = rendered(filtered, 80);
+        assert!(content.contains("No matching task lists"), "{content}");
+        assert!(!content.contains("No task lists"), "{content}");
+    }
+
+    #[test]
+    fn task_list_picker_render_shows_the_failure_text() {
+        let content = rendered(
+            picker(TaskListLoad::Failed("Could not read lists".into()), vec![]),
+            80,
+        );
+        assert!(content.contains("Could not read lists"), "{content}");
+        let mut failed_write = picker(TaskListLoad::Ready, lists());
+        failed_write.error = Some("Failed to update task".into());
+        let content = rendered(failed_write, 80);
+        assert!(content.contains("Failed to update task"), "{content}");
+    }
+
+    #[test]
+    fn task_list_picker_render_keeps_a_thirty_character_name_and_the_hint_whole_at_80_columns() {
+        let name = "Lista com trinta caracteres ab".to_string();
+        assert_eq!(name.chars().count(), 30);
+        let mut open = picker(TaskListLoad::Ready, vec![(2, name.clone())]);
+        open.current_id = Some(2);
+        let content = rendered(open, 80);
+        assert!(
+            content.contains(&format!("> {name} (current)")),
+            "{content}"
+        );
+        assert!(
+            content.contains("↑/↓ move · type to filter · Enter/Ctrl+S confirm · Esc cancel"),
+            "{content}"
+        );
+    }
+
+    #[test]
+    fn task_list_picker_render_leaves_the_footer_to_the_modal() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let model = make_detail_model(DetailOverlay::TaskListPicker(picker(
+            TaskListLoad::Ready,
+            lists(),
+        )));
+        let hint = hint_for_screen(model.top().unwrap());
+        assert!(!hint.contains("type to filter"), "{hint}");
+        assert!(hint.contains("l list"), "{hint}");
+    }
+
+    #[test]
+    fn task_list_picker_render_detail_hint_names_the_key_in_english_and_portuguese() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        let model = make_detail_model(DetailOverlay::None);
+        set_language("en");
+        let english = hint_for_screen(model.top().unwrap());
+        set_language("pt_BR");
+        let portuguese = hint_for_screen(model.top().unwrap());
+        set_language("en");
+        assert!(english.contains("l list"), "{english}");
+        assert!(portuguese.contains("l lista"), "{portuguese}");
+    }
+
+    #[test]
+    fn task_list_picker_render_translates_its_lines_to_portuguese() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("pt_BR");
+        let model = make_detail_model(DetailOverlay::TaskListPicker(picker(
+            TaskListLoad::Loading,
+            vec![],
+        )));
+        let loading = buf_text(&render_via_view(&model, 80, 24));
+        let ready = make_detail_model(DetailOverlay::TaskListPicker(picker(
+            TaskListLoad::Ready,
+            lists(),
+        )));
+        let ready = buf_text(&render_via_view(&ready, 80, 24));
+        set_language("en");
+        assert!(
+            loading.contains("Carregando listas de tarefas"),
+            "{loading}"
+        );
+        assert!(ready.contains("Revisão (atual)"), "{ready}");
+    }
+}
+
+// render_modal returns the inner content (body) Rect — the
 // area beneath the title border and above the hint row, not the outer bordered box.
 
 mod modal_render_inner_rect_contract {
@@ -6767,8 +7131,6 @@ mod modal_render_inner_rect_contract {
     }
 }
 
-// ── Confirm-delete modal render tests (BDR 0026 Sc.7/8, ADR 0039 §4) ─────────
-
 mod confirm_modal_buttons {
     use crate::i18n::set_language;
     use crate::tui::model::{DetailOverlay, Header, ModalButtonTarget, Model, Screen};
@@ -6802,6 +7164,7 @@ mod confirm_modal_buttons {
                 affordances: vec![],
                 focused_comment: None,
                 auth_error: false,
+                download: None,
                 comment_spans: vec![],
             }],
             should_quit: false,
@@ -6842,8 +7205,8 @@ mod confirm_modal_buttons {
         out
     }
 
-    // AC1 (BDR 0026 Sc.7): confirm_delete=Some renders modal with title 'Excluir comentário?'
-    // and visible [Sim]/[Não] button labels (ADR 0041), over a strongly-dimmed backdrop.
+    // confirm_delete=Some renders modal with title 'Excluir comentário?'
+    // and visible [Sim]/[Não] button labels, over a strongly-dimmed backdrop.
     #[test]
     fn confirm_modal_renders_title_and_buttons_pt_br() {
         use ratatui::style::Modifier;
@@ -6879,7 +7242,7 @@ mod confirm_modal_buttons {
         );
     }
 
-    // AC3 (BDR 0026 Sc.8, geometry-consistency): the [Sim] and [Não] labels are
+    // Geometry-consistency: the [Sim] and [Não] labels are
     // located in the rendered buffer; a plain click at those exact cells emits the right result.
     // Button positions come from the registered ModalButtonTargets — never assumed.
     #[test]
@@ -6958,7 +7321,7 @@ mod confirm_modal_buttons {
         }
     }
 
-    // AC3b (geometry-consistency / capture): plain click OUTSIDE the button labels while
+    // plain click OUTSIDE the button labels while
     // the confirm modal is open does NOT delete and does NOT start a text selection.
     #[test]
     fn plain_click_outside_buttons_does_not_delete_or_select() {
@@ -6998,7 +7361,7 @@ mod confirm_modal_buttons {
         );
     }
 
-    // AC3 (plain click on cancel from buffer): plain click on [Não] clears confirm, no Cmd.
+    // plain click on [Não] clears confirm, no Cmd.
     #[test]
     fn plain_click_on_buffer_located_cancel_button_clears_confirm() {
         use crate::tui::model::{update, Msg};
@@ -7039,8 +7402,6 @@ mod confirm_modal_buttons {
     }
 }
 
-// ── Yes/No confirm modal label tests (ADR 0041) ──────────────────────────────
-
 mod yes_no_confirm_labels {
     use crate::i18n::{set_language, t};
     use crate::tui::model::{DetailOverlay, Header, ModalButtonTarget, Model, Screen};
@@ -7074,6 +7435,7 @@ mod yes_no_confirm_labels {
                 affordances: vec![],
                 focused_comment: None,
                 auth_error: false,
+                download: None,
                 comment_spans: vec![],
             }],
             should_quit: false,
@@ -7114,7 +7476,7 @@ mod yes_no_confirm_labels {
         out
     }
 
-    // AC1: the hint row of the delete-confirm modal shows [Sim] and [Não] in pt-BR,
+    // the hint row of the delete-confirm modal shows [Sim] and [Não] in pt-BR,
     // asserted against the real rendered TestBackend buffer.
     #[test]
     fn confirm_modal_hint_row_shows_sim_and_nao_in_pt_br() {
@@ -7142,7 +7504,7 @@ mod yes_no_confirm_labels {
         );
     }
 
-    // AC1 (en): in English locale the hint row shows [Yes] and [No].
+    // in English locale the hint row shows [Yes] and [No].
     #[test]
     fn confirm_modal_hint_row_shows_yes_and_no_in_english() {
         let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -7160,7 +7522,7 @@ mod yes_no_confirm_labels {
         );
     }
 
-    // AC2: the first registered button target (is_confirm: true) maps to the [Sim] columns.
+    // the first registered button target (is_confirm: true) maps to the [Sim] columns.
     // The second (is_confirm: false) maps to the [Não] columns in pt-BR.
     // Swapping the targets would break this test (mutation floor).
     #[test]
@@ -7220,7 +7582,7 @@ mod yes_no_confirm_labels {
         );
     }
 
-    // AC2: a click on the Sim target (is_confirm=true) dispatches ConfirmDeleteComment /
+    // a click on the Sim target (is_confirm=true) dispatches ConfirmDeleteComment /
     // DeleteComment; a click on the Não target (is_confirm=false) dispatches CancelDeleteComment.
     #[test]
     fn click_sim_dispatches_delete_click_nao_dispatches_cancel() {
@@ -7292,8 +7654,8 @@ mod yes_no_confirm_labels {
         }
     }
 
-    // AC2: ConfirmDeleteComment (Enter) confirms and CancelDeleteComment (Esc) cancels
-    // — key handling is unchanged by the label relabeling (ADR 0041).
+    // ConfirmDeleteComment (Enter) confirms and CancelDeleteComment (Esc) cancels
+    // — key handling is unchanged by the label relabeling.
     #[test]
     fn confirm_msg_confirms_and_cancel_msg_cancels_in_confirm_modal() {
         use crate::tui::model::{update, Cmd, Msg};
@@ -7334,7 +7696,7 @@ mod yes_no_confirm_labels {
         }
     }
 
-    // AC3: i18n — t("Yes") resolves to "Sim" in pt-BR and "Yes" in English (identity).
+    // i18n — t("Yes") resolves to "Sim" in pt-BR and "Yes" in English (identity).
     //            t("No") resolves to "Não" in pt-BR and "No" in English (identity).
     #[test]
     fn i18n_yes_no_keys_resolve_correctly() {
@@ -7350,11 +7712,10 @@ mod yes_no_confirm_labels {
     }
 }
 
-// ── Edit-comment affordance render tests (BDR 0024 / ADR 0036) ───────────────
-// AC1: build_detail_content gates the [editar] token to comments whose
+// build_detail_content gates the [editar] token to comments whose
 // created_by_id matches current_user_id.
 
-// AC1-part1: A comment whose created_by_id matches current_user_id carries
+// A comment whose created_by_id matches current_user_id carries
 // an edit affordance: the edit_affordances vec is non-empty and the header
 // line contains the edit token in brackets.
 #[test]
@@ -7401,7 +7762,7 @@ fn edit_affordance_shown_for_own_comment() {
     );
 }
 
-// AC1-part2: A comment owned by a DIFFERENT user must NOT show an edit affordance.
+// A comment owned by a DIFFERENT user must NOT show an edit affordance.
 #[test]
 fn edit_affordance_hidden_for_other_user_comment() {
     use crate::render::{build_detail_content, AffordanceKind};
@@ -7430,7 +7791,7 @@ fn edit_affordance_hidden_for_other_user_comment() {
     );
 }
 
-// AC1-part3: When current_user_id is None, edit affordances are absent.
+// When current_user_id is None, edit affordances are absent.
 #[test]
 fn edit_affordance_hidden_when_current_user_id_is_none() {
     use crate::render::{build_detail_content, AffordanceKind};
@@ -7459,7 +7820,7 @@ fn edit_affordance_hidden_when_current_user_id_is_none() {
     );
 }
 
-// AC1-part4: Edit affordances are populated exactly once (for the own comment).
+// Edit affordances are populated exactly once (for the own comment).
 #[test]
 fn edit_affordances_populated_only_for_own_comment() {
     use crate::render::{build_detail_content, AffordanceKind};
@@ -7498,8 +7859,6 @@ fn edit_affordances_populated_only_for_own_comment() {
     };
     assert_eq!(cid, 10, "affordance must reference comment_id=10");
 }
-
-// --- AC4: focused comment card carries the focus highlight; others do not ---
 
 mod comment_focus_render {
     use crate::render::build_detail_content;
@@ -7570,7 +7929,7 @@ mod comment_focus_render {
         })
     }
 
-    // AC4: focused card's lines carry the focus background; unfocused card's lines do not.
+    // focused card's lines carry the focus background; unfocused card's lines do not.
     #[test]
     fn focused_card_has_highlight_style_unfocused_does_not() {
         let width = 80u16;
@@ -7615,7 +7974,7 @@ mod comment_focus_render {
         let _ = (span1_count, span1_start);
     }
 
-    // AC4: moving focus from card 0 to card 1 moves the highlight.
+    // moving focus from card 0 to card 1 moves the highlight.
     #[test]
     fn moving_focus_moves_highlight_to_new_card() {
         let width = 80u16;
@@ -7665,7 +8024,7 @@ mod comment_focus_render {
         );
     }
 
-    // AC4: no focus (None) — no lines carry the focus background.
+    // no focus (None) — no lines carry the focus background.
     #[test]
     fn no_focus_means_no_highlight_anywhere() {
         let width = 80u16;
@@ -7696,8 +8055,6 @@ mod comment_focus_render {
         );
     }
 }
-
-// --- ADR 0038 / BDR 0025 Scenarios 7-9: contextual footer + status line ---
 
 mod contextual_footer {
     use crate::i18n::set_language;
@@ -7766,6 +8123,7 @@ mod contextual_footer {
                 affordances: content.affordances,
                 focused_comment,
                 auth_error: false,
+                download: None,
                 comment_spans: content.comment_spans,
             }],
             should_quit: false,
@@ -7837,7 +8195,7 @@ mod contextual_footer {
         }
     }
 
-    // AC1/Scenario 7: browsing mode shows the browse hint.
+    // browsing mode shows the browse hint.
     #[test]
     fn detail_footer_browsing_mode_shows_browse_hint() {
         let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -7871,7 +8229,7 @@ mod contextual_footer {
         );
     }
 
-    // (issue 0068 TUI slice) the Detail browsing hint exposes the 'a assignee'
+    // The Detail browsing hint exposes the 'a assignee'
     // affordance. Checked against the pure hint string rather than the width-80
     // render above: the hint already exceeds 80 columns before this token, so a
     // fixed-width render clips it the same way it already clips the trailing
@@ -7900,6 +8258,7 @@ mod contextual_footer {
             affordances: vec![],
             focused_comment: None,
             auth_error: false,
+            download: None,
             comment_spans: vec![],
         };
         let hint = hint_for_screen(&screen);
@@ -7910,7 +8269,7 @@ mod contextual_footer {
         );
     }
 
-    // AC4 (issue 0067 TUI slice): while the log-time modal is open, the footer shows
+    // While the log-time modal is open, the footer shows
     // the browse hint — the modal owns its own hint (one-home rule, mirrors compose).
     #[test]
     fn detail_footer_logging_time_mode_shows_browse_hint() {
@@ -7935,7 +8294,7 @@ mod contextual_footer {
         );
     }
 
-    // (issue 0068 TUI slice) while the estimate-edit modal is open, the footer shows
+    // While the estimate-edit modal is open, the footer shows
     // the browse hint — the modal owns its own hint (one-home rule, mirrors log time).
     #[test]
     fn detail_footer_estimate_edit_mode_shows_browse_hint() {
@@ -7963,7 +8322,7 @@ mod contextual_footer {
         );
     }
 
-    // (issue 0068 TUI slice) while the status-confirm modal is open, the footer shows
+    // While the status-confirm modal is open, the footer shows
     // the browse hint — the modal owns its own hint (one-home rule, mirrors estimate).
     #[test]
     fn detail_footer_status_confirm_mode_shows_browse_hint() {
@@ -7991,7 +8350,7 @@ mod contextual_footer {
         );
     }
 
-    // (issue 0068 TUI slice) while the assignee-picker modal is open, the footer shows
+    // While the assignee-picker modal is open, the footer shows
     // the browse hint — the modal owns its own hint (one-home rule, mirrors status).
     #[test]
     fn detail_footer_assignee_picker_mode_shows_browse_hint() {
@@ -8017,7 +8376,7 @@ mod contextual_footer {
         );
     }
 
-    // AC6 (ADR 0039 §5): while compose modal is open, the footer shows the browse
+    // While compose modal is open, the footer shows the browse
     // hint — the modal owns the compose hint/status (one-home rule).
     // Ctrl+S/Esc hint appears inside the modal box, NOT in the footer.
     #[test]
@@ -8043,7 +8402,7 @@ mod contextual_footer {
         );
     }
 
-    // AC1/Scenario 7: confirm-delete modal shows buttons inside the box (ADR 0039 §5).
+    // Confirm-delete modal shows buttons inside the box.
     // The modal owns its confirm buttons; the footer shows the browse hint behind the dim.
     #[test]
     fn detail_footer_confirm_delete_mode_shows_confirm_hint() {
@@ -8058,7 +8417,7 @@ mod contextual_footer {
         );
         set_language("en");
         let content = buf_to_string(&buf);
-        // The confirm buttons render INSIDE the modal box (one-home rule, ADR 0039 §5).
+        // The confirm buttons render INSIDE the modal box (one-home rule).
         assert!(
             content.contains("Yes") || content.contains("Sim"),
             "confirm button [Yes/Sim] must appear inside the modal box: {content}"
@@ -8067,14 +8426,14 @@ mod contextual_footer {
             content.contains("No") || content.contains("N\u{00e3}o"),
             "cancel button [No/Não] must appear inside the modal box: {content}"
         );
-        // Per ADR 0039 §5 the footer shows the browse hint while the modal is open.
+        // The footer shows the browse hint while the modal is open.
         assert!(
             content.contains("j/k move"),
-            "footer must show browse hint 'j/k move' while confirm modal is open (ADR 0039 §5): {content}"
+            "footer must show browse hint 'j/k move' while confirm modal is open: {content}"
         );
     }
 
-    // AC1/Scenario 7: own-comment-focused mode shows the own-focused hint.
+    // own-comment-focused mode shows the own-focused hint.
     #[test]
     fn detail_footer_own_comment_focused_shows_own_focused_hint() {
         let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -8097,7 +8456,7 @@ mod contextual_footer {
         );
     }
 
-    // AC1: focused on OTHER user's comment → browsing hint (not own-focused).
+    // focused on OTHER user's comment → browsing hint (not own-focused).
     #[test]
     fn detail_footer_other_comment_focused_shows_browse_hint() {
         let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -8116,7 +8475,7 @@ mod contextual_footer {
         );
     }
 
-    // AC6 (ADR 0039 §5): modal open vs browse produce different render output.
+    // Modal open vs browse produce different render output.
     // Browse shows j/k move, modal frame adds the compose overlay (Ctrl+S in modal).
     #[test]
     fn detail_footer_hint_switches_when_mode_changes() {
@@ -8147,7 +8506,7 @@ mod contextual_footer {
         );
     }
 
-    // AC4 (ADR 0039 §5, Scenario 4): 'Enviando…' appears in the compose modal hint
+    // 'Enviando…' appears in the compose modal hint
     // when Submitting (rendered by view() which includes the modal overlay).
     #[test]
     fn detail_footer_status_row_shows_enviando_when_submitting() {
@@ -8168,7 +8527,7 @@ mod contextual_footer {
         );
     }
 
-    // AC4 (ADR 0039 §5): localized error appears in the compose modal when Error.
+    // Localized error appears in the compose modal when Error.
     #[test]
     fn detail_footer_status_row_shows_error_when_compose_error() {
         let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -8188,7 +8547,7 @@ mod contextual_footer {
         );
     }
 
-    // AC2/Scenario 8: status row shows 'Copiado ✓' when copied_feedback is set.
+    // status row shows 'Copiado ✓' when copied_feedback is set.
     #[test]
     fn detail_footer_status_row_shows_copiado_when_copied_feedback() {
         let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -8202,7 +8561,7 @@ mod contextual_footer {
         );
     }
 
-    // AC2/Scenario 8: status row is blank when idle (no compose, no copied_feedback).
+    // status row is blank when idle (no compose, no copied_feedback).
     #[test]
     fn detail_footer_status_row_is_blank_when_idle() {
         let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -8226,8 +8585,8 @@ mod contextual_footer {
         );
     }
 
-    // AC4: FooterPlan height accounts for status row when status is present.
-    // AC4 (ADR 0039 §5): compose status lives in the modal, not the footer.
+    // FooterPlan height accounts for status row when status is present.
+    // Compose status lives in the modal, not the footer.
     // When Submitting, 'Enviando…' appears inside the modal box; the footer
     // shows the browse hint (footer height is unchanged by compose status).
     #[test]
@@ -8255,7 +8614,7 @@ mod contextual_footer {
         );
     }
 
-    // AC4: render at MIN_HEIGHT (6) with a status string does not panic.
+    // render at MIN_HEIGHT (6) with a status string does not panic.
     #[test]
     fn detail_footer_at_min_height_with_status_does_not_panic() {
         let task = json!({"name": "T", "id": 1, "project_id": 1, "is_completed": false});
@@ -8278,6 +8637,7 @@ mod contextual_footer {
                 affordances: vec![],
                 focused_comment: None,
                 auth_error: false,
+                download: None,
                 comment_spans: vec![],
             }],
             should_quit: false,
@@ -8302,7 +8662,7 @@ mod contextual_footer {
         );
     }
 
-    // AC5: pt-BR translations are present in the catalog.
+    // pt-BR translations are present in the catalog.
     #[test]
     fn pt_br_catalog_has_contextual_footer_keys() {
         let raw = include_str!("../../locales/pt_BR.json");
@@ -8318,13 +8678,6 @@ mod contextual_footer {
         );
         assert_eq!(
             catalog
-                .get("Enter/click confirm · Esc cancel")
-                .map(String::as_str),
-            Some("Enter/clique confirmar · Esc cancelar"),
-            "pt_BR must have confirm-delete hint"
-        );
-        assert_eq!(
-            catalog
                 .get("↑/↓ · j/k move · Ctrl+click edit/delete · c new")
                 .map(String::as_str),
             Some("↑/↓ · j/k mover · Ctrl+clique editar/excluir · c novo"),
@@ -8337,7 +8690,7 @@ mod contextual_footer {
         );
     }
 
-    // AC5: all new footer/status strings resolve through i18n::t() in pt-BR.
+    // all new footer/status strings resolve through i18n::t() in pt-BR.
     #[test]
     fn detail_footer_pt_br_browsing_hint_shows_portuguese() {
         let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -8355,8 +8708,6 @@ mod contextual_footer {
         );
     }
 }
-
-// --- Confirm-delete modal overlay (ADR 0039 slice 2) ---
 
 mod confirm_modal_render {
     use crate::i18n::set_language;
@@ -8418,6 +8769,7 @@ mod confirm_modal_render {
                 affordances: content.affordances,
                 focused_comment: None,
                 auth_error: false,
+                download: None,
                 comment_spans: content.comment_spans,
             }],
             should_quit: false,
@@ -8438,7 +8790,7 @@ mod confirm_modal_render {
         terminal.backend().buffer().clone()
     }
 
-    // AC1: when confirm_delete is Some, the modal renders with DIM backdrop and
+    // when confirm_delete is Some, the modal renders with DIM backdrop and
     // the title "Delete comment?" (or pt-BR equivalent).
     #[test]
     fn confirm_modal_renders_dim_backdrop_and_title() {
@@ -8465,7 +8817,7 @@ mod confirm_modal_render {
         );
     }
 
-    // AC1 (pt-BR): confirm modal title is translated.
+    // confirm modal title is translated.
     #[test]
     fn confirm_modal_title_translates_to_pt_br() {
         let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -8479,7 +8831,7 @@ mod confirm_modal_render {
         );
     }
 
-    // AC1: when confirm_delete is None, the modal is absent (no DIM backdrop).
+    // when confirm_delete is None, the modal is absent (no DIM backdrop).
     #[test]
     fn no_confirm_modal_when_confirm_delete_none() {
         let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -8505,7 +8857,7 @@ mod confirm_modal_render {
         );
     }
 
-    // AC2: the confirm-modal buttons [Sim]/[Não] appear in the MODAL overlay (ADR 0041),
+    // The confirm-modal buttons [Sim]/[Não] appear in the MODAL overlay,
     // not spliced inline into the comment card. The buttons are visible in the buffer (in the
     // modal), but the comment card body lines do NOT carry them as inline affordance tokens.
     #[test]
@@ -8529,7 +8881,7 @@ mod confirm_modal_render {
         );
     }
 
-    // AC2 (footer one-home): footer does NOT show the confirm hint when modal is open.
+    // footer does NOT show the confirm hint when modal is open.
     #[test]
     fn footer_does_not_show_confirm_hint_when_modal_open() {
         let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -8547,7 +8899,7 @@ mod confirm_modal_render {
         );
     }
 
-    // AC1: confirm modal shows [Yes]/[No] button labels (ADR 0041) inside the modal.
+    // Confirm modal shows [Yes]/[No] button labels inside the modal.
     #[test]
     fn confirm_modal_shows_button_labels() {
         let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -8564,8 +8916,6 @@ mod confirm_modal_render {
         );
     }
 }
-
-// ── AC1/AC2: Affordance color cells in TestBackend (ADR 0041) ────────────────
 
 /// Build `DetailContent` for a single own comment and render it through
 /// `draw_detail` into a `TestBackend` buffer of the given dimensions.
@@ -8625,7 +8975,7 @@ fn build_and_render_detail_with_own_comment(
     (terminal.backend().buffer().clone(), content)
 }
 
-// AC1: On an own comment rendered to TestBackend, [editar] cells carry
+// On an own comment rendered to TestBackend, [editar] cells carry
 // edit_affordance_style's fg + UNDERLINED.
 //
 // The block rendered in the test frame has its left outer border at x=0, so the
@@ -8676,7 +9026,7 @@ fn own_comment_editar_cells_carry_edit_affordance_style() {
     );
 }
 
-// AC2: On an own comment rendered to TestBackend, [excluir] cells carry
+// On an own comment rendered to TestBackend, [excluir] cells carry
 // delete_affordance_style's fg + UNDERLINED.
 #[test]
 fn own_comment_excluir_cells_carry_delete_affordance_style() {
@@ -8720,7 +9070,7 @@ fn own_comment_excluir_cells_carry_delete_affordance_style() {
     );
 }
 
-// AC4 (regression): Ctrl+click on the styled [editar] cell still opens compose-edit
+// Ctrl+click on the styled [editar] cell still opens compose-edit
 // via the real update() path; a plain click does not.
 #[test]
 fn ctrl_click_on_editar_cell_opens_compose_edit_regression() {
@@ -8801,6 +9151,7 @@ fn ctrl_click_on_editar_cell_opens_compose_edit_regression() {
             affordances: content.affordances.clone(),
             focused_comment: None,
             auth_error: false,
+            download: None,
             comment_spans: content.comment_spans.clone(),
         }],
         should_quit: false,
@@ -8898,6 +9249,7 @@ mod auth_error_render {
                 affordances: content.affordances,
                 focused_comment: None,
                 auth_error,
+                download: None,
                 comment_spans: content.comment_spans,
             }],
             should_quit: false,
@@ -8937,7 +9289,7 @@ mod auth_error_render {
         make_detail_model(false, DetailOverlay::None)
     }
 
-    // AC1: A 401 detail-load sets auth_error on the model and the rendered status
+    // A 401 detail-load sets auth_error on the model and the rendered status
     // line shows the re-auth message.
     #[test]
     fn detail_load_401_sets_auth_error_and_renders_reauth_message() {
@@ -8960,7 +9312,7 @@ mod auth_error_render {
         );
     }
 
-    // AC1 (negation): A 200 detail-load does not set auth_error.
+    // A 200 detail-load does not set auth_error.
     #[test]
     fn detail_load_200_does_not_set_auth_error() {
         let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -8978,7 +9330,7 @@ mod auth_error_render {
         );
     }
 
-    // AC2: Msg::AuthExpired sets auth_error and retains the compose editor content.
+    // Msg::AuthExpired sets auth_error and retains the compose editor content.
     #[test]
     fn auth_expired_sets_auth_error_retains_compose_editor() {
         let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -9011,7 +9363,7 @@ mod auth_error_render {
         }
     }
 
-    // AC2: After AuthExpired, the rendered status line shows the re-auth message,
+    // After AuthExpired, the rendered status line shows the re-auth message,
     // which is distinct from the generic write-error copy.
     #[test]
     fn auth_expired_renders_reauth_message_not_generic_error() {
@@ -9030,7 +9382,7 @@ mod auth_error_render {
         );
     }
 
-    // AC3: A subsequent 200 detail load clears auth_error.
+    // A subsequent 200 detail load clears auth_error.
     #[test]
     fn subsequent_200_load_clears_auth_error() {
         let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -9062,7 +9414,7 @@ mod auth_error_render {
         );
     }
 
-    // AC4: Under pt-BR locale the status line renders the pt-BR translation.
+    // Under pt-BR locale the status line renders the pt-BR translation.
     #[test]
     fn auth_error_renders_pt_br_translation() {
         let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -9081,7 +9433,7 @@ mod auth_error_render {
         );
     }
 
-    // AC4 (identity key check): The English key matches identity — i18n::t returns
+    // identity key check: The English key matches identity — i18n::t returns
     // the source string unchanged when the locale is English.
     #[test]
     fn auth_error_english_key_is_identity() {
@@ -9129,8 +9481,6 @@ mod auth_error_render {
     }
 }
 
-// --- AC1 (issue 0045): build_detail_content emits OpenAsset affordances structurally ---
-//
 // These tests assert the emitted `DetailContent.affordances` payload from
 // `build_detail_content`, not a re-implementation of the geometry.
 mod open_asset_affordance_emission {
@@ -9159,7 +9509,7 @@ mod open_asset_affordance_emission {
         })
     }
 
-    // AC1-a: every NON-IMAGE asset content row carries an OpenAsset affordance with the
+    // every NON-IMAGE asset content row carries an OpenAsset affordance with the
     // asset's exact url. Both assets here are non-image extensions; image classification
     // (which instead emits ViewImage) is covered by the image_affordance_classification
     // module below.
@@ -9194,7 +9544,7 @@ mod open_asset_affordance_emission {
         );
     }
 
-    // AC1-b: non-asset rows (header, separator, pad, hint) carry NO OpenAsset span.
+    // non-asset rows (header, separator, pad, hint) carry NO OpenAsset span.
     // With one short-label asset the section is: [header, pad, Asset, sep, hint, pad].
     // Only the Asset row must have an OpenAsset affordance.
     #[test]
@@ -9253,7 +9603,7 @@ mod open_asset_affordance_emission {
         }
     }
 
-    // AC1-c: a wrapped asset (label longer than content_width) produces multiple Asset rows
+    // a wrapped asset (label longer than content_width) produces multiple Asset rows
     // in the layout, each carrying an OpenAsset affordance with the SAME url.
     // Width 40 → inner_width 38. The prefix "[1] ↗ " is ~8 display cols; a 35+ char label wraps.
     #[test]
@@ -9291,7 +9641,7 @@ mod open_asset_affordance_emission {
         }
     }
 
-    // AC1-d: task with no attachments must produce zero OpenAsset affordances.
+    // task with no attachments must produce zero OpenAsset affordances.
     #[test]
     fn task_without_assets_produces_no_open_asset_affordances() {
         let task = json!({
@@ -9311,8 +9661,6 @@ mod open_asset_affordance_emission {
     }
 }
 
-// --- AC1 (ek-0046 / ADR 0043): build_detail_content emits OpenUrl affordances structurally ---
-//
 // Buffer-derived tests: the DetailContent payload from build_detail_content is the
 // source of truth for hit-targets. Each test is derived from an AC/BDR scenario.
 mod open_url_affordance_emission {
@@ -9320,7 +9668,7 @@ mod open_url_affordance_emission {
     use serde_json::json;
     use std::collections::HashMap;
 
-    // AC1 (buffer-derived): an HTTP URL in the body emits one OpenUrl affordance
+    // an HTTP URL in the body emits one OpenUrl affordance
     // with the complete, unmodified URL. col_start is >= BODY_LEFT_CHROME_COLS
     // (inside the content area, not on the border or padding).
     #[test]
@@ -9353,7 +9701,7 @@ mod open_url_affordance_emission {
         );
     }
 
-    // AC1 (buffer-derived, multi-fragment): a URL that hard-wraps across two lines
+    // a URL that hard-wraps across two lines
     // emits two OpenUrl affordances, BOTH carrying the COMPLETE URL.
     // Uses inner_width=40 → content_width=36; "[URL]" of 39 chars wraps at 36.
     #[test]
@@ -9397,7 +9745,7 @@ mod open_url_affordance_emission {
         );
     }
 
-    // AC4 / OBS-35 (buffer-derived): clicking on the LAST fragment of a hard-wrapped URL
+    // clicking on the LAST fragment of a hard-wrapped URL
     // (where frag0 fills exactly content_width columns) carries the COMPLETE URL.
     // Regression guard for the old inverse-wrap over-join bug.
     #[test]
@@ -9426,7 +9774,7 @@ mod open_url_affordance_emission {
         assert_eq!(
             url_affs.len(),
             2,
-            "OBS-35 URL must emit two affordances (not one over-joined or three): {:?}",
+            "a wrapped URL must emit two affordances (not one over-joined or three): {:?}",
             content.affordances
         );
 
@@ -9436,14 +9784,14 @@ mod open_url_affordance_emission {
             };
             assert_eq!(
                 stored_url, url,
-                "OBS-35: both fragment affordances must carry the complete URL; \
+                "both fragment affordances must carry the complete URL; \
                  got {stored_url:?} at line {}, cols [{}, {})",
                 aff.line_idx, aff.col_start, aff.col_end
             );
         }
     }
 
-    // AC5 (buffer-derived): an email anchor emits OpenUrl("mailto:...") — not
+    // an email anchor emits OpenUrl("mailto:...") — not
     // a plain HTTP URL and not empty.
     #[test]
     fn email_anchor_in_body_emits_mailto_open_url_affordance() {
@@ -9468,7 +9816,7 @@ mod open_url_affordance_emission {
         );
     }
 
-    // AC5 / CC (buffer-derived): a non-URL bracketed token produces NO OpenUrl affordance.
+    // a non-URL bracketed token produces NO OpenUrl affordance.
     // Negative test — asserts the filter works and non-openable tokens are excluded.
     #[test]
     fn non_url_bracket_text_in_body_emits_no_open_url_affordance() {
@@ -9492,9 +9840,7 @@ mod open_url_affordance_emission {
     }
 }
 
-// ── Image viewer overlay render tests (ADR 0065 slice 0058a) ─────────────────
-//
-// Loading/Error draw a placeholder (real ratatui-image render lands in slice 0059).
+// Loading/Error draw a placeholder (real ratatui-image render is not wired yet).
 // Sized to the near-full detail content area, NOT render_modal's ~70% box.
 
 mod image_viewer_render {
@@ -9531,6 +9877,7 @@ mod image_viewer_render {
                 affordances: vec![],
                 focused_comment: None,
                 auth_error: false,
+                download: None,
                 comment_spans: vec![],
             }],
             should_quit: false,
@@ -9617,7 +9964,7 @@ mod image_viewer_render {
         );
     }
 
-    // A3: the dim backdrop (Modifier::DIM, ADR 0039) is present while the viewer is open.
+    // A3: the dim backdrop (Modifier::DIM) is present while the viewer is open.
     #[test]
     fn open_viewer_backdrop_carries_dim_modifier() {
         let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
@@ -9707,7 +10054,7 @@ mod image_viewer_render {
     }
 }
 
-// --- ADR 0065 slice 0058b: image-asset classification, ViewImage affordance
+// --- image-asset classification, ViewImage affordance
 // emission, and hit-test resolve ---
 
 // B1: is_image_filename accepts the raster set (case-insensitive) and rejects
@@ -9758,7 +10105,7 @@ mod image_filename_classification {
 }
 
 // B2: an image asset row emits AffordanceKind::ViewImage; a non-image asset row
-// keeps its OpenAsset external-open affordance (ADR 0065 §1 default).
+// keeps its OpenAsset external-open affordance (the default for a non-image asset).
 mod view_image_affordance_emission {
     use crate::render::{build_detail_content, AffordanceKind};
     use serde_json::json;
@@ -9922,6 +10269,7 @@ mod view_image_hit_test_resolve {
                 }],
                 focused_comment: None,
                 auth_error: false,
+                download: None,
                 comment_spans: vec![],
             }],
             should_quit: false,
@@ -9961,7 +10309,7 @@ mod view_image_hit_test_resolve {
 
     #[test]
     fn resolve_detail_click_view_image_matches_whole_row() {
-        // ADR 0029 whole-row rule: a hit anywhere on the row (not just [2,10)) resolves.
+        // Whole-row rule: a hit anywhere on the row (not just [2,10)) resolves.
         let url = "https://example.test/photo.png";
         let model = detail_model_with_view_image_affordance(url, "photo.png");
 
@@ -10187,5 +10535,809 @@ mod report_render {
         let open = render_view_text(&browse_model(Some(form())));
         assert!(open.contains("Hours report"), "{open}");
         assert_eq!(open.matches(MODAL_HINT).count(), 1, "{open}");
+    }
+}
+
+fn mine_hours_task(
+    estimate: Option<f64>,
+    logged_week: Option<f64>,
+    logged_total: Option<f64>,
+) -> TaskRow {
+    TaskRow {
+        task_id: 1,
+        task_number: 1,
+        name: "Hours Task".into(),
+        instance: "inst".into(),
+        project_id: 0,
+        due_on: Some("2025-06-17".into()),
+        project_name: None,
+        estimate,
+        logged_week,
+        logged_total,
+    }
+}
+
+#[test]
+fn mine_hours_display_card_shows_estimate_week_and_total() {
+    let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+    set_language("en");
+    let task = mine_hours_task(Some(4.0), Some(1.5), Some(7.25));
+    let content = buf_to_string(&render_tasks_to_buf(&[task], 0, 80, 10));
+    assert!(content.contains("est 4"), "{content}");
+    assert!(content.contains("week 1.5"), "{content}");
+    assert!(content.contains("total 7.25"), "{content}");
+}
+
+#[test]
+fn mine_hours_display_card_marks_unknown_values_with_a_dash() {
+    let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+    set_language("en");
+    let task = mine_hours_task(None, None, None);
+    let content = buf_to_string(&render_tasks_to_buf(&[task], 0, 80, 10));
+    assert!(content.contains("est –"), "{content}");
+    assert!(content.contains("week –"), "{content}");
+    assert!(content.contains("total –"), "{content}");
+}
+
+#[test]
+fn mine_hours_display_card_labels_are_translated_in_pt_br() {
+    let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+    set_language("pt_BR");
+    let task = mine_hours_task(Some(4.0), Some(1.5), Some(7.25));
+    let content = buf_to_string(&render_tasks_to_buf(&[task], 0, 80, 10));
+    set_language("en");
+    assert!(content.contains("est 4"), "{content}");
+    assert!(content.contains("semana 1.5"), "{content}");
+    assert!(content.contains("total 7.25"), "{content}");
+}
+
+#[test]
+fn mine_hours_display_card_keeps_name_and_due_text_at_40_and_120_columns() {
+    let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+    set_language("en");
+    let (due_text, _) = crate::tui::model::relative_due(Some("2025-06-17"), today_fixed());
+    for width in [40u16, 120] {
+        let task = mine_hours_task(Some(4.0), Some(1.5), Some(7.25));
+        let content = buf_to_string(&render_tasks_to_buf(&[task], 0, width, 10));
+        assert!(
+            content.contains("#1 Hours Task"),
+            "width {width}: {content}"
+        );
+        assert!(content.contains(&due_text), "width {width}: {content}");
+    }
+}
+
+#[test]
+fn mine_hours_display_card_is_five_rows_tall() {
+    let task = mine_hours_task(Some(4.0), None, None);
+    let backend = TestBackend::new(80, 10);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut targets: Vec<crate::tui::model::ClickTarget> = vec![];
+    terminal
+        .draw(|frame| {
+            draw_tasks(
+                frame,
+                Rect::new(0, 0, 80, 10),
+                "Project A",
+                &[task],
+                0,
+                false,
+                false,
+                today_fixed(),
+                &mut targets,
+                &[],
+                &[],
+                usize::MAX,
+                None,
+            );
+        })
+        .unwrap();
+    assert_eq!(targets[0].y_end - targets[0].y_start, 5);
+}
+
+mod mine_bucket_drawing {
+    use super::{buf_to_string, set_language, LANG_MUTEX};
+    use crate::render::MineTableRow;
+    use crate::tui::model::{init_mine_on, update, Header, Model, Msg, Screen};
+    use crate::tui::screens::draw_tasks;
+    use crate::tui::task_layout::inner_w;
+    use crate::tui::view::view;
+    use crossterm::event::KeyModifiers;
+    use ratatui::{backend::TestBackend, layout::Rect, Terminal};
+
+    fn today() -> chrono::NaiveDate {
+        chrono::NaiveDate::from_ymd_opt(2026, 11, 11).unwrap()
+    }
+
+    fn row(
+        task_id: i64,
+        due_on: Option<&str>,
+        week: Option<f64>,
+        total: Option<f64>,
+    ) -> MineTableRow {
+        MineTableRow {
+            instance: "a".into(),
+            project_id: 1,
+            task_number: task_id,
+            task_id,
+            name: format!("Task {task_id}"),
+            due_on: due_on.map(str::to_owned),
+            project_name: None,
+            estimate: Some(3.0),
+            logged_week: week,
+            logged_total: total,
+        }
+    }
+
+    fn mine(rows: Vec<MineTableRow>, width: u16, height: u16) -> Model {
+        let mut model = init_mine_on(Header::from_instances(&[], None), Some(rows), today()).0;
+        model.viewport = (width, height);
+        model
+    }
+
+    fn draw(model: &mut Model, width: u16, height: u16) -> String {
+        model.reflow_tasks(inner_w(width));
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        let mut targets = vec![];
+        terminal
+            .draw(|frame| view(model, frame, &mut targets, &mut vec![]))
+            .unwrap();
+        model.set_click_targets(targets);
+        buf_to_string(terminal.backend().buffer())
+    }
+
+    fn line_with<'a>(screen: &'a str, needle: &str) -> &'a str {
+        screen
+            .lines()
+            .find(|l| l.contains(needle))
+            .unwrap_or_else(|| panic!("no line with {needle:?} in:\n{screen}"))
+    }
+
+    fn row_of(screen: &str, needle: &str) -> u16 {
+        screen
+            .lines()
+            .position(|l| l.contains(needle))
+            .unwrap_or_else(|| panic!("no line with {needle:?} in:\n{screen}")) as u16
+    }
+
+    #[test]
+    fn mine_list_bucket_headers_appear_only_for_non_empty_buckets() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let mut model = mine(
+            vec![
+                row(1, Some("2026-11-01"), None, None),
+                row(2, None, None, None),
+            ],
+            100,
+            30,
+        );
+        let screen = draw(&mut model, 100, 30);
+        assert!(screen.contains("Overdue (1)"), "{screen}");
+        assert!(screen.contains("No due date (1)"), "{screen}");
+        for absent in ["Today (", "This week (", "Later ("] {
+            assert!(!screen.contains(absent), "{absent}\n{screen}");
+        }
+    }
+
+    #[test]
+    fn mine_list_bucket_headers_show_dash_for_unknown_week_hours_then_the_sum() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let mut model = mine(vec![row(1, Some("2026-11-01"), None, Some(7.0))], 100, 30);
+        let screen = draw(&mut model, 100, 30);
+        assert!(
+            line_with(&screen, "Overdue (1)").contains("Overdue (1) · est 3 · week – · total 7"),
+            "{screen}"
+        );
+        let hours = vec![crate::commands::MineHours {
+            instance: "a".into(),
+            task_id: 1,
+            logged_week: Some(1.5),
+            logged_total: Some(7.0),
+        }];
+        model = update(model, Msg::LoadedMineHours { hours }).0;
+        let screen = draw(&mut model, 100, 30);
+        assert!(
+            line_with(&screen, "Overdue (1)").contains("Overdue (1) · est 3 · week 1.5 · total 7"),
+            "{screen}"
+        );
+    }
+
+    #[test]
+    fn mine_list_bucket_headers_use_the_portuguese_labels() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("pt_BR");
+        let mut model = mine(
+            vec![
+                row(1, Some("2026-11-01"), Some(1.0), Some(2.0)),
+                row(2, None, Some(1.0), Some(2.0)),
+            ],
+            100,
+            30,
+        );
+        let screen = draw(&mut model, 100, 30);
+        set_language("en");
+        assert!(
+            line_with(&screen, "Atrasadas (1)")
+                .contains("Atrasadas (1) · est 3 · semana 1 · total 2"),
+            "{screen}"
+        );
+        assert!(screen.contains("Sem prazo (1)"), "{screen}");
+    }
+
+    fn grouped_tasks() -> Vec<crate::tui::model::TaskRow> {
+        let model = mine(
+            vec![
+                row(1, Some("2026-11-01"), None, None),
+                row(2, None, None, None),
+            ],
+            100,
+            30,
+        );
+        match model.stack.last() {
+            Some(Screen::Tasks { tasks, .. }) => tasks.clone(),
+            _ => unreachable!("mine opens a Tasks screen"),
+        }
+    }
+
+    fn draw_grouped(
+        tasks: &[crate::tui::model::TaskRow],
+        heights: &[u16],
+        offsets: &[u32],
+        cache_width: usize,
+        width: u16,
+    ) -> (
+        String,
+        Vec<crate::tui::model::ClickTarget>,
+        Terminal<TestBackend>,
+    ) {
+        let mut terminal = Terminal::new(TestBackend::new(width, 30)).unwrap();
+        let mut targets = vec![];
+        terminal
+            .draw(|frame| {
+                draw_tasks(
+                    frame,
+                    Rect::new(0, 0, width, 30),
+                    "Proj",
+                    tasks,
+                    0,
+                    false,
+                    false,
+                    today(),
+                    &mut targets,
+                    heights,
+                    offsets,
+                    cache_width,
+                    Some(today()),
+                );
+            })
+            .unwrap();
+        let screen = buf_to_string(terminal.backend().buffer());
+        (screen, targets, terminal)
+    }
+
+    fn assert_headers_over_full_cards(
+        screen: &str,
+        targets: &[crate::tui::model::ClickTarget],
+        reference: &[crate::tui::model::ClickTarget],
+    ) {
+        let overdue = row_of(screen, "Overdue (1)");
+        let no_due = row_of(screen, "No due date (1)");
+        assert_eq!(targets.len(), 2, "{screen}");
+        assert_eq!(targets[0].y_start, overdue + 1, "{screen}");
+        assert_eq!(targets[1].y_start, no_due + 1, "{screen}");
+        for (got, want) in targets.iter().zip(reference) {
+            assert_eq!(
+                got.y_end - got.y_start,
+                want.y_end - want.y_start,
+                "{screen}"
+            );
+        }
+        assert_eq!(targets[0].y_end - targets[0].y_start, 5, "{screen}");
+    }
+
+    #[test]
+    fn mine_list_bucket_headers_keep_full_cards_without_a_fresh_height_cache() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let tasks = grouped_tasks();
+        let real_w = inner_w(100);
+        let real = crate::tui::task_layout::slot_heights(&tasks, real_w, Some(today()));
+        let prefix = |heights: &[u16]| {
+            let mut offsets = vec![0u32];
+            for h in heights {
+                offsets.push(offsets.last().unwrap() + u32::from(*h));
+            }
+            offsets
+        };
+
+        let (screen, reference, _) = draw_grouped(&tasks, &[], &[], usize::MAX, 100);
+        assert_headers_over_full_cards(&screen, &reference, &reference);
+
+        let tall: Vec<u16> = real.iter().map(|h| h + 2).collect();
+        let tall_offsets = prefix(&tall);
+        let (screen, used, _) = draw_grouped(&tasks, &tall, &tall_offsets, real_w, 100);
+        assert_eq!(used.len(), 2, "{screen}");
+        assert_eq!(used[0].y_end - used[0].y_start, 7, "{screen}");
+
+        let (screen, targets, _) = draw_grouped(&tasks, &real, &prefix(&real), real_w, 100);
+        assert_headers_over_full_cards(&screen, &targets, &reference);
+
+        let stale_heights = [tall[0]];
+        let stale_offsets = [0u32, u32::from(tall[0])];
+        let (screen, targets, _) =
+            draw_grouped(&tasks, &stale_heights, &stale_offsets, real_w, 100);
+        assert_headers_over_full_cards(&screen, &targets, &reference);
+
+        let (screen, targets, _) = draw_grouped(&tasks, &tall, &tall_offsets, real_w + 1, 100);
+        assert_headers_over_full_cards(&screen, &targets, &reference);
+
+        let (screen, targets, _) = draw_grouped(&tasks, &[], &[], real_w, 100);
+        assert_headers_over_full_cards(&screen, &targets, &reference);
+    }
+
+    #[test]
+    fn mine_list_bucket_headers_carry_the_column_header_style() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let tasks = grouped_tasks();
+        let (screen, _, terminal) = draw_grouped(&tasks, &[], &[], usize::MAX, 100);
+        let header_row = row_of(&screen, "Overdue (1)");
+        let buffer = terminal.backend().buffer();
+        let x = screen
+            .lines()
+            .nth(header_row as usize)
+            .unwrap()
+            .chars()
+            .position(|c| c == 'O')
+            .unwrap() as u16;
+        let want = crate::tui::theme::column_header_style();
+        for dx in 0.."Overdue (1)".len() as u16 {
+            let cell = &buffer[(x + dx, header_row)];
+            assert_eq!(cell.fg, want.fg.unwrap(), "col {dx}\n{screen}");
+            assert!(
+                cell.modifier.contains(ratatui::style::Modifier::BOLD),
+                "col {dx}\n{screen}"
+            );
+        }
+    }
+
+    #[test]
+    fn mine_list_bucket_headers_are_not_drawn_on_a_browse_list() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let tasks = super::make_tasks(&["First", "Second"]);
+        let mut terminal = Terminal::new(TestBackend::new(80, 20)).unwrap();
+        let mut targets = vec![];
+        terminal
+            .draw(|frame| {
+                draw_tasks(
+                    frame,
+                    Rect::new(0, 0, 80, 20),
+                    "Proj",
+                    &tasks,
+                    0,
+                    false,
+                    false,
+                    today(),
+                    &mut targets,
+                    &[],
+                    &[],
+                    usize::MAX,
+                    None,
+                );
+            })
+            .unwrap();
+        let screen = buf_to_string(terminal.backend().buffer());
+        let first_inner_row = screen.lines().nth(1).unwrap();
+        assert!(first_inner_row.contains('┌'), "{screen}");
+        assert!(!screen.contains("No due date ("), "{screen}");
+        assert_eq!(targets[0].y_start, 1);
+    }
+
+    #[test]
+    fn mine_list_bucket_layout_click_on_a_header_row_selects_nothing() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let mut model = mine(
+            vec![
+                row(1, Some("2026-11-01"), None, None),
+                row(2, None, None, None),
+            ],
+            100,
+            30,
+        );
+        let screen = draw(&mut model, 100, 30);
+        let header_row = row_of(&screen, "No due date (1)");
+        let (model, cmds) = update(
+            model,
+            Msg::Click {
+                column: 5,
+                row: header_row,
+                modifiers: KeyModifiers::NONE,
+            },
+        );
+        assert!(cmds.is_empty());
+        assert_eq!(model.stack.len(), 1);
+        assert!(matches!(
+            model.stack.last(),
+            Some(Screen::Tasks { selected: 0, .. })
+        ));
+    }
+
+    #[test]
+    fn mine_list_bucket_layout_click_on_the_card_under_a_header_opens_that_task() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let mut model = mine(
+            vec![
+                row(1, Some("2026-11-01"), None, None),
+                row(2, None, None, None),
+            ],
+            100,
+            30,
+        );
+        let screen = draw(&mut model, 100, 30);
+        let card_row = row_of(&screen, "Task 2");
+        let (model, cmds) = update(
+            model,
+            Msg::Click {
+                column: 5,
+                row: card_row,
+                modifiers: KeyModifiers::NONE,
+            },
+        );
+        assert_eq!(cmds.len(), 1, "Detail load must be requested");
+        assert!(matches!(
+            model.stack.last(),
+            Some(Screen::Detail { task_id: 2, .. })
+        ));
+    }
+}
+
+mod detail_download_footer {
+    use crate::i18n::set_language;
+    use crate::render::build_detail_content;
+    use crate::tui::model::{DetailOverlay, DownloadOutcome, DownloadState, Header, Model, Screen};
+    use crate::tui::view::view;
+    use ratatui::{backend::TestBackend, Terminal};
+    use serde_json::json;
+    use std::collections::HashMap;
+
+    fn detail(download: Option<DownloadState>, auth_error: bool, copied: bool) -> Model {
+        let task = json!({"name": "T", "id": 1, "project_id": 1, "is_completed": false});
+        let content = build_detail_content(&task, &[], &HashMap::new(), 78, None);
+        Model {
+            stack: vec![Screen::Detail {
+                instance: "inst".into(),
+                project_id: 1,
+                task_id: 1,
+                task,
+                comments: vec![],
+                user_map: HashMap::new(),
+                lines: content.lines,
+                line_styles: content.line_styles,
+                assets: vec![],
+                offset: 0,
+                loading: false,
+                rendered_width: 80,
+                overlay: DetailOverlay::None,
+                current_user_id: None,
+                affordances: content.affordances,
+                focused_comment: None,
+                auth_error,
+                download,
+                comment_spans: content.comment_spans,
+            }],
+            should_quit: false,
+            header: Header::from_instances(&[], None),
+            viewport: (0, 0),
+            click_targets: vec![],
+            modal_button_targets: vec![],
+            last_loaded: None,
+            selection: None,
+            copied_feedback: copied,
+            report: None,
+        }
+    }
+
+    fn screen_text(model: &Model) -> String {
+        let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+        terminal
+            .draw(|frame| view(model, frame, &mut vec![], &mut vec![]))
+            .unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let area = buf.area();
+        (0..area.height)
+            .map(|y| {
+                (0..area.width)
+                    .map(|x| buf.cell((x, y)).unwrap().symbol().to_string())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn rendered(download: Option<DownloadState>, auth_error: bool, copied: bool) -> String {
+        let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        screen_text(&detail(download, auth_error, copied))
+    }
+
+    fn done(saved: usize, total: usize) -> Option<DownloadState> {
+        Some(DownloadState::Finished(DownloadOutcome::Done {
+            saved,
+            total,
+            dir: "/h/dl".into(),
+        }))
+    }
+
+    #[test]
+    fn detail_download_footer_shows_running() {
+        let text = rendered(Some(DownloadState::Running), false, false);
+        assert!(text.contains("Downloading attachments…"), "{text}");
+    }
+
+    #[test]
+    fn detail_download_footer_shows_all_saved() {
+        let text = rendered(done(2, 2), false, false);
+        assert!(
+            text.contains("Downloaded 2 of 2 attachment(s) to /h/dl"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn detail_download_footer_shows_the_whole_tilde_destination_at_80_columns() {
+        let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let model = detail(
+            Some(DownloadState::Finished(DownloadOutcome::Done {
+                saved: 2,
+                total: 2,
+                dir: "~/Downloads/ac-attachments/665-75159".into(),
+            })),
+            false,
+            false,
+        );
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal
+            .draw(|frame| view(&model, frame, &mut vec![], &mut vec![]))
+            .unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let text = (0..buf.area().height)
+            .map(|y| {
+                (0..buf.area().width)
+                    .map(|x| buf.cell((x, y)).unwrap().symbol().to_string())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            text.contains(
+                "Downloaded 2 of 2 attachment(s) to ~/Downloads/ac-attachments/665-75159"
+            ),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn detail_download_footer_shows_a_directory_outside_home_unchanged() {
+        let text = rendered(done(2, 2), false, false);
+        assert!(text.contains("to /h/dl"), "{text}");
+    }
+
+    #[test]
+    fn detail_download_footer_shows_partial_save() {
+        let text = rendered(done(1, 2), false, false);
+        assert!(
+            text.contains("Downloaded 1 of 2 attachment(s) to /h/dl"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn detail_download_footer_shows_the_failure() {
+        let failed = Some(DownloadState::Finished(DownloadOutcome::Failed(
+            "disk full".into(),
+        )));
+        let text = rendered(failed, false, false);
+        assert!(text.contains("disk full"), "{text}");
+    }
+
+    #[test]
+    fn detail_download_footer_shows_the_no_attachments_note() {
+        let text = rendered(Some(DownloadState::NoAttachments), false, false);
+        assert!(text.contains("No attachments to download"), "{text}");
+    }
+
+    #[test]
+    fn detail_download_footer_auth_error_wins() {
+        let text = rendered(done(2, 2), true, false);
+        assert!(text.contains("Token invalid or revoked"), "{text}");
+        assert!(!text.contains("Downloaded 2 of 2"), "{text}");
+    }
+
+    #[test]
+    fn detail_download_footer_outcome_wins_over_the_copied_note() {
+        let text = rendered(done(2, 2), false, true);
+        assert!(text.contains("Downloaded 2 of 2 attachment(s)"), "{text}");
+        assert!(!text.contains("Copiado ✓"), "{text}");
+    }
+
+    #[test]
+    fn detail_download_footer_hint_names_the_key() {
+        let text = rendered(None, false, false);
+        assert!(text.contains("D download"), "{text}");
+    }
+
+    #[test]
+    fn detail_download_footer_is_translated_in_pt_br() {
+        let _guard = super::LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        let shown = |download| {
+            set_language("pt_BR");
+            let text = screen_text(&detail(download, false, false));
+            set_language("en");
+            text
+        };
+        assert!(
+            shown(Some(DownloadState::Running)).contains("Baixando anexos…"),
+            "running"
+        );
+        assert!(
+            shown(done(1, 2)).contains("1 de 2 anexo(s) baixado(s) em /h/dl"),
+            "done"
+        );
+        assert!(
+            shown(Some(DownloadState::NoAttachments)).contains("Nenhum anexo para baixar"),
+            "no attachments"
+        );
+        assert!(shown(None).contains("D baixar"), "hint");
+        set_language("pt_BR");
+        let translated = crate::i18n::t("Could not find the home directory");
+        set_language("en");
+        assert_ne!(translated, "Could not find the home directory");
+    }
+}
+
+mod detail_overlay_render {
+    use super::LANG_MUTEX;
+    use crate::i18n::set_language;
+    use crate::tui::detail_geometry::Selection;
+    use crate::tui::model::{
+        DetailOverlay, EditStatus, Header, ImageAssetRef, ImageStatus, Model, Screen,
+    };
+    use crate::tui::view::view;
+    use ratatui::{backend::TestBackend, buffer::Buffer, style::Modifier, Terminal};
+    use serde_json::Value;
+    use std::collections::HashMap;
+
+    const WIDTH: u16 = 80;
+    const HEIGHT: u16 = 24;
+
+    fn detail_with(overlay: DetailOverlay, selection: Option<Selection>) -> Model {
+        Model {
+            stack: vec![Screen::Detail {
+                instance: "inst".into(),
+                project_id: 1,
+                task_id: 42,
+                task: Value::Null,
+                comments: vec![],
+                user_map: HashMap::new(),
+                lines: vec!["body text".into()],
+                line_styles: vec![],
+                assets: vec![],
+                offset: 0,
+                loading: false,
+                rendered_width: usize::MAX,
+                overlay,
+                current_user_id: None,
+                affordances: vec![],
+                focused_comment: None,
+                auth_error: false,
+                download: None,
+                comment_spans: vec![],
+            }],
+            should_quit: false,
+            header: Header::from_instances(&[], None),
+            viewport: (WIDTH, HEIGHT),
+            click_targets: vec![],
+            modal_button_targets: vec![],
+            last_loaded: None,
+            selection,
+            copied_feedback: false,
+            report: None,
+        }
+    }
+
+    fn render(model: &Model) -> Buffer {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let mut terminal = Terminal::new(TestBackend::new(WIDTH, HEIGHT)).unwrap();
+        terminal
+            .draw(|frame| view(model, frame, &mut vec![], &mut vec![]))
+            .unwrap();
+        terminal.backend().buffer().clone()
+    }
+
+    fn row_text(buf: &Buffer, y: u16) -> String {
+        (0..WIDTH)
+            .map(|x| buf.cell((x, y)).unwrap().symbol())
+            .collect()
+    }
+
+    fn select_whole_frame() -> Option<Selection> {
+        Some(Selection {
+            anchor: (0, 0),
+            cursor: (HEIGHT - 1, WIDTH - 1),
+        })
+    }
+
+    fn is_reversed(buf: &Buffer, x: u16, y: u16) -> bool {
+        buf.cell((x, y))
+            .unwrap()
+            .style()
+            .add_modifier
+            .contains(Modifier::REVERSED)
+    }
+
+    #[test]
+    fn detail_overlay_modal_cells_show_the_modal_not_the_selection_highlight() {
+        let modal = DetailOverlay::StatusConfirm {
+            completed_target: true,
+            status: EditStatus::Editing,
+        };
+        let buf = render(&detail_with(modal, select_whole_frame()));
+
+        let title_row = (0..HEIGHT)
+            .find(|&y| row_text(&buf, y).contains("Change status"))
+            .expect("the status modal title is drawn");
+        let row = row_text(&buf, title_row);
+        let title_byte = row.find("Change status").expect("title column");
+        let title_col = row[..title_byte].chars().count() as u16;
+        assert!(
+            !is_reversed(&buf, title_col, title_row),
+            "the modal title must not carry the selection highlight"
+        );
+        assert!(
+            is_reversed(&buf, 0, 0),
+            "cells outside the modal keep the selection highlight"
+        );
+    }
+
+    #[test]
+    fn detail_overlay_image_viewer_stays_inside_the_content_area() {
+        let viewer = DetailOverlay::ImageViewer {
+            asset: ImageAssetRef {
+                url: "https://example.test/photo.png".into(),
+                label: "photo.png".into(),
+            },
+            status: ImageStatus::Loading,
+        };
+        let buf = render(&detail_with(viewer, None));
+
+        let box_chars = ['┌', '┐', '└', '┘', '│', '─'];
+        let has_box = |y: u16| row_text(&buf, y).chars().any(|c| box_chars.contains(&c));
+        let top_edge = row_text(&buf, 1);
+        let bottom_edge = row_text(&buf, 21);
+        assert!(!has_box(0), "header row stays untouched");
+        assert!(!has_box(22), "footer row stays untouched");
+        assert!(
+            top_edge.starts_with('┌') && !top_edge.contains("photo.png"),
+            "the content frame's top edge stays visible above the viewer: {top_edge}"
+        );
+        assert!(
+            bottom_edge.starts_with('└'),
+            "the content frame's bottom edge stays visible below the viewer: {bottom_edge}"
+        );
+        assert!(
+            row_text(&buf, 2).starts_with("│┌ photo.png"),
+            "viewer top border sits one row inside the content frame"
+        );
+        assert!(
+            row_text(&buf, 20).starts_with("│└"),
+            "viewer bottom border sits one row inside the content frame"
+        );
     }
 }

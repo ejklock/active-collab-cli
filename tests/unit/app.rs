@@ -16,6 +16,7 @@ fn tasks_model_for_reflow(tasks: Vec<TaskRow>) -> Model {
             card_heights: vec![],
             card_offsets: vec![],
             rendered_width: usize::MAX,
+            due_today: None,
         }],
         should_quit: false,
         header: empty_header(),
@@ -47,6 +48,9 @@ fn make_groups(count: usize) -> Vec<ProjectGroup> {
                 project_id: i as i64,
                 due_on: None,
                 project_name: None,
+                estimate: None,
+                logged_week: None,
+                logged_total: None,
             }],
         })
         .collect()
@@ -62,6 +66,9 @@ fn make_tasks(count: usize) -> Vec<TaskRow> {
             project_id: 0,
             due_on: None,
             project_name: None,
+            estimate: None,
+            logged_week: None,
+            logged_total: None,
         })
         .collect()
 }
@@ -104,6 +111,7 @@ fn tasks_model(count: usize) -> Model {
                 card_heights: vec![],
                 card_offsets: vec![],
                 rendered_width: usize::MAX,
+                due_today: None,
             },
         ],
         should_quit: false,
@@ -356,6 +364,7 @@ fn empty_list_navigation_never_panics_or_quits_tasks() {
                 card_heights: vec![],
                 card_offsets: vec![],
                 rendered_width: usize::MAX,
+                due_today: None,
             },
         ],
         should_quit: false,
@@ -498,6 +507,9 @@ fn make_tasks_with_project_id(count: usize, project_id: i64) -> Vec<TaskRow> {
             project_id,
             due_on: None,
             project_name: None,
+            estimate: None,
+            logged_week: None,
+            logged_total: None,
         })
         .collect()
 }
@@ -525,6 +537,7 @@ fn tasks_model_with_project_id(task_count: usize, project_id: i64) -> Model {
                 card_heights: vec![],
                 card_offsets: vec![],
                 rendered_width: usize::MAX,
+                due_today: None,
             },
         ],
         should_quit: false,
@@ -558,6 +571,7 @@ fn detail_model(line_count: usize, offset: usize) -> Model {
                 card_heights: vec![],
                 card_offsets: vec![],
                 rendered_width: usize::MAX,
+                due_today: None,
             },
             Screen::Detail {
                 instance: "inst".into(),
@@ -577,6 +591,7 @@ fn detail_model(line_count: usize, offset: usize) -> Model {
                 affordances: vec![],
                 focused_comment: None,
                 auth_error: false,
+                download: None,
                 comment_spans: vec![],
             },
         ],
@@ -610,6 +625,7 @@ fn loading_detail_model() -> Model {
                 card_heights: vec![],
                 card_offsets: vec![],
                 rendered_width: usize::MAX,
+                due_today: None,
             },
             Screen::Detail {
                 instance: "inst".into(),
@@ -629,6 +645,7 @@ fn loading_detail_model() -> Model {
                 affordances: vec![],
                 focused_comment: None,
                 auth_error: false,
+                download: None,
                 comment_spans: vec![],
             },
         ],
@@ -881,7 +898,7 @@ fn detail_click_does_not_change_state_or_quit() {
     }
 }
 
-// R6c: AC1 — single-flight guard drops refresh while loading is true
+// single-flight guard drops refresh while loading is true
 #[test]
 fn refresh_while_detail_loading_is_dropped() {
     let m = loading_detail_model();
@@ -913,7 +930,7 @@ fn refresh_while_projects_loading_is_dropped() {
     assert!(!m.should_quit);
 }
 
-// R6c: AC2 — refresh when idle emits the correct Cmd and sets loading=true + offset=0
+// refresh when idle emits the correct Cmd and sets loading=true + offset=0
 #[test]
 fn refresh_on_idle_detail_emits_load_detail_refresh_true() {
     let m = detail_model(10, 5);
@@ -962,7 +979,7 @@ fn refresh_on_idle_tasks_emits_load_tasks_by_project() {
     assert!(!m.should_quit);
 }
 
-// R6c: AC3 — cross-screen safety matrix: Detail mouse/scroll/click-below-last never quit
+// cross-screen safety matrix: Detail mouse/scroll/click-below-last never quit
 #[test]
 fn detail_wheel_scroll_never_sets_should_quit() {
     let m = detail_model(3, 2);
@@ -1051,6 +1068,9 @@ fn select_on_tasks_threads_instance_into_load_detail_cmd() {
                         project_id: 10,
                         due_on: None,
                         project_name: None,
+                        estimate: None,
+                        logged_week: None,
+                        logged_total: None,
                     }],
                 }],
                 selected: 0,
@@ -1067,6 +1087,9 @@ fn select_on_tasks_threads_instance_into_load_detail_cmd() {
                     project_id: 10,
                     due_on: None,
                     project_name: None,
+                    estimate: None,
+                    logged_week: None,
+                    logged_total: None,
                 }],
                 selected: 0,
                 loading: false,
@@ -1074,6 +1097,7 @@ fn select_on_tasks_threads_instance_into_load_detail_cmd() {
                 card_heights: vec![],
                 card_offsets: vec![],
                 rendered_width: usize::MAX,
+                due_today: None,
             },
         ],
         should_quit: false,
@@ -1137,6 +1161,9 @@ fn make_mine_row(task_id: i64, task_number: i64, project_id: i64, instance: &str
         name: format!("Task {task_id}"),
         due_on: None,
         project_name: None,
+        estimate: None,
+        logged_week: None,
+        logged_total: None,
     }
 }
 
@@ -1396,6 +1423,7 @@ fn reflow_detail_builds_lines_and_is_memoized() {
             affordances: vec![],
             focused_comment: None,
             auth_error: false,
+            download: None,
             comment_spans: vec![],
         }],
         should_quit: false,
@@ -1500,6 +1528,7 @@ fn reflow_detail_lines_fit_inner_width() {
             affordances: vec![],
             focused_comment: None,
             auth_error: false,
+            download: None,
             comment_spans: vec![],
         }],
         should_quit: false,
@@ -1552,6 +1581,7 @@ fn reflow_detail_rebuilds_on_width_change() {
             affordances: vec![],
             focused_comment: None,
             auth_error: false,
+            download: None,
             comment_spans: vec![],
         }],
         should_quit: false,
@@ -1602,6 +1632,7 @@ fn reflow_detail_is_noop_while_loading() {
             affordances: vec![],
             focused_comment: None,
             auth_error: false,
+            download: None,
             comment_spans: vec![],
         }],
         should_quit: false,
@@ -1658,6 +1689,7 @@ fn reflow_detail_clamps_offset_when_content_shortens() {
             affordances: vec![],
             focused_comment: None,
             auth_error: false,
+            download: None,
             comment_spans: vec![],
         }],
         should_quit: false,
@@ -1714,6 +1746,7 @@ fn user_map_resolved_updates_map_and_invalidates_cache() {
             affordances: vec![],
             focused_comment: None,
             auth_error: false,
+            download: None,
             comment_spans: vec![],
         }],
         should_quit: false,
@@ -1796,6 +1829,7 @@ fn progressive_paint_assignee_fills_in_after_user_map_resolved() {
             affordances: vec![],
             focused_comment: None,
             auth_error: false,
+            download: None,
             comment_spans: vec![],
         }],
         should_quit: false,
@@ -1935,6 +1969,7 @@ fn detail_global_scroll_offset_advances_through_all_content() {
             affordances: vec![],
             focused_comment: None,
             auth_error: false,
+            download: None,
             comment_spans: vec![],
         }],
         should_quit: false,
@@ -1969,7 +2004,7 @@ fn detail_global_scroll_offset_advances_through_all_content() {
     }
 }
 
-// ADR 0031 AC1: reflow_tasks at unchanged width + unchanged list is a no-op.
+// reflow_tasks at unchanged width + unchanged list is a no-op.
 // Verify by poisoning the cache with a sentinel, calling reflow_tasks at the same
 // width, and asserting the sentinel is still present (no rebuild occurred).
 #[test]
@@ -2033,7 +2068,7 @@ fn reflow_tasks_unchanged_width_is_noop() {
     }
 }
 
-// ADR 0031 AC2: list swap (handle_loaded_mine_tasks) invalidates the cache;
+// A list swap (handle_loaded_mine_tasks) invalidates the cache, but
 // changing only `selected` does NOT rebuild.
 #[test]
 fn reflow_tasks_list_swap_invalidates_cache_selected_change_does_not() {
@@ -2046,6 +2081,9 @@ fn reflow_tasks_list_swap_invalidates_cache_selected_change_does_not() {
             name: "Task A".into(),
             due_on: None,
             project_name: None,
+            estimate: None,
+            logged_week: None,
+            logged_total: None,
         },
         MineTableRow {
             instance: "i".into(),
@@ -2055,6 +2093,9 @@ fn reflow_tasks_list_swap_invalidates_cache_selected_change_does_not() {
             name: "Task B".into(),
             due_on: None,
             project_name: None,
+            estimate: None,
+            logged_week: None,
+            logged_total: None,
         },
     ];
     let (mut m, _) = init_mine(empty_header(), Some(rows));
@@ -2090,6 +2131,9 @@ fn reflow_tasks_list_swap_invalidates_cache_selected_change_does_not() {
         name: "Fresh Task".into(),
         due_on: None,
         project_name: None,
+        estimate: None,
+        logged_week: None,
+        logged_total: None,
     }];
     let loaded_at = "2026-06-28T00:00:00Z".to_string();
     let (m3, _) = update(
@@ -2119,7 +2163,7 @@ fn reflow_tasks_list_swap_invalidates_cache_selected_change_does_not() {
     }
 }
 
-// ADR 0031 AC2: every Screen::Tasks construction is born with empty caches + rendered_width usize::MAX.
+// Every Screen::Tasks construction is born with empty caches + rendered_width usize::MAX.
 #[test]
 fn new_tasks_screen_born_with_empty_cache() {
     let m = tasks_model_for_reflow(make_tasks(5));
@@ -2187,7 +2231,7 @@ fn first_visible_linear_oracle(offsets: &[u32], selected: usize, visible_h: u16)
     selected
 }
 
-// ADR 0031 AC3: first_visible calls the production binary search and returns
+// first_visible calls the production binary search and returns
 // the same index as the linear oracle for every selected across the fixture,
 // including selection near the end, the exact-boundary case (kills < vs <= mutant),
 // and the card-taller-than-viewport case (kills dropped .min(selected) mutant).
@@ -2205,6 +2249,9 @@ fn first_visible_card_binary_equals_linear_for_fixture() {
             project_id: 0,
             due_on: None,
             project_name: None,
+            estimate: None,
+            logged_week: None,
+            logged_total: None,
         })
         .collect();
 
@@ -2236,12 +2283,12 @@ fn first_visible_card_binary_equals_linear_for_fixture() {
     }
 
     // Exact-boundary case: kills the `<` vs `<=` mutant on the partition_point predicate.
-    // Each card is 4 rows tall; offsets = [0, 4, 8, 12, ...].
-    // With visible_h=8 and selected=2: sel_end=12, offsets[1]+8=12 exactly.
-    // Correct answer: first=1 (window [4..12] covers sel_end=12).
+    // Each card is 5 rows tall; offsets = [0, 5, 10, 15, ...].
+    // With visible_h=10 and selected=2: sel_end=15, offsets[1]+10=15 exactly.
+    // Correct answer: first=1 (window [5..15] covers sel_end=15).
     // If predicate uses `<=` instead of `<`, partition_point skips index 1 and returns 2.
     {
-        let (sel, vh, want) = (2, 8u16, 1usize);
+        let (sel, vh, want) = (2, 10u16, 1usize);
         let got = first_visible(&offsets, rw, card_inner_w, &heights, sel, vh);
         assert_eq!(
             got, want,
@@ -2250,7 +2297,7 @@ fn first_visible_card_binary_equals_linear_for_fixture() {
     }
 
     // Card-taller-than-viewport case: kills the dropped `.min(selected)` mutant.
-    // With visible_h=3, every card (height 4) exceeds the viewport.
+    // With visible_h=3, every card (height 5) exceeds the viewport.
     // partition_point over offsets[..=selected] returns selected+1 (all satisfy predicate).
     // .min(selected) clamps to `selected`; without it the result would be selected+1.
     {
@@ -2265,10 +2312,10 @@ fn first_visible_card_binary_equals_linear_for_fixture() {
     }
 }
 
-// ADR 0031 AC4: card_offsets uses u32 — cumulative height beyond u16::MAX is exact.
+// card_offsets uses u32 — cumulative height beyond u16::MAX is exact.
 #[test]
 fn card_offsets_do_not_saturate_beyond_u16_max() {
-    let single_card_height: usize = 4;
+    let single_card_height: usize = 5;
     let needed = (u16::MAX as usize / single_card_height) + 10;
     let tasks: Vec<TaskRow> = (0..needed)
         .map(|i| TaskRow {
@@ -2279,6 +2326,9 @@ fn card_offsets_do_not_saturate_beyond_u16_max() {
             project_id: 0,
             due_on: None,
             project_name: None,
+            estimate: None,
+            logged_week: None,
+            logged_total: None,
         })
         .collect();
 
@@ -2301,7 +2351,7 @@ fn card_offsets_do_not_saturate_beyond_u16_max() {
     );
 }
 
-// ADR 0051: pure task_layout unit tests, from primitives only — no Frame, no Model.
+// Pure task_layout unit tests, from primitives only — no Frame, no Model.
 
 fn task_row_named(name: &str) -> TaskRow {
     TaskRow {
@@ -2312,16 +2362,19 @@ fn task_row_named(name: &str) -> TaskRow {
         project_id: 0,
         due_on: None,
         project_name: None,
+        estimate: None,
+        logged_week: None,
+        logged_total: None,
     }
 }
 
 #[test]
-fn card_height_single_line_title_is_four_rows() {
+fn card_height_single_line_title_is_five_rows() {
     use crate::tui::task_layout::card_height;
 
-    // "#7  Short" fits on one line at width 40: 2 border rows + 1 body row + 1 due row.
+    // "#7  Short" fits on one line at width 40: 2 border rows + 1 body row + 1 hours row + 1 due row.
     let task = task_row_named("Short");
-    assert_eq!(card_height(&task, 40), 4);
+    assert_eq!(card_height(&task, 40), 5);
 }
 
 #[test]
@@ -2337,7 +2390,7 @@ fn card_height_wrapped_title_adds_body_rows() {
     let height_wide = card_height(&narrow, wide_w);
     let height_narrow = card_height(&narrow, narrow_w);
 
-    assert_eq!(height_wide, 4, "single-line body at a wide width is 4 rows");
+    assert_eq!(height_wide, 5, "single-line body at a wide width is 5 rows");
     assert!(
         height_narrow > height_wide,
         "wrapping at a narrow width must add body rows: narrow={height_narrow} wide={height_wide}"

@@ -1,6 +1,6 @@
 use super::{
-    column_header_style, palette_for, set_active, theme_from_str, theme_to_str, Mode, ThemeChoice,
-    ANGIE_DARK, ANGIE_LIGHT, NORD_DARK, NORD_LIGHT, SLATE_DARK, SLATE_LIGHT,
+    column_header_style, palette_for, set_active, theme_from_str, Mode, ThemeChoice, ANGIE_DARK,
+    ANGIE_LIGHT, NORD_DARK, NORD_LIGHT, SLATE_DARK, SLATE_LIGHT,
 };
 
 fn assert_palette_eq(actual: super::Palette, expected: super::Palette, label: &str) {
@@ -75,17 +75,6 @@ fn theme_from_str_falls_back_to_angie_for_unknown_or_empty() {
             theme_from_str(input),
             ThemeChoice::Angie,
             "input {input:?} must fall back to Angie"
-        );
-    }
-}
-
-#[test]
-fn theme_to_str_round_trips_for_canonical_names() {
-    for canonical in ["angie", "slate", "nord"] {
-        let round_tripped = theme_to_str(theme_from_str(canonical));
-        assert_eq!(
-            round_tripped, canonical,
-            "round-trip for {canonical:?} must be stable"
         );
     }
 }

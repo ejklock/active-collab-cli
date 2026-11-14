@@ -40,6 +40,7 @@ fn detail_model_with_assets_and_viewport(
             affordances: vec![],
             focused_comment: None,
             auth_error: false,
+            download: None,
             comment_spans: vec![],
         }],
         should_quit: false,
@@ -124,6 +125,7 @@ fn detail_model_scrollable(lines: Vec<String>, assets: Vec<Asset>, viewport: (u1
             affordances: vec![],
             focused_comment: None,
             auth_error: false,
+            download: None,
             comment_spans: vec![],
         }],
         should_quit: false,
@@ -362,8 +364,6 @@ fn click_on_projects_screen_with_target_drills_into_tasks() {
     }
 }
 
-// --- V5 body-link click tests (inline url-from-click contract) ---
-
 /// Build a Detail model with specific lines, assets, offset and viewport.
 fn detail_model_with_lines_and_assets(
     lines: Vec<String>,
@@ -400,6 +400,7 @@ fn detail_model_with_lines_assets_affs(
             affordances,
             focused_comment: None,
             auth_error: false,
+            download: None,
             comment_spans: vec![],
         }],
         should_quit: false,
@@ -543,7 +544,7 @@ fn click_non_url_bracket_token_is_noop() {
 }
 
 // V5-A3: Mailto bracket token yields Cmd::OpenAsset with 'mailto:' scheme pre-added
-// at emit time (ADR 0043 §2) and stored in the OpenUrl affordance.
+// at emit time and stored in the OpenUrl affordance.
 #[test]
 fn click_mailto_bracket_token_yields_mailto_cmd() {
     let email = "user@example.com";
@@ -597,11 +598,9 @@ fn click_outside_content_text_area_is_noop() {
     );
 }
 
-// --- D1c: modifier-gated wrapped-URL click tests ---
-
 /// Build a Detail model with a URL that hard-splits across at least two body content
 /// lines. Uses `build_detail_content` so that `affordances` is properly populated
-/// with `OpenUrl` spans for every wrapped fragment (ADR 0043 §2).
+/// with `OpenUrl` spans for every wrapped fragment.
 ///
 /// Returns `(model, line0_idx, line1_idx, text_top, col_in_frag0, col_in_frag1)`
 /// where `col_in_frag0` and `col_in_frag1` are click columns guaranteed to be inside
@@ -657,6 +656,7 @@ fn detail_model_with_wrapped_url_lines(
             affordances: content.affordances,
             focused_comment: None,
             auth_error: false,
+            download: None,
             comment_spans: vec![],
         }],
         should_quit: false,
@@ -756,7 +756,7 @@ fn plain_click_on_url_token_is_noop() {
     );
     assert!(
         cmds.is_empty(),
-        "plain click on url token must not emit any cmd (BDR 0014 Sc.8)"
+        "plain click on url token must not emit any cmd"
     );
 }
 
@@ -791,8 +791,6 @@ fn ctrl_click_on_single_line_url_still_resolves() {
         other => panic!("expected OpenAsset for single-line url, got {other:?}"),
     }
 }
-
-// --- V6: app-managed text selection tests ---
 
 fn projects_browse_model() -> Model {
     Model {
@@ -848,6 +846,7 @@ fn detail_model_for_selection(lines: Vec<String>, viewport: (u16, u16), offset: 
             affordances: vec![],
             focused_comment: None,
             auth_error: false,
+            download: None,
             comment_spans: vec![],
         }],
         should_quit: false,
@@ -1195,7 +1194,7 @@ fn ctrl_click_on_url_still_opens_link_after_v6() {
     );
 }
 
-// V6-A7 (Sc.8): Multi-line copy over boxed body is chrome-free, UTF-8 correct, and
+// Multi-line copy over boxed body is chrome-free, UTF-8 correct, and
 // no border padding leaks into the clipboard.
 // Viewport 80×24 (no assets). text_top=2, content rows 2..21.
 // Line 0 has "intervenção credibilidade", line 1 has "segunda linha".
@@ -1255,7 +1254,7 @@ fn multiline_copy_chrome_free_utf8_correct() {
     }
 }
 
-// V6-A7 (Sc.8b): A full-width drag (cursor past the right border) still yields zero border chars.
+// A full-width drag (cursor past the right border) still yields zero border chars.
 // Clamp proof: col past the right │ must not include the border in the copied text.
 #[test]
 fn full_width_drag_yields_no_border_chars() {
@@ -1307,7 +1306,7 @@ fn full_width_drag_yields_no_border_chars() {
     }
 }
 
-// V6-A8 (Sc.9): A wrapped logical line copies its FULL content with no eaten/duplicated
+// A wrapped logical line copies its FULL content with no eaten/duplicated
 // characters at the wrap seam.
 // Two consecutive boxed lines that together form one logical sentence (wrapped by panel_box).
 // A selection spanning both rows must produce the full joined content without dropping chars.
@@ -1363,7 +1362,7 @@ fn wrapped_line_copy_has_no_eaten_chars_at_seam() {
     }
 }
 
-// V6-A9 (Sc.10): Selection is scroll-stable.
+// Selection is scroll-stable.
 // Set anchor+cursor, then change Detail scroll offset, then finalize.
 // The copied text must be the SAME logical span as before the scroll.
 #[test]
@@ -1645,7 +1644,7 @@ fn loaded_tasks_clears_revalidating_and_stamps_last_loaded() {
     }
 }
 
-// AC3 (BDR 0019 Sc.3): Pressing a digit '1'-'9' in the detail view produces no asset action.
+// Pressing a digit '1'-'9' in the detail view produces no asset action.
 // The key-event mapper no longer maps digit chars to any Msg that opens assets.
 // Verify via events::map_browse_key_event that digits produce None.
 #[test]
@@ -1668,7 +1667,7 @@ fn digit_keys_produce_no_asset_action_in_detail_view() {
     }
 }
 
-// AC3 (BDR 0019 Sc.4): Pressing 'd' in the detail view enters no download mode.
+// Pressing 'd' in the detail view enters no download mode.
 // The key 'd' is no longer mapped to TogglePendingDownload.
 #[test]
 fn d_key_does_not_enter_download_mode() {
@@ -1688,7 +1687,7 @@ fn d_key_does_not_enter_download_mode() {
     );
 }
 
-// AC1 (BDR 0021 Sc.1): The detail footer hint with assets returns the plain scroll/nav hint
+// The detail footer hint with assets returns the plain scroll/nav hint
 // and does NOT contain 'Ctrl/Cmd' or 'abrir anexo' (hint moved into the Artifacts card).
 #[test]
 fn detail_footer_hint_with_assets_has_no_ctrl_cmd_reference() {
@@ -1713,6 +1712,7 @@ fn detail_footer_hint_with_assets_has_no_ctrl_cmd_reference() {
         affordances: vec![],
         focused_comment: None,
         auth_error: false,
+        download: None,
         comment_spans: vec![],
     };
     let hint = hint_for_screen(&screen);
@@ -1726,7 +1726,7 @@ fn detail_footer_hint_with_assets_has_no_ctrl_cmd_reference() {
     );
     assert!(
         hint.contains("j/k"),
-        "footer hint must contain 'j/k' navigation (ADR 0038 browsing hint): {hint:?}"
+        "footer hint must contain 'j/k' navigation: {hint:?}"
     );
 }
 
@@ -1754,8 +1754,6 @@ fn quit_sets_should_quit_regardless_of_selection_mode() {
     );
 }
 
-// --- V6: Sc.8, Sc.9, Sc.10 copy-fidelity tests ---
-
 /// Build a Detail model with boxed lines as produced by build_detail_content.
 /// The lines contain box chrome (│ border + HPAD), matching real runtime output.
 fn detail_model_with_boxed_lines(lines: Vec<String>, viewport: (u16, u16), offset: usize) -> Model {
@@ -1778,6 +1776,7 @@ fn detail_model_with_boxed_lines(lines: Vec<String>, viewport: (u16, u16), offse
             affordances: vec![],
             focused_comment: None,
             auth_error: false,
+            download: None,
             comment_spans: vec![],
         }],
         should_quit: false,
@@ -1797,7 +1796,7 @@ fn make_boxed_line(content: &str) -> String {
     format!("\u{2502} {content} \u{2502}")
 }
 
-// V6-A7 / Sc.8: Copied text contains NO box-drawing chars (│, ─) or panel padding,
+// V6-A7: Copied text contains NO box-drawing chars (│, ─) or panel padding,
 // and accented pt-BR characters survive intact (char-correct, never byte-sliced).
 // A selection spanning the visible body row (viewport col 0..=col 30) on a line
 // containing "intervenção" must produce ONLY the logical text without `│` or padding.
@@ -1858,7 +1857,7 @@ fn copy_is_chrome_free_and_accents_intact() {
     }
 }
 
-// V6-A7 / Sc.8: Selecting only within the content area on a boxed line gives exactly
+// Selecting only within the content area on a boxed line gives exactly
 // the content characters — no border, no padding.
 // Absolute frame col 3 = first content char; left offset = block-border(1) + panel-chrome(2) = 3.
 #[test]
@@ -1907,7 +1906,7 @@ fn copy_col_range_within_content_gives_exact_chars() {
     }
 }
 
-// V6-A7 / Sc.9: A selection spanning two consecutive boxed lines (simulating a wrapped
+// A selection spanning two consecutive boxed lines (simulating a wrapped
 // logical line) copies the full text from both lines with no chars dropped at the seam.
 #[test]
 fn copy_spanning_two_lines_has_no_dropped_chars_at_seam() {
@@ -1973,7 +1972,7 @@ fn copy_spanning_two_lines_has_no_dropped_chars_at_seam() {
     }
 }
 
-// V6-A8 / Sc.10: Selection is scroll-stable — scrolling the body does NOT change
+// Selection is scroll-stable — scrolling the body does NOT change
 // the logical span that gets copied.
 // Set a selection at offset=0, extract it. Then scroll (change offset) and extract
 // again — the result must be the SAME logical text.
@@ -2019,17 +2018,17 @@ fn copy_is_scroll_stable_same_logical_span_after_scroll() {
     // and re-set the same selection to simulate what happens after scroll.
     // The selection coordinates are in (viewport_row, viewport_col) space — after
     // scroll, the SAME selection now maps to a DIFFERENT logical line.
-    // Sc.10 says: the anchor/cursor are logical coords; scroll must not change them.
+    // The anchor and cursor should be logical coordinates, so a scroll must not change them.
     //
     // The current implementation stores viewport coords, so scrolling shifts which
-    // logical line is extracted. This test verifies the contract from the ADR:
+    // logical line is extracted. This test verifies the contract:
     // the SELECTION is in viewport coords, and extraction re-maps at extract time.
     // After a scroll, the same anchor/cursor pointing to viewport row 2 now maps to
     // a different logical line (offset lines[5+0] instead of lines[0]).
-    // This is the KNOWN limitation documented in the plan: the plan says "anchor/cursor
-    // must be stored as LOGICAL (line, col) positions".
+    // This is a known limitation: the anchor and cursor should be stored as LOGICAL
+    // (line, col) positions.
     //
-    // Given the CURRENT implementation (viewport coords), Sc.10 as stated in the BDR
+    // Given the CURRENT implementation (viewport coords), logical anchoring
     // requires a design change. We verify the minimal invariant: that the selection
     // state is preserved across a Down scroll (not silently cleared).
     let (m, _) = update(m, Msg::Down);
@@ -2052,11 +2051,9 @@ fn copy_is_scroll_stable_same_logical_span_after_scroll() {
     // The selection is NOT cleared by scroll — it survives.
     assert!(
         m.selection.is_some(),
-        "selection must survive a scroll (Sc.10 stability)"
+        "selection must survive a scroll (stability across a scroll)"
     );
 }
-
-// --- S8c: mine SWR pure-model tests ---
 
 use crate::render::MineTableRow;
 
@@ -2070,6 +2067,9 @@ fn sample_mine_rows() -> Vec<MineTableRow> {
             name: "Task Alpha".into(),
             due_on: None,
             project_name: None,
+            estimate: None,
+            logged_week: None,
+            logged_total: None,
         },
         MineTableRow {
             instance: "inst-b".into(),
@@ -2079,6 +2079,9 @@ fn sample_mine_rows() -> Vec<MineTableRow> {
             name: "Task Beta".into(),
             due_on: None,
             project_name: None,
+            estimate: None,
+            logged_week: None,
+            logged_total: None,
         },
     ]
 }
@@ -2178,6 +2181,9 @@ fn loaded_mine_tasks_replaces_rows_clears_revalidating_stamps_last_loaded() {
         name: "Task Gamma".into(),
         due_on: None,
         project_name: None,
+        estimate: None,
+        logged_week: None,
+        logged_total: None,
     }];
     let loaded_at = "2026-06-26T12:00:00Z".to_string();
     let (updated, cmds) = update(
@@ -2213,7 +2219,7 @@ fn loaded_mine_tasks_replaces_rows_clears_revalidating_stamps_last_loaded() {
     }
 }
 
-// V6-A7b (Sc.8): A detail-body copy whose content has a leading double-width emoji
+// A detail-body copy whose content has a leading double-width emoji
 // ('🔹') and accented chars copies the EXACT logical text: emoji present, NO
 // eaten/shifted letter, accents intact, zero '│' chars.
 //
@@ -2461,8 +2467,6 @@ fn loaded_mine_tasks_on_cold_model_clears_loading() {
     }
 }
 
-// --- D2b: due_on threading and relative_due formatter ---
-
 fn mine_row_with_due(due_on: Option<&str>) -> MineTableRow {
     MineTableRow {
         instance: "inst".into(),
@@ -2472,6 +2476,9 @@ fn mine_row_with_due(due_on: Option<&str>) -> MineTableRow {
         name: "Task".into(),
         due_on: due_on.map(str::to_owned),
         project_name: None,
+        estimate: None,
+        logged_week: None,
+        logged_total: None,
     }
 }
 
@@ -2502,6 +2509,9 @@ fn mine_table_row_serde_round_trip_preserves_due_on() {
         name: "Task".into(),
         due_on: Some("2026-07-15".into()),
         project_name: None,
+        estimate: None,
+        logged_week: None,
+        logged_total: None,
     };
     let json = serde_json::to_string(&row).unwrap();
     let decoded: MineTableRow = serde_json::from_str(&json).unwrap();
@@ -2518,9 +2528,7 @@ fn mine_table_row_old_snapshot_missing_due_on_deserializes_to_none() {
     );
 }
 
-// --- D2d-i: project_name threading and serde ---
-
-// AC3: project_name threads MineTableRow → rows_to_task_rows → TaskRow.
+// project_name threads MineTableRow → rows_to_task_rows → TaskRow.
 #[test]
 fn project_name_threads_mine_table_row_to_task_row_via_init_mine() {
     use crate::tui::model::init_mine;
@@ -2533,6 +2541,9 @@ fn project_name_threads_mine_table_row_to_task_row_via_init_mine() {
             name: "Task A".into(),
             due_on: None,
             project_name: Some("My Project".into()),
+            estimate: None,
+            logged_week: None,
+            logged_total: None,
         },
         MineTableRow {
             instance: "inst".into(),
@@ -2542,6 +2553,9 @@ fn project_name_threads_mine_table_row_to_task_row_via_init_mine() {
             name: "Task B".into(),
             due_on: None,
             project_name: None,
+            estimate: None,
+            logged_week: None,
+            logged_total: None,
         },
     ];
     let (model, _) = init_mine(empty_header(), Some(rows));
@@ -2561,7 +2575,7 @@ fn project_name_threads_mine_table_row_to_task_row_via_init_mine() {
     }
 }
 
-// AC3 (serde): MineTableRow round-trip preserves project_name.
+// MineTableRow round-trip preserves project_name.
 #[test]
 fn mine_table_row_serde_round_trip_preserves_project_name() {
     let row = MineTableRow {
@@ -2572,6 +2586,9 @@ fn mine_table_row_serde_round_trip_preserves_project_name() {
         name: "Task".into(),
         due_on: None,
         project_name: Some("Acme Corp".into()),
+        estimate: None,
+        logged_week: None,
+        logged_total: None,
     };
     let json = serde_json::to_string(&row).unwrap();
     let decoded: MineTableRow = serde_json::from_str(&json).unwrap();
@@ -2582,7 +2599,7 @@ fn mine_table_row_serde_round_trip_preserves_project_name() {
     );
 }
 
-// AC3 (old snapshot): an old snapshot JSON without the project_name field
+// an old snapshot JSON without the project_name field
 // must deserialize to None (serde default).
 #[test]
 fn mine_table_row_old_snapshot_missing_project_name_deserializes_to_none() {
@@ -2686,8 +2703,6 @@ fn relative_due_overdue_many_days_returns_plural_label() {
     );
 }
 
-// --- S2b: assets-inline geometry and scroll-aware click tests (BDR 0022) ---
-
 /// Build a Detail model with inline asset section pre-spliced into `lines`.
 ///
 /// Mirrors what `build_detail_content` produces: appends the asset section via
@@ -2757,6 +2772,7 @@ fn detail_model_with_inline_assets(
             affordances,
             focused_comment: None,
             auth_error: false,
+            download: None,
             comment_spans: vec![],
         }],
         should_quit: false,
@@ -2771,7 +2787,7 @@ fn detail_model_with_inline_assets(
     }
 }
 
-// AC2 (BDR 0022 Sc.2): detail_max_offset no longer subtracts any panel height.
+// detail_max_offset no longer subtracts any panel height.
 // For a viewport of 24 rows, DETAIL_CHROME_ROWS=4, text_vh=20.
 // With 30 body lines + blank + 6 asset-section lines = 37 total lines, max = 37-20 = 17.
 // (Before: subtracting panel height would have reduced text_vh further.)
@@ -2796,7 +2812,7 @@ fn detail_max_offset_with_inline_assets_does_not_subtract_panel_height() {
     );
 }
 
-// AC2 (BDR 0022 Sc.7): empty asset list yields no inline section.
+// Empty asset list yields no inline section.
 // Lines are just body lines, and detail_max_offset behaves the same as before.
 #[test]
 fn detail_max_offset_empty_assets_no_inline_section() {
@@ -2810,7 +2826,7 @@ fn detail_max_offset_empty_assets_no_inline_section() {
     );
 }
 
-// AC2 (BDR 0022 Sc.2): last asset row is reachable at max scroll offset.
+// Last asset row is reachable at max scroll offset.
 // With 1 body line + blank + 6 section rows = 8 total lines, viewport_rows=24,
 // text_vh=20, max=8-20=0 (all fits), so the asset section is always visible at offset=0.
 // For the long list scenario: 25 body lines + blank + 6 section = 32 lines.
@@ -2845,7 +2861,7 @@ fn last_asset_row_reachable_at_max_scroll_offset() {
     );
 }
 
-// AC3 (BDR 0022 Sc.5): Ctrl+click on a visible asset row emits OpenAsset for that asset.
+// Ctrl+click on a visible asset row emits OpenAsset for that asset.
 // Model: 5 body lines + blank + section (6 rows) = 12 total lines.
 // Viewport 80x24, offset=0, text_top=2.
 // asset_section_start = 12 - 6 = 6.
@@ -2884,7 +2900,7 @@ fn ctrl_click_on_visible_asset_row_emits_open_asset() {
     }
 }
 
-// AC3 (BDR 0022 Sc.6): Ctrl+click on the section header row (interior_row=0) emits NO cmd.
+// Ctrl+click on the section header row (interior_row=0) emits NO cmd.
 #[test]
 fn ctrl_click_on_asset_section_header_row_emits_no_cmd() {
     let assets = vec![make_asset("doc.pdf", "https://example.com/doc.pdf")];
@@ -2907,7 +2923,7 @@ fn ctrl_click_on_asset_section_header_row_emits_no_cmd() {
     );
 }
 
-// AC3 (BDR 0022 Sc.5): plain (unmodified) click on an asset row emits NO OpenAsset.
+// Plain (unmodified) click on an asset row emits NO OpenAsset.
 // It falls through to is_in_body_area selection (assets are selectable body content).
 #[test]
 fn plain_click_on_asset_row_emits_no_open_asset() {
@@ -2931,7 +2947,7 @@ fn plain_click_on_asset_row_emits_no_open_asset() {
     );
 }
 
-// AC3 (BDR 0022 Sc.6): Ctrl+click on a blank separator row (interior_row=3) emits no cmd.
+// Ctrl+click on a blank separator row (interior_row=3) emits no cmd.
 #[test]
 fn ctrl_click_on_separator_row_emits_no_cmd() {
     let assets = vec![make_asset("doc.pdf", "https://example.com/doc.pdf")];
@@ -2955,7 +2971,7 @@ fn ctrl_click_on_separator_row_emits_no_cmd() {
     );
 }
 
-// AC3 (BDR 0022 Sc.6): Ctrl+click on the italic hint row (interior_row=4) emits no cmd.
+// Ctrl+click on the italic hint row (interior_row=4) emits no cmd.
 #[test]
 fn ctrl_click_on_hint_row_emits_no_cmd() {
     let assets = vec![make_asset("doc.pdf", "https://example.com/doc.pdf")];
@@ -2975,7 +2991,7 @@ fn ctrl_click_on_hint_row_emits_no_cmd() {
     assert!(cmds.is_empty(), "Ctrl+click on hint row must emit no cmd");
 }
 
-// AC3 (BDR 0022 Sc.6): Ctrl+click on asset row at a non-zero scroll offset opens the correct asset.
+// Ctrl+click on asset row at a non-zero scroll offset opens the correct asset.
 // With offset=5, the body line at line_idx=6+2=8 is the asset row at section interior_row=2.
 // But viewport row for that line: row = text_top + (line_idx - offset) = 2 + (8-5) = 5.
 #[test]
@@ -3015,7 +3031,7 @@ fn ctrl_click_on_asset_row_at_nonzero_offset_is_scroll_aware() {
     }
 }
 
-// AC2 (BDR 0022 Sc.2): is_in_body_area includes asset section rows (no panel_h subtracted).
+// is_in_body_area includes asset section rows (no panel_h subtracted).
 // With viewport 80x24, text_top=2, content_text_height=20:
 // rows 2..21 are all "in body area". Row 21 is just outside.
 #[test]
@@ -3042,11 +3058,11 @@ fn is_in_body_area_includes_asset_rows_no_panel_height_subtracted() {
     );
 }
 
-// AC2 (fix-inline-asset-link-style-click): Ctrl/Cmd+click on an inline asset content row
+// Ctrl/Cmd+click on an inline asset content row
 // emits Cmd::OpenAsset with that asset's url; a plain (unmodified) click on the SAME row
 // does NOT emit OpenAsset (reserved for text selection). Pins the Ctrl/Cmd gate end-to-end.
 //
-// This is the regression guard for ADR 0032: the hit-test (asset_panel_cmd_at) is intact.
+// This is the regression guard: the hit-test (asset_panel_cmd_at) is intact.
 // What was broken was only the VISUAL affordance (no link style). Both are now tested together.
 //
 // Layout math for viewport (80, 24), 3 body lines + blank + section:
@@ -3054,7 +3070,7 @@ fn is_in_body_area_includes_asset_rows_no_panel_height_subtracted() {
 //   section_lines for 1 asset: [header(0), pad(1), Asset(2), sep(3), hint(4), pad(5)] = 6 rows
 //   total_lines = 3 + 1 + 6 = 10
 //   asset_section_start = 10 - 6 = 4
-//   interior_row = 2 → Asset{idx:0}
+//   interior_row 2 selects the first asset
 //   line_idx = 4 + 2 = 6
 //   row = text_top(2) + (line_idx - offset(0)) = 8
 #[test]
@@ -3113,7 +3129,7 @@ fn ctrl_click_on_asset_row_emits_open_asset_plain_click_does_not() {
     );
 }
 
-// AC3 (BDR 0022 Sc.5): empty assets list → no inline section → no OpenAsset on any row.
+// Empty assets list → no inline section → no OpenAsset on any row.
 #[test]
 fn ctrl_click_with_empty_assets_emits_no_cmd() {
     let body: Vec<String> = (0..5).map(|i| format!("body line {i}")).collect();
@@ -3134,7 +3150,7 @@ fn ctrl_click_with_empty_assets_emits_no_cmd() {
     );
 }
 
-// AC2 (issue 0045): Ctrl+click on a wrapped continuation line of an asset emits
+// Ctrl+click on a wrapped continuation line of an asset emits
 // OpenAsset with the asset's url.
 // Width 42 → inner_width=40 → content_width=39 (PANEL_HPAD=1). A 35+ char label
 // at that width wraps to at least 2 Asset rows in the layout, each carrying an
@@ -3222,8 +3238,8 @@ fn ctrl_click_on_wrapped_asset_continuation_emits_open_asset() {
     }
 }
 
-// AC4 (issue 0045): plain (no Ctrl/Cmd) click on a wrapped asset continuation row
-// does NOT emit Cmd::OpenAsset. (The modifier gate is enforced per BDR 0014 Sc.8.)
+// Plain (no Ctrl/Cmd) click on a wrapped asset continuation row
+// does NOT emit Cmd::OpenAsset. (The modifier gate is what blocks the plain click.)
 #[test]
 fn plain_click_on_wrapped_asset_continuation_emits_no_open_asset() {
     let asset_url = "https://example.com/file.pdf";
@@ -3272,11 +3288,9 @@ fn plain_click_on_wrapped_asset_continuation_emits_no_open_asset() {
     let has_open = cmds.iter().any(|c| matches!(c, Cmd::OpenAsset { .. }));
     assert!(
         !has_open,
-        "plain click on wrapped continuation must NOT emit OpenAsset (BDR 0014 Sc.8): {cmds:?}"
+        "plain click on wrapped continuation must NOT emit OpenAsset: {cmds:?}"
     );
 }
-
-// ── Compose mode tests (BDR 0024 / ADR 0034 / ADR 0035) ──────────────────────
 
 use crate::tui::model::{
     Compose, ComposeKind, ComposeStatus, DetailOverlay, LogTimeField, LogTimeForm, LogTimeStatus,
@@ -3302,6 +3316,7 @@ fn detail_model_for_compose(instance: &str, project_id: i64, task_id: i64) -> Mo
             affordances: vec![],
             focused_comment: None,
             auth_error: false,
+            download: None,
             comment_spans: vec![],
         }],
         should_quit: false,
@@ -3361,7 +3376,7 @@ fn type_str(mut model: Model, s: &str) -> Model {
     model
 }
 
-// AC1-part1: ComposeOpen on a Detail screen sets compose=Some(Editing, empty editor).
+// ComposeOpen on a Detail screen sets compose=Some(Editing, empty editor).
 #[test]
 fn compose_open_on_detail_sets_editing_state_with_empty_editor() {
     let m = detail_model_for_compose("inst", 10, 42);
@@ -3373,7 +3388,7 @@ fn compose_open_on_detail_sets_editing_state_with_empty_editor() {
     assert_eq!(cp.status, ComposeStatus::Editing);
 }
 
-// AC1-part2: ComposeOpen on a screen that already has compose active is a no-op.
+// ComposeOpen on a screen that already has compose active is a no-op.
 #[test]
 fn compose_open_when_already_active_is_noop() {
     let mut m = detail_model_for_compose("inst", 10, 42);
@@ -3396,7 +3411,7 @@ fn compose_open_when_already_active_is_noop() {
     );
 }
 
-// AC1-part3: ComposeInput appends a character to the editor.
+// ComposeInput appends a character to the editor.
 #[test]
 fn compose_input_appends_character_to_editor() {
     let m = detail_model_for_compose("inst", 10, 42);
@@ -3408,7 +3423,7 @@ fn compose_input_appends_character_to_editor() {
     assert_eq!(cp.editor.lines(), ["hi"]);
 }
 
-// AC1-part4: an Enter Input inserts a newline — it is NOT a submit.
+// an Enter Input inserts a newline — it is NOT a submit.
 #[test]
 fn compose_enter_input_inserts_newline_not_submit() {
     let m = detail_model_for_compose("inst", 10, 42);
@@ -3428,7 +3443,7 @@ fn compose_enter_input_inserts_newline_not_submit() {
     );
 }
 
-// AC1-part5: a Backspace Input removes the last character.
+// a Backspace Input removes the last character.
 #[test]
 fn compose_backspace_input_removes_last_character() {
     let m = detail_model_for_compose("inst", 10, 42);
@@ -3441,7 +3456,7 @@ fn compose_backspace_input_removes_last_character() {
     assert_eq!(cp.editor.lines(), ["a"]);
 }
 
-// AC1 (caret): Left moves the caret back without modifying text; a subsequent insert
+// Left moves the caret back without modifying text; a subsequent insert
 // lands at the caret's new position, not at the end of the line.
 #[test]
 fn compose_left_input_moves_caret_so_insert_lands_mid_line() {
@@ -3457,7 +3472,7 @@ fn compose_left_input_moves_caret_so_insert_lands_mid_line() {
     );
 }
 
-// AC1 (caret): Home/End move the caret to the line's start/end.
+// Home/End move the caret to the line's start/end.
 #[test]
 fn compose_home_end_input_move_caret_to_line_bounds() {
     let m = detail_model_for_compose("inst", 1, 1);
@@ -3481,7 +3496,7 @@ fn compose_home_end_input_move_caret_to_line_bounds() {
     );
 }
 
-// AC1 (caret): Up moves the caret to the previous line.
+// Up moves the caret to the previous line.
 #[test]
 fn compose_up_input_moves_caret_to_previous_line() {
     let m = detail_model_for_compose("inst", 1, 1);
@@ -3500,7 +3515,7 @@ fn compose_up_input_moves_caret_to_previous_line() {
     );
 }
 
-// AC1 (undo/redo): Ctrl+U undoes the last edit; Ctrl+R redoes it.
+// Ctrl+U undoes the last edit; Ctrl+R redoes it.
 #[test]
 fn compose_undo_redo_input_revert_and_reapply_edit() {
     let m = detail_model_for_compose("inst", 1, 1);
@@ -3523,7 +3538,7 @@ fn compose_undo_redo_input_revert_and_reapply_edit() {
     );
 }
 
-// AC1-part6: ComposeCancel clears compose and emits no Cmd.
+// ComposeCancel clears compose and emits no Cmd.
 #[test]
 fn compose_cancel_clears_compose_and_emits_no_cmd() {
     let m = detail_model_for_compose("inst", 10, 42);
@@ -3537,7 +3552,7 @@ fn compose_cancel_clears_compose_and_emits_no_cmd() {
     );
 }
 
-// AC2-part1: ComposeSubmit on non-empty Editing editor emits exactly one Cmd::SubmitComment
+// ComposeSubmit on non-empty Editing editor emits exactly one Cmd::SubmitComment
 // with the correct fields and sets status=Submitting.
 #[test]
 fn compose_submit_nonempty_editor_emits_submit_comment_cmd() {
@@ -3570,7 +3585,7 @@ fn compose_submit_nonempty_editor_emits_submit_comment_cmd() {
     );
 }
 
-// AC2-part2: ComposeSubmit on an empty editor emits no Cmd.
+// ComposeSubmit on an empty editor emits no Cmd.
 #[test]
 fn compose_submit_empty_editor_emits_no_cmd() {
     let m = detail_model_for_compose("inst", 1, 1);
@@ -3582,7 +3597,7 @@ fn compose_submit_empty_editor_emits_no_cmd() {
     );
 }
 
-// AC1: ComposeSubmit on a whitespace-only editor also emits no Cmd (tightened guard).
+// ComposeSubmit on a whitespace-only editor also emits no Cmd (tightened guard).
 #[test]
 fn compose_submit_whitespace_only_editor_emits_no_cmd() {
     let m = detail_model_for_compose("inst", 1, 1);
@@ -3594,7 +3609,7 @@ fn compose_submit_whitespace_only_editor_emits_no_cmd() {
     );
 }
 
-// AC3-part1: CommentMutationOk clears compose AND emits exactly one Cmd::LoadDetail{refresh:true}.
+// CommentMutationOk clears compose AND emits exactly one Cmd::LoadDetail{refresh:true}.
 #[test]
 fn comment_mutation_ok_clears_compose_and_emits_load_detail_refresh() {
     let m = detail_model_for_compose("inst", 7, 13);
@@ -3623,7 +3638,7 @@ fn comment_mutation_ok_clears_compose_and_emits_load_detail_refresh() {
     }
 }
 
-// AC3-part2: CommentMutationErr keeps the editor intact and sets status=Error(msg), emits no Cmd.
+// CommentMutationErr keeps the editor intact and sets status=Error(msg), emits no Cmd.
 #[test]
 fn comment_mutation_err_preserves_editor_and_sets_error_status() {
     let m = detail_model_for_compose("inst", 1, 1);
@@ -3644,7 +3659,7 @@ fn comment_mutation_err_preserves_editor_and_sets_error_status() {
     );
 }
 
-// AC4-part1: map_compose_key_event maps Enter -> ComposeInput(Input{key: Enter}) — the
+// map_compose_key_event maps Enter -> ComposeInput(Input{key: Enter}) — the
 // editor (not a distinct Msg) turns it into a newline.
 #[test]
 fn map_compose_key_event_enter_yields_compose_input_with_enter_key() {
@@ -3670,7 +3685,7 @@ fn map_compose_key_event_enter_yields_compose_input_with_enter_key() {
     );
 }
 
-// AC4-part2: map_compose_key_event maps a printable char -> ComposeInput(Input{key: Char(c)}).
+// map_compose_key_event maps a printable char -> ComposeInput(Input{key: Char(c)}).
 #[test]
 fn map_compose_key_event_printable_char_yields_compose_input() {
     use crate::tui::events::map_compose_key_event;
@@ -3695,7 +3710,7 @@ fn map_compose_key_event_printable_char_yields_compose_input() {
     );
 }
 
-// AC4: map_compose_key_event maps Backspace -> ComposeInput(Input{key: Backspace}) — the
+// map_compose_key_event maps Backspace -> ComposeInput(Input{key: Backspace}) — the
 // generic Input path, not a distinct Msg.
 #[test]
 fn map_compose_key_event_backspace_yields_compose_input_with_backspace_key() {
@@ -3721,7 +3736,7 @@ fn map_compose_key_event_backspace_yields_compose_input_with_backspace_key() {
     );
 }
 
-// AC4-part3: map_compose_key_event maps Ctrl+S -> ComposeSubmit.
+// map_compose_key_event maps Ctrl+S -> ComposeSubmit.
 #[test]
 fn map_compose_key_event_ctrl_s_yields_compose_submit() {
     use crate::tui::events::map_compose_key_event;
@@ -3738,7 +3753,7 @@ fn map_compose_key_event_ctrl_s_yields_compose_submit() {
     );
 }
 
-// AC4-part4: map_compose_key_event maps Esc -> ComposeCancel.
+// map_compose_key_event maps Esc -> ComposeCancel.
 #[test]
 fn map_compose_key_event_esc_yields_compose_cancel() {
     use crate::tui::events::map_compose_key_event;
@@ -3755,7 +3770,7 @@ fn map_compose_key_event_esc_yields_compose_cancel() {
     );
 }
 
-// AC4-part5: map_browse_key_event maps plain 'c' -> ComposeOpen (not a selection or nav action).
+// map_browse_key_event maps plain 'c' -> ComposeOpen (not a selection or nav action).
 #[test]
 fn map_browse_key_event_plain_c_yields_compose_open() {
     use crate::tui::events::map_browse_key_event;
@@ -3772,7 +3787,7 @@ fn map_browse_key_event_plain_c_yields_compose_open() {
     );
 }
 
-// AC4-part6: map_browse_key_event still maps Ctrl+C -> Quit (not ComposeOpen).
+// map_browse_key_event still maps Ctrl+C -> Quit (not ComposeOpen).
 #[test]
 fn map_browse_key_event_ctrl_c_still_quits() {
     use crate::tui::events::map_browse_key_event;
@@ -3789,7 +3804,7 @@ fn map_browse_key_event_ctrl_c_still_quits() {
     );
 }
 
-// AC1-multiline: a sequence of ComposeInput chars + an Enter Input yields two editor lines.
+// a sequence of ComposeInput chars + an Enter Input yields two editor lines.
 #[test]
 fn compose_multiline_editor_produces_two_lines() {
     let m = detail_model_for_compose("inst", 1, 1);
@@ -3804,8 +3819,6 @@ fn compose_multiline_editor_produces_two_lines() {
     );
 }
 
-// ── Log-time modal tests (issue 0067 TUI slice) ───────────────────────────────
-
 fn extract_log_time(model: &Model) -> Option<&LogTimeForm> {
     match model.top() {
         Some(Screen::Detail { overlay, .. }) => overlay.log_time(),
@@ -3813,7 +3826,7 @@ fn extract_log_time(model: &Model) -> Option<&LogTimeForm> {
     }
 }
 
-// AC1-part1: LogTimeOpen on a Detail screen sets the form to Editing/Hours/empty buffers.
+// LogTimeOpen on a Detail screen sets the form to Editing/Hours/empty buffers.
 #[test]
 fn log_time_open_on_detail_sets_editing_state_with_empty_buffers() {
     let m = detail_model_for_compose("inst", 10, 42);
@@ -3826,7 +3839,7 @@ fn log_time_open_on_detail_sets_editing_state_with_empty_buffers() {
     assert_eq!(form.status, LogTimeStatus::Editing);
 }
 
-// AC1-part2: LogTimeOpen on a screen that already has the log-time modal active is a no-op.
+// LogTimeOpen on a screen that already has the log-time modal active is a no-op.
 #[test]
 fn log_time_open_when_already_active_is_noop() {
     let mut m = detail_model_for_compose("inst", 10, 42);
@@ -3846,7 +3859,7 @@ fn log_time_open_when_already_active_is_noop() {
     assert_eq!(form.hours, "3", "existing hours buffer must be preserved");
 }
 
-// AC1-part3: LogTimeChar appends to the focused (Hours) field only.
+// LogTimeChar appends to the focused (Hours) field only.
 #[test]
 fn log_time_char_appends_to_focused_hours_field() {
     let m = detail_model_for_compose("inst", 10, 42);
@@ -3860,7 +3873,7 @@ fn log_time_char_appends_to_focused_hours_field() {
     assert_eq!(form.summary, "", "summary must stay untouched");
 }
 
-// AC1-part3: LogTimeToggleField switches focus so LogTimeChar edits Summary instead.
+// LogTimeToggleField switches focus so LogTimeChar edits Summary instead.
 #[test]
 fn log_time_char_edits_summary_after_toggle_field() {
     let m = detail_model_for_compose("inst", 10, 42);
@@ -3874,7 +3887,7 @@ fn log_time_char_edits_summary_after_toggle_field() {
     assert_eq!(form.hours, "", "hours must stay untouched");
 }
 
-// AC1: LogTimeToggleField is symmetric — a second toggle returns focus to Hours.
+// LogTimeToggleField is symmetric — a second toggle returns focus to Hours.
 #[test]
 fn log_time_toggle_field_twice_returns_to_hours() {
     let m = detail_model_for_compose("inst", 10, 42);
@@ -3885,7 +3898,7 @@ fn log_time_toggle_field_twice_returns_to_hours() {
     assert_eq!(form.field, LogTimeField::Hours);
 }
 
-// AC1-part5: LogTimeBackspace removes the last character of the focused field.
+// LogTimeBackspace removes the last character of the focused field.
 #[test]
 fn log_time_backspace_removes_last_character() {
     let m = detail_model_for_compose("inst", 10, 42);
@@ -3898,7 +3911,7 @@ fn log_time_backspace_removes_last_character() {
     assert_eq!(form.hours, "2");
 }
 
-// AC1-part6: LogTimeCancel clears the overlay and emits no Cmd.
+// LogTimeCancel clears the overlay and emits no Cmd.
 #[test]
 fn log_time_cancel_clears_overlay_and_emits_no_cmd() {
     let m = detail_model_for_compose("inst", 10, 42);
@@ -3912,7 +3925,7 @@ fn log_time_cancel_clears_overlay_and_emits_no_cmd() {
     );
 }
 
-// AC2-part1: LogTimeSubmit with a valid hours buffer and no summary emits exactly one
+// LogTimeSubmit with a valid hours buffer and no summary emits exactly one
 // Cmd::SubmitTimeLog with summary=None and sets status=Submitting.
 #[test]
 fn log_time_submit_valid_hours_emits_submit_time_log_cmd_with_no_summary() {
@@ -3941,7 +3954,7 @@ fn log_time_submit_valid_hours_emits_submit_time_log_cmd_with_no_summary() {
     assert_eq!(form.status, LogTimeStatus::Submitting);
 }
 
-// AC2-part1: a non-empty summary buffer flows into Cmd::SubmitTimeLog as Some(trimmed).
+// a non-empty summary buffer flows into Cmd::SubmitTimeLog as Some(trimmed).
 #[test]
 fn log_time_submit_with_summary_includes_some_summary() {
     let m = detail_model_for_compose("inst", 1, 1);
@@ -3958,7 +3971,7 @@ fn log_time_submit_with_summary_includes_some_summary() {
     }
 }
 
-// AC2-part2: an empty hours buffer sets Error and emits no Cmd.
+// an empty hours buffer sets Error and emits no Cmd.
 #[test]
 fn log_time_submit_empty_hours_sets_error_and_emits_no_cmd() {
     let m = detail_model_for_compose("inst", 1, 1);
@@ -3969,7 +3982,7 @@ fn log_time_submit_empty_hours_sets_error_and_emits_no_cmd() {
     assert!(matches!(form.status, LogTimeStatus::Error(_)));
 }
 
-// AC2-part2: a zero hours buffer sets Error and emits no Cmd.
+// a zero hours buffer sets Error and emits no Cmd.
 #[test]
 fn log_time_submit_zero_hours_sets_error_and_emits_no_cmd() {
     let m = detail_model_for_compose("inst", 1, 1);
@@ -3980,7 +3993,7 @@ fn log_time_submit_zero_hours_sets_error_and_emits_no_cmd() {
     assert!(matches!(form.status, LogTimeStatus::Error(_)));
 }
 
-// AC2-part2: a negative hours buffer sets Error and emits no Cmd.
+// a negative hours buffer sets Error and emits no Cmd.
 #[test]
 fn log_time_submit_negative_hours_sets_error_and_emits_no_cmd() {
     let m = detail_model_for_compose("inst", 1, 1);
@@ -3991,7 +4004,7 @@ fn log_time_submit_negative_hours_sets_error_and_emits_no_cmd() {
     assert!(matches!(form.status, LogTimeStatus::Error(_)));
 }
 
-// AC2-part2: a non-numeric hours buffer sets Error and emits no Cmd.
+// a non-numeric hours buffer sets Error and emits no Cmd.
 #[test]
 fn log_time_submit_non_numeric_hours_sets_error_and_emits_no_cmd() {
     let m = detail_model_for_compose("inst", 1, 1);
@@ -4002,7 +4015,7 @@ fn log_time_submit_non_numeric_hours_sets_error_and_emits_no_cmd() {
     assert!(matches!(form.status, LogTimeStatus::Error(_)));
 }
 
-// AC3-part1: TimeMutationOk clears the overlay AND emits exactly one
+// TimeMutationOk clears the overlay AND emits exactly one
 // Cmd::LoadDetail{refresh:true}, the same server-truth refresh as the comment path.
 #[test]
 fn time_mutation_ok_clears_overlay_and_emits_load_detail_refresh() {
@@ -4031,7 +4044,7 @@ fn time_mutation_ok_clears_overlay_and_emits_load_detail_refresh() {
     }
 }
 
-// AC3-part2: TimeMutationErr keeps the buffers intact and sets status=Error(msg), emits no Cmd.
+// TimeMutationErr keeps the buffers intact and sets status=Error(msg), emits no Cmd.
 #[test]
 fn time_mutation_err_preserves_buffers_and_sets_error_status() {
     let m = detail_model_for_compose("inst", 1, 1);
@@ -4058,7 +4071,7 @@ fn type_log_time_chars(mut model: Model, s: &str) -> Model {
     model
 }
 
-// AC4: map_log_time_key_event maps Ctrl+S -> LogTimeSubmit.
+// map_log_time_key_event maps Ctrl+S -> LogTimeSubmit.
 #[test]
 fn map_log_time_key_event_ctrl_s_yields_log_time_submit() {
     use crate::tui::events::map_log_time_key_event;
@@ -4075,7 +4088,7 @@ fn map_log_time_key_event_ctrl_s_yields_log_time_submit() {
     );
 }
 
-// AC4: map_log_time_key_event maps Esc -> LogTimeCancel.
+// map_log_time_key_event maps Esc -> LogTimeCancel.
 #[test]
 fn map_log_time_key_event_esc_yields_log_time_cancel() {
     use crate::tui::events::map_log_time_key_event;
@@ -4092,7 +4105,7 @@ fn map_log_time_key_event_esc_yields_log_time_cancel() {
     );
 }
 
-// AC4: map_log_time_key_event maps Tab -> LogTimeToggleField.
+// map_log_time_key_event maps Tab -> LogTimeToggleField.
 #[test]
 fn map_log_time_key_event_tab_yields_log_time_toggle_field() {
     use crate::tui::events::map_log_time_key_event;
@@ -4109,7 +4122,7 @@ fn map_log_time_key_event_tab_yields_log_time_toggle_field() {
     );
 }
 
-// AC4: map_log_time_key_event maps Backspace -> LogTimeBackspace.
+// map_log_time_key_event maps Backspace -> LogTimeBackspace.
 #[test]
 fn map_log_time_key_event_backspace_yields_log_time_backspace() {
     use crate::tui::events::map_log_time_key_event;
@@ -4126,7 +4139,7 @@ fn map_log_time_key_event_backspace_yields_log_time_backspace() {
     );
 }
 
-// AC4: map_log_time_key_event maps a printable char -> LogTimeChar(c).
+// map_log_time_key_event maps a printable char -> LogTimeChar(c).
 #[test]
 fn map_log_time_key_event_printable_char_yields_log_time_char() {
     use crate::tui::events::map_log_time_key_event;
@@ -4143,7 +4156,7 @@ fn map_log_time_key_event_printable_char_yields_log_time_char() {
     );
 }
 
-// AC4: map_browse_key_event maps plain 't' -> LogTimeOpen (not a selection or nav action).
+// map_browse_key_event maps plain 't' -> LogTimeOpen (not a selection or nav action).
 #[test]
 fn map_browse_key_event_plain_t_yields_log_time_open() {
     use crate::tui::events::map_browse_key_event;
@@ -4159,8 +4172,6 @@ fn map_browse_key_event_plain_t_yields_log_time_open() {
         "plain 't' must map to LogTimeOpen"
     );
 }
-
-// ── Estimate-edit modal tests (issue 0068 TUI slice) ──────────────────────────
 
 fn detail_model_with_task(
     instance: &str,
@@ -4187,6 +4198,7 @@ fn detail_model_with_task(
             affordances: vec![],
             focused_comment: None,
             auth_error: false,
+            download: None,
             comment_spans: vec![],
         }],
         should_quit: false,
@@ -4215,7 +4227,7 @@ fn type_estimate_chars(mut model: Model, s: &str) -> Model {
     model
 }
 
-// AC1: EstimateOpen on a task with no estimate sets the form to Editing with an empty value.
+// EstimateOpen on a task with no estimate sets the form to Editing with an empty value.
 #[test]
 fn estimate_open_on_detail_with_no_estimate_sets_editing_state_with_empty_value() {
     let m = detail_model_for_compose("inst", 10, 42);
@@ -4226,7 +4238,7 @@ fn estimate_open_on_detail_with_no_estimate_sets_editing_state_with_empty_value(
     assert_eq!(form.status, EditStatus::Editing);
 }
 
-// AC1: EstimateOpen prefills the value from the task's current estimate when present.
+// EstimateOpen prefills the value from the task's current estimate when present.
 #[test]
 fn estimate_open_prefills_value_from_existing_task_estimate() {
     let m = detail_model_with_task("inst", 10, 42, serde_json::json!({ "estimate": 8 }));
@@ -4238,7 +4250,7 @@ fn estimate_open_prefills_value_from_existing_task_estimate() {
     );
 }
 
-// AC1: a fractional task estimate prefills with its decimal value intact.
+// a fractional task estimate prefills with its decimal value intact.
 #[test]
 fn estimate_open_prefills_fractional_task_estimate() {
     let m = detail_model_with_task("inst", 10, 42, serde_json::json!({ "estimate": 4.5 }));
@@ -4247,7 +4259,7 @@ fn estimate_open_prefills_fractional_task_estimate() {
     assert_eq!(form.value, "4.5");
 }
 
-// AC1: EstimateOpen on a screen that already has the estimate modal active is a no-op.
+// EstimateOpen on a screen that already has the estimate modal active is a no-op.
 #[test]
 fn estimate_open_when_already_active_is_noop() {
     let mut m = detail_model_for_compose("inst", 10, 42);
@@ -4265,7 +4277,7 @@ fn estimate_open_when_already_active_is_noop() {
     assert_eq!(form.value, "3", "existing value buffer must be preserved");
 }
 
-// AC1: EstimateChar appends to the value buffer while Editing.
+// EstimateChar appends to the value buffer while Editing.
 #[test]
 fn estimate_char_appends_to_value_buffer() {
     let m = detail_model_for_compose("inst", 10, 42);
@@ -4278,7 +4290,7 @@ fn estimate_char_appends_to_value_buffer() {
     assert_eq!(form.value, "4.5");
 }
 
-// AC1: EstimateBackspace removes the last character of the value buffer.
+// EstimateBackspace removes the last character of the value buffer.
 #[test]
 fn estimate_backspace_removes_last_character() {
     let m = detail_model_for_compose("inst", 10, 42);
@@ -4289,7 +4301,7 @@ fn estimate_backspace_removes_last_character() {
     assert_eq!(form.value, "2");
 }
 
-// AC1: EstimateCancel clears the overlay and emits no Cmd.
+// EstimateCancel clears the overlay and emits no Cmd.
 #[test]
 fn estimate_cancel_clears_overlay_and_emits_no_cmd() {
     let m = detail_model_for_compose("inst", 10, 42);
@@ -4302,7 +4314,7 @@ fn estimate_cancel_clears_overlay_and_emits_no_cmd() {
     );
 }
 
-// AC2: a valid non-negative value emits exactly one Cmd::SubmitTaskEdit carrying
+// a valid non-negative value emits exactly one Cmd::SubmitTaskEdit carrying
 // estimate: Some(value), completion: None, assignee_id: None, and sets Submitting.
 #[test]
 fn estimate_submit_valid_value_emits_submit_task_edit_cmd() {
@@ -4319,7 +4331,9 @@ fn estimate_submit_valid_value_emits_submit_task_edit_cmd() {
             completion,
             assignee_id,
             estimate,
+            task_list_id,
         } => {
+            assert_eq!(*task_list_id, None);
             assert_eq!(instance, "myinst");
             assert_eq!(*project_id, 5);
             assert_eq!(*task_id, 99);
@@ -4333,7 +4347,7 @@ fn estimate_submit_valid_value_emits_submit_task_edit_cmd() {
     assert_eq!(form.status, EditStatus::Submitting);
 }
 
-// AC2: zero is a valid estimate (>= 0) and emits Cmd::SubmitTaskEdit with estimate: Some(0.0).
+// zero is a valid estimate (>= 0) and emits Cmd::SubmitTaskEdit with estimate: Some(0.0).
 #[test]
 fn estimate_submit_zero_is_accepted() {
     let m = detail_model_for_compose("inst", 1, 1);
@@ -4348,7 +4362,7 @@ fn estimate_submit_zero_is_accepted() {
     }
 }
 
-// AC2: an empty value buffer sets Error and emits no Cmd.
+// an empty value buffer sets Error and emits no Cmd.
 #[test]
 fn estimate_submit_empty_value_sets_error_and_emits_no_cmd() {
     let m = detail_model_for_compose("inst", 1, 1);
@@ -4359,7 +4373,7 @@ fn estimate_submit_empty_value_sets_error_and_emits_no_cmd() {
     assert!(matches!(form.status, EditStatus::Error(_)));
 }
 
-// AC2: a negative value sets Error and emits no Cmd.
+// a negative value sets Error and emits no Cmd.
 #[test]
 fn estimate_submit_negative_value_sets_error_and_emits_no_cmd() {
     let m = detail_model_for_compose("inst", 1, 1);
@@ -4370,7 +4384,7 @@ fn estimate_submit_negative_value_sets_error_and_emits_no_cmd() {
     assert!(matches!(form.status, EditStatus::Error(_)));
 }
 
-// AC2: a non-numeric value sets Error and emits no Cmd.
+// a non-numeric value sets Error and emits no Cmd.
 #[test]
 fn estimate_submit_non_numeric_value_sets_error_and_emits_no_cmd() {
     let m = detail_model_for_compose("inst", 1, 1);
@@ -4381,7 +4395,7 @@ fn estimate_submit_non_numeric_value_sets_error_and_emits_no_cmd() {
     assert!(matches!(form.status, EditStatus::Error(_)));
 }
 
-// AC3: TaskEditOk clears the overlay AND emits exactly one Cmd::LoadDetail{refresh:true},
+// TaskEditOk clears the overlay AND emits exactly one Cmd::LoadDetail{refresh:true},
 // the same server-truth refresh as the comment and time-log write paths.
 #[test]
 fn task_edit_ok_clears_overlay_and_emits_load_detail_refresh() {
@@ -4410,7 +4424,7 @@ fn task_edit_ok_clears_overlay_and_emits_load_detail_refresh() {
     }
 }
 
-// AC3: TaskEditErr keeps the value buffer intact and sets status=Error(msg), emits no Cmd.
+// TaskEditErr keeps the value buffer intact and sets status=Error(msg), emits no Cmd.
 #[test]
 fn task_edit_err_preserves_value_and_sets_error_status() {
     let m = detail_model_for_compose("inst", 1, 1);
@@ -4427,7 +4441,7 @@ fn task_edit_err_preserves_value_and_sets_error_status() {
     );
 }
 
-// AC1/AC3: map_estimate_key_event maps Ctrl+S -> EstimateSubmit.
+// map_estimate_key_event maps Ctrl+S -> EstimateSubmit.
 #[test]
 fn map_estimate_key_event_ctrl_s_yields_estimate_submit() {
     use crate::tui::events::map_estimate_key_event;
@@ -4444,7 +4458,7 @@ fn map_estimate_key_event_ctrl_s_yields_estimate_submit() {
     );
 }
 
-// AC1: map_estimate_key_event maps Esc -> EstimateCancel.
+// map_estimate_key_event maps Esc -> EstimateCancel.
 #[test]
 fn map_estimate_key_event_esc_yields_estimate_cancel() {
     use crate::tui::events::map_estimate_key_event;
@@ -4461,7 +4475,7 @@ fn map_estimate_key_event_esc_yields_estimate_cancel() {
     );
 }
 
-// AC1: map_estimate_key_event maps Backspace -> EstimateBackspace.
+// map_estimate_key_event maps Backspace -> EstimateBackspace.
 #[test]
 fn map_estimate_key_event_backspace_yields_estimate_backspace() {
     use crate::tui::events::map_estimate_key_event;
@@ -4478,7 +4492,7 @@ fn map_estimate_key_event_backspace_yields_estimate_backspace() {
     );
 }
 
-// AC1: map_estimate_key_event maps a printable char -> EstimateChar(c).
+// map_estimate_key_event maps a printable char -> EstimateChar(c).
 #[test]
 fn map_estimate_key_event_printable_char_yields_estimate_char() {
     use crate::tui::events::map_estimate_key_event;
@@ -4495,7 +4509,7 @@ fn map_estimate_key_event_printable_char_yields_estimate_char() {
     );
 }
 
-// AC1: map_browse_key_event maps plain 'e' -> EstimateOpen (not a selection or nav action).
+// map_browse_key_event maps plain 'e' -> EstimateOpen (not a selection or nav action).
 #[test]
 fn map_browse_key_event_plain_e_yields_estimate_open() {
     use crate::tui::events::map_browse_key_event;
@@ -4512,8 +4526,6 @@ fn map_browse_key_event_plain_e_yields_estimate_open() {
     );
 }
 
-// ── Status-confirm modal tests (issue 0068 TUI slice) ─────────────────────────
-
 fn extract_status_confirm(model: &Model) -> Option<(bool, &EditStatus)> {
     match model.top() {
         Some(Screen::Detail { overlay, .. }) => overlay.status_confirm(),
@@ -4521,7 +4533,7 @@ fn extract_status_confirm(model: &Model) -> Option<(bool, &EditStatus)> {
     }
 }
 
-// AC1: StatusToggleOpen on an OPEN task sets completed_target=true with status Editing.
+// StatusToggleOpen on an OPEN task sets completed_target=true with status Editing.
 #[test]
 fn status_toggle_open_on_open_task_targets_completed() {
     let m = detail_model_with_task("inst", 10, 42, serde_json::json!({ "is_completed": false }));
@@ -4533,7 +4545,7 @@ fn status_toggle_open_on_open_task_targets_completed() {
     assert_eq!(*status, EditStatus::Editing);
 }
 
-// AC1: StatusToggleOpen on a COMPLETED task sets completed_target=false.
+// StatusToggleOpen on a COMPLETED task sets completed_target=false.
 #[test]
 fn status_toggle_open_on_completed_task_targets_reopen() {
     let m = detail_model_with_task("inst", 10, 42, serde_json::json!({ "is_completed": true }));
@@ -4543,7 +4555,7 @@ fn status_toggle_open_on_completed_task_targets_reopen() {
     assert!(!completed_target, "a completed task must target reopen");
 }
 
-// AC1: StatusToggleOpen on a screen that already has the modal active is a no-op.
+// StatusToggleOpen on a screen that already has the modal active is a no-op.
 #[test]
 fn status_toggle_open_when_already_active_is_noop() {
     let mut m =
@@ -4566,7 +4578,7 @@ fn status_toggle_open_when_already_active_is_noop() {
     );
 }
 
-// AC1: StatusToggleCancel clears the overlay and emits no Cmd.
+// StatusToggleCancel clears the overlay and emits no Cmd.
 #[test]
 fn status_toggle_cancel_clears_overlay_and_emits_no_cmd() {
     let m = detail_model_with_task("inst", 10, 42, serde_json::json!({ "is_completed": false }));
@@ -4579,7 +4591,7 @@ fn status_toggle_cancel_clears_overlay_and_emits_no_cmd() {
     );
 }
 
-// AC2: StatusToggleConfirm while Editing emits exactly one Cmd::SubmitTaskEdit
+// StatusToggleConfirm while Editing emits exactly one Cmd::SubmitTaskEdit
 // carrying completion: Some(completed_target), assignee_id: None, estimate: None,
 // and sets status Submitting.
 #[test]
@@ -4602,7 +4614,9 @@ fn status_toggle_confirm_emits_submit_task_edit_cmd() {
             completion,
             assignee_id,
             estimate,
+            task_list_id,
         } => {
+            assert_eq!(*task_list_id, None);
             assert_eq!(instance, "myinst");
             assert_eq!(*project_id, 5);
             assert_eq!(*task_id, 99);
@@ -4616,7 +4630,7 @@ fn status_toggle_confirm_emits_submit_task_edit_cmd() {
     assert_eq!(*status, EditStatus::Submitting);
 }
 
-// AC2: StatusToggleConfirm is a no-op (no Cmd) when the overlay's status is not Editing.
+// StatusToggleConfirm is a no-op (no Cmd) when the overlay's status is not Editing.
 #[test]
 fn status_toggle_confirm_while_submitting_emits_no_cmd() {
     let mut m = detail_model_with_task("inst", 5, 99, serde_json::json!({ "is_completed": false }));
@@ -4636,7 +4650,7 @@ fn status_toggle_confirm_while_submitting_emits_no_cmd() {
     );
 }
 
-// AC2: StatusToggleConfirm is a no-op (no Cmd) when no status-confirm overlay is active.
+// StatusToggleConfirm is a no-op (no Cmd) when no status-confirm overlay is active.
 #[test]
 fn status_toggle_confirm_without_overlay_emits_no_cmd() {
     let m = detail_model_with_task("inst", 5, 99, serde_json::json!({ "is_completed": false }));
@@ -4647,7 +4661,7 @@ fn status_toggle_confirm_without_overlay_emits_no_cmd() {
     );
 }
 
-// AC3: TaskEditOk clears the status-confirm overlay AND emits exactly one
+// TaskEditOk clears the status-confirm overlay AND emits exactly one
 // Cmd::LoadDetail{refresh:true}, the same shared refresh path as the estimate write.
 #[test]
 fn status_task_edit_ok_clears_overlay_and_emits_load_detail_refresh() {
@@ -4676,7 +4690,7 @@ fn status_task_edit_ok_clears_overlay_and_emits_load_detail_refresh() {
     }
 }
 
-// AC3: TaskEditErr sets the status-confirm overlay's status to Error(msg), proving the
+// TaskEditErr sets the status-confirm overlay's status to Error(msg), proving the
 // generalized task-edit error setter reaches this overlay too.
 #[test]
 fn status_task_edit_err_sets_error_status() {
@@ -4698,7 +4712,7 @@ fn status_task_edit_err_sets_error_status() {
     );
 }
 
-// AC1/AC2: map_status_confirm_key_event maps Enter -> StatusToggleConfirm.
+// map_status_confirm_key_event maps Enter -> StatusToggleConfirm.
 #[test]
 fn map_status_confirm_key_event_enter_yields_status_toggle_confirm() {
     use crate::tui::events::map_status_confirm_key_event;
@@ -4718,7 +4732,7 @@ fn map_status_confirm_key_event_enter_yields_status_toggle_confirm() {
     );
 }
 
-// AC1/AC2: map_status_confirm_key_event maps Ctrl+S -> StatusToggleConfirm.
+// map_status_confirm_key_event maps Ctrl+S -> StatusToggleConfirm.
 #[test]
 fn map_status_confirm_key_event_ctrl_s_yields_status_toggle_confirm() {
     use crate::tui::events::map_status_confirm_key_event;
@@ -4738,7 +4752,7 @@ fn map_status_confirm_key_event_ctrl_s_yields_status_toggle_confirm() {
     );
 }
 
-// AC1: map_status_confirm_key_event maps Esc -> StatusToggleCancel.
+// map_status_confirm_key_event maps Esc -> StatusToggleCancel.
 #[test]
 fn map_status_confirm_key_event_esc_yields_status_toggle_cancel() {
     use crate::tui::events::map_status_confirm_key_event;
@@ -4758,7 +4772,7 @@ fn map_status_confirm_key_event_esc_yields_status_toggle_cancel() {
     );
 }
 
-// AC1: map_status_confirm_key_event ignores a plain printable char — no text entry.
+// map_status_confirm_key_event ignores a plain printable char — no text entry.
 #[test]
 fn map_status_confirm_key_event_printable_char_yields_none() {
     use crate::tui::events::map_status_confirm_key_event;
@@ -4775,7 +4789,7 @@ fn map_status_confirm_key_event_printable_char_yields_none() {
     );
 }
 
-// AC1: map_browse_key_event maps plain 's' -> StatusToggleOpen (not a selection or nav action).
+// map_browse_key_event maps plain 's' -> StatusToggleOpen (not a selection or nav action).
 #[test]
 fn map_browse_key_event_plain_s_yields_status_toggle_open() {
     use crate::tui::events::map_browse_key_event;
@@ -4792,7 +4806,7 @@ fn map_browse_key_event_plain_s_yields_status_toggle_open() {
     );
 }
 
-// Assignee-picker modal tests (issue 0068 TUI slice)
+// Assignee-picker modal tests
 
 fn detail_model_with_task_and_users(
     instance: &str,
@@ -4826,7 +4840,7 @@ fn users_two() -> HashMap<i64, String> {
     map
 }
 
-// AC1: AssigneePickerOpen builds candidates sorted case-insensitively by name and
+// AssigneePickerOpen builds candidates sorted case-insensitively by name and
 // pre-selects index 0 when the task has no current assignee.
 #[test]
 fn assignee_picker_open_builds_sorted_candidates_with_no_assignee_selects_zero() {
@@ -4845,7 +4859,7 @@ fn assignee_picker_open_builds_sorted_candidates_with_no_assignee_selects_zero()
     assert_eq!(*status, EditStatus::Editing);
 }
 
-// AC1: AssigneePickerOpen pre-selects the index of the task's current assignee_id.
+// AssigneePickerOpen pre-selects the index of the task's current assignee_id.
 #[test]
 fn assignee_picker_open_preselects_current_assignee_index() {
     let m = detail_model_with_task_and_users(
@@ -4864,7 +4878,7 @@ fn assignee_picker_open_preselects_current_assignee_index() {
     );
 }
 
-// AC1: an empty user directory produces an empty candidate list and selected 0.
+// an empty user directory produces an empty candidate list and selected 0.
 #[test]
 fn assignee_picker_open_with_empty_directory_yields_empty_candidates() {
     let m = detail_model_with_task_and_users("inst", 10, 42, serde_json::json!({}), HashMap::new());
@@ -4875,7 +4889,7 @@ fn assignee_picker_open_with_empty_directory_yields_empty_candidates() {
     assert_eq!(selected, 0);
 }
 
-// AC1: AssigneePickerOpen on a screen that already has the picker active is a no-op.
+// AssigneePickerOpen on a screen that already has the picker active is a no-op.
 #[test]
 fn assignee_picker_open_when_already_active_is_noop() {
     let mut m =
@@ -4901,7 +4915,7 @@ fn assignee_picker_open_when_already_active_is_noop() {
     );
 }
 
-// AC1: AssigneePickerDown moves the selection forward and saturates at the last row.
+// AssigneePickerDown moves the selection forward and saturates at the last row.
 #[test]
 fn assignee_picker_down_moves_selection_and_saturates_at_end() {
     let m = detail_model_with_task_and_users("inst", 10, 42, serde_json::json!({}), users_two());
@@ -4915,7 +4929,7 @@ fn assignee_picker_down_moves_selection_and_saturates_at_end() {
     assert_eq!(selected, 1, "must saturate at the last candidate index");
 }
 
-// AC1: AssigneePickerUp moves the selection backward and saturates at the first row.
+// AssigneePickerUp moves the selection backward and saturates at the first row.
 #[test]
 fn assignee_picker_up_moves_selection_and_saturates_at_start() {
     let m = detail_model_with_task_and_users("inst", 10, 42, serde_json::json!({}), users_two());
@@ -4930,7 +4944,7 @@ fn assignee_picker_up_moves_selection_and_saturates_at_start() {
     assert_eq!(selected, 0, "must saturate at the first candidate index");
 }
 
-// AC1: AssigneePickerCancel clears the overlay and emits no Cmd.
+// AssigneePickerCancel clears the overlay and emits no Cmd.
 #[test]
 fn assignee_picker_cancel_clears_overlay_and_emits_no_cmd() {
     let m = detail_model_with_task_and_users("inst", 10, 42, serde_json::json!({}), users_two());
@@ -4943,7 +4957,7 @@ fn assignee_picker_cancel_clears_overlay_and_emits_no_cmd() {
     );
 }
 
-// AC2: AssigneePickerSubmit while Editing emits exactly one Cmd::SubmitTaskEdit
+// AssigneePickerSubmit while Editing emits exactly one Cmd::SubmitTaskEdit
 // carrying assignee_id: Some(selected id), completion: None, estimate: None,
 // and sets status Submitting.
 #[test]
@@ -4962,7 +4976,9 @@ fn assignee_picker_submit_emits_submit_task_edit_cmd() {
             completion,
             assignee_id,
             estimate,
+            task_list_id,
         } => {
+            assert_eq!(*task_list_id, None);
             assert_eq!(instance, "myinst");
             assert_eq!(*project_id, 5);
             assert_eq!(*task_id, 99);
@@ -4976,7 +4992,7 @@ fn assignee_picker_submit_emits_submit_task_edit_cmd() {
     assert_eq!(*status, EditStatus::Submitting);
 }
 
-// AC2: AssigneePickerSubmit is a no-op (no Cmd) when candidates is empty.
+// AssigneePickerSubmit is a no-op (no Cmd) when candidates is empty.
 #[test]
 fn assignee_picker_submit_with_empty_candidates_emits_no_cmd() {
     let m = detail_model_with_task_and_users("inst", 5, 99, serde_json::json!({}), HashMap::new());
@@ -4988,7 +5004,7 @@ fn assignee_picker_submit_with_empty_candidates_emits_no_cmd() {
     );
 }
 
-// AC2: AssigneePickerSubmit is a no-op (no Cmd) when the overlay's status is not Editing.
+// AssigneePickerSubmit is a no-op (no Cmd) when the overlay's status is not Editing.
 #[test]
 fn assignee_picker_submit_while_submitting_emits_no_cmd() {
     let mut m = detail_model_with_task_and_users("inst", 5, 99, serde_json::json!({}), users_two());
@@ -5010,7 +5026,7 @@ fn assignee_picker_submit_while_submitting_emits_no_cmd() {
     );
 }
 
-// AC2: AssigneePickerSubmit is a no-op (no Cmd) when no assignee-picker overlay is active.
+// AssigneePickerSubmit is a no-op (no Cmd) when no assignee-picker overlay is active.
 #[test]
 fn assignee_picker_submit_without_overlay_emits_no_cmd() {
     let m = detail_model_with_task_and_users("inst", 5, 99, serde_json::json!({}), users_two());
@@ -5021,7 +5037,7 @@ fn assignee_picker_submit_without_overlay_emits_no_cmd() {
     );
 }
 
-// AC3: TaskEditOk clears the assignee-picker overlay AND emits exactly one
+// TaskEditOk clears the assignee-picker overlay AND emits exactly one
 // Cmd::LoadDetail{refresh:true}, the same shared refresh path as the other task-edit writes.
 #[test]
 fn assignee_picker_task_edit_ok_clears_overlay_and_emits_load_detail_refresh() {
@@ -5050,7 +5066,7 @@ fn assignee_picker_task_edit_ok_clears_overlay_and_emits_load_detail_refresh() {
     }
 }
 
-// AC3: TaskEditErr sets the assignee-picker overlay's status to Error(msg), proving
+// TaskEditErr sets the assignee-picker overlay's status to Error(msg), proving
 // the generalized task-edit error setter reaches this overlay too.
 #[test]
 fn assignee_picker_task_edit_err_sets_error_status() {
@@ -5068,7 +5084,7 @@ fn assignee_picker_task_edit_err_sets_error_status() {
     );
 }
 
-// AC1: typed characters filter the candidate list to names containing the filter
+// typed characters filter the candidate list to names containing the filter
 // text, case-insensitive substring match on name only.
 #[test]
 fn assignee_picker_char_filters_candidates_by_name_case_insensitive() {
@@ -5086,7 +5102,7 @@ fn assignee_picker_char_filters_candidates_by_name_case_insensitive() {
     );
 }
 
-// AC2: a filter change resets the highlighted row to the first match, and Up/Down
+// a filter change resets the highlighted row to the first match, and Up/Down
 // move only within the filtered list, saturating at its first/last row.
 #[test]
 fn assignee_picker_filter_resets_selection_and_nav_clamps_to_filtered_list() {
@@ -5127,7 +5143,7 @@ fn assignee_picker_filter_resets_selection_and_nav_clamps_to_filtered_list() {
     assert_eq!(selected, 0, "Up must saturate at the first filtered row");
 }
 
-// AC3: Submit with a non-empty filtered list emits Cmd::SubmitTaskEdit carrying the
+// Submit with a non-empty filtered list emits Cmd::SubmitTaskEdit carrying the
 // highlighted FILTERED candidate's id, not an index into the full candidate list.
 #[test]
 fn assignee_picker_submit_uses_filtered_candidate_id() {
@@ -5148,7 +5164,7 @@ fn assignee_picker_submit_uses_filtered_candidate_id() {
     }
 }
 
-// AC3: Submit is a no-op (no Cmd) when the current filter matches no candidate.
+// Submit is a no-op (no Cmd) when the current filter matches no candidate.
 #[test]
 fn assignee_picker_submit_with_no_filter_matches_emits_no_cmd() {
     let m = detail_model_with_task_and_users("inst", 5, 99, serde_json::json!({}), users_two());
@@ -5161,7 +5177,7 @@ fn assignee_picker_submit_with_no_filter_matches_emits_no_cmd() {
     );
 }
 
-// AC5: Backspace removes the last character from the filter buffer.
+// Backspace removes the last character from the filter buffer.
 #[test]
 fn assignee_picker_backspace_removes_last_filter_char() {
     let m = detail_model_with_task_and_users("inst", 10, 42, serde_json::json!({}), users_two());
@@ -5176,7 +5192,7 @@ fn assignee_picker_backspace_removes_last_filter_char() {
     assert_eq!(filter, "b");
 }
 
-// AC5: Backspace on an already-empty filter is a no-op.
+// Backspace on an already-empty filter is a no-op.
 #[test]
 fn assignee_picker_backspace_on_empty_filter_is_noop() {
     let m = detail_model_with_task_and_users("inst", 10, 42, serde_json::json!({}), users_two());
@@ -5210,7 +5226,7 @@ fn assignee_picker_char_while_submitting_is_noop() {
     assert_eq!(filter, "", "filter must not change while Submitting");
 }
 
-// AC4: map_assignee_picker_key_event maps Down -> AssigneePickerDown.
+// map_assignee_picker_key_event maps Down -> AssigneePickerDown.
 #[test]
 fn map_assignee_picker_key_event_down_yields_assignee_picker_down() {
     use crate::tui::events::map_assignee_picker_key_event;
@@ -5227,7 +5243,7 @@ fn map_assignee_picker_key_event_down_yields_assignee_picker_down() {
     ));
 }
 
-// AC4: map_assignee_picker_key_event maps Up -> AssigneePickerUp.
+// map_assignee_picker_key_event maps Up -> AssigneePickerUp.
 #[test]
 fn map_assignee_picker_key_event_up_yields_assignee_picker_up() {
     use crate::tui::events::map_assignee_picker_key_event;
@@ -5244,7 +5260,7 @@ fn map_assignee_picker_key_event_up_yields_assignee_picker_up() {
     ));
 }
 
-// AC4: map_assignee_picker_key_event maps j/k and every other printable char to
+// map_assignee_picker_key_event maps j/k and every other printable char to
 // AssigneePickerChar — j/k no longer navigate, they type into the filter.
 #[test]
 fn map_assignee_picker_key_event_printable_chars_yield_assignee_picker_char() {
@@ -5267,7 +5283,7 @@ fn map_assignee_picker_key_event_printable_chars_yield_assignee_picker_char() {
     }
 }
 
-// AC4: map_assignee_picker_key_event maps Backspace -> AssigneePickerBackspace.
+// map_assignee_picker_key_event maps Backspace -> AssigneePickerBackspace.
 #[test]
 fn map_assignee_picker_key_event_backspace_yields_assignee_picker_backspace() {
     use crate::tui::events::map_assignee_picker_key_event;
@@ -5284,7 +5300,7 @@ fn map_assignee_picker_key_event_backspace_yields_assignee_picker_backspace() {
     ));
 }
 
-// AC1/AC2: map_assignee_picker_key_event maps Enter and Ctrl+S -> AssigneePickerSubmit.
+// map_assignee_picker_key_event maps Enter and Ctrl+S -> AssigneePickerSubmit.
 #[test]
 fn map_assignee_picker_key_event_enter_and_ctrl_s_yield_assignee_picker_submit() {
     use crate::tui::events::map_assignee_picker_key_event;
@@ -5311,7 +5327,7 @@ fn map_assignee_picker_key_event_enter_and_ctrl_s_yield_assignee_picker_submit()
     ));
 }
 
-// AC1: map_assignee_picker_key_event maps Esc -> AssigneePickerCancel.
+// map_assignee_picker_key_event maps Esc -> AssigneePickerCancel.
 #[test]
 fn map_assignee_picker_key_event_esc_yields_assignee_picker_cancel() {
     use crate::tui::events::map_assignee_picker_key_event;
@@ -5331,7 +5347,7 @@ fn map_assignee_picker_key_event_esc_yields_assignee_picker_cancel() {
     );
 }
 
-// AC1: map_browse_key_event maps plain 'a' -> AssigneePickerOpen (not a selection or nav action).
+// map_browse_key_event maps plain 'a' -> AssigneePickerOpen (not a selection or nav action).
 #[test]
 fn map_browse_key_event_plain_a_yields_assignee_picker_open() {
     use crate::tui::events::map_browse_key_event;
@@ -5347,8 +5363,6 @@ fn map_browse_key_event_plain_a_yields_assignee_picker_open() {
         "plain 'a' must map to AssigneePickerOpen"
     );
 }
-
-// ── Comment-edit-ui tests (BDR 0024 Sc.4-5 / ADR 0036) ───────────────────────
 
 /// Build a Detail model that has one owned comment (created_by_id == current_user_id)
 /// and one unowned comment. The model is reflowed at `width` so `edit_affordances`
@@ -5394,6 +5408,7 @@ fn detail_model_with_comments_for_edit(
             affordances: vec![],
             focused_comment: None,
             auth_error: false,
+            download: None,
             comment_spans: vec![],
         }],
         should_quit: false,
@@ -5411,7 +5426,7 @@ fn detail_model_with_comments_for_edit(
     m
 }
 
-// edit-AC4: ComposeSubmit with kind=Edit{comment_id} emits Cmd::UpdateComment
+// ComposeSubmit with kind=Edit{comment_id} emits Cmd::UpdateComment
 // (NOT Cmd::SubmitComment), carries the correct instance / comment_id / body.
 // Drives the real Ctrl+click -> compose open -> submit path.
 #[test]
@@ -5468,7 +5483,7 @@ fn compose_submit_with_edit_kind_emits_update_comment_cmd() {
     );
 }
 
-// edit-AC4-B: ComposeSubmit with kind=New still emits Cmd::SubmitComment (regression guard).
+// ComposeSubmit with kind=New still emits Cmd::SubmitComment (regression guard).
 #[test]
 fn compose_submit_with_new_kind_still_emits_submit_comment_cmd() {
     let m = detail_model_for_compose("myinst", 5, 99);
@@ -5484,7 +5499,7 @@ fn compose_submit_with_new_kind_still_emits_submit_comment_cmd() {
     );
 }
 
-// edit-AC2: A Ctrl/Cmd+click landing on the [editar] affordance opens compose
+// A Ctrl/Cmd+click landing on the [editar] affordance opens compose
 // with kind=Edit (scroll-aware: verifies via affordance coordinates populated by
 // reflow_detail). A plain (unmodified) click on the same coordinates does NOT
 // open compose.
@@ -5539,7 +5554,7 @@ fn ctrl_click_on_edit_affordance_opens_compose_edit() {
     assert_eq!(cp.status, ComposeStatus::Editing, "status must be Editing");
 }
 
-// edit-AC2-B: A plain (unmodified) click on the affordance coordinates does NOT
+// A plain (unmodified) click on the affordance coordinates does NOT
 // open compose (modifier gate is required for [editar] activation).
 #[test]
 fn plain_click_on_edit_affordance_coords_does_not_open_compose() {
@@ -5570,8 +5585,6 @@ fn plain_click_on_edit_affordance_coords_does_not_open_compose() {
         "plain click on affordance coords must NOT open compose"
     );
 }
-
-// ── Comment-delete-ui tests (BDR 0024 Sc.6 / issue 0034) ─────────────────────
 
 /// Build a reflowed Detail model that has one owned comment (id=42, created_by_id=7)
 /// so `delete_affordances` is populated after `reflow_detail`.
@@ -5645,7 +5658,7 @@ fn confirm_affordances_absent_when_confirm_delete_is_none() {
                 "confirm_delete must be None before any click"
             );
             // The confirm/cancel modal buttons are hit-tested by dispatch_modal_click
-            // from frame geometry (ADR 0039). The scroll-aware affordance list must
+            // from frame geometry. The scroll-aware affordance list must
             // contain only Edit and Delete kinds — never modal-specific entries.
             let only_edit_or_delete = affordances.iter().all(|a| {
                 matches!(
@@ -5748,7 +5761,7 @@ fn plain_click_on_delete_affordance_does_not_set_confirm_delete() {
 
 // ACd2-c: After clicking `[excluir]`, confirm_delete is Some and the modal overlay
 // owns confirm/cancel UI. The scroll-aware affordance list must NOT contain inline
-// Confirm/Cancel entries (they moved to the modal, ADR 0039 slice 2).
+// Confirm/Cancel entries (they moved to the modal).
 #[test]
 fn confirm_affordances_absent_in_affordances_after_delete_request() {
     let m = detail_model_with_comments_for_delete("inst", 1, 1, Some(7), 82);
@@ -5787,7 +5800,7 @@ fn confirm_affordances_absent_in_affordances_after_delete_request() {
                 "confirm_delete must be Some(42) after excluir click"
             );
             // The confirm/cancel modal buttons are hit-tested by dispatch_modal_click
-            // from frame geometry (ADR 0039). The scroll-aware affordance list must
+            // from frame geometry. The scroll-aware affordance list must
             // contain only Edit and Delete kinds — never modal-specific entries.
             let only_edit_or_delete = affordances.iter().all(|a| {
                 matches!(
@@ -5808,7 +5821,7 @@ fn confirm_affordances_absent_in_affordances_after_delete_request() {
 
 // ACd2-d: When confirm_delete is Some, Msg::ConfirmDeleteComment emits exactly one
 // `Cmd::DeleteComment{comment_id: 42}` with the correct instance and clears confirm_delete.
-// (Modal confirm is now via Enter key / Msg::ConfirmDeleteComment — ADR 0039 slice 2.)
+// (Modal confirm is now via Enter key / Msg::ConfirmDeleteComment.)
 #[test]
 fn confirm_delete_msg_emits_delete_comment_cmd() {
     let m = detail_model_with_comments_for_delete("myinst", 1, 1, Some(7), 82);
@@ -5861,7 +5874,7 @@ fn confirm_delete_msg_emits_delete_comment_cmd() {
 }
 
 // ACd2-e: When confirm_delete is Some, Msg::CancelDeleteComment clears it and emits NO Cmd.
-// (Modal cancel is now via Esc key / Msg::CancelDeleteComment — ADR 0039 slice 2.)
+// (Modal cancel is now via Esc key / Msg::CancelDeleteComment.)
 #[test]
 fn cancel_delete_msg_clears_confirm_delete_no_cmd() {
     let m = detail_model_with_comments_for_delete("inst", 1, 1, Some(7), 82);
@@ -5989,8 +6002,6 @@ fn comment_mutation_err_does_not_emit_refresh() {
     );
 }
 
-// --- AC1: FocusNextComment / FocusPrevComment move focused_comment, emit no Cmd ---
-
 fn detail_model_with_n_comments(n: usize) -> Model {
     use serde_json::json;
     let comments: Vec<serde_json::Value> = (0..n)
@@ -6022,6 +6033,7 @@ fn detail_model_with_n_comments(n: usize) -> Model {
             affordances: vec![],
             focused_comment: None,
             auth_error: false,
+            download: None,
             comment_spans: vec![],
         }],
         should_quit: false,
@@ -6051,7 +6063,7 @@ fn focused_comment(model: &Model) -> Option<usize> {
     }
 }
 
-// AC1: FocusNextComment with None focus moves to first comment (index 0), emits no Cmd.
+// FocusNextComment with None focus moves to first comment (index 0), emits no Cmd.
 #[test]
 fn focus_next_from_none_moves_to_first_comment() {
     let m = detail_model_with_n_comments_and_spans(3);
@@ -6064,7 +6076,7 @@ fn focus_next_from_none_moves_to_first_comment() {
     );
 }
 
-// AC1: FocusNextComment moves focus from 0 to 1.
+// FocusNextComment moves focus from 0 to 1.
 #[test]
 fn focus_next_increments_focused_comment() {
     let mut m = detail_model_with_n_comments_and_spans(3);
@@ -6083,7 +6095,7 @@ fn focus_next_increments_focused_comment() {
     );
 }
 
-// AC1: FocusPrevComment with None focus moves to first comment (index 0), emits no Cmd.
+// FocusPrevComment with None focus moves to first comment (index 0), emits no Cmd.
 #[test]
 fn focus_prev_from_none_moves_to_first_comment() {
     let m = detail_model_with_n_comments_and_spans(3);
@@ -6096,7 +6108,7 @@ fn focus_prev_from_none_moves_to_first_comment() {
     );
 }
 
-// AC1: FocusPrevComment moves focus from 1 to 0.
+// FocusPrevComment moves focus from 1 to 0.
 #[test]
 fn focus_prev_decrements_focused_comment() {
     let mut m = detail_model_with_n_comments_and_spans(3);
@@ -6115,7 +6127,7 @@ fn focus_prev_decrements_focused_comment() {
     );
 }
 
-// AC1: FocusNextComment at last comment is a no-op (no wraparound).
+// FocusNextComment at last comment is a no-op (no wraparound).
 #[test]
 fn focus_next_at_last_comment_is_noop() {
     let mut m = detail_model_with_n_comments_and_spans(3);
@@ -6134,7 +6146,7 @@ fn focus_next_at_last_comment_is_noop() {
     );
 }
 
-// AC1: FocusPrevComment at first comment is a no-op (no wraparound).
+// FocusPrevComment at first comment is a no-op (no wraparound).
 #[test]
 fn focus_prev_at_first_comment_is_noop() {
     let mut m = detail_model_with_n_comments_and_spans(3);
@@ -6153,7 +6165,7 @@ fn focus_prev_at_first_comment_is_noop() {
     );
 }
 
-// AC1: Zero-comment thread keeps focused_comment = None on FocusNextComment.
+// Zero-comment thread keeps focused_comment = None on FocusNextComment.
 #[test]
 fn focus_next_on_empty_thread_is_noop() {
     let m = detail_model_with_n_comments_and_spans(0);
@@ -6166,7 +6178,7 @@ fn focus_next_on_empty_thread_is_noop() {
     );
 }
 
-// AC1: Zero-comment thread keeps focused_comment = None on FocusPrevComment.
+// Zero-comment thread keeps focused_comment = None on FocusPrevComment.
 #[test]
 fn focus_prev_on_empty_thread_is_noop() {
     let m = detail_model_with_n_comments_and_spans(0);
@@ -6178,8 +6190,6 @@ fn focus_prev_on_empty_thread_is_noop() {
         "empty thread: FocusPrev must keep focused_comment = None"
     );
 }
-
-// --- AC2: focus move sets offset so focused card is fully visible ---
 
 fn detail_model_with_comment_spans(
     comment_spans: Vec<(usize, usize)>,
@@ -6219,6 +6229,7 @@ fn detail_model_with_comment_spans(
             affordances: vec![],
             focused_comment: None,
             auth_error: false,
+            download: None,
             comment_spans,
         }],
         should_quit: false,
@@ -6240,7 +6251,7 @@ fn detail_offset(model: &Model) -> usize {
     }
 }
 
-// AC2: card below viewport — focus move scrolls down so card's last line is visible.
+// card below viewport — focus move scrolls down so card's last line is visible.
 // viewport_rows=14, DETAIL_CHROME_ROWS=4 → text_vh=10.
 // Card at lines 15..20 (start=15, count=5). Offset=0 → card_end(20) > viewport_end(10).
 // Expected offset = card_end - text_vh = 20 - 10 = 10.
@@ -6263,7 +6274,7 @@ fn focus_move_scrolls_down_when_card_below_viewport() {
     );
 }
 
-// AC2: card above viewport — focus move scrolls up so card's first line is visible.
+// card above viewport — focus move scrolls up so card's first line is visible.
 // viewport_rows=14, text_vh=10. Card at lines 3..8 (start=3, count=5).
 // Offset=10 → card_start(3) < current_offset(10).
 // Expected offset = card_start = 3.
@@ -6284,7 +6295,7 @@ fn focus_move_scrolls_up_when_card_above_viewport() {
     );
 }
 
-// AC2: card already fully visible — focus move leaves offset unchanged.
+// card already fully visible — focus move leaves offset unchanged.
 // viewport_rows=14, text_vh=10. Card at lines 2..6 (start=2, count=4).
 // Offset=0 → viewport covers lines 0..10; card [2..6] fully inside.
 // Expected offset = 0 (unchanged).
@@ -6304,8 +6315,6 @@ fn focus_move_does_not_change_offset_when_card_already_visible() {
         "card already visible: offset must remain unchanged"
     );
 }
-
-// --- AC3: PageUp/PageDown change offset and leave focused_comment unchanged ---
 
 #[test]
 fn page_down_changes_offset_leaves_focused_comment_unchanged() {
@@ -6378,8 +6387,6 @@ fn mouse_wheel_scroll_leaves_focused_comment_unchanged() {
         "ScrollDown must leave focused_comment unchanged"
     );
 }
-
-// --- AC5: reflow_detail rebuilds comment_spans on width change, reuses on same width ---
 
 #[test]
 fn reflow_detail_builds_comment_spans_on_width_change() {
@@ -6469,8 +6476,6 @@ fn reflow_detail_rebuilds_comment_spans_on_data_change() {
     }
 }
 
-// --- AC6: Ctrl/Cmd+click on [editar]/[excluir] still emits the correct Cmd (regression) ---
-
 #[test]
 fn ctrl_click_editar_on_focused_own_card_still_emits_compose_open() {
     let m = detail_model_with_comments_for_edit("inst", 1, 1, Some(7), 82);
@@ -6523,8 +6528,6 @@ fn no_key_acts_on_focused_comment_for_edit_or_delete() {
     );
     let _ = m_after_e;
 }
-
-// --- AC1 (BDR 0026 Sc.9): modal_area centering and clamping ---
 
 #[test]
 fn modal_area_centers_in_large_frame() {
@@ -6594,8 +6597,6 @@ fn modal_area_clamps_when_frame_shorter_than_desired() {
     );
 }
 
-// --- AC3 (slice-1b): modal_target_size pure unit tests ---
-
 #[test]
 fn modal_target_size_large_frame_returns_70_percent() {
     use crate::tui::widgets::modal::{modal_target_size, ModalContent};
@@ -6637,8 +6638,6 @@ fn modal_target_size_respects_content_minimum() {
     assert!(w >= 1, "width must be at least 1: got {w}");
 }
 
-// --- AC3 (BDR 0026 Sc.3): compose absent from scrollable lines after reflow ---
-
 #[test]
 fn reflow_detail_with_compose_does_not_append_compose_lines() {
     use crate::tui::model::{Compose, ComposeKind, ComposeStatus};
@@ -6666,6 +6665,7 @@ fn reflow_detail_with_compose_does_not_append_compose_lines() {
             affordances: vec![],
             focused_comment: None,
             auth_error: false,
+            download: None,
             comment_spans: vec![],
         }],
         should_quit: false,
@@ -6695,7 +6695,6 @@ fn reflow_detail_with_compose_does_not_append_compose_lines() {
     }
 }
 
-// --- AC7: compose semantics regression — key map unchanged after modal migration ---
 // These exercise the pure update() transitions to confirm the compose mode behavior
 // is unaffected by moving the rendering to an overlay.
 
@@ -6725,6 +6724,7 @@ fn ac7_regression_compose_enter_input_inserts_newline_not_submit_after_modal_mig
             affordances: vec![],
             focused_comment: None,
             auth_error: false,
+            download: None,
             comment_spans: vec![],
         }],
         should_quit: false,
@@ -6781,6 +6781,7 @@ fn ac7_regression_compose_cancel_clears_compose_emits_no_cmd_after_modal_migrati
             affordances: vec![],
             focused_comment: None,
             auth_error: false,
+            download: None,
             comment_spans: vec![],
         }],
         should_quit: false,
@@ -6832,6 +6833,7 @@ fn ac7_regression_compose_submit_emits_write_cmd_after_modal_migration() {
             affordances: vec![],
             focused_comment: None,
             auth_error: false,
+            download: None,
             comment_spans: vec![],
         }],
         should_quit: false,
@@ -6879,8 +6881,6 @@ fn scroll_offset_for_card_scrolls_up_when_above() {
     assert_eq!(result, 3, "card above viewport: offset must be card_start");
 }
 
-// --- Confirm-delete modal keyboard routing (ADR 0039 slice 2) ---
-
 fn detail_model_with_confirm_delete(comment_id: i64) -> Model {
     Model {
         stack: vec![Screen::Detail {
@@ -6901,6 +6901,7 @@ fn detail_model_with_confirm_delete(comment_id: i64) -> Model {
             affordances: vec![],
             focused_comment: None,
             auth_error: false,
+            download: None,
             comment_spans: vec![],
         }],
         should_quit: false,
@@ -6915,7 +6916,7 @@ fn detail_model_with_confirm_delete(comment_id: i64) -> Model {
     }
 }
 
-// AC4: Enter key (Msg::Select) when confirm_delete is Some confirms the delete.
+// Enter key (Msg::Select) when confirm_delete is Some confirms the delete.
 #[test]
 fn enter_key_when_confirm_delete_some_emits_delete_comment() {
     let m = detail_model_with_confirm_delete(99);
@@ -6943,7 +6944,7 @@ fn enter_key_when_confirm_delete_some_emits_delete_comment() {
     }
 }
 
-// AC4: Esc key (Msg::Back) when confirm_delete is Some cancels the delete (no cmd, no pop).
+// Esc key (Msg::Back) when confirm_delete is Some cancels the delete (no cmd, no pop).
 #[test]
 fn esc_key_when_confirm_delete_some_cancels_without_popping() {
     let m = detail_model_with_confirm_delete(99);
@@ -6965,7 +6966,7 @@ fn esc_key_when_confirm_delete_some_cancels_without_popping() {
     assert!(!m2.should_quit, "Esc in confirm sub-mode must not quit");
 }
 
-// AC4: Msg::ConfirmDeleteComment when confirm_delete is None is a no-op.
+// Msg::ConfirmDeleteComment when confirm_delete is None is a no-op.
 #[test]
 fn confirm_delete_msg_when_none_is_noop() {
     let m = detail_model_with_assets_and_viewport(vec![], "inst", (80, 24));
@@ -6982,7 +6983,7 @@ fn confirm_delete_msg_when_none_is_noop() {
     }
 }
 
-// AC4: Msg::CancelDeleteComment when confirm_delete is None is a no-op.
+// Msg::CancelDeleteComment when confirm_delete is None is a no-op.
 #[test]
 fn cancel_delete_msg_when_none_is_noop() {
     let m = detail_model_with_assets_and_viewport(vec![], "inst", (80, 24));
@@ -6997,7 +6998,7 @@ fn cancel_delete_msg_when_none_is_noop() {
     );
 }
 
-// AC5 (regression): Msg::CommentMutationOk after a delete triggers LoadDetail{refresh:true}.
+// Msg::CommentMutationOk after a delete triggers LoadDetail{refresh:true}.
 // This test duplicates the existing comment_mutation_ok_after_delete_emits_load_detail_refresh
 // from the same file to guard against the delete refresh path regressing across slices.
 #[test]
@@ -7048,7 +7049,7 @@ fn comment_mutation_ok_after_delete_triggers_load_detail_refresh_regression() {
     }
 }
 
-// AC3: plain left click on the [confirmar] button target emits Cmd::DeleteComment.
+// plain left click on the [confirmar] button target emits Cmd::DeleteComment.
 // Button targets are set on the model (mirroring the shell's render-then-set flow).
 // For an 80×24 frame: modal at x=12,y=4,w=56,h=16, inner_x=13, hint_row=18.
 // [confirmar] → x_start=13, x_end=24.
@@ -7102,7 +7103,7 @@ fn plain_click_on_confirm_button_emits_delete_comment() {
     }
 }
 
-// AC3: plain left click on the [cancelar] button target clears confirm_delete, emits no Cmd.
+// plain left click on the [cancelar] button target clears confirm_delete, emits no Cmd.
 #[test]
 fn plain_click_on_cancel_button_clears_confirm_no_cmd() {
     use crate::tui::model::ModalButtonTarget;
@@ -7146,7 +7147,7 @@ fn plain_click_on_cancel_button_clears_confirm_no_cmd() {
     }
 }
 
-// AC3b: plain click OUTSIDE the button targets while confirm modal is open is a no-op
+// plain click OUTSIDE the button targets while confirm modal is open is a no-op
 // (modal captures all clicks — no selection starts behind it).
 #[test]
 fn plain_click_outside_buttons_while_modal_open_is_noop() {
@@ -7195,8 +7196,6 @@ fn plain_click_outside_buttons_while_modal_open_is_noop() {
     );
 }
 
-// ── hit_test::resolve_detail_click unit tests (AC4, AC5, TE) ─────────────────
-
 use super::super::hit_test::{resolve_detail_click, DetailClickTarget};
 use crate::render::{AffordanceKind, LocalAffordance};
 
@@ -7222,6 +7221,7 @@ fn hit_test_model(lines: Vec<String>, affordances: Vec<LocalAffordance>) -> Mode
             affordances,
             focused_comment: None,
             auth_error: false,
+            download: None,
             comment_spans: vec![],
         }],
         should_quit: false,
@@ -7236,7 +7236,7 @@ fn hit_test_model(lines: Vec<String>, affordances: Vec<LocalAffordance>) -> Mode
     }
 }
 
-// AC4 / TE: plain click (has_modifier=false) always resolves to None.
+// plain click (has_modifier=false) always resolves to None.
 #[test]
 fn resolve_detail_click_plain_click_is_none() {
     let m = hit_test_model(
@@ -7255,7 +7255,7 @@ fn resolve_detail_click_plain_click_is_none() {
     );
 }
 
-// AC4 / TE: Ctrl/Cmd click on an Edit affordance resolves to CommentEdit(id).
+// Ctrl/Cmd click on an Edit affordance resolves to CommentEdit(id).
 #[test]
 fn resolve_detail_click_edit_affordance_returns_comment_edit() {
     let m = hit_test_model(
@@ -7276,7 +7276,7 @@ fn resolve_detail_click_edit_affordance_returns_comment_edit() {
     );
 }
 
-// AC4 / TE: Ctrl/Cmd click on a Delete affordance resolves to CommentDelete(id).
+// Ctrl/Cmd click on a Delete affordance resolves to CommentDelete(id).
 #[test]
 fn resolve_detail_click_delete_affordance_returns_comment_delete() {
     let m = hit_test_model(
@@ -7295,7 +7295,7 @@ fn resolve_detail_click_delete_affordance_returns_comment_delete() {
     );
 }
 
-// AC4 / TE: Ctrl/Cmd click on an OpenUrl affordance resolves to OpenUrl(url).
+// Ctrl/Cmd click on an OpenUrl affordance resolves to OpenUrl(url).
 #[test]
 fn resolve_detail_click_open_url_affordance_returns_open_url() {
     let url = "https://example.com/doc.pdf";
@@ -7317,7 +7317,7 @@ fn resolve_detail_click_open_url_affordance_returns_open_url() {
     }
 }
 
-// AC4 / TE: asset whole-row rule — Ctrl/Cmd click anywhere on an OpenAsset line
+// asset whole-row rule — Ctrl/Cmd click anywhere on an OpenAsset line
 // resolves to OpenAsset(url), even if the column is outside [col_start, col_end).
 #[test]
 fn resolve_detail_click_open_asset_matches_whole_row() {
@@ -7345,7 +7345,7 @@ fn resolve_detail_click_open_asset_matches_whole_row() {
     }
 }
 
-// AC4 / TE: non-row-target (Edit) outside [col_start, col_end) resolves to None.
+// non-row-target (Edit) outside [col_start, col_end) resolves to None.
 #[test]
 fn resolve_detail_click_edit_outside_col_range_is_none() {
     let m = hit_test_model(
@@ -7365,7 +7365,7 @@ fn resolve_detail_click_edit_outside_col_range_is_none() {
     );
 }
 
-// AC5 / TE: line_idx >= lines.len() out-of-range guard → None (no panic, no stale hit).
+// line_idx >= lines.len() out-of-range guard → None (no panic, no stale hit).
 // A Ctrl/Cmd+click whose scroll-aware line_idx exceeds the content must resolve to None,
 // even when an affordance exists at that line_idx in the affordance list.
 #[test]
@@ -7388,7 +7388,7 @@ fn resolve_detail_click_out_of_range_line_idx_is_none() {
     );
 }
 
-// AC4 / TE: click outside the text viewport (row < text_top) resolves to None.
+// click outside the text viewport (row < text_top) resolves to None.
 #[test]
 fn resolve_detail_click_row_above_text_top_is_none() {
     let m = hit_test_model(
@@ -7408,7 +7408,7 @@ fn resolve_detail_click_row_above_text_top_is_none() {
     );
 }
 
-// AC4 / TE: swapping the arm would miss — Edit and Delete variants map to distinct targets.
+// swapping the arm would miss — Edit and Delete variants map to distinct targets.
 #[test]
 fn resolve_detail_click_edit_and_delete_map_to_distinct_targets() {
     let m_edit = hit_test_model(
@@ -7441,7 +7441,7 @@ fn resolve_detail_click_edit_and_delete_map_to_distinct_targets() {
     );
 }
 
-// AC4: is_row_target predicate — OpenAsset returns true, all others return false.
+// is_row_target predicate — OpenAsset returns true, all others return false.
 #[test]
 fn affordance_kind_is_row_target_only_for_open_asset() {
     assert!(
@@ -7461,8 +7461,6 @@ fn affordance_kind_is_row_target_only_for_open_asset() {
         "OpenUrl must NOT be a row target"
     );
 }
-
-// ── Image viewer overlay lifecycle tests (ADR 0065 slice 0058a) ──────────────
 
 use crate::tui::model::{ImageAssetRef, ImageStatus};
 
@@ -7493,7 +7491,7 @@ fn extract_image_viewer(model: &Model) -> Option<(ImageAssetRef, ImageStatus)> {
     }
 }
 
-// A1: applying DetailClickTarget::ViewImage(asset) sets overlay=ImageViewer{Loading}
+// A1: applying DetailClickTarget::ViewImage(asset) sets the overlay to the image viewer in its loading state
 // and emits Cmd::LoadImage{asset}.
 #[test]
 fn view_image_click_target_opens_viewer_loading_and_emits_load_image() {
@@ -7619,8 +7617,6 @@ fn q_still_quits_when_no_overlay_open() {
     let (m2, _) = update(m, Msg::Quit);
     assert!(m2.should_quit, "q must quit when no overlay is open");
 }
-
-// ── Hours-report modal ────────────────────────────────────────────────────────
 
 fn report_header() -> Header {
     Header {
@@ -8007,8 +8003,6 @@ fn report_modal_close_clears_the_form_from_any_status() {
     }
 }
 
-// ── Hours-report modal: export outcome mapping and pointer isolation ─────────
-
 #[test]
 fn report_outcome_ok_carries_the_saved_path_and_total() {
     let path = "/x/hours-report-01-10-2026-31-10-2026.xlsx";
@@ -8089,6 +8083,9 @@ fn report_pointer_tasks_model() -> Model {
             project_id: 1,
             due_on: None,
             project_name: None,
+            estimate: None,
+            logged_week: None,
+            logged_total: None,
         }],
         selected: 0,
         loading: false,
@@ -8096,6 +8093,7 @@ fn report_pointer_tasks_model() -> Model {
         card_heights: vec![],
         card_offsets: vec![],
         rendered_width: usize::MAX,
+        due_today: None,
     })
 }
 
@@ -8153,4 +8151,1988 @@ fn report_pointer_click_opens_the_row_again_after_the_modal_closes() {
         "{:?}",
         m.top()
     );
+}
+
+fn mine_snapshot_row(
+    task_id: i64,
+    estimate: Option<f64>,
+    logged_week: Option<f64>,
+    logged_total: Option<f64>,
+) -> MineTableRow {
+    MineTableRow {
+        instance: "inst".into(),
+        project_id: 1,
+        task_number: task_id,
+        task_id,
+        name: format!("Task {task_id}"),
+        due_on: None,
+        project_name: None,
+        estimate,
+        logged_week,
+        logged_total,
+    }
+}
+
+#[test]
+fn mine_snapshot_written_without_hour_fields_loads_with_hours_unknown() {
+    let json = r#"[{"instance":"inst","project_id":1,"task_number":1,"task_id":1,"name":"Task","due_on":"2026-07-15"}]"#;
+    let rows: Vec<MineTableRow> = serde_json::from_str(json).unwrap();
+    assert_eq!(rows[0].estimate, None);
+    assert_eq!(rows[0].logged_week, None);
+    assert_eq!(rows[0].logged_total, None);
+}
+
+#[test]
+fn mine_snapshot_round_trips_the_hours() {
+    let rows = vec![
+        mine_snapshot_row(1, Some(4.0), Some(1.5), Some(7.25)),
+        mine_snapshot_row(2, None, Some(0.0), None),
+    ];
+    let json = serde_json::to_string(&rows).unwrap();
+    let decoded: Vec<MineTableRow> = serde_json::from_str(&json).unwrap();
+    assert_eq!(decoded[0].estimate, Some(4.0));
+    assert_eq!(decoded[0].logged_week, Some(1.5));
+    assert_eq!(decoded[0].logged_total, Some(7.25));
+    assert_eq!(decoded[1].estimate, None);
+    assert_eq!(decoded[1].logged_week, Some(0.0));
+    assert_eq!(decoded[1].logged_total, None);
+}
+
+#[test]
+fn mine_snapshot_task_rows_ignore_unknown_hour_fields_of_older_readers() {
+    let json = r#"{"task_id":1,"task_number":1,"name":"T","instance":"i","project_id":1}"#;
+    let row: TaskRow = serde_json::from_str(json).unwrap();
+    assert_eq!(row.estimate, None);
+    assert_eq!(row.logged_week, None);
+    assert_eq!(row.logged_total, None);
+}
+
+#[test]
+fn mine_snapshot_cached_rows_paint_first_and_revalidated_rows_replace_their_hours() {
+    use crate::tui::model::init_mine;
+    let seed = vec![mine_snapshot_row(1, None, None, None)];
+    let (model, _) = init_mine(empty_header(), Some(seed));
+    match model.top() {
+        Some(Screen::Tasks { tasks, .. }) => {
+            assert_eq!(tasks[0].logged_total, None);
+        }
+        _ => panic!("expected Tasks screen"),
+    }
+    let (updated, _) = update(
+        model,
+        Msg::LoadedMineTasks {
+            rows: vec![mine_snapshot_row(1, Some(4.0), Some(1.5), Some(7.25))],
+            loaded_at: "2026-06-26T12:00:00Z".to_string(),
+        },
+    );
+    match updated.top() {
+        Some(Screen::Tasks { tasks, .. }) => {
+            assert_eq!(tasks[0].estimate, Some(4.0));
+            assert_eq!(tasks[0].logged_week, Some(1.5));
+            assert_eq!(tasks[0].logged_total, Some(7.25));
+        }
+        _ => panic!("expected Tasks screen"),
+    }
+}
+
+fn mine_row(instance: &str, task_id: i64, week: Option<f64>, total: Option<f64>) -> MineTableRow {
+    MineTableRow {
+        instance: instance.into(),
+        project_id: 1,
+        task_number: task_id,
+        task_id,
+        name: format!("Task {task_id}"),
+        due_on: None,
+        project_name: None,
+        estimate: Some(3.0),
+        logged_week: week,
+        logged_total: total,
+    }
+}
+
+fn mine_hours(
+    instance: &str,
+    task_id: i64,
+    week: Option<f64>,
+    total: Option<f64>,
+) -> crate::commands::MineHours {
+    crate::commands::MineHours {
+        instance: instance.into(),
+        task_id,
+        logged_week: week,
+        logged_total: total,
+    }
+}
+
+fn mine_model(rows: Vec<MineTableRow>) -> Model {
+    crate::tui::model::init_mine(empty_header(), Some(rows)).0
+}
+
+fn mine_tasks_of(model: &Model) -> (&Vec<TaskRow>, usize) {
+    match model.stack.last() {
+        Some(Screen::Tasks {
+            tasks, selected, ..
+        }) => (tasks, *selected),
+        _ => panic!("expected Tasks screen"),
+    }
+}
+
+fn apply_mine_hours(model: Model, hours: Vec<crate::commands::MineHours>) -> Model {
+    let (updated, cmds) = update(model, Msg::LoadedMineHours { hours });
+    assert!(cmds.is_empty());
+    updated
+}
+
+#[test]
+fn mine_hours_message_fills_week_and_total_of_the_listed_task() {
+    let model = mine_model(vec![mine_row("a", 1, None, None)]);
+    let model = apply_mine_hours(model, vec![mine_hours("a", 1, Some(1.5), Some(7.0))]);
+    let (tasks, _) = mine_tasks_of(&model);
+    assert_eq!(tasks[0].logged_week, Some(1.5));
+    assert_eq!(tasks[0].logged_total, Some(7.0));
+}
+
+#[test]
+fn mine_hours_message_sets_an_unknown_value_unknown() {
+    let model = mine_model(vec![mine_row("a", 1, Some(2.0), Some(9.0))]);
+    let model = apply_mine_hours(model, vec![mine_hours("a", 1, None, Some(4.0))]);
+    let (tasks, _) = mine_tasks_of(&model);
+    assert_eq!(tasks[0].logged_week, None);
+    assert_eq!(tasks[0].logged_total, Some(4.0));
+}
+
+#[test]
+fn mine_hours_message_keeps_the_hours_of_a_row_without_an_entry() {
+    let model = mine_model(vec![
+        mine_row("a", 1, Some(2.0), Some(9.0)),
+        mine_row("a", 2, None, None),
+    ]);
+    let model = apply_mine_hours(model, vec![mine_hours("a", 2, Some(1.0), Some(1.0))]);
+    let (tasks, _) = mine_tasks_of(&model);
+    assert_eq!(tasks[0].logged_week, Some(2.0));
+    assert_eq!(tasks[0].logged_total, Some(9.0));
+}
+
+#[test]
+fn mine_hours_message_adds_no_row_for_an_unlisted_task() {
+    let model = mine_model(vec![mine_row("a", 1, None, None)]);
+    let model = apply_mine_hours(model, vec![mine_hours("a", 99, Some(1.0), Some(1.0))]);
+    let (tasks, _) = mine_tasks_of(&model);
+    assert_eq!(tasks.len(), 1);
+    assert_eq!(tasks[0].logged_week, None);
+}
+
+#[test]
+fn mine_hours_message_matches_the_same_task_id_per_instance() {
+    let model = mine_model(vec![
+        mine_row("a", 1, None, None),
+        mine_row("b", 1, None, None),
+    ]);
+    let model = apply_mine_hours(
+        model,
+        vec![
+            mine_hours("b", 1, Some(5.0), Some(50.0)),
+            mine_hours("a", 1, Some(2.0), Some(20.0)),
+        ],
+    );
+    let (tasks, _) = mine_tasks_of(&model);
+    assert_eq!(
+        (tasks[0].logged_week, tasks[0].logged_total),
+        (Some(2.0), Some(20.0))
+    );
+    assert_eq!(
+        (tasks[1].logged_week, tasks[1].logged_total),
+        (Some(5.0), Some(50.0))
+    );
+}
+
+#[test]
+fn mine_hours_message_leaves_estimate_order_and_selection() {
+    let mut model = mine_model(vec![
+        mine_row("a", 1, None, None),
+        mine_row("a", 2, None, None),
+    ]);
+    if let Some(Screen::Tasks { selected, .. }) = model.stack.last_mut() {
+        *selected = 1;
+    }
+    let model = apply_mine_hours(
+        model,
+        vec![
+            mine_hours("a", 2, Some(1.0), Some(2.0)),
+            mine_hours("a", 1, Some(3.0), Some(4.0)),
+        ],
+    );
+    let (tasks, selected) = mine_tasks_of(&model);
+    assert_eq!(selected, 1);
+    assert_eq!(
+        tasks.iter().map(|t| t.task_id).collect::<Vec<_>>(),
+        vec![1, 2]
+    );
+    assert!(tasks.iter().all(|t| t.estimate == Some(3.0)));
+}
+
+fn apply_mine_rows(model: Model, rows: Vec<MineTableRow>) -> Model {
+    update(
+        model,
+        Msg::LoadedMineTasks {
+            rows,
+            loaded_at: "2026-06-26T12:00:00Z".into(),
+        },
+    )
+    .0
+}
+
+#[test]
+fn mine_hours_message_survives_rows_message_keeps_the_earlier_hours_of_a_listed_task() {
+    let model = mine_model(vec![mine_row("a", 1, Some(2.0), Some(9.0))]);
+    let model = apply_mine_rows(model, vec![mine_row("a", 1, None, None)]);
+    let (tasks, _) = mine_tasks_of(&model);
+    assert_eq!(
+        (tasks[0].logged_week, tasks[0].logged_total),
+        (Some(2.0), Some(9.0))
+    );
+}
+
+#[test]
+fn mine_hours_message_survives_rows_message_shows_a_new_task_with_unknown_hours() {
+    let model = mine_model(vec![mine_row("a", 1, Some(2.0), Some(9.0))]);
+    let model = apply_mine_rows(
+        model,
+        vec![mine_row("a", 1, None, None), mine_row("a", 2, None, None)],
+    );
+    let (tasks, _) = mine_tasks_of(&model);
+    assert_eq!((tasks[1].logged_week, tasks[1].logged_total), (None, None));
+}
+
+#[test]
+fn mine_hours_message_survives_rows_message_drops_a_task_that_left_the_list() {
+    let model = mine_model(vec![
+        mine_row("a", 1, Some(2.0), Some(9.0)),
+        mine_row("a", 2, Some(1.0), Some(1.0)),
+    ]);
+    let model = apply_mine_rows(model, vec![mine_row("a", 2, None, None)]);
+    let (tasks, _) = mine_tasks_of(&model);
+    assert_eq!(tasks.len(), 1);
+    assert_eq!(tasks[0].task_id, 2);
+}
+
+#[test]
+fn mine_hours_message_survives_rows_message_takes_the_estimate_from_the_new_rows() {
+    let model = mine_model(vec![mine_row("a", 1, Some(2.0), Some(9.0))]);
+    let mut fresh = mine_row("a", 1, None, None);
+    fresh.estimate = Some(8.0);
+    let model = apply_mine_rows(model, vec![fresh]);
+    let (tasks, _) = mine_tasks_of(&model);
+    assert_eq!(tasks[0].estimate, Some(8.0));
+}
+
+fn detail_open_over_mine(rows: Vec<MineTableRow>) -> Model {
+    let (model, _) = update(mine_model(rows), Msg::Select);
+    assert!(matches!(model.stack.last(), Some(Screen::Detail { .. })));
+    model
+}
+
+fn tasks_below(model: &Model) -> &Vec<TaskRow> {
+    match model.stack.first() {
+        Some(Screen::Tasks { tasks, .. }) => tasks,
+        _ => panic!("expected Tasks screen at the bottom of the stack"),
+    }
+}
+
+fn top_detail_debug(model: &Model) -> String {
+    format!("{:?}", model.stack.last().expect("a screen"))
+}
+
+#[test]
+fn mine_list_under_detail_receives_the_hours_message() {
+    let model = detail_open_over_mine(vec![mine_row("a", 1, None, None)]);
+    let before = top_detail_debug(&model);
+    let model = apply_mine_hours(model, vec![mine_hours("a", 1, Some(1.5), Some(7.0))]);
+    assert_eq!(top_detail_debug(&model), before);
+    let (back, _) = update(model, Msg::Back);
+    let (tasks, _) = mine_tasks_of(&back);
+    assert_eq!(
+        (tasks[0].logged_week, tasks[0].logged_total),
+        (Some(1.5), Some(7.0))
+    );
+}
+
+#[test]
+fn mine_list_under_detail_receives_the_rows_message_and_keeps_earlier_hours() {
+    let model = detail_open_over_mine(vec![mine_row("a", 1, Some(2.0), Some(9.0))]);
+    let before = top_detail_debug(&model);
+    let model = apply_mine_rows(
+        model,
+        vec![mine_row("a", 1, None, None), mine_row("a", 2, None, None)],
+    );
+    assert_eq!(top_detail_debug(&model), before);
+    let tasks = tasks_below(&model);
+    assert_eq!(tasks.len(), 2);
+    assert_eq!(
+        (tasks[0].logged_week, tasks[0].logged_total),
+        (Some(2.0), Some(9.0))
+    );
+    assert_eq!((tasks[1].logged_week, tasks[1].logged_total), (None, None));
+}
+
+#[test]
+fn mine_list_under_detail_changes_nothing_without_a_tasks_screen() {
+    let mut model = mine_model(vec![mine_row("a", 1, None, None)]);
+    model.stack.clear();
+    let after_hours = apply_mine_hours(model, vec![mine_hours("a", 1, Some(1.0), Some(1.0))]);
+    assert!(after_hours.stack.is_empty());
+    let after_rows = apply_mine_rows(after_hours, vec![mine_row("a", 1, None, None)]);
+    assert!(after_rows.stack.is_empty());
+}
+
+fn grouping_today() -> chrono::NaiveDate {
+    chrono::NaiveDate::from_ymd_opt(2026, 11, 11).unwrap()
+}
+
+fn dated_row(task_id: i64, due_on: Option<&str>) -> MineTableRow {
+    MineTableRow {
+        due_on: due_on.map(str::to_owned),
+        ..mine_row("a", task_id, None, None)
+    }
+}
+
+/// Wednesday 2026-11-11: ids 6 and 3 are overdue (out of due-date order in the
+/// input), 4 is today, 5 this week, 1 later, 2 has no due date.
+fn mixed_due_rows() -> Vec<MineTableRow> {
+    vec![
+        dated_row(1, Some("2026-11-20")),
+        dated_row(2, None),
+        dated_row(3, Some("2026-11-05")),
+        dated_row(4, Some("2026-11-11")),
+        dated_row(5, Some("2026-11-13")),
+        dated_row(6, Some("2026-11-01")),
+    ]
+}
+
+fn grouped_mine_model(rows: Vec<MineTableRow>) -> Model {
+    crate::tui::model::init_mine_on(empty_header(), Some(rows), grouping_today()).0
+}
+
+fn mine_task_ids(model: &Model) -> Vec<i64> {
+    mine_tasks_of(model).0.iter().map(|t| t.task_id).collect()
+}
+
+fn reload_mine(model: Model, rows: Vec<MineTableRow>) -> Model {
+    let (updated, cmds) = update(
+        model,
+        Msg::LoadedMineTasks {
+            rows,
+            loaded_at: "2026-11-11T12:00:00Z".into(),
+        },
+    );
+    assert!(cmds.is_empty());
+    updated
+}
+
+#[test]
+fn mine_list_groups_a_seed_in_bucket_order_with_earlier_due_first() {
+    let model = grouped_mine_model(mixed_due_rows());
+    assert_eq!(mine_task_ids(&model), [6, 3, 4, 5, 1, 2]);
+}
+
+#[test]
+fn mine_list_groups_a_reload_in_bucket_order() {
+    let model = grouped_mine_model(vec![dated_row(9, None)]);
+    let model = reload_mine(model, mixed_due_rows());
+    assert_eq!(mine_task_ids(&model), [6, 3, 4, 5, 1, 2]);
+}
+
+#[test]
+fn mine_list_groups_keeps_the_order_when_hours_arrive() {
+    let model = grouped_mine_model(mixed_due_rows());
+    let model = apply_mine_hours(
+        model,
+        vec![
+            mine_hours("a", 2, Some(1.0), Some(2.0)),
+            mine_hours("a", 6, Some(3.0), Some(4.0)),
+        ],
+    );
+    assert_eq!(mine_task_ids(&model), [6, 3, 4, 5, 1, 2]);
+    let (tasks, _) = mine_tasks_of(&model);
+    assert_eq!(tasks[0].logged_week, Some(3.0));
+    assert_eq!(tasks[5].logged_total, Some(2.0));
+}
+
+#[test]
+fn mine_list_groups_keeps_the_same_task_selected_when_a_reload_moves_it() {
+    let mut model = grouped_mine_model(mixed_due_rows());
+    model.top_mut().unwrap().set_selected(4);
+    assert_eq!(mine_tasks_of(&model).0[4].task_id, 1);
+    let model = reload_mine(
+        model,
+        vec![
+            dated_row(1, Some("2026-11-20")),
+            dated_row(7, Some("2026-11-02")),
+            dated_row(8, Some("2026-11-03")),
+        ],
+    );
+    let (tasks, selected) = mine_tasks_of(&model);
+    assert_eq!(selected, 2);
+    assert_eq!(tasks[selected].task_id, 1);
+}
+
+fn selected_instance_and_id(model: &Model) -> (String, i64) {
+    let (tasks, selected) = mine_tasks_of(model);
+    (tasks[selected].instance.clone(), tasks[selected].task_id)
+}
+
+#[test]
+fn mine_list_groups_keeps_the_instance_selected_when_two_share_a_task_id() {
+    let mut model = grouped_mine_model(vec![
+        mine_row("a", 1, None, None),
+        mine_row("b", 1, None, None),
+    ]);
+    model.top_mut().unwrap().set_selected(1);
+    assert_eq!(selected_instance_and_id(&model), ("b".to_string(), 1));
+    let model = reload_mine(
+        model,
+        vec![
+            mine_row("c", 0, None, None),
+            mine_row("a", 1, None, None),
+            mine_row("b", 1, None, None),
+        ],
+    );
+    assert_eq!(selected_instance_and_id(&model), ("b".to_string(), 1));
+    assert_eq!(mine_tasks_of(&model).1, 2);
+}
+
+#[test]
+fn mine_list_groups_keeps_the_instance_selected_when_a_reload_swaps_two_sharing_a_task_id() {
+    let mut model = grouped_mine_model(vec![
+        mine_row("a", 1, None, None),
+        mine_row("b", 1, None, None),
+    ]);
+    model.top_mut().unwrap().set_selected(0);
+    let model = reload_mine(
+        model,
+        vec![
+            mine_row("c", 0, None, None),
+            mine_row("b", 1, None, None),
+            mine_row("a", 1, None, None),
+        ],
+    );
+    assert_eq!(selected_instance_and_id(&model), ("a".to_string(), 1));
+    assert_eq!(mine_tasks_of(&model).1, 2);
+}
+
+#[test]
+fn mine_list_groups_clamps_the_selection_when_the_selected_task_is_gone() {
+    let mut model = grouped_mine_model(mixed_due_rows());
+    model.top_mut().unwrap().set_selected(4);
+    let model = reload_mine(
+        model,
+        vec![
+            dated_row(7, Some("2026-11-02")),
+            dated_row(8, Some("2026-11-03")),
+            dated_row(9, None),
+        ],
+    );
+    let (_, selected) = mine_tasks_of(&model);
+    assert_eq!(selected, 2);
+}
+
+#[test]
+fn mine_list_groups_a_gone_selection_inside_the_new_list_keeps_its_index() {
+    let mut model = grouped_mine_model(mixed_due_rows());
+    model.top_mut().unwrap().set_selected(1);
+    let model = reload_mine(
+        model,
+        vec![
+            dated_row(7, Some("2026-11-02")),
+            dated_row(8, Some("2026-11-03")),
+            dated_row(9, None),
+        ],
+    );
+    let (_, selected) = mine_tasks_of(&model);
+    assert_eq!(selected, 1);
+}
+
+fn browse_tasks_model(rows: Vec<TaskRow>) -> Model {
+    let model = Model {
+        stack: vec![Screen::Projects {
+            groups: vec![ProjectGroup {
+                project_id: 1,
+                project_name: "Proj".into(),
+                instance: "a".into(),
+                tasks: rows,
+            }],
+            selected: 0,
+            loading: false,
+            revalidating: false,
+        }],
+        should_quit: false,
+        header: empty_header(),
+        viewport: (80, 24),
+        click_targets: vec![],
+        modal_button_targets: vec![],
+        last_loaded: None,
+        selection: None,
+        copied_feedback: false,
+        report: None,
+    };
+    update(model, Msg::Select).0
+}
+
+fn browse_rows_in_api_order() -> Vec<TaskRow> {
+    [(1, Some("2026-11-20")), (2, None), (3, Some("2026-11-01"))]
+        .into_iter()
+        .map(|(id, due)| TaskRow {
+            task_id: id,
+            task_number: id,
+            name: format!("Task {id}"),
+            instance: "a".into(),
+            project_id: 1,
+            due_on: due.map(str::to_owned),
+            project_name: None,
+            estimate: None,
+            logged_week: None,
+            logged_total: None,
+        })
+        .collect()
+}
+
+#[test]
+fn mine_list_groups_leaves_a_browse_list_in_api_order_ungrouped() {
+    let model = browse_tasks_model(browse_rows_in_api_order());
+    match model.stack.last() {
+        Some(Screen::Tasks {
+            tasks, due_today, ..
+        }) => {
+            assert_eq!(*due_today, None);
+            let ids: Vec<i64> = tasks.iter().map(|t| t.task_id).collect();
+            assert_eq!(ids, [1, 2, 3]);
+        }
+        _ => panic!("expected Tasks screen"),
+    }
+}
+
+#[test]
+fn mine_list_groups_builds_a_grouped_screen_without_an_injected_date() {
+    let (model, _) = crate::tui::model::init_mine(empty_header(), Some(mixed_due_rows()));
+    match model.stack.last() {
+        Some(Screen::Tasks { due_today, .. }) => assert!(due_today.is_some()),
+        _ => panic!("expected Tasks screen"),
+    }
+}
+
+fn card_heights_of(model: &Model) -> Vec<u16> {
+    match model.stack.last() {
+        Some(Screen::Tasks { card_heights, .. }) => card_heights.clone(),
+        _ => panic!("expected Tasks screen"),
+    }
+}
+
+#[test]
+fn mine_list_bucket_layout_adds_one_row_to_the_first_task_of_each_bucket() {
+    let mut model = grouped_mine_model(mixed_due_rows());
+    model.reflow_tasks(60);
+    let (tasks, _) = mine_tasks_of(&model);
+    let base = crate::tui::task_layout::card_height(&tasks[0], 60);
+    // Order is 6,3 (overdue), 4 (today), 5 (this week), 1 (later), 2 (none).
+    assert_eq!(
+        card_heights_of(&model),
+        [base + 1, base, base + 1, base + 1, base + 1, base + 1]
+    );
+}
+
+#[test]
+fn mine_list_bucket_layout_leaves_a_browse_list_at_plain_card_heights() {
+    let mut model = browse_tasks_model(browse_rows_in_api_order());
+    model.reflow_tasks(60);
+    let (tasks, _) = mine_tasks_of(&model);
+    let expected: Vec<u16> = tasks
+        .iter()
+        .map(|t| crate::tui::task_layout::card_height(t, 60))
+        .collect();
+    assert_eq!(card_heights_of(&model), expected);
+}
+
+#[test]
+fn mine_list_bucket_layout_scrolls_a_lower_bucket_header_into_view_with_its_task() {
+    let mut model = grouped_mine_model(mixed_due_rows());
+    model.reflow_tasks(60);
+    let (offsets, heights) = match model.stack.last() {
+        Some(Screen::Tasks {
+            card_offsets,
+            card_heights,
+            ..
+        }) => (card_offsets.clone(), card_heights.clone()),
+        _ => panic!("expected Tasks screen"),
+    };
+    // Task index 2 opens the Today bucket: its slot is header row plus card.
+    let visible_h = heights[2];
+    let first = crate::tui::task_layout::first_visible(&offsets, 60, 60, &heights, 2, visible_h);
+    assert_eq!(first, 2);
+    assert_eq!(heights[2], heights[1] + 1);
+}
+
+#[test]
+fn mine_list_bucket_layout_moves_selection_across_buckets_on_tasks_only() {
+    let mut model = grouped_mine_model(mixed_due_rows());
+    model.top_mut().unwrap().set_selected(1);
+    model = update(model, Msg::Down).0;
+    assert_eq!(mine_tasks_of(&model).1, 2);
+    assert_eq!(mine_tasks_of(&model).0[2].task_id, 4);
+    model = update(model, Msg::Up).0;
+    assert_eq!(mine_tasks_of(&model).1, 1);
+    assert_eq!(mine_tasks_of(&model).0[1].task_id, 3);
+    model.top_mut().unwrap().set_selected(3);
+    assert_eq!(mine_tasks_of(&model).0[3].task_id, 5);
+    for page in [Msg::PageDown, Msg::PageUp] {
+        model = update(model, page).0;
+        assert_eq!(mine_tasks_of(&model).1, 3);
+    }
+}
+
+use crate::tui::model::{DownloadOutcome, DownloadState};
+
+fn download_task() -> serde_json::Value {
+    serde_json::json!({
+        "id": 75159,
+        "project_id": 665,
+        "attachments": [{"name": "spec.pdf", "download_url": "https://x.test/spec.pdf"}]
+    })
+}
+
+fn download_comments() -> Vec<serde_json::Value> {
+    vec![serde_json::json!({
+        "id": 1,
+        "attachments": [{"name": "shot.png", "download_url": "https://x.test/shot.png"}]
+    })]
+}
+
+fn download_detail(task: serde_json::Value, comments: Vec<serde_json::Value>) -> Model {
+    let mut model = detail_model_with_assets_and_viewport(vec![], "inst", (80, 24));
+    if let Some(Screen::Detail {
+        task: t,
+        comments: c,
+        project_id,
+        task_id,
+        ..
+    }) = model.top_mut()
+    {
+        *t = task;
+        *c = comments;
+        *project_id = 665;
+        *task_id = 75159;
+    }
+    model
+}
+
+fn download_state(model: &Model) -> Option<DownloadState> {
+    match model.top() {
+        Some(Screen::Detail { download, .. }) => download.clone(),
+        _ => panic!("expected the Detail screen"),
+    }
+}
+
+fn download_done(saved: usize, total: usize) -> Msg {
+    Msg::AttachmentsDownloaded {
+        instance: "inst".into(),
+        project_id: 665,
+        task_id: 75159,
+        outcome: DownloadOutcome::Done {
+            saved,
+            total,
+            dir: "/h/Downloads/ac-attachments/665-75159".into(),
+        },
+    }
+}
+
+#[test]
+fn detail_download_key_starts_one_download_of_every_downloadable_asset() {
+    let model = download_detail(download_task(), download_comments());
+    let (model, cmds) = update(model, Msg::DownloadAttachments);
+    assert_eq!(
+        cmds,
+        vec![Cmd::DownloadAttachments {
+            instance: "inst".into(),
+            project_id: 665,
+            task_id: 75159,
+            assets: vec![
+                make_asset("spec.pdf", "https://x.test/spec.pdf"),
+                make_asset("shot.png", "https://x.test/shot.png"),
+            ],
+        }]
+    );
+    assert_eq!(download_state(&model), Some(DownloadState::Running));
+}
+
+#[test]
+fn detail_download_key_while_running_does_nothing() {
+    let model = download_detail(download_task(), download_comments());
+    let (model, _) = update(model, Msg::DownloadAttachments);
+    let (model, cmds) = update(model, Msg::DownloadAttachments);
+    assert!(cmds.is_empty());
+    assert_eq!(download_state(&model), Some(DownloadState::Running));
+}
+
+#[test]
+fn detail_download_key_without_downloadable_asset_shows_the_note() {
+    let task = serde_json::json!({"body": "<a href=\"https://x.test/page\">link</a>"});
+    let (model, cmds) = update(download_detail(task, vec![]), Msg::DownloadAttachments);
+    assert!(cmds.is_empty());
+    assert_eq!(download_state(&model), Some(DownloadState::NoAttachments));
+}
+
+#[test]
+fn detail_download_key_on_list_screens_changes_nothing() {
+    let projects = Model {
+        stack: vec![Screen::Projects {
+            groups: vec![],
+            selected: 0,
+            loading: false,
+            revalidating: false,
+        }],
+        ..download_detail(download_task(), vec![])
+    };
+    let (projects, cmds) = update(projects, Msg::DownloadAttachments);
+    assert!(cmds.is_empty());
+    assert!(matches!(projects.top(), Some(Screen::Projects { .. })));
+}
+
+#[test]
+fn detail_download_key_while_loading_emits_nothing() {
+    let mut model = download_detail(download_task(), download_comments());
+    if let Some(Screen::Detail { loading, .. }) = model.top_mut() {
+        *loading = true;
+    }
+    let (model, cmds) = update(model, Msg::DownloadAttachments);
+    assert!(cmds.is_empty());
+    assert_eq!(download_state(&model), None);
+}
+
+#[test]
+fn detail_download_key_with_a_modal_open_types_into_the_modal() {
+    let model = download_detail(download_task(), download_comments());
+    let (model, _) = update(model, Msg::ComposeOpen);
+    let key =
+        crossterm::event::KeyEvent::new(crossterm::event::KeyCode::Char('D'), KeyModifiers::SHIFT);
+    let msg = crate::tui::route_key_event(&model, key).expect("compose takes every key");
+    assert!(matches!(msg, Msg::ComposeInput(_)));
+    let (model, cmds) = update(model, msg);
+    assert!(cmds.is_empty());
+    assert_eq!(download_state(&model), None);
+}
+
+#[test]
+fn detail_download_key_maps_uppercase_d_only() {
+    use crate::tui::events::map_browse_key_event;
+    let press = |c| {
+        map_browse_key_event(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Char(c),
+            KeyModifiers::NONE,
+        ))
+    };
+    assert!(matches!(press('D'), Some(Msg::DownloadAttachments)));
+    assert!(press('d').is_none());
+}
+
+#[test]
+fn detail_download_result_for_the_open_task_sets_done() {
+    let model = download_detail(download_task(), download_comments());
+    let (model, _) = update(model, Msg::DownloadAttachments);
+    let (model, _) = update(model, download_done(2, 2));
+    assert_eq!(
+        download_state(&model),
+        Some(DownloadState::Finished(DownloadOutcome::Done {
+            saved: 2,
+            total: 2,
+            dir: "/h/Downloads/ac-attachments/665-75159".into(),
+        }))
+    );
+}
+
+#[test]
+fn detail_download_failure_result_sets_failed() {
+    let model = download_detail(download_task(), download_comments());
+    let (model, _) = update(
+        model,
+        Msg::AttachmentsDownloaded {
+            instance: "inst".into(),
+            project_id: 665,
+            task_id: 75159,
+            outcome: DownloadOutcome::Failed("no home".into()),
+        },
+    );
+    assert_eq!(
+        download_state(&model),
+        Some(DownloadState::Finished(DownloadOutcome::Failed(
+            "no home".into()
+        )))
+    );
+}
+
+#[test]
+fn detail_download_result_for_another_task_is_ignored() {
+    let model = download_detail(download_task(), download_comments());
+    let (model, _) = update(model, Msg::DownloadAttachments);
+    let other = Msg::AttachmentsDownloaded {
+        instance: "inst".into(),
+        project_id: 665,
+        task_id: 1,
+        outcome: DownloadOutcome::Failed("x".into()),
+    };
+    let (model, _) = update(model, other);
+    assert_eq!(download_state(&model), Some(DownloadState::Running));
+}
+
+#[test]
+fn detail_download_result_after_the_detail_was_popped_is_ignored() {
+    let mut model = download_detail(download_task(), download_comments());
+    model.stack.insert(
+        0,
+        Screen::Projects {
+            groups: vec![],
+            selected: 0,
+            loading: false,
+            revalidating: false,
+        },
+    );
+    let model = update(model, Msg::Back).0;
+    let (model, cmds) = update(model, download_done(1, 1));
+    assert!(cmds.is_empty());
+    assert!(matches!(model.top(), Some(Screen::Projects { .. })));
+}
+
+#[test]
+fn detail_download_outcome_survives_a_reload_of_the_same_task() {
+    let model = download_detail(download_task(), download_comments());
+    let (model, _) = update(model, download_done(2, 2));
+    let load = DetailLoad {
+        task: download_task(),
+        comments: download_comments(),
+        assets: vec![],
+        user_map: HashMap::new(),
+        loaded_at: "2025-01-01T00:00:00Z".into(),
+        current_user_id: None,
+        unauthorized: false,
+    };
+    let (model, _) = update(model, Msg::LoadedDetail(load));
+    assert!(matches!(
+        download_state(&model),
+        Some(DownloadState::Finished(DownloadOutcome::Done { .. }))
+    ));
+}
+
+fn downloaded(path: Option<&str>, error: Option<&str>) -> crate::controller::DownloadedAsset {
+    crate::controller::DownloadedAsset {
+        name: "a".into(),
+        url: "https://x.test/a".into(),
+        path: path.map(String::from),
+        error: error.map(String::from),
+    }
+}
+
+#[test]
+fn detail_download_outcome_destination_is_under_the_home_downloads() {
+    let dir = crate::tui::attachments_destination(Some(std::path::Path::new("/h")), 665, 75159);
+    assert_eq!(
+        dir,
+        Some(std::path::PathBuf::from(
+            "/h/Downloads/ac-attachments/665-75159"
+        ))
+    );
+}
+
+#[test]
+fn detail_download_outcome_without_home_is_a_failure_not_a_fallback_path() {
+    assert_eq!(crate::tui::attachments_destination(None, 665, 75159), None);
+}
+
+#[test]
+fn detail_download_outcome_counts_saved_over_total() {
+    let dir = std::path::PathBuf::from("/d");
+    let count = |results: &[crate::controller::DownloadedAsset]| {
+        crate::tui::download_summary(dir.clone(), results)
+    };
+    let done = |saved, total| DownloadOutcome::Done {
+        saved,
+        total,
+        dir: dir.clone(),
+    };
+    assert_eq!(
+        count(&[
+            downloaded(Some("/d/a"), None),
+            downloaded(Some("/d/b"), None)
+        ]),
+        done(2, 2)
+    );
+    assert_eq!(
+        count(&[
+            downloaded(Some("/d/a"), None),
+            downloaded(None, Some("404"))
+        ]),
+        done(1, 2)
+    );
+    assert_eq!(
+        count(&[downloaded(None, Some("x")), downloaded(None, Some("y"))]),
+        done(0, 2)
+    );
+}
+
+#[tokio::test]
+async fn detail_download_outcome_writes_the_served_bytes_under_the_home_downloads() {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/spec.pdf"))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(vec![7, 8, 9]))
+        .mount(&server)
+        .await;
+    let instance = Instance {
+        name: "inst".into(),
+        base_url: server.uri(),
+        email: "a@example.com".into(),
+        token: "fixture-token".into(),
+        user_id: Some(1),
+    };
+    let client =
+        crate::client::ActiveCollabClient::new(instance, crate::http::Http::new().unwrap());
+    let home = tempfile::TempDir::new().unwrap();
+    let assets = vec![make_asset(
+        "spec.pdf",
+        &format!("{}/spec.pdf", server.uri()),
+    )];
+
+    let outcome =
+        crate::tui::download_task_outcome(&client, Some(home.path()), 665, 75159, &assets).await;
+
+    let dir = home.path().join("Downloads/ac-attachments/665-75159");
+    assert_eq!(
+        outcome,
+        DownloadOutcome::Done {
+            saved: 1,
+            total: 1,
+            dir: "~/Downloads/ac-attachments/665-75159".into()
+        }
+    );
+    assert_eq!(std::fs::read(dir.join("spec.pdf")).unwrap(), vec![7, 8, 9]);
+}
+
+fn download_asset_server_instance(base_url: String) -> Instance {
+    Instance {
+        name: "inst".into(),
+        base_url,
+        email: "a@example.com".into(),
+        token: "fixture-token".into(),
+        user_id: Some(1),
+    }
+}
+
+#[tokio::test]
+async fn detail_download_outcome_without_home_fails_and_requests_nothing() {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/spec.pdf"))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(vec![1]))
+        .mount(&server)
+        .await;
+    let client = crate::client::ActiveCollabClient::new(
+        download_asset_server_instance(server.uri()),
+        crate::http::Http::new().unwrap(),
+    );
+    let assets = vec![make_asset(
+        "spec.pdf",
+        &format!("{}/spec.pdf", server.uri()),
+    )];
+    let stray = std::env::temp_dir().join("ac-attachments/665-75159/spec.pdf");
+    let _ = std::fs::remove_file(&stray);
+
+    let outcome = crate::tui::download_task_outcome(&client, None, 665, 75159, &assets).await;
+
+    assert_eq!(
+        outcome,
+        DownloadOutcome::Failed("Could not find the home directory".into())
+    );
+    assert!(server.received_requests().await.unwrap().is_empty());
+    assert!(!stray.exists());
+}
+
+fn download_result_msg(instance: &str, project_id: i64) -> Msg {
+    Msg::AttachmentsDownloaded {
+        instance: instance.into(),
+        project_id,
+        task_id: 75159,
+        outcome: DownloadOutcome::Failed("x".into()),
+    }
+}
+
+#[test]
+fn detail_download_result_for_another_instance_is_ignored() {
+    let model = download_detail(download_task(), download_comments());
+    let (model, _) = update(model, Msg::DownloadAttachments);
+    let (model, _) = update(model, download_result_msg("other", 665));
+    assert_eq!(download_state(&model), Some(DownloadState::Running));
+}
+
+#[test]
+fn detail_download_result_for_another_project_is_ignored() {
+    let model = download_detail(download_task(), download_comments());
+    let (model, _) = update(model, Msg::DownloadAttachments);
+    let (model, _) = update(model, download_result_msg("inst", 1));
+    assert_eq!(download_state(&model), Some(DownloadState::Running));
+}
+
+#[test]
+fn detail_download_result_for_the_same_instance_project_and_task_is_applied() {
+    let model = download_detail(download_task(), download_comments());
+    let (model, _) = update(model, Msg::DownloadAttachments);
+    let (model, _) = update(model, download_result_msg("inst", 665));
+    assert_eq!(
+        download_state(&model),
+        Some(DownloadState::Finished(DownloadOutcome::Failed("x".into())))
+    );
+}
+
+#[tokio::test]
+async fn detail_download_dispatch_of_an_unknown_instance_reports_a_failed_outcome() {
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut model = download_detail(download_task(), download_comments());
+    let cmd = Cmd::DownloadAttachments {
+        instance: "missing".into(),
+        project_id: 665,
+        task_id: 75159,
+        assets: vec![make_asset("spec.pdf", "https://x.test/spec.pdf")],
+    };
+    crate::tui::dispatch_cmds(
+        vec![cmd],
+        &mut model,
+        &[],
+        &crate::http::Http::new().unwrap(),
+        std::path::Path::new("/nonexistent/ac.db"),
+        tx,
+    );
+    let msg = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+        .await
+        .expect("the download path answers within the wait")
+        .expect("the channel stays open");
+    match msg {
+        Msg::AttachmentsDownloaded {
+            instance,
+            project_id,
+            task_id,
+            outcome: DownloadOutcome::Failed(_),
+        } => assert_eq!(
+            (instance.as_str(), project_id, task_id),
+            ("missing", 665, 75159)
+        ),
+        _ => panic!("expected a failed download result"),
+    }
+}
+
+#[test]
+fn detail_download_key_on_the_tasks_screen_changes_nothing() {
+    let mut model = download_detail(download_task(), download_comments());
+    model.stack = vec![Screen::Tasks {
+        project_name: "P".into(),
+        tasks: vec![],
+        selected: 0,
+        loading: false,
+        revalidating: false,
+        card_heights: vec![],
+        card_offsets: vec![],
+        rendered_width: usize::MAX,
+        due_today: None,
+    }];
+    let before = format!("{:?}", model.stack);
+    let key =
+        crossterm::event::KeyEvent::new(crossterm::event::KeyCode::Char('D'), KeyModifiers::SHIFT);
+    let msg = crate::tui::route_key_event(&model, key).expect("browse maps D");
+    let (model, cmds) = update(model, msg);
+    assert!(cmds.is_empty());
+    assert_eq!(format!("{:?}", model.stack), before);
+}
+
+#[test]
+fn detail_download_key_with_the_log_time_or_estimate_overlay_open_goes_to_the_overlay() {
+    let key =
+        crossterm::event::KeyEvent::new(crossterm::event::KeyCode::Char('D'), KeyModifiers::SHIFT);
+    let log_time = DetailOverlay::LogTime(LogTimeForm {
+        hours: String::new(),
+        summary: String::new(),
+        field: LogTimeField::Hours,
+        status: LogTimeStatus::Editing,
+    });
+    let estimate = DetailOverlay::EstimateEdit(EstimateForm {
+        value: String::new(),
+        status: EditStatus::Editing,
+    });
+    for overlay in [log_time, estimate] {
+        let model = detail_model_with_overlay(overlay);
+        let msg = crate::tui::route_key_event(&model, key).expect("the overlay takes every key");
+        assert!(!matches!(msg, Msg::DownloadAttachments));
+        let (_, cmds) = update(model, msg);
+        assert!(cmds.is_empty());
+    }
+}
+
+fn task_list_model(current: Option<i64>) -> Model {
+    let task = match current {
+        Some(id) => serde_json::json!({ "task_list_id": id }),
+        None => serde_json::json!({}),
+    };
+    let mut model = detail_model_with_task("inst", 665, 75159, task);
+    model.viewport = (80, 24);
+    model
+}
+
+fn key_press(code: crossterm::event::KeyCode) -> crossterm::event::KeyEvent {
+    crossterm::event::KeyEvent::new(code, KeyModifiers::NONE)
+}
+
+fn press(model: Model, code: crossterm::event::KeyCode) -> (Model, Vec<Cmd>) {
+    let msg = crate::tui::route_key_event(&model, key_press(code)).expect("the key maps to a Msg");
+    update(model, msg)
+}
+
+fn type_text(mut model: Model, text: &str) -> Model {
+    for c in text.chars() {
+        model = press(model, crossterm::event::KeyCode::Char(c)).0;
+    }
+    model
+}
+
+fn task_lists_fixture() -> Vec<(i64, String)> {
+    vec![
+        (30, "Backlog".to_string()),
+        (10, "Revisão".to_string()),
+        (20, "Em andamento".to_string()),
+    ]
+}
+
+fn lists_loaded(
+    instance: &str,
+    project_id: i64,
+    task_id: i64,
+    lists: Result<Vec<(i64, String)>, String>,
+) -> Msg {
+    Msg::TaskListsLoaded {
+        instance: instance.into(),
+        project_id,
+        task_id,
+        lists,
+    }
+}
+
+fn open_task_list_picker(current: Option<i64>) -> Model {
+    let (model, _) = update(task_list_model(current), Msg::TaskListPickerOpen);
+    model
+}
+
+fn loaded_task_list_picker(current: Option<i64>) -> Model {
+    let model = open_task_list_picker(current);
+    let msg = lists_loaded("inst", 665, 75159, Ok(task_lists_fixture()));
+    update(model, msg).0
+}
+
+fn task_list_picker(model: &Model) -> Option<&TaskListPicker> {
+    match model.top() {
+        Some(Screen::Detail { overlay, .. }) => overlay.task_list_picker(),
+        _ => None,
+    }
+}
+
+fn picker_names(model: &Model) -> Vec<String> {
+    let picker = task_list_picker(model).expect("the picker is open");
+    filter_assignee_candidates(&picker.candidates, &picker.filter)
+        .into_iter()
+        .map(|(_, name)| name)
+        .collect()
+}
+
+#[test]
+fn task_list_picker_key_l_on_the_detail_opens_it_loading_and_reads_the_lists_once() {
+    let (model, cmds) = press(
+        task_list_model(Some(10)),
+        crossterm::event::KeyCode::Char('l'),
+    );
+    let picker = task_list_picker(&model).expect("l opens the picker");
+    assert_eq!(picker.load, TaskListLoad::Loading);
+    assert_eq!(
+        cmds,
+        vec![Cmd::LoadTaskLists {
+            instance: "inst".into(),
+            project_id: 665,
+            task_id: 75159,
+        }]
+    );
+}
+
+#[test]
+fn task_list_picker_open_while_open_changes_nothing() {
+    let model = open_task_list_picker(Some(10));
+    let before = format!("{:?}", model.stack);
+    let (model, cmds) = update(model, Msg::TaskListPickerOpen);
+    assert!(cmds.is_empty());
+    assert_eq!(format!("{:?}", model.stack), before);
+}
+
+#[test]
+fn task_list_picker_key_l_off_the_detail_changes_nothing() {
+    let mut model = task_list_model(Some(10));
+    model.stack = vec![Screen::Tasks {
+        project_name: "P".into(),
+        tasks: vec![],
+        selected: 0,
+        loading: false,
+        revalidating: false,
+        card_heights: vec![],
+        card_offsets: vec![],
+        rendered_width: usize::MAX,
+        due_today: None,
+    }];
+    let before = format!("{:?}", model.stack);
+    let (model, cmds) = press(model, crossterm::event::KeyCode::Char('l'));
+    assert!(cmds.is_empty());
+    assert_eq!(format!("{:?}", model.stack), before);
+}
+
+#[test]
+fn task_list_picker_key_l_with_another_overlay_open_goes_to_that_overlay() {
+    let compose_model = update(task_list_model(None), Msg::ComposeOpen).0;
+    let log_time = DetailOverlay::LogTime(LogTimeForm {
+        hours: String::new(),
+        summary: String::new(),
+        field: LogTimeField::Hours,
+        status: LogTimeStatus::Editing,
+    });
+    let estimate = DetailOverlay::EstimateEdit(EstimateForm {
+        value: String::new(),
+        status: EditStatus::Editing,
+    });
+    let status = DetailOverlay::StatusConfirm {
+        completed_target: true,
+        status: EditStatus::Editing,
+    };
+    let assignee = DetailOverlay::AssigneePicker {
+        candidates: vec![(1, "Alice".to_string())],
+        filter: String::new(),
+        selected: 0,
+        status: EditStatus::Editing,
+    };
+    let models = [
+        compose_model,
+        detail_model_with_overlay(log_time),
+        detail_model_with_overlay(estimate),
+        detail_model_with_overlay(status),
+        detail_model_with_overlay(assignee),
+    ];
+    for model in models {
+        let msg =
+            crate::tui::route_key_event(&model, key_press(crossterm::event::KeyCode::Char('l')));
+        let (model, cmds) = match msg {
+            Some(msg) => update(model, msg),
+            None => (model, vec![]),
+        };
+        assert!(cmds.is_empty());
+        assert!(task_list_picker(&model).is_none());
+    }
+}
+
+#[test]
+fn task_list_picker_key_l_typed_in_the_log_time_overlay_lands_in_the_buffer() {
+    let model = detail_model_with_overlay(DetailOverlay::LogTime(LogTimeForm {
+        hours: String::new(),
+        summary: String::new(),
+        field: LogTimeField::Summary,
+        status: LogTimeStatus::Editing,
+    }));
+    let (model, _) = press(model, crossterm::event::KeyCode::Char('l'));
+    match model.top() {
+        Some(Screen::Detail { overlay, .. }) => {
+            assert_eq!(overlay.log_time().expect("log time open").summary, "l");
+        }
+        _ => panic!("expected the Detail screen"),
+    }
+}
+
+#[test]
+fn task_list_picker_key_l_typed_in_the_estimate_overlay_lands_in_the_buffer() {
+    let model = detail_model_with_overlay(DetailOverlay::EstimateEdit(EstimateForm {
+        value: String::new(),
+        status: EditStatus::Editing,
+    }));
+    let (model, cmds) = press(model, crossterm::event::KeyCode::Char('l'));
+    assert!(cmds.is_empty());
+    match model.top() {
+        Some(Screen::Detail { overlay, .. }) => {
+            assert_eq!(overlay.estimate_edit().expect("estimate open").value, "l");
+        }
+        _ => panic!("expected the Detail screen"),
+    }
+}
+
+#[test]
+fn task_list_picker_key_l_typed_once_the_lists_loaded_filters_instead_of_reopening() {
+    let model = loaded_task_list_picker(Some(10));
+    let (model, cmds) = press(model, crossterm::event::KeyCode::Char('l'));
+    assert!(cmds.is_empty());
+    assert_eq!(task_list_picker(&model).expect("open").filter, "l");
+}
+
+#[test]
+fn task_list_picker_loaded_lists_keep_server_order_and_preselect_the_current_list() {
+    let model = loaded_task_list_picker(Some(10));
+    let picker = task_list_picker(&model).expect("open");
+    assert_eq!(picker.load, TaskListLoad::Ready);
+    assert_eq!(picker.candidates, task_lists_fixture());
+    assert_eq!(picker.current_id, Some(10));
+    assert_eq!(picker.selected, 1);
+}
+
+#[test]
+fn task_list_picker_loaded_lists_select_the_first_row_when_the_current_list_is_absent() {
+    let model = loaded_task_list_picker(Some(999));
+    assert_eq!(task_list_picker(&model).expect("open").selected, 0);
+    let model = loaded_task_list_picker(None);
+    assert_eq!(task_list_picker(&model).expect("open").selected, 0);
+}
+
+#[test]
+fn task_list_picker_ignores_a_result_for_another_instance_project_or_task() {
+    for msg in [
+        lists_loaded("other", 665, 75159, Ok(task_lists_fixture())),
+        lists_loaded("inst", 1, 75159, Ok(task_lists_fixture())),
+        lists_loaded("inst", 665, 2, Ok(task_lists_fixture())),
+    ] {
+        let model = open_task_list_picker(Some(10));
+        let before = format!("{:?}", model.stack);
+        let (model, cmds) = update(model, msg);
+        assert!(cmds.is_empty());
+        assert_eq!(format!("{:?}", model.stack), before);
+    }
+}
+
+#[test]
+fn task_list_picker_ignores_a_result_after_escape_closed_it() {
+    let model = open_task_list_picker(Some(10));
+    let (model, cmds) = press(model, crossterm::event::KeyCode::Esc);
+    assert!(cmds.is_empty());
+    let (model, _) = update(
+        model,
+        lists_loaded("inst", 665, 75159, Ok(task_lists_fixture())),
+    );
+    assert!(task_list_picker(&model).is_none());
+}
+
+#[test]
+fn task_list_picker_ignores_a_result_after_the_detail_was_popped() {
+    let mut model = open_task_list_picker(Some(10));
+    model.stack = vec![Screen::Projects {
+        groups: vec![],
+        selected: 0,
+        loading: false,
+        revalidating: false,
+    }];
+    let before = format!("{:?}", model.stack);
+    let (model, cmds) = update(
+        model,
+        lists_loaded("inst", 665, 75159, Ok(task_lists_fixture())),
+    );
+    assert!(cmds.is_empty());
+    assert_eq!(format!("{:?}", model.stack), before);
+}
+
+#[test]
+fn task_list_picker_with_no_lists_emits_nothing_on_enter() {
+    let model = open_task_list_picker(Some(10));
+    let (model, _) = update(model, lists_loaded("inst", 665, 75159, Ok(vec![])));
+    let picker = task_list_picker(&model).expect("open");
+    assert_eq!(picker.load, TaskListLoad::Ready);
+    assert!(picker.candidates.is_empty());
+    let (model, cmds) = press(model, crossterm::event::KeyCode::Enter);
+    assert!(cmds.is_empty());
+    assert!(task_list_picker(&model).is_some());
+}
+
+#[test]
+fn task_list_picker_failed_read_shows_the_failure_and_stays_closable() {
+    let model = open_task_list_picker(Some(10));
+    let (model, cmds) = update(model, lists_loaded("inst", 665, 75159, Err("boom".into())));
+    assert!(cmds.is_empty());
+    assert_eq!(
+        task_list_picker(&model).expect("open").load,
+        TaskListLoad::Failed("boom".into())
+    );
+    let (model, cmds) = press(model, crossterm::event::KeyCode::Enter);
+    assert!(cmds.is_empty());
+    let (model, _) = press(model, crossterm::event::KeyCode::Esc);
+    assert!(task_list_picker(&model).is_none());
+}
+
+fn detail_rendered_width(model: &Model) -> usize {
+    match model.top() {
+        Some(Screen::Detail { rendered_width, .. }) => *rendered_width,
+        _ => panic!("expected the Detail screen"),
+    }
+}
+
+fn set_detail_rendered_width(model: &mut Model, width: usize) {
+    if let Some(Screen::Detail { rendered_width, .. }) = model.top_mut() {
+        *rendered_width = width;
+    }
+}
+
+#[test]
+fn task_list_picker_ignores_a_second_result_once_ready() {
+    let model = type_text(loaded_task_list_picker(Some(10)), "e");
+    let model = press(model, crossterm::event::KeyCode::Down).0;
+    let before = format!("{:?}", model.stack);
+    let late = lists_loaded("inst", 665, 75159, Ok(vec![(99, "Late".to_string())]));
+    let (model, cmds) = update(model, late);
+    assert!(cmds.is_empty());
+    assert_eq!(format!("{:?}", model.stack), before);
+}
+
+#[test]
+fn task_list_picker_ignores_a_second_result_after_a_failed_read() {
+    let model = open_task_list_picker(Some(10));
+    let (model, _) = update(model, lists_loaded("inst", 665, 75159, Err("boom".into())));
+    let before = format!("{:?}", model.stack);
+    let late = lists_loaded("inst", 665, 75159, Ok(task_lists_fixture()));
+    let (model, cmds) = update(model, late);
+    assert!(cmds.is_empty());
+    assert_eq!(format!("{:?}", model.stack), before);
+}
+
+#[test]
+fn task_list_picker_ignores_a_stale_result_after_reopening() {
+    let model = open_task_list_picker(Some(10));
+    let (model, _) = press(model, crossterm::event::KeyCode::Esc);
+    let (model, _) = update(model, Msg::TaskListPickerOpen);
+    let (model, _) = update(
+        model,
+        lists_loaded("inst", 665, 75159, Ok(task_lists_fixture())),
+    );
+    let model = type_text(model, "e");
+    let before = format!("{:?}", model.stack);
+    let late = lists_loaded("inst", 665, 75159, Ok(vec![(99, "Late".to_string())]));
+    let (model, _) = update(model, late);
+    assert_eq!(format!("{:?}", model.stack), before);
+}
+
+#[test]
+fn task_list_picker_typed_l_while_loading_changes_nothing() {
+    let model = open_task_list_picker(Some(10));
+    let before = format!("{:?}", model.stack);
+    let (model, cmds) = press(model, crossterm::event::KeyCode::Char('l'));
+    assert!(cmds.is_empty());
+    assert_eq!(format!("{:?}", model.stack), before);
+}
+
+#[test]
+fn task_list_picker_typed_l_after_a_failed_read_changes_nothing() {
+    let model = open_task_list_picker(Some(10));
+    let (model, _) = update(model, lists_loaded("inst", 665, 75159, Err("boom".into())));
+    let before = format!("{:?}", model.stack);
+    let (model, cmds) = press(model, crossterm::event::KeyCode::Char('l'));
+    assert!(cmds.is_empty());
+    assert_eq!(format!("{:?}", model.stack), before);
+}
+
+#[test]
+fn task_list_picker_unauthorized_read_ends_loading_with_the_reauthentication_text() {
+    let reauth = "Token invalid or revoked — run `ac setup add` to re-authenticate.";
+    let model = open_task_list_picker(Some(10));
+    let (model, _) = update(model, Msg::AuthExpired);
+    let (model, cmds) = update(
+        model,
+        lists_loaded("inst", 665, 75159, Err(reauth.to_string())),
+    );
+    assert!(cmds.is_empty());
+    match model.top() {
+        Some(Screen::Detail { auth_error, .. }) => assert!(*auth_error),
+        _ => panic!("expected the Detail screen"),
+    }
+    assert_eq!(
+        task_list_picker(&model).expect("open").load,
+        TaskListLoad::Failed(reauth.to_string())
+    );
+    let (model, _) = press(model, crossterm::event::KeyCode::Esc);
+    assert!(task_list_picker(&model).is_none());
+}
+
+#[test]
+fn task_list_picker_unauthorized_read_takes_the_reauthentication_path() {
+    let model = open_task_list_picker(Some(10));
+    let (model, _) = update(model, Msg::AuthExpired);
+    match model.top() {
+        Some(Screen::Detail { auth_error, .. }) => assert!(*auth_error),
+        _ => panic!("expected the Detail screen"),
+    }
+}
+
+#[test]
+fn task_list_picker_filter_matches_case_insensitively_including_non_ascii() {
+    for text in ["revi", "REVI"] {
+        let model = type_text(loaded_task_list_picker(Some(10)), text);
+        assert_eq!(picker_names(&model), vec!["Revisão".to_string()], "{text}");
+    }
+}
+
+#[test]
+fn task_list_picker_backspace_widens_the_filter() {
+    let mut model = type_text(loaded_task_list_picker(Some(10)), "revi");
+    for _ in 0..4 {
+        model = press(model, crossterm::event::KeyCode::Backspace).0;
+    }
+    assert_eq!(picker_names(&model).len(), 3);
+}
+
+#[test]
+fn task_list_picker_up_and_down_saturate_within_the_filtered_rows() {
+    let mut model = loaded_task_list_picker(None);
+    for _ in 0..5 {
+        model = press(model, crossterm::event::KeyCode::Down).0;
+    }
+    assert_eq!(task_list_picker(&model).expect("open").selected, 2);
+    for _ in 0..5 {
+        model = press(model, crossterm::event::KeyCode::Up).0;
+    }
+    assert_eq!(task_list_picker(&model).expect("open").selected, 0);
+    let model = type_text(model, "e");
+    assert_eq!(picker_names(&model), vec!["Revisão", "Em andamento"]);
+    let model = press(model, crossterm::event::KeyCode::Down).0;
+    let model = press(model, crossterm::event::KeyCode::Down).0;
+    assert_eq!(task_list_picker(&model).expect("open").selected, 1);
+}
+
+#[test]
+fn task_list_picker_enter_with_no_filter_match_emits_nothing() {
+    let model = type_text(loaded_task_list_picker(Some(10)), "zzz");
+    let (model, cmds) = press(model, crossterm::event::KeyCode::Enter);
+    assert!(cmds.is_empty());
+    let picker = task_list_picker(&model).expect("open");
+    assert_eq!(picker.status, EditStatus::Editing);
+}
+
+#[test]
+fn task_list_picker_enter_on_another_list_submits_only_the_list() {
+    let model = press(
+        loaded_task_list_picker(Some(10)),
+        crossterm::event::KeyCode::Down,
+    )
+    .0;
+    let (model, cmds) = press(model, crossterm::event::KeyCode::Enter);
+    assert_eq!(
+        cmds,
+        vec![Cmd::SubmitTaskEdit {
+            instance: "inst".into(),
+            project_id: 665,
+            task_id: 75159,
+            completion: None,
+            assignee_id: None,
+            estimate: None,
+            task_list_id: Some(20),
+        }]
+    );
+    assert_eq!(
+        task_list_picker(&model).expect("open").status,
+        EditStatus::Submitting
+    );
+}
+
+#[test]
+fn task_list_picker_enter_on_the_current_list_closes_without_a_write() {
+    let (model, cmds) = press(
+        loaded_task_list_picker(Some(10)),
+        crossterm::event::KeyCode::Enter,
+    );
+    assert!(cmds.is_empty());
+    assert!(task_list_picker(&model).is_none());
+}
+
+#[test]
+fn task_list_picker_escape_closes_without_a_write() {
+    let (model, cmds) = press(
+        loaded_task_list_picker(Some(10)),
+        crossterm::event::KeyCode::Esc,
+    );
+    assert!(cmds.is_empty());
+    assert!(task_list_picker(&model).is_none());
+}
+
+#[test]
+fn task_list_picker_edit_ok_after_a_move_closes_it_and_refreshes_the_detail() {
+    let model = press(
+        loaded_task_list_picker(Some(10)),
+        crossterm::event::KeyCode::Down,
+    )
+    .0;
+    let (model, _) = press(model, crossterm::event::KeyCode::Enter);
+    let (model, cmds) = update(model, Msg::TaskEditOk);
+    assert!(task_list_picker(&model).is_none());
+    assert_eq!(
+        cmds,
+        vec![Cmd::LoadDetail {
+            instance: "inst".into(),
+            project_id: 665,
+            task_id: 75159,
+            refresh: true,
+        }]
+    );
+}
+
+#[test]
+fn task_list_picker_edit_err_shows_the_error_and_allows_another_try() {
+    let model = press(
+        loaded_task_list_picker(Some(10)),
+        crossterm::event::KeyCode::Down,
+    )
+    .0;
+    let (model, _) = press(model, crossterm::event::KeyCode::Enter);
+    let (model, cmds) = update(model, Msg::TaskEditErr("nope".into()));
+    assert!(cmds.is_empty());
+    let picker = task_list_picker(&model).expect("still open");
+    assert_eq!(picker.error.as_deref(), Some("nope"));
+    let (_, cmds) = press(model, crossterm::event::KeyCode::Enter);
+    assert!(matches!(
+        cmds.as_slice(),
+        [Cmd::SubmitTaskEdit {
+            task_list_id: Some(20),
+            ..
+        }]
+    ));
+}
+
+#[test]
+fn task_list_picker_retry_after_a_write_error_clears_the_old_error() {
+    let model = press(
+        loaded_task_list_picker(Some(10)),
+        crossterm::event::KeyCode::Down,
+    )
+    .0;
+    let (model, _) = press(model, crossterm::event::KeyCode::Enter);
+    let (model, _) = update(model, Msg::TaskEditErr("nope".into()));
+    let (model, cmds) = press(model, crossterm::event::KeyCode::Enter);
+    assert_eq!(cmds.len(), 1);
+    let picker = task_list_picker(&model).expect("still open");
+    assert_eq!(picker.status, EditStatus::Submitting);
+    assert_eq!(picker.error, None);
+}
+
+#[test]
+fn task_list_picker_write_error_forces_a_repaint_of_the_detail() {
+    let model = press(
+        loaded_task_list_picker(Some(10)),
+        crossterm::event::KeyCode::Down,
+    )
+    .0;
+    let (mut model, _) = press(model, crossterm::event::KeyCode::Enter);
+    set_detail_rendered_width(&mut model, 80);
+    let (model, _) = update(model, Msg::TaskEditErr("nope".into()));
+    assert_eq!(detail_rendered_width(&model), usize::MAX);
+}
+
+fn shell_instance(base_url: &str) -> Instance {
+    Instance {
+        name: "inst".into(),
+        base_url: base_url.into(),
+        email: "me@example.com".into(),
+        token: "tok".into(),
+        user_id: Some(1),
+    }
+}
+
+async fn dispatch_to_msgs(cmd: Cmd, targets: &[Instance], count: usize) -> Vec<Msg> {
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut model = task_list_model(None);
+    crate::tui::dispatch_cmds(
+        vec![cmd],
+        &mut model,
+        targets,
+        &crate::http::Http::new().unwrap(),
+        std::path::Path::new("/nonexistent/ac.db"),
+        tx,
+    );
+    let mut msgs = Vec::new();
+    for _ in 0..count {
+        let msg = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+            .await
+            .expect("the shell answers within the wait")
+            .expect("the channel stays open");
+        msgs.push(msg);
+    }
+    msgs
+}
+
+async fn dispatch_to_one_msg(cmd: Cmd, targets: &[Instance]) -> Msg {
+    dispatch_to_msgs(cmd, targets, 1)
+        .await
+        .pop()
+        .expect("one message")
+}
+
+fn read_task_lists_cmd(instance: &str) -> Cmd {
+    Cmd::LoadTaskLists {
+        instance: instance.into(),
+        project_id: 665,
+        task_id: 75159,
+    }
+}
+
+#[tokio::test]
+async fn task_list_picker_shell_read_yields_the_servers_lists_for_the_same_task() {
+    let server = wiremock::MockServer::start().await;
+    wiremock::Mock::given(wiremock::matchers::method("GET"))
+        .and(wiremock::matchers::path("/api/v1/projects/665/task-lists"))
+        .respond_with(
+            wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!([
+                {"id": 30, "name": "Backlog"},
+                {"id": 10, "name": "Revisão"}
+            ])),
+        )
+        .mount(&server)
+        .await;
+    let msg = dispatch_to_one_msg(
+        read_task_lists_cmd("inst"),
+        &[shell_instance(&server.uri())],
+    )
+    .await;
+    match msg {
+        Msg::TaskListsLoaded {
+            instance,
+            project_id,
+            task_id,
+            lists,
+        } => {
+            assert_eq!(
+                (instance.as_str(), project_id, task_id),
+                ("inst", 665, 75159)
+            );
+            assert_eq!(
+                lists,
+                Ok(vec![
+                    (30, "Backlog".to_string()),
+                    (10, "Revisão".to_string())
+                ])
+            );
+        }
+        _ => panic!("expected the loaded lists"),
+    }
+}
+
+#[tokio::test]
+async fn task_list_picker_shell_read_with_a_401_ends_the_picker_loading_with_reauthentication() {
+    let server = wiremock::MockServer::start().await;
+    wiremock::Mock::given(wiremock::matchers::method("GET"))
+        .and(wiremock::matchers::path("/api/v1/projects/665/task-lists"))
+        .respond_with(wiremock::ResponseTemplate::new(401))
+        .mount(&server)
+        .await;
+    let msgs = dispatch_to_msgs(
+        read_task_lists_cmd("inst"),
+        &[shell_instance(&server.uri())],
+        2,
+    )
+    .await;
+    let mut model = open_task_list_picker(Some(10));
+    for msg in msgs {
+        model = update(model, msg).0;
+    }
+    match model.top() {
+        Some(Screen::Detail { auth_error, .. }) => assert!(*auth_error),
+        _ => panic!("expected the Detail screen"),
+    }
+    match &task_list_picker(&model).expect("open").load {
+        TaskListLoad::Failed(text) => assert!(text.contains("ac setup add"), "{text}"),
+        other => panic!("expected the failed state, got {other:?}"),
+    }
+    let (model, _) = press(model, crossterm::event::KeyCode::Esc);
+    assert!(task_list_picker(&model).is_none());
+}
+
+#[tokio::test]
+async fn task_list_picker_shell_read_with_a_500_yields_a_failed_result() {
+    let server = wiremock::MockServer::start().await;
+    wiremock::Mock::given(wiremock::matchers::method("GET"))
+        .and(wiremock::matchers::path("/api/v1/projects/665/task-lists"))
+        .respond_with(wiremock::ResponseTemplate::new(500))
+        .mount(&server)
+        .await;
+    let msg = dispatch_to_one_msg(
+        read_task_lists_cmd("inst"),
+        &[shell_instance(&server.uri())],
+    )
+    .await;
+    match msg {
+        Msg::TaskListsLoaded {
+            instance,
+            project_id,
+            task_id,
+            lists: Err(_),
+        } => assert_eq!(
+            (instance.as_str(), project_id, task_id),
+            ("inst", 665, 75159)
+        ),
+        _ => panic!("expected a failed lists result"),
+    }
+}
+
+#[tokio::test]
+async fn task_list_picker_shell_read_of_an_unknown_instance_fails_without_the_network() {
+    let msg = dispatch_to_one_msg(read_task_lists_cmd("missing"), &[]).await;
+    match msg {
+        Msg::TaskListsLoaded {
+            instance,
+            project_id,
+            task_id,
+            lists: Err(_),
+        } => assert_eq!(
+            (instance.as_str(), project_id, task_id),
+            ("missing", 665, 75159)
+        ),
+        _ => panic!("expected a failed lists result"),
+    }
+}
+
+#[tokio::test]
+async fn task_list_picker_shell_write_sends_only_the_list_in_one_put() {
+    let server = wiremock::MockServer::start().await;
+    wiremock::Mock::given(wiremock::matchers::method("PUT"))
+        .and(wiremock::matchers::path("/api/v1/projects/665/tasks/75159"))
+        .and(wiremock::matchers::body_json(
+            serde_json::json!({"task_list_id": 20}),
+        ))
+        .respond_with(
+            wiremock::ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({"single": {"id": 75159}})),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    let cmd = Cmd::SubmitTaskEdit {
+        instance: "inst".into(),
+        project_id: 665,
+        task_id: 75159,
+        completion: None,
+        assignee_id: None,
+        estimate: None,
+        task_list_id: Some(20),
+    };
+    let msg = dispatch_to_one_msg(cmd, &[shell_instance(&server.uri())]).await;
+    assert!(matches!(msg, Msg::TaskEditOk));
+}
+
+fn status_confirm_model() -> Model {
+    detail_model_with_overlay(DetailOverlay::StatusConfirm {
+        completed_target: true,
+        status: EditStatus::Editing,
+    })
+}
+
+#[test]
+fn status_confirm_overlay_routes_enter_to_the_confirm_message() {
+    let msg = crate::tui::route_key_event(
+        &status_confirm_model(),
+        key_press(crossterm::event::KeyCode::Enter),
+    );
+    assert!(matches!(msg, Some(Msg::StatusToggleConfirm)));
+}
+
+#[test]
+fn status_confirm_overlay_routes_ctrl_s_to_the_confirm_message() {
+    let key = crossterm::event::KeyEvent::new(
+        crossterm::event::KeyCode::Char('s'),
+        KeyModifiers::CONTROL,
+    );
+    let msg = crate::tui::route_key_event(&status_confirm_model(), key);
+    assert!(matches!(msg, Some(Msg::StatusToggleConfirm)));
+}
+
+#[test]
+fn status_confirm_overlay_routes_esc_to_the_cancel_message() {
+    let msg = crate::tui::route_key_event(
+        &status_confirm_model(),
+        key_press(crossterm::event::KeyCode::Esc),
+    );
+    assert!(matches!(msg, Some(Msg::StatusToggleCancel)));
+}
+
+#[test]
+fn status_confirm_overlay_swallows_q_instead_of_quitting() {
+    let msg = crate::tui::route_key_event(
+        &status_confirm_model(),
+        key_press(crossterm::event::KeyCode::Char('q')),
+    );
+    assert!(msg.is_none(), "q must not reach the browse map's quit");
+}
+
+fn frame_after_shell_reflow(model: &mut Model) -> String {
+    use crate::tui::view::view;
+    use ratatui::{backend::TestBackend, Terminal};
+
+    model.reflow_detail(78);
+    let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+    let mut targets = Vec::new();
+    let mut modal_targets = Vec::new();
+    terminal
+        .draw(|f| view(model, f, &mut targets, &mut modal_targets))
+        .unwrap();
+    let buf = terminal.backend().buffer().clone();
+    let area = buf.area();
+    let mut out = String::new();
+    for y in 0..area.height {
+        for x in 0..area.width {
+            out.push_str(buf.cell((x, y)).unwrap().symbol());
+        }
+        out.push('\n');
+    }
+    out
+}
+
+fn overlay_close_model() -> Model {
+    let task = serde_json::json!({
+        "name": "Closing overlays keeps the body",
+        "id": 42,
+        "project_id": 10,
+        "is_completed": false
+    });
+    detail_model_with_task_and_users("inst", 10, 42, task, users_two())
+}
+
+#[test]
+fn closing_the_assignee_picker_overlay_shows_the_same_detail_body_on_the_next_frame() {
+    let mut m = overlay_close_model();
+    let before = frame_after_shell_reflow(&mut m);
+    assert!(before.contains("Closing overlays keeps the body"));
+    let mut m = update(m, Msg::AssigneePickerOpen).0;
+    let open = frame_after_shell_reflow(&mut m);
+    assert_ne!(open, before, "the picker must be visible while open");
+    let mut m = update(m, Msg::AssigneePickerCancel).0;
+    assert_eq!(frame_after_shell_reflow(&mut m), before);
+}
+
+#[test]
+fn closing_the_task_list_picker_overlay_shows_the_same_detail_body_on_the_next_frame() {
+    let mut m = overlay_close_model();
+    let before = frame_after_shell_reflow(&mut m);
+    let mut m = update(m, Msg::TaskListPickerOpen).0;
+    let open = frame_after_shell_reflow(&mut m);
+    assert_ne!(open, before, "the picker must be visible while open");
+    let mut m = update(m, Msg::TaskListPickerCancel).0;
+    assert_eq!(frame_after_shell_reflow(&mut m), before);
+}
+
+#[test]
+fn closing_the_image_viewer_overlay_shows_the_same_detail_body_on_the_next_frame() {
+    let mut m = overlay_close_model();
+    let before = frame_after_shell_reflow(&mut m);
+    let asset = image_asset("photo.png", "https://example.test/photo.png");
+    let mut m = apply_detail_click_target(m, DetailClickTarget::ViewImage(asset)).0;
+    let open = frame_after_shell_reflow(&mut m);
+    assert_ne!(open, before, "the viewer must be visible while open");
+    let mut m = update(m, Msg::Back).0;
+    assert_eq!(frame_after_shell_reflow(&mut m), before);
 }

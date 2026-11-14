@@ -33,8 +33,9 @@ use crossterm::{
 use events::{
     map_assignee_picker_key_event, map_browse_key_event, map_browse_mouse_event,
     map_compose_key_event, map_confirm_key_event, map_estimate_key_event, map_log_time_key_event,
-    map_report_key_event, map_status_confirm_key_event,
+    map_report_key_event, map_status_confirm_key_event, map_task_list_picker_key_event,
 };
+use model::DownloadOutcome;
 use ratatui::{backend::CrosstermBackend, Terminal};
 use std::io;
 use std::path::{Path, PathBuf};
@@ -129,6 +130,14 @@ fn status_confirm_active(model: &Model) -> bool {
     )
 }
 
+/// Return true when the task-list picker is active on the top screen.
+fn task_list_picker_active(model: &Model) -> bool {
+    matches!(
+        model.top(),
+        Some(model::Screen::Detail { overlay, .. }) if overlay.task_list_picker().is_some()
+    )
+}
+
 /// Return true when the assignee-picker modal is active on the top screen.
 fn assignee_picker_active(model: &Model) -> bool {
     matches!(
@@ -147,25 +156,35 @@ fn assignee_picker_active(model: &Model) -> bool {
 ///   4. estimate-edit sub-mode (estimate modal open) — typed chars + Ctrl+S/Esc
 ///   5. status-confirm sub-mode (status-confirm modal open) — Enter/Ctrl+S/Esc only
 ///   6. assignee-picker sub-mode (assignee-picker modal open) — j/k/Enter/Ctrl+S/Esc only
-///   7. browse mode — navigation, shortcuts
+///   7. task-list picker sub-mode (task-list picker open) — same keys as the assignee picker
+///   8. browse mode — navigation, shortcuts
 pub(crate) fn route_key_event(model: &Model, key: crossterm::event::KeyEvent) -> Option<Msg> {
-    if model.report.is_some() {
-        map_report_key_event(key)
-    } else if confirm_active(model) {
-        map_confirm_key_event(key)
-    } else if compose_active(model) {
-        map_compose_key_event(key)
-    } else if log_time_active(model) {
-        map_log_time_key_event(key)
-    } else if estimate_active(model) {
-        map_estimate_key_event(key)
-    } else if status_confirm_active(model) {
-        map_status_confirm_key_event(key)
-    } else if assignee_picker_active(model) {
-        map_assignee_picker_key_event(key)
-    } else {
-        map_browse_key_event(key)
-    }
+    let map = KEY_ROUTES
+        .iter()
+        .find(|(active, _)| active(model))
+        .map_or(map_browse_key_event as KeyMapper, |(_, map)| *map);
+    map(key)
+}
+
+type KeyMapper = fn(crossterm::event::KeyEvent) -> Option<Msg>;
+type ModalActive = fn(&Model) -> bool;
+
+/// The modal owners of the keyboard, each with the mapper of its keys; at most one
+/// is active at a time, and no match leaves the browse map.
+const KEY_ROUTES: [(ModalActive, KeyMapper); 8] = [
+    (report_active, map_report_key_event),
+    (confirm_active, map_confirm_key_event),
+    (compose_active, map_compose_key_event),
+    (log_time_active, map_log_time_key_event),
+    (estimate_active, map_estimate_key_event),
+    (status_confirm_active, map_status_confirm_key_event),
+    (assignee_picker_active, map_assignee_picker_key_event),
+    (task_list_picker_active, map_task_list_picker_key_event),
+];
+
+/// Return true when the hours-report modal is open (on any screen).
+fn report_active(model: &Model) -> bool {
+    model.report.is_some()
 }
 
 /// Handle a crossterm input event: map to a Msg, run update, and dispatch commands.
@@ -230,7 +249,10 @@ fn handle_channel_msg_mine(
     db_path: &Path,
     tx: &mpsc::UnboundedSender<Msg>,
 ) -> Model {
-    let is_loaded_mine = matches!(msg, Msg::LoadedMineTasks { .. });
+    let is_loaded_mine = matches!(
+        msg,
+        Msg::LoadedMineTasks { .. } | Msg::LoadedMineHours { .. }
+    );
     let new_model = handle_channel_msg(msg, model, targets, http, db_path, tx);
     if is_loaded_mine {
         write_mine_snapshot(&new_model, targets, db_path);
@@ -398,8 +420,8 @@ fn read_browse_snapshot(
 /// On entry, reads the mine snapshot from TaskListCache and uses it as a seed
 /// so the task list paints immediately while the revalidation fetch runs in
 /// the background (SWR, scope="mine").  A cold cache falls back to the loading
-/// placeholder.  The caller must NOT block on a synchronous collect_mine_rows
-/// before this call — revalidation runs inside the TUI loop via Cmd::LoadMineTasks.
+/// placeholder.  The caller must NOT load the rows before this call —
+/// revalidation runs inside the TUI loop via Cmd::LoadMineTasks.
 pub async fn run_mine(targets: Vec<Instance>, http: Http, db_path: PathBuf) -> i32 {
     let seed = read_mine_snapshot(&targets, &db_path);
     let header = build_header(&targets, &db_path);
@@ -429,13 +451,29 @@ fn read_mine_snapshot(
     serde_json::from_str(&list_json).ok()
 }
 
+/// Loads the mine tasks: sends the rows as soon as the task lists arrive, then
+/// the hours once their requests finish.
+async fn load_mine_tasks(
+    targets: Vec<Instance>,
+    http: Http,
+    db_path: PathBuf,
+    tx: mpsc::UnboundedSender<Msg>,
+) {
+    let lists = crate::commands::collect_mine_task_lists(&targets, &http).await;
+    let rows = controller::attach_project_names(&db_path, crate::commands::mine_rows_of(&lists));
+    let loaded_at = crate::store::now_brt_iso();
+    let _ = tx.send(Msg::LoadedMineTasks { rows, loaded_at });
+    let hours = crate::commands::collect_mine_hours(&lists, &http).await;
+    let _ = tx.send(Msg::LoadedMineHours { hours });
+}
+
 /// Serialize the current mine tasks and write them to the task_list_cache.
 /// Silently ignores errors so a cache write failure never crashes the TUI.
 fn write_mine_snapshot(model: &Model, targets: &[Instance], db_path: &Path) {
     use crate::config::Config;
     use crate::store::Store;
     use crate::tui::model::Screen;
-    let Some(Screen::Tasks { tasks, .. }) = model.top() else {
+    let Some(Screen::Tasks { tasks, .. }) = model.tasks_screen() else {
         return;
     };
     let rows: Vec<MineTableRow> = tasks
@@ -448,6 +486,9 @@ fn write_mine_snapshot(model: &Model, targets: &[Instance], db_path: &Path) {
             name: t.name.clone(),
             due_on: t.due_on.clone(),
             project_name: t.project_name.clone(),
+            estimate: t.estimate,
+            logged_week: t.logged_week,
+            logged_total: t.logged_total,
         })
         .collect();
     let Ok(list_json) = serde_json::to_string(&rows) else {
@@ -528,6 +569,55 @@ fn dispatch_comment_write(
     }
 }
 
+fn dispatch_load(
+    cmd: Cmd,
+    targets: &[Instance],
+    http: &Http,
+    db_path: &Path,
+    tx: &mpsc::UnboundedSender<Msg>,
+) {
+    match cmd {
+        Cmd::LoadTasksByProject => {
+            let targets = targets.to_vec();
+            let http = http.clone();
+            let tx = tx.clone();
+            let db_path = db_path.to_path_buf();
+            tokio::spawn(async move {
+                let groups = controller::tasks_by_project(db_path, &targets, &http).await;
+                let loaded_at = crate::store::now_brt_iso();
+                let _ = tx.send(Msg::LoadedTasksByProject { groups, loaded_at });
+            });
+        }
+        Cmd::LoadMineTasks => {
+            let targets = targets.to_vec();
+            let http = http.clone();
+            let tx = tx.clone();
+            let db_path = db_path.to_path_buf();
+            tokio::spawn(load_mine_tasks(targets, http, db_path, tx));
+        }
+        Cmd::LoadDetail {
+            instance,
+            project_id,
+            task_id,
+            refresh,
+        } => {
+            let req = DetailRequest {
+                instance,
+                project_id,
+                task_id,
+                refresh,
+            };
+            spawn_load_detail(targets, http, db_path, tx, req);
+        }
+        Cmd::LoadTaskLists {
+            instance,
+            project_id,
+            task_id,
+        } => spawn_task_lists_read(targets, http, tx, (instance, project_id, task_id)),
+        _ => unreachable!("dispatch_load called with a non-load Cmd"),
+    }
+}
+
 fn dispatch_cmds(
     cmds: Vec<Cmd>,
     model: &mut Model,
@@ -538,42 +628,11 @@ fn dispatch_cmds(
 ) {
     for cmd in cmds {
         match cmd {
-            Cmd::LoadTasksByProject => {
-                let targets = targets.to_vec();
-                let http = http.clone();
-                let tx = tx.clone();
-                let db_path = db_path.to_path_buf();
-                tokio::spawn(async move {
-                    let groups = controller::tasks_by_project(db_path, &targets, &http).await;
-                    let loaded_at = crate::store::now_brt_iso();
-                    let _ = tx.send(Msg::LoadedTasksByProject { groups, loaded_at });
-                });
-            }
-            Cmd::LoadMineTasks => {
-                let targets = targets.to_vec();
-                let http = http.clone();
-                let tx = tx.clone();
-                let db_path = db_path.to_path_buf();
-                tokio::spawn(async move {
-                    let rows = crate::commands::collect_mine_rows(&targets, &http).await;
-                    let rows = controller::attach_project_names(&db_path, rows);
-                    let loaded_at = crate::store::now_brt_iso();
-                    let _ = tx.send(Msg::LoadedMineTasks { rows, loaded_at });
-                });
-            }
-            Cmd::LoadDetail {
-                instance,
-                project_id,
-                task_id,
-                refresh,
-            } => {
-                let req = DetailRequest {
-                    instance,
-                    project_id,
-                    task_id,
-                    refresh,
-                };
-                spawn_load_detail(targets, http, db_path, &tx, req);
+            cmd @ (Cmd::LoadTasksByProject
+            | Cmd::LoadMineTasks
+            | Cmd::LoadDetail { .. }
+            | Cmd::LoadTaskLists { .. }) => {
+                dispatch_load(cmd, targets, http, db_path, &tx);
             }
             Cmd::OpenAsset { instance, url } => {
                 spawn_open_asset(targets, &tx, instance, url);
@@ -607,6 +666,7 @@ fn dispatch_cmds(
                 completion,
                 assignee_id,
                 estimate,
+                task_list_id,
             } => {
                 spawn_task_edit(
                     targets,
@@ -616,22 +676,40 @@ fn dispatch_cmds(
                     project_id,
                     task_id,
                     completion,
-                    assignee_id,
-                    estimate,
+                    (assignee_id, estimate, task_list_id),
                 );
             }
-            // The fetch/decode/StatefulProtocol handling for the image viewer is
-            // slice 0059 (ADR 0065); this slice only wires the pure overlay lifecycle,
-            // so the viewer stays on its Loading placeholder until that slice lands.
+            // Only the pure overlay lifecycle of the image viewer is wired; the
+            // fetch and decode are not, so the viewer stays on its Loading placeholder.
             Cmd::LoadImage { .. } => {}
-            Cmd::ExportHoursReport {
-                instance,
-                period,
-                format,
-            } => {
-                spawn_hours_report(targets, http, &tx, instance, period, format);
+            cmd @ (Cmd::ExportHoursReport { .. } | Cmd::DownloadAttachments { .. }) => {
+                dispatch_file_export(cmd, targets, http, &tx);
             }
         }
+    }
+}
+
+/// Run an effect that writes files for the user: the hours report or a task's
+/// attachments.
+fn dispatch_file_export(
+    cmd: Cmd,
+    targets: &[Instance],
+    http: &Http,
+    tx: &mpsc::UnboundedSender<Msg>,
+) {
+    match cmd {
+        Cmd::ExportHoursReport {
+            instance,
+            period,
+            format,
+        } => spawn_hours_report(targets, http, tx, instance, period, format),
+        Cmd::DownloadAttachments {
+            instance,
+            project_id,
+            task_id,
+            assets,
+        } => spawn_attachment_download(targets, http, tx, (instance, project_id, task_id), assets),
+        _ => unreachable!("dispatch_file_export called with a non-export Cmd"),
     }
 }
 
@@ -940,6 +1018,88 @@ fn spawn_hours_report(
     );
 }
 
+/// The folder a task's attachments are saved to: `Downloads/ac-attachments/<project_id>-<task_id>`
+/// under the home directory. No home directory means no destination, never a fallback path.
+pub(crate) fn attachments_destination(
+    home: Option<&Path>,
+    project_id: i64,
+    task_id: i64,
+) -> Option<PathBuf> {
+    home.map(|home| {
+        home.join("Downloads")
+            .join("ac-attachments")
+            .join(format!("{project_id}-{task_id}"))
+    })
+}
+
+/// Count the saved assets of a finished download. A download whose assets all
+/// failed is still a finished one: each asset carries its own error.
+pub(crate) fn download_summary(
+    dir: PathBuf,
+    results: &[controller::DownloadedAsset],
+) -> DownloadOutcome {
+    DownloadOutcome::Done {
+        saved: results.iter().filter(|r| r.path.is_some()).count(),
+        total: results.len(),
+        dir,
+    }
+}
+
+/// Download `assets` of one task into its folder under `home` through the same
+/// function `ac get --download-attachments` uses. The outcome names the folder
+/// with `home` shown as `~`, so the footer line stays short.
+pub(crate) async fn download_task_outcome(
+    client: &crate::client::ActiveCollabClient,
+    home: Option<&Path>,
+    project_id: i64,
+    task_id: i64,
+    assets: &[crate::render::Asset],
+) -> DownloadOutcome {
+    let Some(dir) = attachments_destination(home, project_id, task_id) else {
+        return DownloadOutcome::Failed(crate::i18n::t("Could not find the home directory"));
+    };
+    let results = controller::download_task_attachments(client, assets, &dir).await;
+    let shown = home.and_then(|home| dir.strip_prefix(home).ok());
+    let shown = shown.map_or_else(|| dir.clone(), |rest| Path::new("~").join(rest));
+    download_summary(shown, &results)
+}
+
+/// Spawn the attachment download of one task; the home directory is resolved on
+/// the spawned task and one `Msg` reports the outcome.
+fn spawn_attachment_download(
+    targets: &[Instance],
+    http: &Http,
+    tx: &mpsc::UnboundedSender<Msg>,
+    task_ref: (String, i64, i64),
+    assets: Vec<crate::render::Asset>,
+) {
+    let (instance, project_id, task_id) = task_ref;
+    let finished = move |instance: String, outcome| Msg::AttachmentsDownloaded {
+        instance,
+        project_id,
+        task_id,
+        outcome,
+    };
+    let missing = finished(
+        instance.clone(),
+        DownloadOutcome::Failed(crate::i18n::t("Unknown instance")),
+    );
+    let reply_instance = instance.clone();
+    spawn_with_client(
+        targets,
+        http,
+        tx,
+        &instance,
+        missing,
+        move |client, tx| async move {
+            let home = dirs::home_dir();
+            let outcome =
+                download_task_outcome(&client, home.as_deref(), project_id, task_id, &assets).await;
+            let _ = tx.send(finished(reply_instance, outcome));
+        },
+    );
+}
+
 /// Whether a task-write step succeeded (continue on to the next step) or must stop
 /// the pipeline, and with which `Msg` to report the stop.
 enum TaskEditStep {
@@ -959,11 +1119,60 @@ fn classify_task_edit_outcome(outcome: anyhow::Result<TaskWriteOutcome>) -> Task
     }
 }
 
+/// Read the project's task lists for the task-list picker and report them for the
+/// same instance, project and task; an unknown instance or a failed read reports
+/// the failure text, and a 401 asks for re-authentication and also ends the picker's
+/// loading with the re-authentication text.
+fn spawn_task_lists_read(
+    targets: &[Instance],
+    http: &Http,
+    tx: &mpsc::UnboundedSender<Msg>,
+    task_ref: (String, i64, i64),
+) {
+    let (instance, project_id, task_id) = task_ref;
+    let finished = move |instance: String, lists| Msg::TaskListsLoaded {
+        instance,
+        project_id,
+        task_id,
+        lists,
+    };
+    let failure = crate::i18n::t("Failed to load task lists");
+    let reauthentication =
+        crate::i18n::t("Token invalid or revoked — run `ac setup add` to re-authenticate.");
+    let missing = finished(instance.clone(), Err(failure.clone()));
+    let reply_instance = instance.clone();
+    spawn_with_client(
+        targets,
+        http,
+        tx,
+        &instance,
+        missing,
+        move |client, tx| async move {
+            let msgs = match client.fetch_task_lists(project_id).await {
+                Ok(crate::client::TaskListsOutcome::Ok(lists)) => vec![finished(
+                    reply_instance,
+                    Ok(lists.into_iter().map(|l| (l.id, l.name)).collect()),
+                )],
+                Ok(crate::client::TaskListsOutcome::Unauthorized) => vec![
+                    Msg::AuthExpired,
+                    finished(reply_instance, Err(reauthentication)),
+                ],
+                Ok(crate::client::TaskListsOutcome::Failed(_)) | Err(_) => {
+                    vec![finished(reply_instance, Err(failure))]
+                }
+            };
+            for msg in msgs {
+                let _ = tx.send(msg);
+            }
+        },
+    );
+}
+
 /// Spawn the task-field write: apply `set_task_completion` when `completion` is
-/// given, then `update_task` when `assignee_id` and/or `estimate` are given,
-/// stopping at the first non-Ok outcome. Written generally enough that a future
-/// status toggle or assignee picker reuses it unchanged (only their
-/// `Cmd::SubmitTaskEdit` fields differ).
+/// given, then `update_task` when an assignee, an estimate and/or a task list are
+/// given (`fields`, in that order), stopping at the first non-Ok outcome.
+/// Written generally enough that a future status toggle or picker reuses it
+/// unchanged (only their `Cmd::SubmitTaskEdit` fields differ).
 #[allow(clippy::too_many_arguments)]
 fn spawn_task_edit(
     targets: &[Instance],
@@ -973,9 +1182,9 @@ fn spawn_task_edit(
     project_id: i64,
     task_id: i64,
     completion: Option<bool>,
-    assignee_id: Option<i64>,
-    estimate: Option<f64>,
+    fields: (Option<i64>, Option<f64>, Option<i64>),
 ) {
+    let (assignee_id, estimate, task_list_id) = fields;
     let missing = Msg::TaskEditErr(crate::i18n::t("Failed to update task"));
     spawn_with_client(
         targets,
@@ -992,9 +1201,9 @@ fn spawn_task_edit(
                 }
             }
 
-            if assignee_id.is_some() || estimate.is_some() {
+            if assignee_id.is_some() || estimate.is_some() || task_list_id.is_some() {
                 let outcome = client
-                    .update_task(project_id, task_id, assignee_id, estimate)
+                    .update_task(project_id, task_id, assignee_id, estimate, task_list_id)
                     .await;
                 if let TaskEditStep::Stop(msg) = classify_task_edit_outcome(outcome) {
                     let _ = tx.send(msg);
@@ -1029,3 +1238,7 @@ fn platform_opener() -> &'static str {
         "xdg-open"
     }
 }
+
+#[cfg(test)]
+#[path = "../../tests/unit/tui_mine_snapshot.rs"]
+mod mine_snapshot_tests;

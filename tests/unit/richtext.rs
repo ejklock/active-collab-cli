@@ -284,7 +284,7 @@ fn empty_html_returns_empty_string() {
     assert_eq!(out, "");
 }
 
-// --- ADR 0068 / issue 0062 C1: control chars stripped at decode ———————————
+// --- Control chars stripped at decode ———————————
 
 #[test]
 fn entity_encoded_escape_byte_stripped_in_paragraph() {
@@ -370,7 +370,7 @@ fn normal_rendering_unchanged_accents_emoji_and_entity() {
     );
 }
 
-// --- R3a-A4 / BDR 0003: CLI parity is verified in render tests ————————————
+// --- CLI parity is verified in render tests ————————————
 
 // --- Mixed document ——————————————————————————————————————————————————————
 
@@ -809,9 +809,9 @@ fn underline_style_survives_wrap() {
     }
 }
 
-// --- BDR 0023: positional style threading (disambiguation tests) —————————————
+// --- Positional style threading (disambiguation tests) —————————————
 
-/// BDR 0023 Sc.1 — a word repeated in the same source line with different emphasis
+/// A word repeated in the same source line with different emphasis
 /// keeps each occurrence's own style after wrapping.
 ///
 /// Source: ["format the " Plain, "format" Bold, " call" Plain]
@@ -859,7 +859,7 @@ fn repeated_word_keeps_per_occurrence_style() {
     );
 }
 
-/// BDR 0023 Sc.2 — a short word that is a substring of a larger styled token
+/// A short word that is a substring of a larger styled token
 /// does not inherit the larger token's style.
 ///
 /// Source: ["category " Bold, "cat" Plain]
@@ -897,7 +897,7 @@ fn substring_word_does_not_inherit_larger_token_style() {
     );
 }
 
-/// BDR 0023 Sc.4 — a word that straddles an emphasis boundary keeps both styles
+/// A word that straddles an emphasis boundary keeps both styles
 /// as adjacent spans in the wrapped output.
 ///
 /// Source: ["fo" Bold, "o" Plain] — no whitespace, one display word "foo".
@@ -939,7 +939,7 @@ fn cross_boundary_word_keeps_both_styles() {
     assert_eq!(plain_text, "o", "Plain span must be 'o': {row:?}");
 }
 
-/// BDR 0023 Sc.5 — a styled word that falls after a wrap break keeps its style;
+/// A styled word that falls after a wrap break keeps its style;
 /// the word before the break keeps its own style unchanged.
 ///
 /// Source: ["plain " Plain (repeated to fill ~38 chars), "bold" Bold]
@@ -1013,7 +1013,7 @@ fn wrap_rich_empty_line_returns_empty_vec() {
     );
 }
 
-/// Geometry 2 — an all-whitespace line normalizes to one canonical BLANK line (ADR 0048).
+/// Geometry 2 — an all-whitespace line normalizes to one canonical BLANK line.
 ///
 /// A wordless segment always yields exactly one empty output line — a mutant that drops
 /// this wordless-segment fallback would produce an empty Vec (no words), failing the
@@ -1040,7 +1040,7 @@ fn wrap_rich_all_whitespace_returns_single_blank_line() {
     );
 }
 
-/// Blank lines between paragraphs are preserved, not dropped (ADR 0048's fix).
+/// Blank lines between paragraphs are preserved, not dropped.
 ///
 /// A mutant that drops the wordless-segment fallback (or merges consecutive newline
 /// segments) would collapse the empty middle segment, producing two lines instead of

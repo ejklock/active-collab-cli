@@ -1,9 +1,9 @@
 //! Central style layer for the TUI.
 //!
-//! # Design-system token model (ADR 0060)
+//! # Design-system token model
 //!
 //! Every visible color in the TUI is named by **role**, not by hue. The role
-//! set is small — thirteen tokens — and lives in [`Palette`]. Concrete palettes
+//! set is small — eleven tokens — and lives in [`Palette`]. Concrete palettes
 //! (`ANGIE_DARK`, `SLATE_DARK`, `NORD_DARK`, and their `_LIGHT` twins) fill those
 //! roles with truecolor `Rgb` values. Swapping the whole look is therefore a
 //! *values* change (`set_active`), never a code change: the `*_style()` builders
@@ -20,7 +20,7 @@ use crate::tui::model::DueStyle;
 use ratatui::style::{Color, Modifier, Style};
 use std::sync::RwLock;
 
-/// The thirteen semantic roles every screen draws from.
+/// The eleven semantic roles every screen draws from.
 ///
 /// `Copy` so a reader can cheaply snapshot the active palette under the lock and
 /// release it before building a `Style`.
@@ -30,10 +30,6 @@ pub struct Palette {
     pub surface_base: Color,
     /// Raised band (identity bar, status bar) — one step off the base.
     pub surface_raised: Color,
-    /// Box-drawing rules and separators.
-    // Unused until a later slice's builder reads panel border color from tokens (ADR 0060 follow-ups).
-    #[allow(dead_code)]
-    pub border: Color,
     /// Primary text.
     pub text: Color,
     /// Secondary / muted text (labels, column headers, timestamps).
@@ -42,10 +38,6 @@ pub struct Palette {
     pub accent: Color,
     /// "open / a link / done" — also the underlined-link color.
     pub success: Color,
-    /// Informational / structural highlight (quotes, original-title marker).
-    // Unused until a later slice's builder reads the info token (ADR 0060 follow-ups).
-    #[allow(dead_code)]
-    pub info: Color,
     /// "due now / soon".
     pub warning: Color,
     /// "overdue / destructive".
@@ -62,29 +54,23 @@ pub struct Palette {
 pub const ANGIE_DARK: Palette = Palette {
     surface_base: Color::Rgb(13, 17, 23),
     surface_raised: Color::Rgb(22, 27, 34),
-    border: Color::Rgb(48, 54, 61),
     text: Color::Rgb(230, 237, 243),
     text_secondary: Color::Rgb(139, 148, 158),
     accent: Color::Rgb(86, 212, 221),
     success: Color::Rgb(63, 185, 80),
-    info: Color::Rgb(88, 166, 255),
     warning: Color::Rgb(210, 153, 34),
     danger: Color::Rgb(248, 81, 73),
     selection: Color::Rgb(210, 153, 34),
     selection_fg: Color::Rgb(13, 17, 23),
     footer: Color::Rgb(173, 186, 199),
 };
-// Unused until slice S3/S4 wires runtime theme selection (ADR 0062).
-#[allow(dead_code)]
 pub const ANGIE_LIGHT: Palette = Palette {
     surface_base: Color::Rgb(255, 255, 255),
     surface_raised: Color::Rgb(246, 248, 250),
-    border: Color::Rgb(208, 215, 222),
     text: Color::Rgb(31, 35, 40),
     text_secondary: Color::Rgb(101, 109, 118),
     accent: Color::Rgb(15, 124, 140),
     success: Color::Rgb(26, 127, 55),
-    info: Color::Rgb(9, 105, 218),
     warning: Color::Rgb(154, 103, 0),
     danger: Color::Rgb(207, 34, 46),
     selection: Color::Rgb(191, 135, 0),
@@ -93,34 +79,26 @@ pub const ANGIE_LIGHT: Palette = Palette {
 };
 
 // Slate & Amber — a warmer evolution of the original retro palette.
-// Unused until slice S3/S4 wires runtime theme selection (ADR 0062).
-#[allow(dead_code)]
 pub const SLATE_DARK: Palette = Palette {
     surface_base: Color::Rgb(23, 22, 28),
     surface_raised: Color::Rgb(33, 31, 40),
-    border: Color::Rgb(52, 49, 61),
     text: Color::Rgb(236, 231, 225),
     text_secondary: Color::Rgb(164, 158, 151),
     accent: Color::Rgb(224, 164, 88),
     success: Color::Rgb(139, 196, 138),
-    info: Color::Rgb(127, 180, 230),
     warning: Color::Rgb(224, 164, 88),
     danger: Color::Rgb(229, 112, 107),
     selection: Color::Rgb(224, 164, 88),
     selection_fg: Color::Rgb(23, 22, 28),
     footer: Color::Rgb(201, 194, 186),
 };
-// Unused until slice S3/S4 wires runtime theme selection (ADR 0062).
-#[allow(dead_code)]
 pub const SLATE_LIGHT: Palette = Palette {
     surface_base: Color::Rgb(250, 248, 245),
     surface_raised: Color::Rgb(240, 236, 229),
-    border: Color::Rgb(221, 214, 204),
     text: Color::Rgb(36, 31, 26),
     text_secondary: Color::Rgb(107, 97, 87),
     accent: Color::Rgb(179, 101, 26),
     success: Color::Rgb(63, 126, 63),
-    info: Color::Rgb(43, 108, 176),
     warning: Color::Rgb(179, 101, 26),
     danger: Color::Rgb(193, 74, 68),
     selection: Color::Rgb(217, 138, 43),
@@ -129,34 +107,26 @@ pub const SLATE_LIGHT: Palette = Palette {
 };
 
 // Nord Frost — cool, low-saturation, easy on the eyes for long sessions.
-// Unused until slice S3/S4 wires runtime theme selection (ADR 0062).
-#[allow(dead_code)]
 pub const NORD_DARK: Palette = Palette {
     surface_base: Color::Rgb(46, 52, 64),
     surface_raised: Color::Rgb(59, 66, 82),
-    border: Color::Rgb(67, 76, 94),
     text: Color::Rgb(236, 239, 244),
     text_secondary: Color::Rgb(169, 177, 196),
     accent: Color::Rgb(136, 192, 208),
     success: Color::Rgb(163, 190, 140),
-    info: Color::Rgb(129, 161, 193),
     warning: Color::Rgb(235, 203, 139),
     danger: Color::Rgb(191, 97, 106),
     selection: Color::Rgb(94, 129, 172),
     selection_fg: Color::Rgb(236, 239, 244),
     footer: Color::Rgb(216, 222, 233),
 };
-// Unused until slice S3/S4 wires runtime theme selection (ADR 0062).
-#[allow(dead_code)]
 pub const NORD_LIGHT: Palette = Palette {
     surface_base: Color::Rgb(236, 239, 244),
     surface_raised: Color::Rgb(229, 233, 240),
-    border: Color::Rgb(216, 222, 233),
     text: Color::Rgb(46, 52, 64),
     text_secondary: Color::Rgb(76, 86, 106),
     accent: Color::Rgb(46, 125, 149),
     success: Color::Rgb(79, 122, 63),
-    info: Color::Rgb(94, 129, 172),
     warning: Color::Rgb(180, 138, 46),
     danger: Color::Rgb(191, 97, 106),
     selection: Color::Rgb(129, 161, 193),
@@ -165,8 +135,6 @@ pub const NORD_LIGHT: Palette = Palette {
 };
 
 /// A named palette family — the user-facing theme choice.
-// Unused until slice S3/S4 wires runtime theme selection (ADR 0062).
-#[allow(dead_code)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ThemeChoice {
     Angie,
@@ -175,17 +143,15 @@ pub enum ThemeChoice {
 }
 
 /// Light or dark mode within a [`ThemeChoice`].
-// Unused until slice S3/S4 wires runtime theme selection (ADR 0062).
-#[allow(dead_code)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
     Dark,
+    // The light palettes are complete, but no setting selects light mode yet; startup always picks Dark.
+    #[allow(dead_code)]
     Light,
 }
 
 /// Resolve a `(theme, mode)` pair to its concrete palette.
-// Unused until slice S3/S4 wires runtime theme selection (ADR 0062).
-#[allow(dead_code)]
 pub fn palette_for(theme: ThemeChoice, mode: Mode) -> Palette {
     match (theme, mode) {
         (ThemeChoice::Angie, Mode::Dark) => ANGIE_DARK,
@@ -199,24 +165,11 @@ pub fn palette_for(theme: ThemeChoice, mode: Mode) -> Palette {
 
 /// Parse a persisted `"theme"` config value (e.g. `"angie"`, `"nord"`).
 /// Unknown values fall back to the default (`Angie`).
-// Unused until slice S3/S4 wires runtime theme selection (ADR 0062).
-#[allow(dead_code)]
 pub fn theme_from_str(s: &str) -> ThemeChoice {
     match s.trim().to_ascii_lowercase().as_str() {
         "slate" | "slate-amber" | "amber" => ThemeChoice::Slate,
         "nord" | "nord-frost" | "frost" => ThemeChoice::Nord,
         _ => ThemeChoice::Angie,
-    }
-}
-
-/// Stable string form for persisting a [`ThemeChoice`] to config.
-// Unused until slice S3/S4 wires runtime theme selection (ADR 0062).
-#[allow(dead_code)]
-pub fn theme_to_str(theme: ThemeChoice) -> &'static str {
-    match theme {
-        ThemeChoice::Angie => "angie",
-        ThemeChoice::Slate => "slate",
-        ThemeChoice::Nord => "nord",
     }
 }
 
@@ -232,15 +185,11 @@ fn palette() -> Palette {
 
 /// Replace the active palette wholesale. Call once at startup and again whenever
 /// the user picks a theme in Settings; the next frame paints in the new palette.
-// Unused until slice S3/S4 wires runtime theme selection (ADR 0062).
-#[allow(dead_code)]
 pub fn set_active_palette(p: Palette) {
     *ACTIVE_PALETTE.write().expect("theme palette lock poisoned") = p;
 }
 
 /// Convenience over [`set_active_palette`] using the named theme + mode.
-// Unused until slice S3/S4 wires runtime theme selection (ADR 0062).
-#[allow(dead_code)]
 pub fn set_active(theme: ThemeChoice, mode: Mode) {
     set_active_palette(palette_for(theme, mode));
 }
@@ -303,14 +252,6 @@ pub fn delete_affordance_style() -> Style {
         .add_modifier(Modifier::UNDERLINED)
 }
 
-/// Badge style (selection hue, bold) — retained for theme-consistency tests.
-#[allow(dead_code)]
-pub fn badge_style() -> Style {
-    Style::default()
-        .fg(palette().selection)
-        .add_modifier(Modifier::BOLD)
-}
-
 /// Body text selection highlight — reversed foreground/background (REVERSED).
 ///
 /// Reverse video is terminal-portable and provides visible contrast without
@@ -356,7 +297,7 @@ pub fn focused_comment_style() -> Style {
 
 /// Panel title seated in a panel's top rule (Details / Description / Comments) —
 /// accent + bold. Carried structurally as a `RichStyle::PanelTitle` run over the
-/// label span of the top-border row (ADR 0063), mirroring how the comment
+/// label span of the top-border row, mirroring how the comment
 /// edit/delete affordances style tokens on that same border row.
 pub fn panel_title_style() -> Style {
     Style::default()

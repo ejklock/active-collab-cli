@@ -1,49 +1,227 @@
+use super::hours_report::{resolve_period, PeriodPreset};
 use super::presenter;
+use super::resolve::load_targets;
 use crate::agent_json;
-use crate::client::{ActiveCollabClient, Unauthorized};
+use crate::client::{ActiveCollabClient, TimeRecordsOutcome, Unauthorized};
 use crate::http::Http;
 use crate::i18n::t;
 use crate::render::{self, MineTableRow};
 use crate::store::instances::{Instance, InstanceRepository};
 use std::io::Write;
 
-/// Parity: Python _render_mine_table (aggregation loop).
-///
-/// For each target instance, builds a client and fetches open tasks. Maps each
-/// MineTask to a MineTableRow using task_number when present (else id as fallback),
-/// mirroring Python `t.task_number or t.id`.
-///
-/// Instance order is preserved deterministically via an indexed JoinSet.
-pub(crate) async fn collect_mine_rows(targets: &[Instance], http: &Http) -> Vec<MineTableRow> {
-    let t = std::time::Instant::now();
+/// One task's hours as fetched after its row was listed; `None` marks a value
+/// the API did not give.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct MineHours {
+    pub instance: String,
+    pub task_id: i64,
+    pub logged_week: Option<f64>,
+    pub logged_total: Option<f64>,
+}
 
-    let mut set: tokio::task::JoinSet<(usize, Vec<crate::models::MineTask>)> =
+/// Loads every target instance's rows concurrently, one result per target in
+/// target order; an instance whose task did not finish yields no rows.
+async fn fan_out_instance_rows(
+    targets: &[Instance],
+    http: &Http,
+    today: chrono::NaiveDate,
+) -> Vec<anyhow::Result<Vec<MineTableRow>>> {
+    let mut set: tokio::task::JoinSet<(usize, anyhow::Result<Vec<MineTableRow>>)> =
         tokio::task::JoinSet::new();
 
     for (idx, inst) in targets.iter().enumerate() {
-        let client = ActiveCollabClient::new(inst.clone(), http.clone());
+        let inst = inst.clone();
+        let http = http.clone();
         set.spawn(async move {
-            let tasks = client.fetch_open_tasks().await.unwrap_or_default();
-            (idx, tasks)
+            let client = ActiveCollabClient::new(inst.clone(), http.clone());
+            let rows = match client.fetch_open_tasks().await {
+                Ok(tasks) => Ok(fill_task_hours(&inst, &http, tasks, today).await),
+                Err(e) => Err(e),
+            };
+            (idx, rows)
         });
     }
 
-    let mut per_index: Vec<Vec<crate::models::MineTask>> =
-        (0..targets.len()).map(|_| Vec::new()).collect();
+    let mut per_index: Vec<anyhow::Result<Vec<MineTableRow>>> =
+        (0..targets.len()).map(|_| Ok(Vec::new())).collect();
 
     while let Some(joined) = set.join_next().await {
-        if let Ok((idx, tasks)) = joined {
-            per_index[idx] = tasks;
+        if let Ok((idx, result)) = joined {
+            per_index[idx] = result;
         }
     }
+    per_index
+}
 
-    let rows = per_index
+/// Maps the instance's open tasks to rows and fills their hours.
+pub(super) async fn fill_task_hours(
+    inst: &Instance,
+    http: &Http,
+    tasks: Vec<crate::models::MineTask>,
+    today: chrono::NaiveDate,
+) -> Vec<MineTableRow> {
+    let hours = fetch_task_hours(inst, http, &tasks, today).await;
+    tasks
         .into_iter()
-        .flat_map(|tasks| tasks.into_iter().map(mine_task_to_row))
-        .collect();
+        .zip(hours)
+        .map(|(task, hours)| MineTableRow {
+            logged_week: hours.logged_week,
+            logged_total: hours.logged_total,
+            ..mine_task_to_row(task)
+        })
+        .collect()
+}
 
-    crate::timing::record("mine_list_load", t.elapsed());
-    rows
+/// One instance's open tasks, as listed.
+pub(crate) type InstanceTasks = (Instance, Vec<crate::models::MineTask>);
+
+/// Lists every target instance's open tasks concurrently, in target order; an
+/// instance whose list fails is left out.
+pub(crate) async fn collect_mine_task_lists(
+    targets: &[Instance],
+    http: &Http,
+) -> Vec<InstanceTasks> {
+    let timer = std::time::Instant::now();
+    let mut set: tokio::task::JoinSet<(usize, Option<InstanceTasks>)> = tokio::task::JoinSet::new();
+    for (idx, inst) in targets.iter().enumerate() {
+        let inst = inst.clone();
+        let client = ActiveCollabClient::new(inst.clone(), http.clone());
+        set.spawn(async move {
+            let listed = client.fetch_open_tasks().await.ok().map(|t| (inst, t));
+            (idx, listed)
+        });
+    }
+    let mut per_index: Vec<Option<InstanceTasks>> = vec![None; targets.len()];
+    while let Some(joined) = set.join_next().await {
+        if let Ok((idx, listed)) = joined {
+            per_index[idx] = listed;
+        }
+    }
+    crate::timing::record("mine_list_load", timer.elapsed());
+    per_index.into_iter().flatten().collect()
+}
+
+/// The rows of the listed tasks, without hours.
+pub(crate) fn mine_rows_of(lists: &[InstanceTasks]) -> Vec<MineTableRow> {
+    lists
+        .iter()
+        .flat_map(|(_, tasks)| tasks.iter().cloned().map(mine_task_to_row))
+        .collect()
+}
+
+/// The hours of every listed task, fetched concurrently per instance, in
+/// list order.
+pub(crate) async fn collect_mine_hours(lists: &[InstanceTasks], http: &Http) -> Vec<MineHours> {
+    let timer = std::time::Instant::now();
+    let today = chrono::Local::now().date_naive();
+    let mut set: tokio::task::JoinSet<(usize, Vec<MineHours>)> = tokio::task::JoinSet::new();
+    for (idx, (inst, tasks)) in lists.iter().enumerate() {
+        let (inst, tasks, http) = (inst.clone(), tasks.clone(), http.clone());
+        set.spawn(async move { (idx, fetch_task_hours(&inst, &http, &tasks, today).await) });
+    }
+    let mut per_index: Vec<Vec<MineHours>> = vec![Vec::new(); lists.len()];
+    while let Some(joined) = set.join_next().await {
+        if let Ok((idx, hours)) = joined {
+            per_index[idx] = hours;
+        }
+    }
+    crate::timing::record("mine_hours_load", timer.elapsed());
+    per_index.into_iter().flatten().collect()
+}
+
+/// Each task's hours, in task order.
+///
+/// One records request covers the user's week for every task; each task's
+/// total comes from its own payload, fetched concurrently. A failed request
+/// leaves the affected hours `None` and never drops a task.
+async fn fetch_task_hours(
+    inst: &Instance,
+    http: &Http,
+    tasks: &[crate::models::MineTask],
+    today: chrono::NaiveDate,
+) -> Vec<MineHours> {
+    if tasks.is_empty() {
+        return Vec::new();
+    }
+    let (week_start, week_end) = resolve_period(PeriodPreset::Week, today);
+    let from = week_start.format("%Y-%m-%d").to_string();
+    let to = week_end.format("%Y-%m-%d").to_string();
+
+    let (week, totals) = tokio::join!(
+        fetch_week_hours(inst, http, &from, &to),
+        fetch_total_hours(inst, http, tasks)
+    );
+
+    tasks
+        .iter()
+        .zip(totals)
+        .map(|(task, logged_total)| MineHours {
+            instance: task.instance_name.clone(),
+            task_id: task.id,
+            logged_week: week
+                .as_ref()
+                .map(|per_task| per_task.get(&task.id).copied().unwrap_or(0.0)),
+            logged_total,
+        })
+        .collect()
+}
+
+/// The user's hours per task id over `from..=to`, rounded to 2 decimals;
+/// `None` when the user id is missing or the records request fails.
+async fn fetch_week_hours(
+    inst: &Instance,
+    http: &Http,
+    from: &str,
+    to: &str,
+) -> Option<std::collections::HashMap<i64, f64>> {
+    let user_id = inst.user_id.filter(|id| *id != 0)?;
+    let client = ActiveCollabClient::new(inst.clone(), http.clone());
+    let Ok(TimeRecordsOutcome::Ok(report)) =
+        client.fetch_time_records_by_date(user_id, from, to).await
+    else {
+        return None;
+    };
+    let mut per_task: std::collections::HashMap<i64, f64> = std::collections::HashMap::new();
+    for record in report
+        .time_records
+        .iter()
+        .filter(|r| r.parent_type == "Task")
+    {
+        *per_task.entry(record.parent_id).or_insert(0.0) += record.value;
+    }
+    for hours in per_task.values_mut() {
+        *hours = (*hours * 100.0).round() / 100.0;
+    }
+    Some(per_task)
+}
+
+/// Each task's total logged hours (`tracked_time` of its payload), fetched
+/// concurrently, in task order; `None` where the request or payload fails.
+async fn fetch_total_hours(
+    inst: &Instance,
+    http: &Http,
+    tasks: &[crate::models::MineTask],
+) -> Vec<Option<f64>> {
+    let mut set: tokio::task::JoinSet<(usize, Option<f64>)> = tokio::task::JoinSet::new();
+    for (idx, task) in tasks.iter().enumerate() {
+        let project_id = task.project_id;
+        let task_id = task.id;
+        let client = ActiveCollabClient::new(inst.clone(), http.clone());
+        set.spawn(async move {
+            let total = match client.fetch_task(project_id, task_id).await {
+                Ok((200, Some(payload))) => payload.get("tracked_time").and_then(|v| v.as_f64()),
+                _ => None,
+            };
+            (idx, total)
+        });
+    }
+    let mut totals: Vec<Option<f64>> = vec![None; tasks.len()];
+    while let Some(joined) = set.join_next().await {
+        if let Ok((idx, total)) = joined {
+            totals[idx] = total;
+        }
+    }
+    totals
 }
 
 fn mine_task_to_row(task: crate::models::MineTask) -> MineTableRow {
@@ -53,51 +231,45 @@ fn mine_task_to_row(task: crate::models::MineTask) -> MineTableRow {
     };
     MineTableRow {
         instance: task.instance_name,
-        project_id: task.project_id.unwrap_or(0),
+        project_id: task.project_id,
         task_number,
         task_id: task.id,
         name: task.name,
         due_on: task.due_on,
         project_name: None,
+        estimate: task.estimate,
+        logged_week: None,
+        logged_total: None,
     }
 }
 
 /// Auth-aware mine aggregation for the CLI path.
 ///
-/// Mirrors collect_mine_rows but propagates Unauthorized rather than swallowing it.
+/// Loads every target's rows with their hours, propagating Unauthorized rather than swallowing it.
 /// On 401 from any target instance, returns Err(Unauthorized). Other non-200 errors
 /// from an instance are silently skipped (unchanged behaviour for transient failures).
 async fn fetch_mine_rows_checked(
     targets: &[Instance],
     http: &Http,
 ) -> anyhow::Result<Vec<MineTableRow>> {
+    fetch_mine_rows_checked_on(targets, http, chrono::Local::now().date_naive()).await
+}
+
+pub(super) async fn fetch_mine_rows_checked_on(
+    targets: &[Instance],
+    http: &Http,
+    today: chrono::NaiveDate,
+) -> anyhow::Result<Vec<MineTableRow>> {
     let timer = std::time::Instant::now();
 
-    let mut set: tokio::task::JoinSet<(usize, anyhow::Result<Vec<crate::models::MineTask>>)> =
-        tokio::task::JoinSet::new();
-
-    for (idx, inst) in targets.iter().enumerate() {
-        let client = ActiveCollabClient::new(inst.clone(), http.clone());
-        set.spawn(async move { (idx, client.fetch_open_tasks().await) });
-    }
-
-    let mut per_index: Vec<Vec<crate::models::MineTask>> =
-        (0..targets.len()).map(|_| Vec::new()).collect();
-
-    while let Some(joined) = set.join_next().await {
-        if let Ok((idx, result)) = joined {
-            match result {
-                Ok(tasks) => per_index[idx] = tasks,
-                Err(e) if e.is::<Unauthorized>() => return Err(e),
-                Err(_) => {}
-            }
+    let mut rows = Vec::new();
+    for result in fan_out_instance_rows(targets, http, today).await {
+        match result {
+            Ok(instance_rows) => rows.extend(instance_rows),
+            Err(e) if e.is::<Unauthorized>() => return Err(e),
+            Err(_) => {}
         }
     }
-
-    let rows = per_index
-        .into_iter()
-        .flat_map(|tasks| tasks.into_iter().map(mine_task_to_row))
-        .collect();
 
     crate::timing::record("mine_list_load", timer.elapsed());
     Ok(rows)
@@ -130,48 +302,12 @@ pub(crate) async fn mine_core(
     out: &mut dyn Write,
     err: &mut dyn Write,
 ) -> MineOutcome {
-    let instances = match repo.load_all() {
-        Ok(v) => v,
-        Err(e) => {
-            writeln!(err, "Error loading instances: {e}").ok();
-            return MineOutcome::Done(1);
+    let targets = match load_targets(repo, instance_filter) {
+        Ok(targets) => targets,
+        Err(failure) => {
+            writeln!(err, "{}", failure.message).ok();
+            return MineOutcome::Done(failure.code);
         }
-    };
-
-    if instances.is_empty() {
-        writeln!(
-            err,
-            "{}",
-            t("Error: no instances configured. Run: active_collab.py setup add")
-        )
-        .ok();
-        return MineOutcome::Done(2);
-    }
-
-    let targets: Vec<Instance> = if let Some(name) = instance_filter {
-        let matches: Vec<Instance> = instances
-            .iter()
-            .filter(|i| i.name == name)
-            .cloned()
-            .collect();
-        if matches.is_empty() {
-            let known: Vec<&str> = instances.iter().map(|i| i.name.as_str()).collect();
-            let known_str = known.join(", ");
-            writeln!(
-                err,
-                "{}",
-                t(&format!(
-                    "Error: instance '{name}' not found. Known: {known}",
-                    name = name,
-                    known = known_str
-                ))
-            )
-            .ok();
-            return MineOutcome::Done(2);
-        }
-        matches
-    } else {
-        instances
     };
 
     if is_tty && !json {
