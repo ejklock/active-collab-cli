@@ -330,7 +330,7 @@ pi profile, use `--scope project --dir ~/.pi/agent-profiles/<name>`.
 The Claude Code, Codex and OpenCode plugins install the skill **and** the `ac mcp` server
 into a harness in one step (the Pi package installs the skill only).
 Install `ac` first (`install.sh`, above): each of these plugins starts the `ac` found on your
-`PATH`, and needs a release that has the `mcp` subcommand (releases up to 0.11.0 lack it).
+`PATH`, and needs `ac` 0.12.0 or later (earlier releases lack the `mcp` subcommand).
 
 ```sh
 # Claude Code
@@ -354,8 +354,7 @@ Pi installs the skill only (it has no MCP client):
 pi install npm:pi-active-collab
 ```
 
-The `opencode-active-collab` and `pi-active-collab` npm packages are **not published
-yet**. Until they are, install them from a clone of this repository: for Pi, run
+To install from a clone of this repository instead of npm: for Pi, run
 `pi install ./packages/pi`; for OpenCode, list the absolute path
 `"file:///path/to/active-collab-cli/packages/opencode"` in `plugin`.
 
