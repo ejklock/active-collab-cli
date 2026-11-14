@@ -27,6 +27,7 @@ Excluded: `npm publish`, reserving package names, pushing, and a release; bundli
 - The plugin keeps two MCP declarations only if one cannot serve both harnesses: Codex 0.167 reads only a root `mcp.json` with a transport `type`, never `.mcp.json`; Claude Code reads the file its manifest's `mcpServers` names. One `mcp.json`, named by the Claude manifest, serves both (session, 2026-11-13).
 - The plugin keeps a root `plugin.json` for Codex: without it Codex installs the plugin but shows no display name, description, developer or website (session, 2026-11-13).
 - Manifests name the author Evaldo Klock and license MIT, as `LICENSE` does (session default, 2026-11-13). Not taken: Klock Tecnologia as author.
+- Claude Code (and Codex) install from the git marketplace in this repository, not npm (owner, 2026-11-13): Claude Code has no direct npm install, and an npm `source` in a marketplace entry still needs `marketplace add`. Not taken: a third npm package behind an npm-source marketplace entry; submitting to the Anthropic plugin directory.
 
 ### Acceptance
 
