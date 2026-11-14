@@ -2,7 +2,7 @@
 type: Issue
 title: One npm package installs ac in both OpenCode and Pi
 description: "active-collab-agent replaces opencode-active-collab and pi-active-collab: OpenCode loads its config hook, Pi loads only its skill."
-status: open
+status: closed
 timestamp: 2026-11-14T01:37:22Z
 ---
 
