@@ -26,7 +26,6 @@ TUI/UX work (V/R/ARCH slices), tracing to
 * [0066 — Comment writes preserve paragraph breaks — encode newlines as HTML before POST/PUT](0066-comment-writes-preserve-paragraph-breaks-encode-newlines-as-html-before-post-put.md) - open
 * [0070 — TUI assignee-picker gains a live search/filter field](0070-assignee-picker-search-filter.md) - open
 * [0071 — Comment writes can send formatted bodies — add a raw HTML option and fix the stale skill text](0071-comment-writes-can-send-formatted-bodies-add-a-raw-html-option-and-fix-the-stale-skill-text.md) - open
-* [0093 — Embedded body images fail to download and resolve to thumbnails](0093-embedded-body-images-fail-to-download-and-resolve-to-thumbnails.md) - open
 
 ## Closed
 
@@ -101,3 +100,4 @@ TUI/UX work (V/R/ARCH slices), tracing to
 * [0090 — Install ac in Claude Code, Codex, OpenCode and Pi as a plugin](0090-install-ac-in-claude-code-codex-opencode-and-pi-as-a-plugin.md) - closed
 * [0091 — Claude Code drops ac_read and ac_write because their schema is a top-level oneOf](0091-claude-code-drops-ac-read-and-ac-write-because-their-schema-is-a-top-level-oneof.md) - closed
 * [0092 — One npm package installs ac in both OpenCode and Pi](0092-one-npm-package-installs-ac-in-both-opencode-and-pi.md) - closed
+* [0093 — Embedded body images fail to download and resolve to thumbnails](0093-embedded-body-images-fail-to-download-and-resolve-to-thumbnails.md) - closed
