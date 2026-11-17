@@ -1,0 +1,11 @@
+---
+description: Read ActiveCollab task/assignment/comment/project data as JSON via the `ac` CLI (get/current/mine/browse --json), non-interactively. Run `ac skill active-collab` for the full contract.
+globs:
+alwaysApply: false
+---
+
+# active-collab (thin pointer)
+
+The full ActiveCollab `--json` read contract is served by the CLI. Run `ac skill active-collab`
+and follow its output — it documents the `--json` schemas for get/current/mine/browse,
+the round-trippable `ref`, and the cache flags.
