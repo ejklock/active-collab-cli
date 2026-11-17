@@ -618,10 +618,18 @@ impl ActiveCollabClient {
     /// `Http::authed_get` reusing the existing host-gated token attach/omit
     /// behavior — the token is attached only when `url`'s host matches the
     /// instance host. Returns Ok((status, body)) for any HTTP response; only
-    /// transport failures are Err.
+    /// transport failures are Err. A host-less `url` (as embedded in task
+    /// bodies) is resolved against the instance base URL first, so the token
+    /// gate sees the instance host; an unparsable base is an Err.
     pub async fn fetch_asset_bytes(&self, url: &str) -> Result<(u16, bytes::Bytes)> {
+        let resolved = match url::Url::parse(url) {
+            Ok(_) => url.to_string(),
+            Err(_) => url::Url::parse(&self.instance.base_url)?
+                .join(url)?
+                .to_string(),
+        };
         self.http
-            .authed_get(url, &self.instance.base_url, &self.instance.token)
+            .authed_get(&resolved, &self.instance.base_url, &self.instance.token)
             .await
     }
 }

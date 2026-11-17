@@ -1438,6 +1438,76 @@ async fn fetch_asset_bytes_non_200_returns_status_not_err() {
 }
 
 #[tokio::test]
+async fn fetch_asset_bytes_resolves_relative_url_against_instance_and_sends_token() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/proxy.php"))
+        .and(wiremock::matchers::query_param("a", "1"))
+        .and(wiremock::matchers::query_param("b", "2"))
+        .and(header("x-angie-authapitoken", "test-token"))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(vec![7]))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = make_client(&server.uri());
+    let (status, body) = client
+        .fetch_asset_bytes("/proxy.php?a=1&b=2")
+        .await
+        .unwrap();
+    assert_eq!(status, 200);
+    assert_eq!(body.as_ref(), &[7]);
+    server.verify().await;
+}
+
+#[tokio::test]
+async fn fetch_asset_bytes_relative_url_ignores_base_url_path_and_trailing_slash() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/proxy.php"))
+        .and(header("x-angie-authapitoken", "test-token"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(2)
+        .mount(&server)
+        .await;
+
+    for base in [
+        format!("{}/", server.uri()),
+        format!("{}/sub/dir/", server.uri()),
+    ] {
+        let client = make_client(&base);
+        let (status, _) = client.fetch_asset_bytes("/proxy.php").await.unwrap();
+        assert_eq!(status, 200, "base {base}");
+    }
+    server.verify().await;
+}
+
+#[tokio::test]
+async fn fetch_asset_bytes_absolute_instance_url_is_fetched_unchanged() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/proxy.php"))
+        .and(wiremock::matchers::query_param("x", "y z"))
+        .and(header("x-angie-authapitoken", "test-token"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = make_client(&server.uri());
+    let url = format!("{}/proxy.php?x=y%20z", server.uri());
+    let (status, _) = client.fetch_asset_bytes(&url).await.unwrap();
+    assert_eq!(status, 200);
+    server.verify().await;
+}
+
+#[tokio::test]
+async fn fetch_asset_bytes_relative_url_with_unparsable_base_is_an_error() {
+    let client = make_client("not a url");
+    assert!(client.fetch_asset_bytes("/proxy.php").await.is_err());
+}
+
+#[tokio::test]
 async fn base_url_trailing_slash_is_trimmed() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))

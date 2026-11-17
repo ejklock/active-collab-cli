@@ -2071,6 +2071,97 @@ fn downloadable_assets_includes_attachments_and_inline_images_only() {
     );
 }
 
+const WRAPPED_IMAGE_HTML: &str = r#"<a href="https://collab.example.com/proxy.php?proxy=download_file&amp;module=system&amp;v=7.2.25&amp;b=DEV&amp;context=attachments&amp;id=62806&amp;size=86937&amp;md5=1f82add71660ec3ed9afaee6589a6368&amp;timestamp=2026-11-17+13%3A03%3A36&amp;force=1&amp;i=" target="_blank" rel="noreferrer noopener"><img src="/proxy.php?proxy=forward_thumbnail&module=system&v=7.2.25&b=DEV&context=upload&name=2026-11%2F170216-QjlMNWmERahK5LDSEFKkyIKKmkijlmnxMNqOZdcy&original_file_name=image.png&width=800&height=800&ver=86937&scale=scale" alt="image.png" /></a>"#;
+
+const WRAPPED_IMAGE_URL: &str = "https://collab.example.com/proxy.php?proxy=download_file&module=system&v=7.2.25&b=DEV&context=attachments&id=62806&size=86937&md5=1f82add71660ec3ed9afaee6589a6368&timestamp=2026-11-17+13%3A03%3A36&force=1&i=";
+
+#[test]
+fn downloadable_assets_wrapped_image_yields_the_download_href_under_its_file_name() {
+    let task = serde_json::json!({ "body": WRAPPED_IMAGE_HTML });
+    let assets = downloadable_assets(&task, &[]);
+    assert_eq!(assets.len(), 1, "{assets:?}");
+    assert_eq!(assets[0].url, WRAPPED_IMAGE_URL);
+    assert_eq!(assets[0].name, "image.png");
+}
+
+#[test]
+fn downloadable_assets_same_wrapped_image_in_body_and_comment_yields_one_asset() {
+    let task = serde_json::json!({ "body": WRAPPED_IMAGE_HTML });
+    let comments = vec![serde_json::json!({ "body": WRAPPED_IMAGE_HTML })];
+    let assets = downloadable_assets(&task, &comments);
+    assert_eq!(assets.len(), 1, "{assets:?}");
+}
+
+#[test]
+fn downloadable_assets_bare_image_uses_decoded_src_and_original_file_name() {
+    let task = serde_json::json!({
+        "body": r#"<img src="/proxy.php?proxy=forward_thumbnail&amp;context=upload&amp;original_file_name=shot.jpg&amp;width=800">"#
+    });
+    let assets = downloadable_assets(&task, &[]);
+    assert_eq!(assets.len(), 1, "{assets:?}");
+    assert_eq!(
+        assets[0].url,
+        "/proxy.php?proxy=forward_thumbnail&context=upload&original_file_name=shot.jpg&width=800"
+    );
+    assert_eq!(assets[0].name, "shot.jpg");
+}
+
+#[test]
+fn downloadable_assets_image_without_original_file_name_is_named_by_alt() {
+    let task = serde_json::json!({
+        "body": r#"<img src="https://example.com/x/abc123" alt="diagram.png">"#
+    });
+    let assets = downloadable_assets(&task, &[]);
+    assert_eq!(assets.len(), 1, "{assets:?}");
+    assert_eq!(assets[0].name, "diagram.png");
+}
+
+#[test]
+fn downloadable_assets_image_in_ordinary_link_yields_only_the_image() {
+    let task = serde_json::json!({
+        "body": r#"<a href="https://example.com/page"><img src="https://example.com/pic.png"></a>"#
+    });
+    let assets = downloadable_assets(&task, &[]);
+    let urls: Vec<&str> = assets.iter().map(|a| a.url.as_str()).collect();
+    assert_eq!(urls, vec!["https://example.com/pic.png"]);
+}
+
+#[test]
+fn downloadable_assets_download_anchor_for_upload_context_or_without_image_is_not_an_asset() {
+    let task = serde_json::json!({
+        "body": concat!(
+            r#"<a href="https://c.example.com/proxy.php?proxy=download_file&amp;context=upload&amp;id=1"><img src="https://c.example.com/t.png"></a>"#,
+            r#"<a href="https://c.example.com/proxy.php?proxy=download_file&amp;context=attachments&amp;id=2">report</a>"#
+        )
+    });
+    let assets = downloadable_assets(&task, &[]);
+    let urls: Vec<&str> = assets.iter().map(|a| a.url.as_str()).collect();
+    assert_eq!(urls, vec!["https://c.example.com/t.png"]);
+}
+
+#[test]
+fn downloadable_assets_malformed_tags_yield_no_asset_and_do_not_panic() {
+    let task = serde_json::json!({
+        "body": r#"<img src="https://example.com/a.png <a href="https://x/proxy.php?proxy=download_file&context=attachments"><img src="#
+    });
+    let assets = downloadable_assets(&task, &[]);
+    assert!(assets.is_empty(), "{assets:?}");
+}
+
+#[test]
+fn downloadable_assets_lists_attachments_after_body_images() {
+    let task = serde_json::json!({
+        "body": WRAPPED_IMAGE_HTML,
+        "attachments": [{ "name": "report.pdf", "url": "https://example.com/report.pdf" }]
+    });
+    let assets = downloadable_assets(&task, &[]);
+    let urls: Vec<&str> = assets.iter().map(|a| a.url.as_str()).collect();
+    assert_eq!(
+        urls,
+        vec![WRAPPED_IMAGE_URL, "https://example.com/report.pdf"]
+    );
+}
+
 #[test]
 fn downloadable_assets_anchor_only_content_yields_empty_set() {
     let task = serde_json::json!({
