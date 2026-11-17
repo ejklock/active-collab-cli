@@ -235,6 +235,10 @@ pub struct TaskCore {
 
 static IMG_SRC_RE: OnceLock<Regex> = OnceLock::new();
 static HREF_WITH_TEXT_RE: OnceLock<Regex> = OnceLock::new();
+static IMG_TAG_RE: OnceLock<Regex> = OnceLock::new();
+static ATTR_SRC_RE: OnceLock<Regex> = OnceLock::new();
+static ATTR_ALT_RE: OnceLock<Regex> = OnceLock::new();
+static ANCHOR_WRAPPING_IMG_RE: OnceLock<Regex> = OnceLock::new();
 
 fn img_src_re() -> &'static Regex {
     IMG_SRC_RE.get_or_init(|| {
@@ -247,6 +251,30 @@ fn href_with_text_re() -> &'static Regex {
     HREF_WITH_TEXT_RE.get_or_init(|| {
         Regex::new(r#"(?i)<a\b[^>]*\bhref=["']([^"']+)["'][^>]*>(.*?)</a>"#)
             .expect("href_with_text_re is a valid pattern")
+    })
+}
+
+fn img_tag_re() -> &'static Regex {
+    IMG_TAG_RE
+        .get_or_init(|| Regex::new(r"(?i)<img\b[^>]*>").expect("img_tag_re is a valid pattern"))
+}
+
+fn attr_src_re() -> &'static Regex {
+    ATTR_SRC_RE.get_or_init(|| {
+        Regex::new(r#"(?i)\ssrc=["']([^"'<>\s]+)["']"#).expect("attr_src_re is a valid pattern")
+    })
+}
+
+fn attr_alt_re() -> &'static Regex {
+    ATTR_ALT_RE.get_or_init(|| {
+        Regex::new(r#"(?i)\salt=["']([^"'<>]*)["']"#).expect("attr_alt_re is a valid pattern")
+    })
+}
+
+fn anchor_wrapping_img_re() -> &'static Regex {
+    ANCHOR_WRAPPING_IMG_RE.get_or_init(|| {
+        Regex::new(r#"(?is)<a\b[^>]*\shref=["']([^"'<>]+)["'][^>]*>\s*(<img\b[^>]*>)\s*</a>"#)
+            .expect("anchor_wrapping_img_re is a valid pattern")
     })
 }
 
@@ -283,9 +311,8 @@ pub(crate) fn derive_asset_label(url: &str, anchor_text: Option<&str>) -> String
     url_host(url).unwrap_or_default()
 }
 
-/// Extract inline `<img src>` assets from HTML — the shared regex walk behind
-/// both `assets_from_html` (all assets) and `downloadable_assets` (attachments
-/// + images only, never anchor hyperlinks).
+/// Extract inline `<img src>` assets from HTML, as listed by
+/// `assets_from_html`.
 fn image_assets_from_html(html: &str) -> Vec<Asset> {
     img_src_re()
         .captures_iter(html)
@@ -293,6 +320,65 @@ fn image_assets_from_html(html: &str) -> Vec<Asset> {
             let url = cap[1].to_string();
             let name = derive_asset_label(&url, None);
             Asset { name, url }
+        })
+        .collect()
+}
+
+/// Parse a possibly host-less URL (as ActiveCollab emits) for query inspection only.
+fn parse_loose_url(url: &str) -> Option<url::Url> {
+    let placeholder = url::Url::parse("http://placeholder.invalid").ok()?;
+    placeholder.join(url).ok()
+}
+
+fn query_value(url: &url::Url, key: &str) -> Option<String> {
+    url.query_pairs()
+        .find(|(k, _)| k == key)
+        .map(|(_, v)| v.into_owned())
+}
+
+fn is_attachment_download_url(url: &str) -> bool {
+    parse_loose_url(url).is_some_and(|u| {
+        query_value(&u, "proxy").as_deref() == Some("download_file")
+            && query_value(&u, "context").as_deref() == Some("attachments")
+    })
+}
+
+/// Embedded-image assets worth downloading from HTML. An image wrapped in an
+/// attachment download anchor yields that anchor's URL (the original file,
+/// not the thumbnail); any other image yields its decoded `src`. The name is
+/// the `original_file_name` query value, then the `alt` text, then the usual
+/// label derivation.
+fn embedded_image_downloads(html: &str) -> Vec<Asset> {
+    let originals: std::collections::HashMap<usize, String> = anchor_wrapping_img_re()
+        .captures_iter(html)
+        .filter_map(|cap| {
+            let href = html_escape::decode_html_entities(&cap[1]).into_owned();
+            let img_start = cap.get(2)?.start();
+            is_attachment_download_url(&href).then_some((img_start, href))
+        })
+        .collect();
+
+    img_tag_re()
+        .find_iter(html)
+        .filter_map(|m| {
+            let tag = m.as_str();
+            let src =
+                html_escape::decode_html_entities(&attr_src_re().captures(tag)?[1]).into_owned();
+            let url = originals
+                .get(&m.start())
+                .cloned()
+                .unwrap_or_else(|| src.clone());
+            let name = parse_loose_url(&src)
+                .and_then(|u| query_value(&u, "original_file_name"))
+                .filter(|n| !n.is_empty())
+                .or_else(|| {
+                    attr_alt_re()
+                        .captures(tag)
+                        .map(|c| html_escape::decode_html_entities(&c[1]).trim().to_string())
+                        .filter(|n| !n.is_empty())
+                })
+                .unwrap_or_else(|| derive_asset_label(&url, None));
+            Some(Asset { name, url })
         })
         .collect()
 }
@@ -376,8 +462,10 @@ fn attachment_assets(task: &Value, comments: &[Value]) -> Vec<Asset> {
 
 /// Extract the narrower set of assets worth downloading as files: real
 /// `task.attachments` and comment `attachments` entries plus inline
-/// `<img src>` sources from the task body and comments. Never includes anchor-hyperlink assets — a comment
-/// author's link is not necessarily a file ActiveCollab is hosting.
+/// embedded images from the task body and comments: the original file when
+/// the image sits in an attachment download link, else its `<img src>`.
+/// Never includes anchor-hyperlink assets — a comment author's link is not
+/// necessarily a file ActiveCollab is hosting.
 ///
 /// Deduplicates by URL, preserving first-seen order.
 pub fn downloadable_assets(task: &Value, comments: &[Value]) -> Vec<Asset> {
@@ -391,13 +479,13 @@ pub fn downloadable_assets(task: &Value, comments: &[Value]) -> Vec<Asset> {
     };
 
     let body_html = task.get("body").and_then(|v| v.as_str()).unwrap_or("");
-    for asset in image_assets_from_html(body_html) {
+    for asset in embedded_image_downloads(body_html) {
         add(asset);
     }
 
     for comment in comments {
         let comment_html = comment.get("body").and_then(|v| v.as_str()).unwrap_or("");
-        for asset in image_assets_from_html(comment_html) {
+        for asset in embedded_image_downloads(comment_html) {
             add(asset);
         }
     }
