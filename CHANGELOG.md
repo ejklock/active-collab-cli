@@ -11,6 +11,15 @@ pre-cutover Python package's history is preserved verbatim under
 version numbers are a separate line and do not continue into the Rust crate
 (issue 0055).
 
+## [0.12.3] - 2026-11-17
+
+### Fixed
+
+- `--download-attachments` and the MCP tool `ac_download_attachments` save the
+  images embedded in a task or comment body, not only the attachments: each one
+  downloads as the full-size original from its attachment link, under its real
+  file name, instead of failing with `builder error`.
+
 ## [0.12.2] - 2026-11-14
 
 ### Changed
