@@ -2,7 +2,7 @@
 type: Issue
 title: Embedded body images fail to download and resolve to thumbnails
 description: The attachment download takes each embedded image's original from its download_file anchor, resolves relative sources against the instance and names the file from original_file_name.
-status: open
+status: closed
 timestamp: 2026-11-17T14:48:25Z
 ---
 
@@ -33,7 +33,7 @@ Excluded: other anchor hyperlinks (they stay out of the download); the asset lis
 
 ### Outcome
 
-Implemented on branch `fix/ek-0093-embedded-body-images` (uncommitted). `downloadable_assets` in `src/controller.rs` takes an embedded image's original from its wrapping `download_file` anchor; `fetch_asset_bytes` in `src/client.rs` resolves a relative URL against the instance base with `url::Url::join`, and the origin gate still decides the token header after resolution.
+Delivered in PR #47 (merge 1ebceeb). `downloadable_assets` in `src/controller.rs` takes an embedded image's original from its wrapping `download_file` anchor; `fetch_asset_bytes` in `src/client.rs` resolves a relative URL against the instance base with `url::Url::join`, and the origin gate still decides the token header after resolution.
 
 Proof: `docker compose run --rm dev cargo test --bin ac downloadable_assets` (13 passed) covers AC1; `cargo test --bin ac fetch_asset_bytes` (7 passed) covers AC2; `cargo test -- --test-threads=1` 1880 passed; `comment_policy`, `clippy --all-targets -D warnings`, `fmt --check` and `se-gates check` pass. AC3 checked by hand on 2026-11-17 with `target/debug/ac`: four PNGs saved as `image.png`…`image_4.png` with byte sizes equal to the anchors' `size=` (86937, 50391, 12841, 14665), plus the `.txt` attachment, no error.
 
