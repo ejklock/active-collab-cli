@@ -46,6 +46,7 @@
   "Error: not in a git repository or HEAD is detached.": "Erro: não está em um repositório git ou HEAD está desanexado.",
   "Error: branch '{branch}' does not match expected pattern (feature|hotfix|fix)/PROJECT_ID-TASK_ID (e.g. feature/665-75159).": "Erro: branch '{branch}' não corresponde ao padrão esperado (feature|hotfix|fix)/PROJECT_ID-TASK_ID (ex: feature/665-75159).",
   "No open tasks assigned to you.": "Nenhuma tarefa aberta atribuída a você.",
+  "No open tasks assigned to you match the filter.": "Nenhuma tarefa aberta atribuída a você corresponde ao filtro.",
   "Connectivity: OK": "Conectividade: OK",
   "Connectivity: FAILED (HTTP {status})": "Conectividade: FALHOU (HTTP {status})",
   "Connectivity: FAILED ({exc})": "Conectividade: FALHOU ({exc})",

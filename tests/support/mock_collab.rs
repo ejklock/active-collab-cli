@@ -226,6 +226,49 @@ impl Respond for TaskDetail {
     }
 }
 
+/// The dependencies of the task at `index` in the seed: the next seeded task
+/// is its parent and the previous one its child.
+struct Dependencies {
+    tasks: Vec<SeedTask>,
+    index: usize,
+}
+
+impl Dependencies {
+    fn entry(task: &SeedTask) -> Value {
+        json!({
+            "id": task.id,
+            "class": "Task",
+            "project_id": task.project_id,
+            "task_number": task.number,
+            "name": task.name,
+            "is_completed": false,
+            "is_trashed": false,
+            "task_list_id": FIRST_TASK_LIST,
+            "labels": [{ "id": 7, "name": "STATUS:GO LIVE", "color": "#FBBB75" }],
+        })
+    }
+}
+
+impl Respond for Dependencies {
+    fn respond(&self, _request: &Request) -> ResponseTemplate {
+        let parents: Vec<Value> = self
+            .tasks
+            .get(self.index + 1)
+            .map(Self::entry)
+            .into_iter()
+            .collect();
+        let children: Vec<Value> = self
+            .index
+            .checked_sub(1)
+            .and_then(|previous| self.tasks.get(previous))
+            .map(Self::entry)
+            .into_iter()
+            .collect();
+        ResponseTemplate::new(200)
+            .set_body_json(json!({ "parents": parents, "children": children }))
+    }
+}
+
 struct TaskLists;
 
 impl Respond for TaskLists {
@@ -457,7 +500,19 @@ pub async fn mount_routes(server: &MockServer, fixture: &Fixture, log: Option<&R
         &log,
     )
     .await;
-    for task in &fixture.tasks {
+    for (index, task) in fixture.tasks.iter().enumerate() {
+        let dependencies = Dependencies {
+            tasks: fixture.tasks.clone(),
+            index,
+        };
+        mount(
+            server,
+            "GET",
+            format!("/api/v1/dependencies/tasks/{}", task.id),
+            dependencies,
+            &log,
+        )
+        .await;
         let task_route = format!("/api/v1/projects/{}/tasks/{}", task.project_id, task.id);
         let detail = TaskDetail {
             user_id: fixture.user_id,

@@ -469,15 +469,23 @@ fn cache_read_is_a_miss_for_an_entry_without_the_format_key() {
 #[test]
 fn cache_read_is_a_miss_for_an_entry_with_another_format_value() {
     let (_dir, store) = make_store();
-    insert_raw_task_entry(&store, r#"{"id":1,"comments":[],"_ac_cache_format":2}"#);
+    insert_raw_task_entry(&store, r#"{"id":1,"comments":[],"_ac_cache_format":3}"#);
     let cache = TaskCache::new(store.conn());
     assert!(cache.read("acme", 1, 1).unwrap().is_none());
 }
 
 #[test]
-fn cache_read_accepts_an_entry_with_format_value_one() {
+fn cache_read_is_a_miss_for_an_entry_stamped_before_the_task_list_was_kept() {
     let (_dir, store) = make_store();
     insert_raw_task_entry(&store, r#"{"id":1,"comments":[],"_ac_cache_format":1}"#);
+    let cache = TaskCache::new(store.conn());
+    assert!(cache.read("acme", 1, 1).unwrap().is_none());
+}
+
+#[test]
+fn cache_read_accepts_an_entry_with_format_value_two() {
+    let (_dir, store) = make_store();
+    insert_raw_task_entry(&store, r#"{"id":1,"comments":[],"_ac_cache_format":2}"#);
     let cache = TaskCache::new(store.conn());
     let result = cache.read("acme", 1, 1).unwrap().unwrap();
     assert_eq!(result.fields["id"], 1);

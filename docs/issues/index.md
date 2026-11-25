@@ -28,6 +28,9 @@ TUI/UX work (V/R/ARCH slices), tracing to
 * [0071 — Comment writes can send formatted bodies — add a raw HTML option and fix the stale skill text](0071-comment-writes-can-send-formatted-bodies-add-a-raw-html-option-and-fix-the-stale-skill-text.md) - open
 * [0096 — ac mcp keeps every finished task result for the life of the process](0096-ac-mcp-keeps-every-finished-task-result-for-the-life-of-the-process.md) - open
 * [0097 — ac mcp cuts off a running call five seconds after the client disconnects](0097-ac-mcp-cuts-off-a-running-call-five-seconds-after-the-client-disconnects.md) - open
+* [0098 — JSON reads expose task list, labels and parent/child tasks, with filters](0098-json-reads-expose-task-list-labels-and-parent-child-tasks-with-filters.md) - open
+* [0099 — ac get serves a stale task list from the cache after ac task set moves the task](0099-ac-get-serves-a-stale-task-list-from-the-cache-after-ac-task-set-moves-the-task.md) - open
+* [0100 — Open work by phase: kanban in the ac mine TUI and phase in ac mine --json](0100-open-work-by-phase-kanban-in-the-ac-mine-tui-and-phase-in-ac-mine-json.md) - open
 
 ## Closed
 

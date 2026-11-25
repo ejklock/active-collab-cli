@@ -59,6 +59,8 @@ async fn run(program: &str, raw_argv: Vec<String>) -> i32 {
                 dispatch(Command::Mine(cli::MineArgs {
                     instance: None,
                     json: false,
+                    label: Vec::new(),
+                    task_list: None,
                 }))
                 .await
             }
@@ -347,6 +349,7 @@ async fn dispatch_get(args: cli::GetArgs) -> i32 {
         no_comments: args.display.no_comments,
         download_attachments: args.display.download_attachments,
         attachments_dir: args.display.attachments_dir.clone(),
+        no_dependencies: args.display.no_dependencies,
     };
     get_core(
         &args.ref_,
@@ -374,6 +377,7 @@ async fn dispatch_current(args: cli::DisplayArgs) -> i32 {
         no_comments: args.no_comments,
         download_attachments: args.download_attachments,
         attachments_dir: args.attachments_dir.clone(),
+        no_dependencies: args.no_dependencies,
     };
     current_core(
         branch.as_deref(),
@@ -397,10 +401,12 @@ async fn dispatch_mine(args: cli::MineArgs) -> i32 {
     let repo = store::instances::InstanceRepository::new(store.conn());
     let is_tty = std::io::stdout().is_terminal() && std::io::stdin().is_terminal();
 
+    let filter = commands::MineFilter::new(&args.label, args.task_list.as_deref());
     let outcome = mine_core(
         &repo,
         &http.clone(),
         args.instance.as_deref(),
+        &filter,
         args.json,
         is_tty,
         &mut std::io::stdout(),

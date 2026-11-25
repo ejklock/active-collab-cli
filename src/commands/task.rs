@@ -3,12 +3,13 @@ use crate::client::{ActiveCollabClient, TaskList, TaskListsOutcome, TaskWriteOut
 use crate::controller;
 use crate::http::HTTP_UNAUTHORIZED;
 use crate::i18n::{fill, t};
+use crate::models::MineTask;
 use crate::render;
 use crate::store::cache::TaskCache;
 use crate::store::instances::Instance;
 use anyhow::Result;
 use serde_json::{json, Value};
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
@@ -20,6 +21,8 @@ pub(crate) struct DisplayFlags {
     pub no_comments: bool,
     pub download_attachments: bool,
     pub attachments_dir: Option<String>,
+    /// Skip the parents/children lookup of the JSON output.
+    pub no_dependencies: bool,
 }
 
 /// Parity: Python _load_task.
@@ -130,6 +133,12 @@ pub(crate) async fn do_get_task(
         if let Some((_, downloaded)) = &downloaded {
             splice_downloaded_attachments(&mut obj, downloaded);
         }
+        let dependencies = if flags.no_dependencies {
+            None
+        } else {
+            fetch_dependencies(client, tid).await
+        };
+        splice_dependencies(&mut obj, client, dependencies).await;
         writeln!(out, "{}", serde_json::to_string(&obj).unwrap_or_default()).ok();
         return 0;
     }
@@ -147,6 +156,106 @@ pub(crate) async fn do_get_task(
         writeln!(out, "{}", download_summary_line(dest_dir, downloaded)).ok();
     }
     0
+}
+
+/// The parent and child tasks of a task, trashed ones left out.
+struct Dependencies {
+    parents: Vec<MineTask>,
+    children: Vec<MineTask>,
+}
+
+/// The dependencies of task `tid`, or `None` when the request fails or the
+/// body is not `{parents: [...], children: [...]}`, so a failed lookup never
+/// reads as "no dependencies".
+async fn fetch_dependencies(client: &ActiveCollabClient, tid: i64) -> Option<Dependencies> {
+    let (status, payload) = client.fetch_task_dependencies(tid).await.ok()?;
+    if status != 200 {
+        return None;
+    }
+    let payload = payload?;
+    let side = |key: &str| -> Option<Vec<MineTask>> {
+        let entries = payload.get(key)?.as_array()?;
+        Some(
+            entries
+                .iter()
+                .filter_map(|entry| MineTask::from_api(entry, ""))
+                .filter(|task| !task.is_trashed)
+                .collect(),
+        )
+    };
+    Some(Dependencies {
+        parents: side("parents")?,
+        children: side("children")?,
+    })
+}
+
+/// Task list names by (project id, list id), one request per distinct project
+/// run concurrently; a project whose request fails contributes no names.
+async fn task_list_names(
+    client: &ActiveCollabClient,
+    deps: &Dependencies,
+) -> HashMap<(i64, i64), String> {
+    let projects: BTreeSet<i64> = deps
+        .parents
+        .iter()
+        .chain(&deps.children)
+        .map(|task| task.project_id)
+        .collect();
+    let mut set: tokio::task::JoinSet<(i64, Vec<TaskList>)> = tokio::task::JoinSet::new();
+    for project_id in projects {
+        let client = client.clone();
+        set.spawn(async move {
+            let lists = match client.fetch_task_lists(project_id).await {
+                Ok(TaskListsOutcome::Ok(lists)) => lists,
+                _ => Vec::new(),
+            };
+            (project_id, lists)
+        });
+    }
+    let mut names = HashMap::new();
+    while let Some(joined) = set.join_next().await {
+        if let Ok((project_id, lists)) = joined {
+            names.extend(
+                lists
+                    .into_iter()
+                    .map(|list| ((project_id, list.id), list.name)),
+            );
+        }
+    }
+    names
+}
+
+/// Insert `parents` and `children` into the task object: arrays when the
+/// lookup succeeded, null when it was skipped or failed.
+async fn splice_dependencies(
+    obj: &mut Value,
+    client: &ActiveCollabClient,
+    dependencies: Option<Dependencies>,
+) {
+    let Value::Object(map) = obj else {
+        return;
+    };
+    let Some(deps) = dependencies else {
+        map.insert("parents".to_owned(), Value::Null);
+        map.insert("children".to_owned(), Value::Null);
+        return;
+    };
+    let names = task_list_names(client, &deps).await;
+    let shape = |tasks: &[MineTask]| {
+        Value::Array(
+            tasks
+                .iter()
+                .map(|task| {
+                    let name = task
+                        .task_list_id
+                        .and_then(|list_id| names.get(&(task.project_id, list_id)));
+                    crate::agent_json::dependency_object(task, name.map(String::as_str))
+                })
+                .collect(),
+        )
+    };
+    map.insert("parents".to_owned(), shape(&deps.parents));
+    map.insert("children".to_owned(), shape(&deps.children));
 }
 
 /// Run the attachment download when `flags.download_attachments` is

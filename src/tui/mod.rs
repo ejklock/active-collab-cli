@@ -489,6 +489,9 @@ fn write_mine_snapshot(model: &Model, targets: &[Instance], db_path: &Path) {
             estimate: t.estimate,
             logged_week: t.logged_week,
             logged_total: t.logged_total,
+            task_list_id: None,
+            task_list: None,
+            labels: Vec::new(),
         })
         .collect();
     let Ok(list_json) = serde_json::to_string(&rows) else {

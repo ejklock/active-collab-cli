@@ -66,6 +66,10 @@ ac get 665/75159 --json        # → the full task object for that ref
  "name":"...","status":"open","assignee":"Jane Doe","assignee_id":12,
  "project_name":"...","start_on":"2026-01-02","due_on":"2026-01-09",
  "estimate_hours":8,"logged_hours":3,
+ "task_list_id":8852,"task_list":"Go live","labels":[{"id":707,"name":"STATUS:GO LIVE"}],
+ "parents":[{"ref":"817/78972","project_id":817,"task_id":78972,"task_number":36,"name":"...",
+   "status":"open","task_list_id":8852,"task_list":"Go live","labels":[{"id":707,"name":"STATUS:GO LIVE"}]}],
+ "children":[],
  "url":"https://collab.example.com/projects/665/tasks/75159",
  "description":"plain text (HTML stripped)",
  "assets":[{"name":"spec.pdf","url":"https://..."}],
@@ -77,6 +81,16 @@ ac get 665/75159 --json        # → the full task object for that ref
   translated human label.
 - `assignee` is the resolved name or `null`; `assignee_id` is the id or `null`.
 - `start_on` / `due_on` are `null` when absent.
+- `task_list_id` is the id of the task list (board column) the task sits in, or `null`.
+- `task_list` is that list's name, or `null` when unknown.
+- `labels` is the task's labels as `{id, name}` objects in ActiveCollab's order, `[]` when none.
+- `parents` and `children` are the task's ActiveCollab dependencies (a deploy task lists the
+  tasks it ships as parents). Each entry has `ref`, `project_id`, `task_id`, `task_number`,
+  `name`, `status`, `task_list_id`, `task_list` (name, `null` when it could not be resolved)
+  and `labels`, in ActiveCollab's order; trashed tasks are left out. Both are `[]` when the
+  task has none and `null` when the lookup was skipped (`--no-dependencies`, or `no_dependencies`
+  on the MCP `get`) or failed, so `null` never means "no dependencies". They are looked up on
+  every `--json` read (never cached); the human and `--short` output do not show them.
 - `description` and comment `body` are plain text (HTML stripped).
 - `comments` is `[]` when there are none or `--no-comments` is passed.
 - `downloaded_attachments` is **additive**: it only appears when `--download-attachments`
@@ -87,11 +101,14 @@ ac get 665/75159 --json        # → the full task object for that ref
 ```json
 {"count":2,"tasks":[
   {"ref":"665/75159","instance":"work","project_id":665,"task_number":75159,"task_id":75159,"name":"...",
-   "due_on":"2026-11-13","due_bucket":"this_week","estimate_hours":"4","logged_week_hours":"3.5","logged_total_hours":"7.25"}],
+   "due_on":"2026-11-13","due_bucket":"this_week","estimate_hours":"4","logged_week_hours":"3.5","logged_total_hours":"7.25",
+   "task_list_id":8852,"task_list":"Go live","labels":[{"id":707,"name":"STATUS:GO LIVE"}]}],
  "buckets":[{"key":"overdue","count":0,"estimate_hours":null,"logged_week_hours":"0","logged_total_hours":"0"}]}
 ```
 
 - `due_on` is `YYYY-MM-DD` or `null`.
+- `task_list_id`, `task_list` and `labels` mean the same as in `get`: the list id (or `null`),
+  the list name (or `null`) and the `{id, name}` labels (`[]` when none).
 - `due_bucket` is one of `overdue`, `today`, `this_week` (after today, up to Sunday of the
   current Monday–Sunday week), `later` or `none` (no due date); `tasks` keep their order.
 - `buckets` always has five entries in the order `overdue`, `today`, `this_week`, `later`,
@@ -118,7 +135,10 @@ ac get 665/75159 --json        # → the full task object for that ref
 | `--json` | curated minified JSON; non-interactive | `get`, `current`, `mine`, `browse` |
 | `--no-comments` | omit the `comments` array (emits `[]`) | `get`, `current` |
 | `--refresh` | ignore the cache and re-fetch | `get`, `current` |
+| `--no-dependencies` | skip the dependencies lookup (`parents` and `children` are `null`) | `get`, `current` |
 | `--instance <name>` | limit to one configured instance | `mine`, `browse`, `get`, `current` |
+| `--label <name>` | keep tasks carrying the label (exact name, case-insensitive); repeat to require every one | `mine` |
+| `--task-list <name\|id>` | keep tasks in the list: all digits = list id, else the list name (case-insensitive, any project); an unmatched name yields `count` 0 | `mine` |
 | `--download-attachments` | fetch every task attachment, comment attachment and inline image to a local directory | `get`, `current` |
 | `--attachments-dir <DIR>` | override the download destination (default: a per-task path under the OS temp dir) | `get`, `current` |
 
@@ -201,7 +221,7 @@ every other operation needs `instance` only when several instances are configure
 
 | Tool | Hint | Operations (parameters) |
 |---|---|---|
-| `ac_read` | read-only | `get` (`ref`, `no_comments`, `refresh`) · `current` (optional `branch`, else the git branch of the server's working directory) · `mine` |
+| `ac_read` | read-only | `get` (`ref`, `no_comments`, `refresh`, `no_dependencies` to skip the parents/children lookup) · `current` (optional `branch`, else the git branch of the server's working directory) · `mine` (optional `labels`, an array of label names that must all match, and `task_list`, a list id or name; same rules as `--label` and `--task-list`) |
 | `ac_write` | destructive | `comment` (`ref`, `body`, `html`) · `log_time` (`ref`, `hours`, `date`, `summary`, `job_type`) · `set_task` (`ref`, `status`, `assignee`, `estimate`, `list`) · `time_report` (`period` or `start` + `end`, `format`) |
 | `ac_download_attachments` | writes files, idempotent | `ref`, `attachments_dir` (default: the per-task temp path), `instance`; no `operation` field. Fetches the attachments of the task and of its comments, plus inline images. Returns what `ac get --download-attachments --json` prints. `ac_read` `get` does not download. |
 

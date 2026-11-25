@@ -19,12 +19,69 @@ pub(crate) struct MineHours {
     pub logged_total: Option<f64>,
 }
 
+/// Which open tasks `ac mine` keeps. The default keeps every task.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct MineFilter {
+    /// Lowercased label names a task must all carry.
+    labels: Vec<String>,
+    task_list: Option<TaskListMatch>,
+}
+
+/// A task list named by id (all ASCII digits) or by name, lowercased.
+#[derive(Debug, Clone)]
+enum TaskListMatch {
+    Id(i64),
+    Name(String),
+    /// All digits but beyond `i64`: no task list has such an id.
+    NoSuchId,
+}
+
+impl MineFilter {
+    pub(crate) fn new(labels: &[String], task_list: Option<&str>) -> Self {
+        Self {
+            labels: labels.iter().map(|l| l.to_lowercase()).collect(),
+            task_list: task_list.map(|value| {
+                if !value.is_empty() && value.chars().all(|c| c.is_ascii_digit()) {
+                    value
+                        .parse()
+                        .map_or(TaskListMatch::NoSuchId, TaskListMatch::Id)
+                } else {
+                    TaskListMatch::Name(value.to_lowercase())
+                }
+            }),
+        }
+    }
+
+    pub(crate) fn is_active(&self) -> bool {
+        !self.labels.is_empty() || self.task_list.is_some()
+    }
+
+    fn keeps(&self, task: &crate::models::MineTask) -> bool {
+        let list_ok = match &self.task_list {
+            None => true,
+            Some(TaskListMatch::Id(id)) => task.task_list_id == Some(*id),
+            Some(TaskListMatch::Name(name)) => task
+                .task_list
+                .as_ref()
+                .is_some_and(|list| list.to_lowercase() == *name),
+            Some(TaskListMatch::NoSuchId) => false,
+        };
+        list_ok
+            && self.labels.iter().all(|wanted| {
+                task.labels
+                    .iter()
+                    .any(|label| label.name.to_lowercase() == *wanted)
+            })
+    }
+}
+
 /// Loads every target instance's rows concurrently, one result per target in
 /// target order; an instance whose task did not finish yields no rows.
 async fn fan_out_instance_rows(
     targets: &[Instance],
     http: &Http,
     today: chrono::NaiveDate,
+    filter: &MineFilter,
 ) -> Vec<anyhow::Result<Vec<MineTableRow>>> {
     let mut set: tokio::task::JoinSet<(usize, anyhow::Result<Vec<MineTableRow>>)> =
         tokio::task::JoinSet::new();
@@ -32,10 +89,14 @@ async fn fan_out_instance_rows(
     for (idx, inst) in targets.iter().enumerate() {
         let inst = inst.clone();
         let http = http.clone();
+        let filter = filter.clone();
         set.spawn(async move {
             let client = ActiveCollabClient::new(inst.clone(), http.clone());
             let rows = match client.fetch_open_tasks().await {
-                Ok(tasks) => Ok(fill_task_hours(&inst, &http, tasks, today).await),
+                Ok(mut tasks) => {
+                    tasks.retain(|task| filter.keeps(task));
+                    Ok(fill_task_hours(&inst, &http, tasks, today).await)
+                }
                 Err(e) => Err(e),
             };
             (idx, rows)
@@ -240,6 +301,9 @@ fn mine_task_to_row(task: crate::models::MineTask) -> MineTableRow {
         estimate: task.estimate,
         logged_week: None,
         logged_total: None,
+        task_list_id: task.task_list_id,
+        task_list: task.task_list,
+        labels: task.labels,
     }
 }
 
@@ -251,19 +315,21 @@ fn mine_task_to_row(task: crate::models::MineTask) -> MineTableRow {
 async fn fetch_mine_rows_checked(
     targets: &[Instance],
     http: &Http,
+    filter: &MineFilter,
 ) -> anyhow::Result<Vec<MineTableRow>> {
-    fetch_mine_rows_checked_on(targets, http, chrono::Local::now().date_naive()).await
+    fetch_mine_rows_checked_on(targets, http, chrono::Local::now().date_naive(), filter).await
 }
 
 pub(super) async fn fetch_mine_rows_checked_on(
     targets: &[Instance],
     http: &Http,
     today: chrono::NaiveDate,
+    filter: &MineFilter,
 ) -> anyhow::Result<Vec<MineTableRow>> {
     let timer = std::time::Instant::now();
 
     let mut rows = Vec::new();
-    for result in fan_out_instance_rows(targets, http, today).await {
+    for result in fan_out_instance_rows(targets, http, today, filter).await {
         match result {
             Ok(instance_rows) => rows.extend(instance_rows),
             Err(e) if e.is::<Unauthorized>() => return Err(e),
@@ -288,15 +354,20 @@ pub(crate) enum MineOutcome {
 ///
 /// Loads instances, applies optional instance filter, then:
 ///   - `json=true`: fetches rows, emits JSON, returns `Done(0)`.
-///   - `is_tty=true, json=false`: returns `TuiLaunch` so the caller opens the
-///     interactive mine TUI.  Rows are NOT pre-fetched here — the TUI reads its
-///     own snapshot and revalidates via `Cmd::LoadMineTasks`.
-///   - `is_tty=false, json=false`: fetches rows, writes the plain-text table,
-///     returns `Done(0)`.
+///   - `is_tty=true, json=false`, no `filter`: returns `TuiLaunch` so the caller
+///     opens the interactive mine TUI.  Rows are NOT pre-fetched here — the TUI
+///     reads its own snapshot and revalidates via `Cmd::LoadMineTasks`.
+///   - otherwise (a TTY with an active `filter`, which the TUI cannot apply):
+///     fetches the kept rows and writes the plain-text table, returns `Done(0)`.
+///
+/// `filter` is applied before the per-task hour requests; `count` and
+/// `buckets` of the JSON reflect only the kept tasks.
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn mine_core(
     repo: &InstanceRepository<'_>,
     http: &Http,
     instance_filter: Option<&str>,
+    filter: &MineFilter,
     json: bool,
     is_tty: bool,
     out: &mut dyn Write,
@@ -310,11 +381,11 @@ pub(crate) async fn mine_core(
         }
     };
 
-    if is_tty && !json {
+    if is_tty && !json && !filter.is_active() {
         return MineOutcome::TuiLaunch { targets };
     }
 
-    let rows = match fetch_mine_rows_checked(&targets, http).await {
+    let rows = match fetch_mine_rows_checked(&targets, http, filter).await {
         Ok(r) => r,
         Err(e) if e.is::<Unauthorized>() => {
             writeln!(err, "{}", presenter::reauth_message()).ok();
@@ -333,11 +404,21 @@ pub(crate) async fn mine_core(
         return MineOutcome::Done(0);
     }
 
-    if rows.is_empty() {
-        writeln!(out, "{}", t("No open tasks assigned to you.")).ok();
-        return MineOutcome::Done(0);
-    }
-
-    writeln!(out, "{}", render::render_mine_table(&rows)).ok();
+    write_mine_table(&rows, filter.is_active(), out);
     MineOutcome::Done(0)
+}
+
+/// Writes the plain-text table, or the empty-result message; a filtered empty
+/// result says the filter matched nothing rather than that no task exists.
+fn write_mine_table(rows: &[MineTableRow], filtered: bool, out: &mut dyn Write) {
+    if !rows.is_empty() {
+        writeln!(out, "{}", render::render_mine_table(rows)).ok();
+        return;
+    }
+    let message = if filtered {
+        t("No open tasks assigned to you match the filter.")
+    } else {
+        t("No open tasks assigned to you.")
+    };
+    writeln!(out, "{message}").ok();
 }

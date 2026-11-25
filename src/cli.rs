@@ -152,6 +152,9 @@ pub struct DisplayArgs {
     /// Destination directory for --download-attachments (defaults to a per-task temp path).
     #[arg(long, value_name = "DIR")]
     pub attachments_dir: Option<String>,
+    /// With --json, skip the parents/children lookup (both print null).
+    #[arg(long = "no-dependencies")]
+    pub no_dependencies: bool,
 }
 
 #[derive(Args, Debug)]
@@ -162,6 +165,20 @@ pub struct MineArgs {
     /// Print curated minified JSON for agent/LLM consumption; never launches the TUI.
     #[arg(long)]
     pub json: bool,
+    /// Keep only tasks carrying this label (name, case-insensitive); repeat to require several.
+    #[arg(long, value_name = "NAME", value_parser = non_empty_filter)]
+    pub label: Vec<String>,
+    /// Keep only tasks in this task list, by id (all digits) or name (case-insensitive).
+    #[arg(long, value_name = "NAME|ID", value_parser = non_empty_filter)]
+    pub task_list: Option<String>,
+}
+
+fn non_empty_filter(value: &str) -> Result<String, String> {
+    if value.is_empty() {
+        Err("must not be empty".to_owned())
+    } else {
+        Ok(value.to_owned())
+    }
 }
 
 #[derive(Args, Debug)]
