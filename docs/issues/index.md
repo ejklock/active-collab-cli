@@ -26,7 +26,6 @@ TUI/UX work (V/R/ARCH slices), tracing to
 * [0066 — Comment writes preserve paragraph breaks — encode newlines as HTML before POST/PUT](0066-comment-writes-preserve-paragraph-breaks-encode-newlines-as-html-before-post-put.md) - open
 * [0070 — TUI assignee-picker gains a live search/filter field](0070-assignee-picker-search-filter.md) - open
 * [0071 — Comment writes can send formatted bodies — add a raw HTML option and fix the stale skill text](0071-comment-writes-can-send-formatted-bodies-add-a-raw-html-option-and-fix-the-stale-skill-text.md) - open
-* [0095 — ac mcp serves the skill, runs long calls as tasks and trims its context cost](0095-ac-mcp-serves-the-skill-runs-long-calls-as-tasks-and-trims-its-context-cost.md) - open
 * [0096 — ac mcp keeps every finished task result for the life of the process](0096-ac-mcp-keeps-every-finished-task-result-for-the-life-of-the-process.md) - open
 * [0097 — ac mcp cuts off a running call five seconds after the client disconnects](0097-ac-mcp-cuts-off-a-running-call-five-seconds-after-the-client-disconnects.md) - open
 
@@ -105,3 +104,4 @@ TUI/UX work (V/R/ARCH slices), tracing to
 * [0092 — One npm package installs ac in both OpenCode and Pi](0092-one-npm-package-installs-ac-in-both-opencode-and-pi.md) - closed
 * [0093 — Embedded body images fail to download and resolve to thumbnails](0093-embedded-body-images-fail-to-download-and-resolve-to-thumbnails.md) - closed
 * [0094 — The served skill tells the agent to prefer the MCP tools](0094-the-served-skill-tells-the-agent-to-prefer-the-mcp-tools.md) - closed
+* [0095 — ac mcp serves the skill, runs long calls as tasks and trims its context cost](0095-ac-mcp-serves-the-skill-runs-long-calls-as-tasks-and-trims-its-context-cost.md) - closed

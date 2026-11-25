@@ -2,7 +2,7 @@
 type: Issue
 title: ac mcp serves the skill, runs long calls as tasks and trims its context cost
 description: The ac MCP server serves the active-collab skill over the MCP skills extension, runs the attachment download and the hours export as tasks when the client declares the tasks extension, and spends fewer tokens on its tool list.
-status: open
+status: closed
 timestamp: 2026-11-25T12:00:00Z
 ---
 
