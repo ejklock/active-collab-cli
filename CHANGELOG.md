@@ -11,6 +11,15 @@ pre-cutover Python package's history is preserved verbatim under
 version numbers are a separate line and do not continue into the Rust crate
 (issue 0055).
 
+## [0.12.4] - 2026-11-25
+
+### Changed
+
+- The skill `ac skill active-collab` prints tells an agent to call the `ac mcp`
+  tools (`ac_read`, `ac_write`, `ac_download_attachments`) when that MCP server
+  is connected, and to run the `ac` CLI otherwise; `ac browse` always runs in
+  the CLI.
+
 ## [0.12.3] - 2026-11-17
 
 ### Fixed
