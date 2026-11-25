@@ -57,3 +57,14 @@ fn a_field_declared_differently_by_two_operations_panics_naming_both() {
 
     flatten_operations(&mut schema);
 }
+
+#[test]
+fn heartbeat_progress_rises_with_every_beat_and_stays_below_the_total() {
+    let beats = [1_u32, 2, 98, 99, 100, 101, 1000, 100_000];
+    let values: Vec<f64> = beats.iter().map(|n| heartbeat_progress(*n)).collect();
+    assert!(
+        values.windows(2).all(|pair| pair[0] < pair[1]),
+        "{values:?}"
+    );
+    assert!(values.iter().all(|v| *v < PROGRESS_TOTAL), "{values:?}");
+}

@@ -692,6 +692,12 @@ fn join_failure(error: &JoinError) -> McpError {
     McpError::internal_error(format!("tool task failed: {error}"), None)
 }
 
+/// Progress of heartbeat `beat` (1-based): rises with every beat and approaches the total
+/// without reaching it, so a call of any length keeps reporting increasing progress.
+fn heartbeat_progress(beat: u32) -> f64 {
+    PROGRESS_TOTAL - PROGRESS_TOTAL / (f64::from(beat) + 1.0)
+}
+
 /// Where a long call reports its progress: the requester's token, if it sent one.
 struct Progress {
     peer: Peer<RoleServer>,
@@ -719,14 +725,16 @@ impl Progress {
         self.send(0.0, "started").await;
         let first_beat = tokio::time::Instant::now() + HEARTBEAT;
         let mut heartbeat = tokio::time::interval_at(first_beat, HEARTBEAT);
-        let mut beats = 0.0_f64;
+        let mut beats = 0_u32;
         loop {
+            // Biased so a heartbeat due at the instant the core ends is sent before the end.
             tokio::select! {
-                () = &mut cancel => return None,
+                biased;
                 _ = heartbeat.tick() => {
-                    beats = (beats + 1.0).min(PROGRESS_TOTAL - 1.0);
-                    self.send(beats, "running").await;
+                    beats = beats.saturating_add(1);
+                    self.send(heartbeat_progress(beats), "running").await;
                 }
+                () = &mut cancel => return None,
                 joined = &mut core => {
                     self.send(PROGRESS_TOTAL, "finished").await;
                     return Some(joined);

@@ -430,6 +430,8 @@ exactly what the matching `--json` command prints.
 marked neither read-only nor destructive; `ac_read` `get` does not download. See
 [ADR 0072](docs/adr/0072-ac-mcp-exposes-downloads-as-a-third-tool-with-honest-annotations.md).
 
+The server also serves the `active-collab` skill as the resource `skill://active-collab/SKILL.md`. A client that declares the MCP tasks extension gets `ac_download_attachments` and `ac_write` `time_report` as cancellable tasks with progress notifications.
+
 `ac_write` changes data on your ActiveCollab instance as the logged-in user and is
 marked destructive, so a harness that honours MCP tool hints asks before calling it.
 The Claude Code, Codex and OpenCode plugins above register the server for you. To register it by hand instead, once per harness:

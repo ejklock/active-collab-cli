@@ -39,7 +39,7 @@ flowchart TD
     screens --> theme
     main --> cli["cli (clap)"]
     cli --> commands
-    main --> mcp["mcp/mod.rs\nac mcp · rmcp stdio server\nac_read · ac_write (flat schema, operation enum) · ac_download_attachments\nskills.rs · the active-collab skill as a resource and over the skills extension"]
+    main --> mcp["mcp/mod.rs\nac mcp · rmcp stdio server\nac_read · ac_write (flat schema, operation enum) · ac_download_attachments\nskills.rs · the active-collab skill as a resource and over the skills extension\ntasks · ac_download_attachments and the time report run as cancellable tasks with progress"]
     mcp --> commands
     subgraph commands["commands/ — three masters (ADR 0055)"]
         direction TB
@@ -153,10 +153,12 @@ flowchart TD
   as the resource `skill://active-collab/SKILL.md` and as the one entry of the skills
   extension's `skills/list` and `skills/get`, and its instructions name that resource
   ([ADR 0076](/adr/0076-ac-mcp-serves-its-skill-over-the-skills-extension-and-runs-long-calls-as-tasks.md));
-  any other URI is `invalid_params`.
+  any other URI is `invalid_params`. When the client declares the tasks extension, `ac_download_attachments`
+  and the `time_report` write run as tasks (rmcp `TaskManager`; `tasks/get`, `tasks/cancel`) and report
+  progress every 5 s, rising and always below the total.
   Fitness: `tests/mcp_stdio.rs` drives the built binary over stdio and asserts the tool list,
   byte-identical output against the `--json` commands, error mapping, the skill resource and
-  catalog, and that every stdout line is a JSON-RPC frame.
+  catalog, the task lifecycle and progress, and that every stdout line is a JSON-RPC frame.
 - **tui/model.update** is pure — no terminal, no async, no I/O. Gate-checked by unit
   tests (BDR 0001) and `cargo test` running headless.
 - **client/http** is the only outbound-network boundary; **token host isolation**

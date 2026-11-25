@@ -1169,6 +1169,7 @@ async fn a_long_task_call_with_a_progress_token_reports_progress_below_its_total
         progress.iter().zip(&totals).all(|(p, t)| p <= t),
         "{reported:?}"
     );
+    assert_eq!(progress[1], 50.0, "first heartbeat: {progress:?}");
     let running = progress.len() - 1;
     assert!(
         progress[..running].iter().zip(&totals).all(|(p, t)| p < t),

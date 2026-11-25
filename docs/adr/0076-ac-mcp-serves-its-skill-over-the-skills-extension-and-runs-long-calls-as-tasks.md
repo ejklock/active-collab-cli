@@ -31,5 +31,5 @@ timestamp: 2026-11-25T12:00:00Z
 ## Consequences
 
 - The skill text reaches an agent that has only the MCP server, at the cost of a few hundred bytes of instructions in `initialize`.
-- `AcServer` is no longer a unit struct: it holds the tool router and the skill catalog.
-- Fitness function: `tests/mcp_stdio.rs` asserts the initialize capabilities and instructions, the resource and skill listings and reads against the embedded `SKILL.md`, and `invalid_params` for every other URI.
+- `AcServer` is no longer a unit struct: it holds the tool router, the skill catalog and the `TaskManager`.
+- Fitness function: `tests/mcp_stdio.rs` asserts the initialize capabilities and instructions, the resource and skill listings and reads against the embedded `SKILL.md`, `invalid_params` for every other URI, and the task tests (long calls declared as tasks complete with the synchronous result, calls without the extension stay synchronous, cancel and unknown task ids, progress rising below the total).
