@@ -11,6 +11,14 @@ pre-cutover Python package's history is preserved verbatim under
 version numbers are a separate line and do not continue into the Rust crate
 (issue 0055).
 
+## [0.12.5] - 2026-11-25
+
+### Changed
+
+- Each release tag publishes the `active-collab-agent` npm package from the
+  release workflow through npm trusted publishing, so npm no longer lags the
+  GitHub release.
+
 ## [0.12.4] - 2026-11-25
 
 ### Changed
