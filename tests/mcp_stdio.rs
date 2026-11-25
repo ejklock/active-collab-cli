@@ -1,4 +1,7 @@
-use rmcp::model::{CallToolRequestParams, CallToolResult, ErrorCode, Tool};
+use rmcp::model::{
+    CallToolRequestParams, CallToolResult, ClientRequest, CustomRequest, ErrorCode,
+    GetSkillRequestParams, ReadResourceRequestParams, ResourceContents, Tool, SKILLS_EXTENSION_ID,
+};
 use rmcp::service::{RoleClient, RunningService, ServiceError};
 use rmcp::transport::{ConfigureCommandExt, TokioChildProcess};
 use rmcp::ServiceExt;
@@ -932,6 +935,117 @@ async fn tools_list_stays_within_its_size_bound() {
     assert!(
         size <= MAX_TOOLS_LIST_BYTES,
         "tools list is {size} bytes, bound is {MAX_TOOLS_LIST_BYTES}"
+    );
+    client.cancel().await.unwrap();
+}
+
+const SKILL_URI: &str = "skill://active-collab/SKILL.md";
+const SKILL_TEXT: &str = include_str!("../.claude/skills/active-collab/SKILL.md");
+
+fn skill_description() -> &'static str {
+    SKILL_TEXT
+        .lines()
+        .find_map(|line| line.strip_prefix("description: "))
+        .expect("the skill frontmatter has a description")
+}
+
+fn protocol_code(error: ServiceError) -> ErrorCode {
+    match error {
+        ServiceError::McpError(data) => data.code,
+        other => panic!("expected a protocol error, got {other:?}"),
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn skill_is_declared_listed_read_and_fetched() {
+    let env = Env::new(&[]);
+    let client = env.connect().await;
+
+    let info = client.peer_info().expect("the server answered initialize");
+    assert!(info.capabilities.tools.is_some(), "{:?}", info.capabilities);
+    assert!(
+        info.capabilities.resources.is_some(),
+        "{:?}",
+        info.capabilities
+    );
+    assert!(
+        info.capabilities
+            .extensions
+            .as_ref()
+            .is_some_and(|extensions| extensions.contains_key(SKILLS_EXTENSION_ID)),
+        "{:?}",
+        info.capabilities
+    );
+    let instructions = info.instructions.as_deref().expect("instructions are set");
+    assert!(instructions.contains(SKILL_URI), "{instructions}");
+
+    let resources = client.list_all_resources().await.unwrap();
+    assert_eq!(resources.len(), 1, "{resources:?}");
+    assert_eq!(resources[0].uri, SKILL_URI);
+    assert_eq!(resources[0].mime_type.as_deref(), Some("text/markdown"));
+    assert_eq!(resources[0].name, "active-collab");
+
+    let read = client
+        .read_resource(ReadResourceRequestParams::new(SKILL_URI))
+        .await
+        .unwrap();
+    let [ResourceContents::TextResourceContents { text, .. }] = read.contents.as_slice() else {
+        panic!("expected one text content, got {:?}", read.contents);
+    };
+    assert_eq!(text, SKILL_TEXT);
+
+    let skills = client.list_all_skills().await.unwrap();
+    assert_eq!(skills.len(), 1, "{skills:?}");
+    assert_eq!(skills[0].uri, SKILL_URI);
+    assert_eq!(skills[0].frontmatter.name, "active-collab");
+    assert_eq!(skills[0].frontmatter.description, skill_description());
+
+    let got = client
+        .get_skill(GetSkillRequestParams::new(SKILL_URI))
+        .await
+        .unwrap();
+    assert_eq!(got.skill.uri, SKILL_URI);
+    assert_eq!(got.skill.frontmatter.name, "active-collab");
+    client.cancel().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn skill_requests_for_anything_else_are_invalid_params_and_tools_keep_working() {
+    let env = Env::new(&[]);
+    let client = env.connect().await;
+
+    for uri in [
+        "skill://active-collab/OTHER.md",
+        "skill://other/SKILL.md",
+        "file:///etc/passwd",
+        "skill://active-collab/../SKILL.md",
+    ] {
+        let error = client
+            .read_resource(ReadResourceRequestParams::new(uri))
+            .await
+            .expect_err(uri);
+        assert_eq!(protocol_code(error), ErrorCode::INVALID_PARAMS, "{uri}");
+    }
+    let error = client
+        .get_skill(GetSkillRequestParams::new("skill://other/SKILL.md"))
+        .await
+        .expect_err("unknown skill");
+    assert_eq!(protocol_code(error), ErrorCode::INVALID_PARAMS);
+
+    let missing_uri =
+        ClientRequest::CustomRequest(CustomRequest::new("skills/get", Some(json!({}))));
+    let error = client
+        .send_request(missing_uri)
+        .await
+        .expect_err("skills/get without a uri");
+    assert_eq!(protocol_code(error), ErrorCode::INVALID_PARAMS);
+
+    let result = call(&client, "ac_read", json!({"operation": "mine"}))
+        .await
+        .unwrap();
+    assert!(
+        result.content.iter().any(|block| block.as_text().is_some()),
+        "{result:?}"
     );
     client.cancel().await.unwrap();
 }

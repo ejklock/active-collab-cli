@@ -1,4 +1,5 @@
-//! MCP server over stdio. Two tools, `ac_read` and `ac_write`, select a
+//! MCP server over stdio. It serves the `active-collab` skill as a resource and over the skills
+//! extension (see `skills`). Two tools, `ac_read` and `ac_write`, select a
 //! command core by `operation` and return the core's `--json` output, so the
 //! agent contract stays the one in `agent_json`; a third, `ac_download_attachments`,
 //! saves a task's attachments to disk. While the server runs, stdout
@@ -11,9 +12,17 @@ use crate::commands::{
 };
 use crate::store::cache::TaskCache;
 use crate::store::instances::InstanceRepository;
-use rmcp::model::{CallToolResult, ContentBlock, JsonObject};
+use rmcp::handler::server::tool::{ToolCallContext, ToolRouter};
+use rmcp::model::{
+    CallToolRequestParams, CallToolResponse, CallToolResult, ConstString, ContentBlock,
+    CustomRequest, CustomResult, ErrorCode, GetSkillRequestMethod, GetSkillRequestParams,
+    GetSkillResult, Implementation, JsonObject, ListResourcesResult, ListSkillsResult,
+    ListToolsResult, PaginatedRequestParams, ReadResourceRequestParams, ReadResourceResponse,
+    ReadResourceResult, ResourceContents, ServerCapabilities, ServerConfig, Tool,
+};
+use rmcp::service::RequestContext;
 use rmcp::transport::stdio;
-use rmcp::{tool, tool_router, ErrorData as McpError, ServiceExt};
+use rmcp::{tool, tool_router, ErrorData as McpError, RoleServer, ServerHandler, ServiceExt};
 use schemars::generate::SchemaSettings;
 use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
@@ -22,9 +31,19 @@ use serde_json::Value;
 use std::future::Future;
 use std::sync::Arc;
 
+mod skills;
+use skills::SkillCatalog;
+
 /// Serve MCP on stdin/stdout until the client closes the connection.
 pub(crate) async fn serve() -> i32 {
-    let running = match AcServer.serve(stdio()).await {
+    let skills = match SkillCatalog::embedded() {
+        Ok(skills) => skills,
+        Err(e) => {
+            eprintln!("Error starting MCP server: {e}");
+            return 1;
+        }
+    };
+    let running = match AcServer::new(skills).serve(stdio()).await {
         Ok(running) => running,
         Err(e) => {
             eprintln!("Error starting MCP server: {e}");
@@ -40,11 +59,20 @@ pub(crate) async fn serve() -> i32 {
     }
 }
 
-#[derive(Clone, Copy)]
-struct AcServer;
+struct AcServer {
+    router: ToolRouter<AcServer>,
+    skills: SkillCatalog,
+}
 
-#[tool_router(server_handler)]
+#[tool_router]
 impl AcServer {
+    fn new(skills: SkillCatalog) -> Self {
+        Self {
+            router: Self::tool_router(),
+            skills,
+        }
+    }
+
     #[tool(
         description = "Read ActiveCollab data as `ac ... --json` prints it.",
         input_schema = input_schema::<ReadOperation>(),
@@ -79,6 +107,112 @@ impl AcServer {
     ) -> Result<CallToolResult, McpError> {
         let arguments: DownloadArguments = parse_operation(arguments)?;
         run_isolated(move || run_download(arguments)).await
+    }
+}
+
+impl ServerHandler for AcServer {
+    fn get_info(&self) -> ServerConfig {
+        let instructions = format!(
+            "Read the resource {} before you use the tools; they mirror the `ac … --json` commands.",
+            self.skills.uri()
+        );
+        ServerConfig::new(
+            ServerCapabilities::builder()
+                .enable_tools()
+                .enable_resources()
+                .enable_skills()
+                .build(),
+        )
+        .with_server_info(Implementation::new("ac", env!("CARGO_PKG_VERSION")))
+        .with_instructions(instructions)
+    }
+
+    async fn call_tool(
+        &self,
+        request: CallToolRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<CallToolResponse, McpError> {
+        self.router
+            .call(ToolCallContext::new(self, request, context))
+            .await
+    }
+
+    async fn list_tools(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListToolsResult, McpError> {
+        Ok(ListToolsResult::with_all_items(self.router.list_all()))
+    }
+
+    fn get_tool(&self, name: &str) -> Option<Tool> {
+        self.router.get(name).cloned()
+    }
+
+    async fn list_resources(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListResourcesResult, McpError> {
+        Ok(ListResourcesResult::with_all_items(self.skills.resources()))
+    }
+
+    async fn read_resource(
+        &self,
+        request: ReadResourceRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ReadResourceResponse, McpError> {
+        let text = self.skills.read(&request.uri).ok_or_else(|| {
+            McpError::invalid_params(format!("no such resource: {}", request.uri), None)
+        })?;
+        Ok(
+            ReadResourceResult::new(vec![ResourceContents::TextResourceContents {
+                uri: request.uri,
+                mime_type: Some("text/markdown".to_string()),
+                text: text.to_string(),
+                meta: None,
+            }])
+            .into(),
+        )
+    }
+
+    async fn list_skills(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListSkillsResult, McpError> {
+        Ok(ListSkillsResult::with_all_items(self.skills.skills()))
+    }
+
+    async fn get_skill(
+        &self,
+        request: GetSkillRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<GetSkillResult, McpError> {
+        let skill = self.skills.skill(&request.uri).ok_or_else(|| {
+            McpError::invalid_params(format!("no such skill: {}", request.uri), None)
+        })?;
+        Ok(GetSkillResult::new(skill.clone()))
+    }
+
+    /// A `skills/get` whose parameters did not parse (no `uri`, or one that is not text) reaches
+    /// here instead of `get_skill`; it is a malformed request, not an unknown method.
+    async fn on_custom_request(
+        &self,
+        request: CustomRequest,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<CustomResult, McpError> {
+        if request.method == GetSkillRequestMethod::VALUE {
+            return Err(McpError::invalid_params(
+                "skills/get needs a text `uri`",
+                None,
+            ));
+        }
+        Err(McpError::new(
+            ErrorCode::METHOD_NOT_FOUND,
+            request.method,
+            None,
+        ))
     }
 }
 

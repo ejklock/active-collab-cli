@@ -39,7 +39,7 @@ flowchart TD
     screens --> theme
     main --> cli["cli (clap)"]
     cli --> commands
-    main --> mcp["mcp/mod.rs\nac mcp · rmcp stdio server\nac_read · ac_write (flat schema, operation enum) · ac_download_attachments"]
+    main --> mcp["mcp/mod.rs\nac mcp · rmcp stdio server\nac_read · ac_write (flat schema, operation enum) · ac_download_attachments\nskills.rs · the active-collab skill as a resource and over the skills extension"]
     mcp --> commands
     subgraph commands["commands/ — three masters (ADR 0055)"]
         direction TB
@@ -148,10 +148,15 @@ flowchart TD
   so the `--json` contract and the host-gated write seam have one home. The instance, store and
   client setup that `main.rs` and `mcp` both need lives once in `commands/context.rs`. While the
   server runs, stdout belongs to JSON-RPC: cores write only to their injected writers. Each
-  session is its own process; the SQLite cache (`journal_mode=WAL`) is the shared state.
+  session is its own process; the SQLite cache (`journal_mode=WAL`) is the shared state. The
+  server also serves the embedded `active-collab` skill (the `SKILLS` body `ac skill` prints)
+  as the resource `skill://active-collab/SKILL.md` and as the one entry of the skills
+  extension's `skills/list` and `skills/get`, and its instructions name that resource
+  ([ADR 0076](/adr/0076-ac-mcp-serves-its-skill-over-the-skills-extension-and-runs-long-calls-as-tasks.md));
+  any other URI is `invalid_params`.
   Fitness: `tests/mcp_stdio.rs` drives the built binary over stdio and asserts the tool list,
-  byte-identical output against the `--json` commands, error mapping, and that every stdout line
-  is a JSON-RPC frame.
+  byte-identical output against the `--json` commands, error mapping, the skill resource and
+  catalog, and that every stdout line is a JSON-RPC frame.
 - **tui/model.update** is pure — no terminal, no async, no I/O. Gate-checked by unit
   tests (BDR 0001) and `cargo test` running headless.
 - **client/http** is the only outbound-network boundary; **token host isolation**
