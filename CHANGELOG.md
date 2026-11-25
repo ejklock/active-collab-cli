@@ -11,6 +11,26 @@ pre-cutover Python package's history is preserved verbatim under
 version numbers are a separate line and do not continue into the Rust crate
 (issue 0055).
 
+## [0.12.7] - 2026-11-25
+
+### Added
+
+- `ac get --json` and `ac mine --json` carry each task's `task_list_id`,
+  `task_list` (name) and `labels` (`[{id, name}]`).
+- `ac get` and `ac current --json` carry `parents` and `children` from the
+  ActiveCollab task dependencies, each with its ref, name, status, task list
+  and labels; `[]` means none, `null` means skipped or failed.
+  `--no-dependencies` skips the lookup.
+- `ac mine --label <name>` (repeatable) and `ac mine --task-list <name|id>`
+  filter the table and the JSON.
+- The MCP `ac_read` tool takes `labels` and `task_list` on `mine` and
+  `no_dependencies` on `get`.
+
+### Changed
+
+- The task cache format moves to version 2; entries written by earlier
+  versions are refetched once.
+
 ## [0.12.6] - 2026-11-25
 
 ### Added
