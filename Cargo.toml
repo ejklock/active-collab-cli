@@ -1,6 +1,6 @@
 [package]
 name = "ac"
-version = "0.12.3"
+version = "0.12.4"
 edition = "2021"
 description = "Unofficial ActiveCollab CLI, terminal UI and MCP server: read tasks, log time and export hours from the terminal or an AI coding agent"
 license = "MIT"
