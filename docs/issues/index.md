@@ -101,3 +101,4 @@ TUI/UX work (V/R/ARCH slices), tracing to
 * [0091 — Claude Code drops ac_read and ac_write because their schema is a top-level oneOf](0091-claude-code-drops-ac-read-and-ac-write-because-their-schema-is-a-top-level-oneof.md) - closed
 * [0092 — One npm package installs ac in both OpenCode and Pi](0092-one-npm-package-installs-ac-in-both-opencode-and-pi.md) - closed
 * [0093 — Embedded body images fail to download and resolve to thumbnails](0093-embedded-body-images-fail-to-download-and-resolve-to-thumbnails.md) - closed
+* [0094 — The served skill tells the agent to prefer the MCP tools](0094-the-served-skill-tells-the-agent-to-prefer-the-mcp-tools.md) - closed

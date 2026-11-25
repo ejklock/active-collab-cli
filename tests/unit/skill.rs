@@ -163,6 +163,49 @@ fn skill_comment_section_documents_plain_default_and_html_flag() {
 }
 
 #[test]
+fn skill_prefers_mcp_tools_then_falls_back_to_cli_before_commands() {
+    let body = canonical_body();
+    let prefer = body
+        .find("## Prefer the MCP tools")
+        .expect("the prefer heading must be present");
+    let otherwise = body
+        .find("## Otherwise use the CLI")
+        .expect("the otherwise heading must be present");
+    let commands = body
+        .find("## Commands")
+        .expect("the commands heading must be present");
+    assert!(
+        prefer < otherwise && otherwise < commands,
+        "order must be prefer, otherwise, commands: {prefer} {otherwise} {commands}"
+    );
+
+    let prefer_section = &body[prefer..otherwise];
+    for needle in [
+        "ac_read",
+        "ac_write",
+        "ac_download_attachments",
+        "get",
+        "current",
+        "mine",
+        "comment",
+        "log_time",
+        "set_task",
+        "time_report",
+    ] {
+        assert!(
+            prefer_section.contains(needle),
+            "the prefer section must name `{needle}`: {prefer_section}"
+        );
+    }
+
+    let otherwise_section = &body[otherwise..commands];
+    assert!(
+        otherwise_section.contains("ac browse"),
+        "the otherwise section must say `ac browse` runs in the CLI: {otherwise_section}"
+    );
+}
+
+#[test]
 fn skill_is_known_command_and_not_rewritten_to_get() {
     assert!(crate::cli::KNOWN_COMMANDS.contains(&"skill"));
     assert_eq!(
