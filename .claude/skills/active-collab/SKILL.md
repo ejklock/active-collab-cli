@@ -14,6 +14,27 @@ renderers as the human output, so JSON and text never drift.
 Authoritative decision: [ADR 0011](../../../docs/adr/0011-agent-json-output-contract.md).
 Observable behavior + test matrix: [BDR 0010](../../../docs/bdr/0010-agent-json-output-contract.md).
 
+## Prefer the MCP tools
+
+When the `active-collab` MCP server (`ac mcp`) is connected, its tools
+`ac_read`, `ac_write` and `ac_download_attachments` are among your tools,
+possibly with a harness prefix such as `mcp__active-collab__`. Call them
+instead of running `ac` in a shell: they take typed parameters and return
+exactly what the matching `--json` command prints.
+
+| Tool | Operations | Instead of |
+|---|---|---|
+| `ac_read` | `get` · `current` · `mine` | `ac get` · `ac current` · `ac mine` with `--json` |
+| `ac_write` | `comment` · `log_time` · `set_task` · `time_report` | `ac comment` · `ac time log` · `ac task set` · `ac time report` |
+| `ac_download_attachments` | no `operation`; takes `ref` | `ac get --download-attachments --json` |
+
+The parameters of each operation are in the section `MCP server — ac mcp` below.
+
+## Otherwise use the CLI
+
+When those tools are not available, run the `ac` commands documented below.
+`ac browse` has no MCP operation, so it always runs in the CLI.
+
 ## Commands
 
 | Command | Emits | TUI? |
