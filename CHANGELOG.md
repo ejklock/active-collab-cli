@@ -11,6 +11,22 @@ pre-cutover Python package's history is preserved verbatim under
 version numbers are a separate line and do not continue into the Rust crate
 (issue 0055).
 
+## [0.12.6] - 2026-11-25
+
+### Added
+
+- `ac mcp` serves the `active-collab` skill as the MCP resource
+  `skill://active-collab/SKILL.md` through the skills extension, and names it
+  in its server instructions.
+- With the MCP tasks extension, `ac_download_attachments` and `ac_write`
+  `time_report` run as cancellable tasks; a call with a progress token gets
+  progress notifications.
+
+### Changed
+
+- `ac mcp` tool and parameter descriptions are shorter: `tools/list` drops
+  from 4615 to 3573 bytes with the same arguments.
+
 ## [0.12.5] - 2026-11-25
 
 ### Changed
