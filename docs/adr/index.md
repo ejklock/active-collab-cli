@@ -70,7 +70,8 @@
 * [0071 — Task list joins the bounded set of editable task fields](0071-task-list-joins-the-bounded-set-of-editable-task-fields.md) - Accepted
 * [0072 — ac mcp exposes downloads as a third tool with honest annotations](0072-ac-mcp-exposes-downloads-as-a-third-tool-with-honest-annotations.md) - Accepted
 * [0073 — Attachment downloads take comment attachments and the TUI saves to Downloads](0073-attachment-downloads-take-comment-attachments-and-the-tui-saves-to-downloads.md) - Accepted
-* [0074 — Agent plugins for four harnesses ship from this repository](0074-agent-plugins-for-four-harnesses-ship-from-this-repository.md) - Accepted
+* [0074 — Agent plugins for four harnesses ship from this repository](0074-agent-plugins-for-four-harnesses-ship-from-this-repository.md) - Accepted (npm publishing bullet superseded by [0075](0075-the-release-workflow-publishes-the-npm-package-on-each-release-tag.md))
+* [0075 — The release workflow publishes the npm package on each release tag](0075-the-release-workflow-publishes-the-npm-package-on-each-release-tag.md) - Accepted
 
 ## Superseded
 

@@ -78,3 +78,41 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           files: dist/**/*
+
+  publish-npm:
+    needs: release
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      # Trusted publishing (OIDC) needs npm 11.5.1 or later.
+      - name: Update npm
+        run: npm install -g npm@latest
+
+      - name: Check the package version matches the tag
+        working-directory: packages/active-collab-agent
+        run: |
+          tag_version="${GITHUB_REF_NAME#v}"
+          package_version="$(node -p "require('./package.json').version")"
+          if [ "${package_version}" != "${tag_version}" ]; then
+            echo "packages/active-collab-agent/package.json is ${package_version}, tag ${GITHUB_REF_NAME} wants ${tag_version}" >&2
+            exit 1
+          fi
+
+      - name: Test the package
+        working-directory: packages/active-collab-agent
+        run: node --test
+
+      - name: Publish to npm
+        working-directory: packages/active-collab-agent
+        run: npm publish --provenance --access public
