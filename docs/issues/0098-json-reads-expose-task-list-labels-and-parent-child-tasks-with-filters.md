@@ -2,7 +2,7 @@
 type: Issue
 title: JSON reads expose task list, labels and parent/child tasks, with filters
 description: ac get and ac mine --json gain task_list, labels and task dependencies, ac mine filters by label and task list, and ac_read returns the same, so an agent can list the tasks a deploy ships.
-status: open
+status: closed
 tracker: https://github.com/ejklock/active-collab-cli/issues/58
 timestamp: 2026-11-25T19:00:00Z
 ---

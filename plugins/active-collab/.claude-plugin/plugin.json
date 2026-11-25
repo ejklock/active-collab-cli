@@ -1,6 +1,6 @@
 {
   "name": "active-collab",
-  "version": "0.12.6",
+  "version": "0.12.7",
   "description": "Read ActiveCollab tasks, assignments, comments and projects through the ac CLI: the ac MCP server and the active-collab skill.",
   "author": { "name": "Evaldo Klock" },
   "license": "MIT",
