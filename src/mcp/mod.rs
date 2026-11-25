@@ -725,6 +725,8 @@ impl Progress {
         self.send(0.0, "started").await;
         let first_beat = tokio::time::Instant::now() + HEARTBEAT;
         let mut heartbeat = tokio::time::interval_at(first_beat, HEARTBEAT);
+        // Skip missed ticks so a slow send cannot fire a burst that starves the cancel arm.
+        heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         let mut beats = 0_u32;
         loop {
             // Biased so a heartbeat due at the instant the core ends is sent before the end.
