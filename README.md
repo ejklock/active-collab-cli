@@ -208,6 +208,8 @@ When run in a terminal (TTY), `mine` opens an interactive arrow-key list of your
 open tasks aggregated across all configured instances. Select a task to view its
 detail or open/download its assets. When output is piped or redirected (non-TTY),
 `mine` falls back to a plain table suitable for scripts.
+`--label NAME` (repeatable; a task must carry every one) and `--task-list NAME|ID`
+filter the table and the `--json` output, and skip the interactive list.
 
 Each task shows its estimate, the hours you logged on it this week (Monday to
 Sunday) and its total logged hours. An hour value the server does not return
@@ -296,9 +298,11 @@ ac               # same as: ac current (when branch matches)
 | Flag | Applies to | Effect |
 |---|---|---|
 | `--instance NAME` | `get`, `current`, `mine`, `browse` | Force a specific configured instance (required when >1 configured) |
+| `--label NAME`, `--task-list NAME\|ID` | `mine` | Keep only tasks with every given label (case-insensitive) and in that task list (id or name) |
 | `--short` | `get`, `current` | Print `PROJECT/TASK<TAB>name` only |
 | `--no-comments` | `get`, `current` | Omit the comments section |
 | `--json` | `get`, `current` | Print raw task JSON (always hits the API, bypasses cache) |
+| `--no-dependencies` | `get`, `current` | With `--json`, skip the parents/children lookup (both print `null`) |
 | `--refresh` | `get`, `current` | Bypass the task cache and re-fetch from the API |
 
 ---

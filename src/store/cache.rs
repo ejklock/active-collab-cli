@@ -10,7 +10,9 @@ use std::collections::HashMap;
 /// Key stored inside each cached task object, marking an entry that holds the
 /// full comment list; `TaskCache::read` treats an entry without it as a miss.
 const FORMAT_KEY: &str = "_ac_cache_format";
-const FORMAT_VERSION: i64 = 1;
+/// Bumped when the cached task gains a field a reader needs, so older entries
+/// are refetched instead of printing it as missing.
+const FORMAT_VERSION: i64 = 2;
 
 pub struct CachedTask {
     pub fields: Value,

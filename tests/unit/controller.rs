@@ -210,6 +210,9 @@ fn build_groups_uses_numeric_fallback_for_unknown_project() {
         id: 1,
         task_number: Some(1),
         name: "X".into(),
+        task_list_id: None,
+        task_list: None,
+        labels: Vec::new(),
         is_completed: false,
         is_trashed: false,
         project_id: 999,
@@ -229,6 +232,9 @@ fn build_groups_same_project_id_on_two_instances_produces_two_groups() {
         id: 10,
         task_number: Some(1),
         name: "Task A".into(),
+        task_list_id: None,
+        task_list: None,
+        labels: Vec::new(),
         is_completed: false,
         is_trashed: false,
         project_id: 100,
@@ -240,6 +246,9 @@ fn build_groups_same_project_id_on_two_instances_produces_two_groups() {
         id: 20,
         task_number: Some(2),
         name: "Task B".into(),
+        task_list_id: None,
+        task_list: None,
+        labels: Vec::new(),
         is_completed: false,
         is_trashed: false,
         project_id: 100,
@@ -286,6 +295,9 @@ fn build_groups_instance_field_matches_task_instance() {
         id: 5,
         task_number: Some(5),
         name: "My Task".into(),
+        task_list_id: None,
+        task_list: None,
+        labels: Vec::new(),
         is_completed: false,
         is_trashed: false,
         project_id: 42,
@@ -312,6 +324,9 @@ fn build_groups_sorted_by_project_name_then_instance() {
         id: 1,
         task_number: Some(1),
         name: "T1".into(),
+        task_list_id: None,
+        task_list: None,
+        labels: Vec::new(),
         is_completed: false,
         is_trashed: false,
         project_id: 1,
@@ -323,6 +338,9 @@ fn build_groups_sorted_by_project_name_then_instance() {
         id: 2,
         task_number: Some(2),
         name: "T2".into(),
+        task_list_id: None,
+        task_list: None,
+        labels: Vec::new(),
         is_completed: false,
         is_trashed: false,
         project_id: 1,
@@ -334,6 +352,9 @@ fn build_groups_sorted_by_project_name_then_instance() {
         id: 3,
         task_number: Some(3),
         name: "T3".into(),
+        task_list_id: None,
+        task_list: None,
+        labels: Vec::new(),
         is_completed: false,
         is_trashed: false,
         project_id: 2,
@@ -1948,6 +1969,9 @@ fn make_mine_row(instance: &str, project_id: i64, task_id: i64) -> crate::render
         estimate: None,
         logged_week: None,
         logged_total: None,
+        task_list_id: None,
+        task_list: None,
+        labels: Vec::new(),
     }
 }
 
@@ -2611,5 +2635,73 @@ fn comment_attachments_with_anchor_only_body_split_by_function() {
     assert_eq!(
         urls_of(&extract_assets(&task, &comments)),
         vec!["https://example.com/doc", "https://example.com/f.txt"]
+    );
+}
+
+fn task_list_payload(top_level_task_list: Option<serde_json::Value>) -> serde_json::Value {
+    let mut payload = serde_json::json!({
+        "single": { "id": 81802, "project_id": 817, "name": "Deploy", "task_list_id": 8852 },
+        "tracked_time": 1.5,
+        "comments": []
+    });
+    if let Some(list) = top_level_task_list {
+        payload["task_list"] = list;
+    }
+    payload
+}
+
+fn printed_task_list(task: &serde_json::Value) -> (serde_json::Value, serde_json::Value) {
+    let obj = crate::agent_json::task_object(task, &[], &HashMap::new(), "work", false);
+    (obj["task_list_id"].clone(), obj["task_list"].clone())
+}
+
+#[test]
+fn task_list_name_is_printed_from_the_fetched_payload_and_from_the_cache_alike() {
+    let (task, comments) = parse_task_payload(task_list_payload(Some(
+        serde_json::json!({ "id": 8852, "name": "Go live", "class": "TaskList" }),
+    )));
+    assert_eq!(
+        printed_task_list(&task),
+        (serde_json::json!(8852), serde_json::json!("Go live"))
+    );
+
+    let dir = tempfile::TempDir::new().unwrap();
+    let config = Config {
+        db_path: dir.path().join("test.db"),
+        task_cache_ttl_hours: 24,
+    };
+    let store = Store::open(&config).unwrap();
+    let cache = TaskCache::new(store.conn());
+    cache
+        .write(
+            "acme",
+            817,
+            81802,
+            &task,
+            &serde_json::Value::Array(comments),
+        )
+        .unwrap();
+    let cached = cache.read("acme", 817, 81802).unwrap().unwrap();
+    assert_eq!(
+        printed_task_list(&cached.fields),
+        (serde_json::json!(8852), serde_json::json!("Go live"))
+    );
+}
+
+#[test]
+fn task_list_name_is_null_when_the_payload_has_no_task_list_object() {
+    let (task, _) = parse_task_payload(task_list_payload(None));
+    assert_eq!(
+        printed_task_list(&task),
+        (serde_json::json!(8852), serde_json::Value::Null)
+    );
+}
+
+#[test]
+fn task_list_name_is_null_when_the_payload_task_list_is_not_an_object() {
+    let (task, _) = parse_task_payload(task_list_payload(Some(serde_json::json!("Go live"))));
+    assert_eq!(
+        printed_task_list(&task),
+        (serde_json::json!(8852), serde_json::Value::Null)
     );
 }

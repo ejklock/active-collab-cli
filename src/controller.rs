@@ -934,6 +934,7 @@ pub(crate) fn parse_task_payload(payload: Value) -> (Value, Vec<Value>) {
         .cloned()
         .unwrap_or(Value::Object(serde_json::Map::new()));
     task["tracked_time"] = payload.get("tracked_time").cloned().unwrap_or(Value::Null);
+    task["task_list"] = payload.get("task_list").cloned().unwrap_or(Value::Null);
     let comments: Vec<Value> = payload
         .get("comments")
         .and_then(|v| v.as_array())

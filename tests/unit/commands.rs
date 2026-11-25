@@ -1190,6 +1190,7 @@ fn default_flags() -> DisplayFlags {
         no_comments: false,
         download_attachments: false,
         attachments_dir: None,
+        no_dependencies: false,
     }
 }
 
@@ -2405,7 +2406,17 @@ async fn mine_core_empty_instances_returns_exit2_with_message() {
     let mut out = Vec::new();
     let mut err = Vec::new();
 
-    let outcome = mine_core(&repo, &make_http(), None, false, false, &mut out, &mut err).await;
+    let outcome = mine_core(
+        &repo,
+        &make_http(),
+        None,
+        &no_filter(),
+        false,
+        false,
+        &mut out,
+        &mut err,
+    )
+    .await;
     let code = mine_outcome_code(outcome);
 
     assert_eq!(code, 2);
@@ -2427,6 +2438,7 @@ async fn mine_core_instance_filter_not_found_returns_exit2_with_known() {
         &repo,
         &make_http(),
         Some("nosuch"),
+        &no_filter(),
         false,
         false,
         &mut out,
@@ -2473,6 +2485,7 @@ async fn mine_core_instance_filter_limits_to_matching_instance() {
         &repo,
         &make_http(),
         Some("work"),
+        &no_filter(),
         false,
         false,
         &mut out,
@@ -2515,7 +2528,17 @@ async fn mine_core_non_tty_with_rows_writes_table_and_returns_0() {
     let mut out = Vec::new();
     let mut err = Vec::new();
 
-    let outcome = mine_core(&repo, &make_http(), None, false, false, &mut out, &mut err).await;
+    let outcome = mine_core(
+        &repo,
+        &make_http(),
+        None,
+        &no_filter(),
+        false,
+        false,
+        &mut out,
+        &mut err,
+    )
+    .await;
     let code = mine_outcome_code(outcome);
 
     assert_eq!(code, 0);
@@ -2551,7 +2574,17 @@ async fn mine_core_non_tty_no_rows_writes_no_tasks_message_and_returns_0() {
     let mut out = Vec::new();
     let mut err = Vec::new();
 
-    let outcome = mine_core(&repo, &make_http(), None, false, false, &mut out, &mut err).await;
+    let outcome = mine_core(
+        &repo,
+        &make_http(),
+        None,
+        &no_filter(),
+        false,
+        false,
+        &mut out,
+        &mut err,
+    )
+    .await;
     let code = mine_outcome_code(outcome);
 
     assert_eq!(code, 0);
@@ -2580,7 +2613,17 @@ async fn mine_core_tty_returns_tui_launch_without_fetching_rows() {
     let mut out = Vec::new();
     let mut err = Vec::new();
 
-    let outcome = mine_core(&repo, &make_http(), None, false, true, &mut out, &mut err).await;
+    let outcome = mine_core(
+        &repo,
+        &make_http(),
+        None,
+        &no_filter(),
+        false,
+        true,
+        &mut out,
+        &mut err,
+    )
+    .await;
 
     match outcome {
         MineOutcome::TuiLaunch { targets } => {
@@ -2624,7 +2667,17 @@ async fn mine_core_non_tty_writes_render_mine_table_exactly_and_returns_done() {
     let mut out = Vec::new();
     let mut err = Vec::new();
 
-    let outcome = mine_core(&repo, &make_http(), None, false, false, &mut out, &mut err).await;
+    let outcome = mine_core(
+        &repo,
+        &make_http(),
+        None,
+        &no_filter(),
+        false,
+        false,
+        &mut out,
+        &mut err,
+    )
+    .await;
 
     match &outcome {
         MineOutcome::TuiLaunch { .. } => panic!("non-TTY path must NOT return TuiLaunch"),
@@ -2639,6 +2692,9 @@ async fn mine_core_non_tty_writes_render_mine_table_exactly_and_returns_done() {
         task_number: 4,
         task_id: 77,
         name: "Table row task".to_owned(),
+        task_list_id: None,
+        task_list: None,
+        labels: Vec::new(),
         due_on: None,
         project_name: None,
         estimate: None,
@@ -2717,6 +2773,7 @@ async fn mine_core_json_mode_prints_minified_line_and_never_calls_launch() {
         &repo,
         &make_http(),
         None,
+        &no_filter(),
         true,
         true, // is_tty=true: json must still suppress TUI
         &mut out,
@@ -2751,6 +2808,107 @@ async fn mine_core_json_mode_prints_minified_line_and_never_calls_launch() {
     assert_eq!(tasks[0]["name"], "JSON task");
 }
 
+async fn mine_json_tasks_for(body: serde_json::Value) -> Vec<serde_json::Value> {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/users/42/tasks"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(body))
+        .mount(&server)
+        .await;
+    let (_dir, store) = make_store();
+    let inst = Instance {
+        name: "jsoninst".to_owned(),
+        base_url: server.uri(),
+        email: "x@x.com".to_owned(),
+        token: "tok".to_owned(),
+        user_id: Some(42),
+    };
+    InstanceRepository::new(store.conn()).save(&inst).unwrap();
+    let repo = InstanceRepository::new(store.conn());
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    let outcome = mine_core(
+        &repo,
+        &make_http(),
+        None,
+        &no_filter(),
+        true,
+        false,
+        &mut out,
+        &mut err,
+    )
+    .await;
+    assert_eq!(mine_outcome_code(outcome), 0);
+    let obj: serde_json::Value = serde_json::from_str(output_str(&out).trim_end()).unwrap();
+    obj["tasks"].as_array().unwrap().clone()
+}
+
+#[tokio::test]
+async fn mine_json_task_list_name_comes_from_the_related_task_list_object() {
+    let tasks = mine_json_tasks_for(serde_json::json!({
+        "tasks": [
+            { "id": 1, "project_id": 3, "task_list_id": 6023 },
+            { "id": 2, "project_id": 3, "task_list_id": 999 },
+            { "id": 3, "project_id": 3 }
+        ],
+        "related": { "TaskList": { "6023": { "id": 6023, "name": "Alocação Clube Duratex" } } }
+    }))
+    .await;
+    assert_eq!(tasks.len(), 3);
+    assert_eq!(tasks[0]["task_list_id"], 6023);
+    assert_eq!(tasks[0]["task_list"], "Alocação Clube Duratex");
+    assert_eq!(tasks[1]["task_list_id"], 999);
+    assert!(tasks[1]["task_list"].is_null());
+    assert!(tasks[2]["task_list_id"].is_null());
+    assert!(tasks[2]["task_list"].is_null());
+}
+
+#[tokio::test]
+async fn mine_json_tasks_stay_listed_when_related_is_an_empty_map_or_missing() {
+    let shapes = [
+        serde_json::json!({ "related": [] }),
+        serde_json::json!({ "related": { "TaskList": [] } }),
+        serde_json::json!({}),
+    ];
+    for shape in shapes {
+        let mut body = shape.clone();
+        body["tasks"] = serde_json::json!([{ "id": 1, "project_id": 3, "task_list_id": 6023 }]);
+        let tasks = mine_json_tasks_for(body).await;
+        assert_eq!(tasks.len(), 1, "shape {shape}");
+        assert_eq!(tasks[0]["task_list_id"], 6023, "shape {shape}");
+        assert!(tasks[0]["task_list"].is_null(), "shape {shape}");
+    }
+}
+
+#[tokio::test]
+async fn mine_json_labels_are_id_and_name_objects_in_payload_order() {
+    let tasks = mine_json_tasks_for(serde_json::json!({
+        "tasks": [
+            { "id": 1, "project_id": 3, "labels": [
+                {"id": 707, "name": "STATUS:GO LIVE", "color": "#FBBB75"},
+                {"id": "7", "name": "string id"},
+                {"id": 8},
+                {"id": 9, "name": ""},
+                {"id": 3, "name": "ROTINA MENSAL"}
+            ] },
+            { "id": 2, "project_id": 3, "labels": [] },
+            { "id": 4, "project_id": 3, "labels": null },
+            { "id": 5, "project_id": 3 }
+        ]
+    }))
+    .await;
+    assert_eq!(
+        tasks[0]["labels"],
+        serde_json::json!([
+            {"id": 707, "name": "STATUS:GO LIVE"},
+            {"id": 3, "name": "ROTINA MENSAL"}
+        ])
+    );
+    for task in &tasks[1..] {
+        assert_eq!(task["labels"], serde_json::json!([]));
+    }
+}
+
 #[tokio::test]
 async fn mine_core_json_mode_empty_rows_yields_count_zero_exit_0() {
     let server = MockServer::start().await;
@@ -2776,7 +2934,17 @@ async fn mine_core_json_mode_empty_rows_yields_count_zero_exit_0() {
     let mut out = Vec::new();
     let mut err = Vec::new();
 
-    let outcome = mine_core(&repo, &make_http(), None, true, false, &mut out, &mut err).await;
+    let outcome = mine_core(
+        &repo,
+        &make_http(),
+        None,
+        &no_filter(),
+        true,
+        false,
+        &mut out,
+        &mut err,
+    )
+    .await;
     let code = mine_outcome_code(outcome);
 
     assert_eq!(code, 0, "json mode must return 0 even with empty rows");
@@ -3083,7 +3251,17 @@ async fn mine_core_401_prints_reauth_message_and_returns_exit1() {
     let mut out = Vec::new();
     let mut err = Vec::new();
 
-    let outcome = mine_core(&repo, &make_http(), None, false, false, &mut out, &mut err).await;
+    let outcome = mine_core(
+        &repo,
+        &make_http(),
+        None,
+        &no_filter(),
+        false,
+        false,
+        &mut out,
+        &mut err,
+    )
+    .await;
     let code = mine_outcome_code(outcome);
 
     assert_eq!(code, 1, "401 must yield non-zero exit");
@@ -3132,7 +3310,17 @@ async fn mine_core_401_json_mode_prints_reauth_message_and_returns_exit1() {
     let mut out = Vec::new();
     let mut err = Vec::new();
 
-    let outcome = mine_core(&repo, &make_http(), None, true, false, &mut out, &mut err).await;
+    let outcome = mine_core(
+        &repo,
+        &make_http(),
+        None,
+        &no_filter(),
+        true,
+        false,
+        &mut out,
+        &mut err,
+    )
+    .await;
     let code = mine_outcome_code(outcome);
 
     assert_eq!(code, 1, "401 in json mode must yield non-zero exit");
@@ -6441,7 +6629,17 @@ async fn mine_json_run(server: &MockServer) -> (i32, serde_json::Value) {
         .unwrap();
     let repo = InstanceRepository::new(store.conn());
     let (mut out, mut err) = (Vec::new(), Vec::new());
-    let outcome = mine_core(&repo, &make_http(), None, true, false, &mut out, &mut err).await;
+    let outcome = mine_core(
+        &repo,
+        &make_http(),
+        None,
+        &no_filter(),
+        true,
+        false,
+        &mut out,
+        &mut err,
+    )
+    .await;
     let code = mine_outcome_code(outcome);
     let value = serde_json::from_str(output_str(&out).trim()).unwrap_or(serde_json::Value::Null);
     (code, value)
@@ -6635,12 +6833,15 @@ async fn mine_json_keeps_existing_keys_and_adds_the_four_hour_keys() {
             "due_on",
             "estimate_hours",
             "instance",
+            "labels",
             "logged_total_hours",
             "logged_week_hours",
             "name",
             "project_id",
             "ref",
             "task_id",
+            "task_list",
+            "task_list_id",
             "task_number"
         ]
     );
@@ -6684,6 +6885,7 @@ async fn mine_week_hours_requests_the_monday_to_sunday_range_of_the_given_day() 
             &[mine_hours_instance(&server)],
             &make_http(),
             mine_date(y, m, d),
+            &no_filter(),
         )
         .await
         .unwrap();
@@ -7432,6 +7634,7 @@ async fn run_mine_with_instance_filter(filter: &str) -> Captured {
         &repo,
         &make_http(),
         Some(filter),
+        &no_filter(),
         false,
         false,
         &mut out,
@@ -7876,5 +8079,727 @@ async fn task_set_ambiguous_assignee_stays_english_under_en() {
     assert_eq!(
         run.err,
         "Error: assignee '{list}' matches more than one user; use the numeric id instead.\n"
+    );
+}
+
+fn no_filter() -> MineFilter {
+    MineFilter::default()
+}
+
+fn mine_filter_of(labels: &[&str], task_list: Option<&str>) -> MineFilter {
+    let labels: Vec<String> = labels.iter().map(|l| (*l).to_owned()).collect();
+    MineFilter::new(&labels, task_list)
+}
+
+fn filter_fixture_tasks() -> serde_json::Value {
+    serde_json::json!({
+        "tasks": [
+            { "id": 1, "project_id": 3, "name": "Alpha", "task_list_id": 8852,
+              "labels": [{"id": 1, "name": "STATUS:GO LIVE"}] },
+            { "id": 2, "project_id": 4, "name": "Bravo", "task_list_id": 9000,
+              "labels": [{"id": 2, "name": "ROTINA MENSAL"}, {"id": 1, "name": "STATUS:GO LIVE"}] },
+            { "id": 3, "project_id": 3, "name": "Charlie", "task_list_id": 6000,
+              "labels": [{"id": 3, "name": "STATUS:DESENVOLVIMENTO"}] },
+            { "id": 4, "project_id": 5, "name": "Delta", "labels": [] }
+        ],
+        "related": { "TaskList": {
+            "8852": { "id": 8852, "name": "Go live" },
+            "9000": { "id": 9000, "name": "Go live" },
+            "6000": { "id": 6000, "name": "Desenvolvimento" }
+        } }
+    })
+}
+
+struct FilteredMine {
+    code: i32,
+    out: String,
+    hour_requests: Vec<String>,
+}
+
+impl FilteredMine {
+    fn json(&self) -> serde_json::Value {
+        serde_json::from_str(self.out.trim_end()).expect("output must be JSON")
+    }
+
+    fn task_ids(&self) -> Vec<i64> {
+        let mut ids: Vec<i64> = self.json()["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["task_id"].as_i64().unwrap())
+            .collect();
+        ids.sort_unstable();
+        ids
+    }
+}
+
+async fn run_filtered_mine(
+    body: serde_json::Value,
+    filter: MineFilter,
+    json: bool,
+    is_tty: bool,
+) -> FilteredMine {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/users/42/tasks"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(body))
+        .mount(&server)
+        .await;
+    let (_dir, store) = make_store();
+    InstanceRepository::new(store.conn())
+        .save(&mine_hours_instance(&server))
+        .unwrap();
+    let repo = InstanceRepository::new(store.conn());
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let outcome = mine_core(
+        &repo,
+        &make_http(),
+        None,
+        &filter,
+        json,
+        is_tty,
+        &mut out,
+        &mut err,
+    )
+    .await;
+    let code = mine_outcome_code(outcome);
+    let hour_requests = server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .map(|r| r.url.path().to_owned())
+        .filter(|p| p.starts_with("/api/v1/projects/"))
+        .collect();
+    FilteredMine {
+        code,
+        out: output_str(&out).to_owned(),
+        hour_requests,
+    }
+}
+
+async fn filtered_task_ids(labels: &[&str], task_list: Option<&str>) -> Vec<i64> {
+    let run = run_filtered_mine(
+        filter_fixture_tasks(),
+        mine_filter_of(labels, task_list),
+        true,
+        false,
+    )
+    .await;
+    assert_eq!(run.code, 0);
+    run.task_ids()
+}
+
+#[tokio::test]
+async fn mine_label_filter_keeps_tasks_carrying_the_label_ignoring_case() {
+    assert_eq!(filtered_task_ids(&["STATUS:GO LIVE"], None).await, [1, 2]);
+    assert_eq!(filtered_task_ids(&["status:go live"], None).await, [1, 2]);
+}
+
+#[tokio::test]
+async fn mine_label_filter_requires_every_given_label() {
+    let ids = filtered_task_ids(&["STATUS:GO LIVE", "ROTINA MENSAL"], None).await;
+    assert_eq!(ids, [2]);
+}
+
+#[tokio::test]
+async fn mine_label_filter_matches_the_whole_name_without_trimming() {
+    assert!(filtered_task_ids(&["STATUS:GO"], None).await.is_empty());
+    assert!(filtered_task_ids(&[" STATUS:GO LIVE"], None)
+        .await
+        .is_empty());
+}
+
+#[tokio::test]
+async fn mine_label_filter_json_counts_only_kept_tasks() {
+    let run = run_filtered_mine(
+        filter_fixture_tasks(),
+        mine_filter_of(&["STATUS:GO"], None),
+        true,
+        false,
+    )
+    .await;
+    assert_eq!(run.code, 0);
+    assert_eq!(run.json()["count"], 0);
+    assert_eq!(run.json()["tasks"], serde_json::json!([]));
+
+    let run = run_filtered_mine(
+        filter_fixture_tasks(),
+        mine_filter_of(&["ROTINA MENSAL"], None),
+        true,
+        false,
+    )
+    .await;
+    let json = run.json();
+    assert_eq!(json["count"], 1);
+    let bucketed: i64 = json["buckets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|b| b["count"].as_i64().unwrap())
+        .sum();
+    assert_eq!(bucketed, 1, "buckets must count only the kept tasks");
+}
+
+#[tokio::test]
+async fn mine_task_list_filter_matches_an_id() {
+    assert_eq!(filtered_task_ids(&[], Some("8852")).await, [1]);
+    assert!(filtered_task_ids(&[], Some("99999")).await.is_empty());
+}
+
+#[tokio::test]
+async fn mine_task_list_filter_matches_a_name_in_any_project_ignoring_case() {
+    assert_eq!(filtered_task_ids(&[], Some("go live")).await, [1, 2]);
+    assert_eq!(filtered_task_ids(&[], Some("GO LIVE")).await, [1, 2]);
+}
+
+#[tokio::test]
+async fn mine_task_list_filter_treats_digits_with_a_suffix_as_a_name() {
+    assert!(filtered_task_ids(&[], Some("8852x")).await.is_empty());
+}
+
+#[tokio::test]
+async fn mine_task_list_filter_never_keeps_a_task_with_an_unknown_list_name_by_name() {
+    let body = serde_json::json!({
+        "tasks": [{ "id": 1, "project_id": 3, "task_list_id": 7000 }]
+    });
+    let by_name = run_filtered_mine(
+        body.clone(),
+        mine_filter_of(&[], Some("go live")),
+        true,
+        false,
+    )
+    .await;
+    assert!(by_name.task_ids().is_empty());
+    let by_id = run_filtered_mine(body, mine_filter_of(&[], Some("7000")), true, false).await;
+    assert_eq!(by_id.task_ids(), [1]);
+}
+
+#[tokio::test]
+async fn mine_task_list_filter_combined_with_a_label_needs_both() {
+    assert_eq!(
+        filtered_task_ids(&["STATUS:GO LIVE"], Some("8852")).await,
+        [1]
+    );
+    assert_eq!(
+        filtered_task_ids(&["ROTINA MENSAL"], Some("8852")).await,
+        Vec::<i64>::new()
+    );
+}
+
+#[tokio::test]
+async fn mine_task_list_filter_requests_hours_only_for_kept_tasks() {
+    let run = run_filtered_mine(
+        filter_fixture_tasks(),
+        mine_filter_of(&[], Some("8852")),
+        true,
+        false,
+    )
+    .await;
+    assert_eq!(run.hour_requests, ["/api/v1/projects/3/tasks/1"]);
+
+    let none = run_filtered_mine(
+        filter_fixture_tasks(),
+        mine_filter_of(&[], Some("99999")),
+        true,
+        false,
+    )
+    .await;
+    assert!(none.hour_requests.is_empty());
+}
+
+#[tokio::test]
+async fn mine_filter_output_a_tty_with_a_filter_prints_the_filtered_table() {
+    let run = run_filtered_mine(
+        filter_fixture_tasks(),
+        mine_filter_of(&["ROTINA MENSAL"], None),
+        false,
+        true,
+    )
+    .await;
+    assert_eq!(run.code, 0);
+    assert!(run.out.contains("Bravo"), "{}", run.out);
+    assert!(!run.out.contains("Alpha"), "{}", run.out);
+}
+
+#[tokio::test]
+async fn mine_filter_output_a_tty_without_a_filter_still_launches_the_tui() {
+    let server = MockServer::start().await;
+    let (_dir, store) = make_store();
+    InstanceRepository::new(store.conn())
+        .save(&mine_hours_instance(&server))
+        .unwrap();
+    let repo = InstanceRepository::new(store.conn());
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let outcome = mine_core(
+        &repo,
+        &make_http(),
+        None,
+        &no_filter(),
+        false,
+        true,
+        &mut out,
+        &mut err,
+    )
+    .await;
+    assert!(matches!(outcome, MineOutcome::TuiLaunch { .. }));
+}
+
+#[tokio::test]
+async fn mine_filter_output_an_empty_filtered_table_says_the_filter_matched_nothing() {
+    let run = run_filtered_mine(
+        filter_fixture_tasks(),
+        mine_filter_of(&["nope"], None),
+        false,
+        false,
+    )
+    .await;
+    assert_eq!(run.code, 0);
+    assert_eq!(run.out, "No open tasks assigned to you match the filter.\n");
+}
+
+#[tokio::test]
+async fn mine_filter_output_without_a_filter_keeps_the_plain_empty_message() {
+    let run = run_filtered_mine(
+        serde_json::json!({ "tasks": [] }),
+        no_filter(),
+        false,
+        false,
+    )
+    .await;
+    assert_eq!(run.out, "No open tasks assigned to you.\n");
+}
+
+const DEPENDENCIES_PATH: &str = "/api/v1/dependencies/tasks/10";
+
+fn dependency_entry(
+    id: i64,
+    project_id: i64,
+    name: &str,
+    list_id: i64,
+    extra: serde_json::Value,
+) -> serde_json::Value {
+    let mut entry = serde_json::json!({
+        "id": id,
+        "class": "Task",
+        "project_id": project_id,
+        "task_number": id % 100,
+        "name": name,
+        "is_completed": false,
+        "is_trashed": false,
+        "task_list_id": list_id,
+        "labels": [{ "id": 707, "name": "STATUS:GO LIVE", "color": "#FBBB75" }],
+    });
+    if let (Some(base), Some(extra)) = (entry.as_object_mut(), extra.as_object()) {
+        base.extend(extra.clone());
+    }
+    entry
+}
+
+fn task_lists_body(lists: &[(i64, &str)]) -> serde_json::Value {
+    serde_json::Value::Array(
+        lists
+            .iter()
+            .map(|(id, name)| serde_json::json!({ "id": id, "name": name }))
+            .collect(),
+    )
+}
+
+async fn mount_get(server: &MockServer, route: &str, response: ResponseTemplate) {
+    Mock::given(method("GET"))
+        .and(path(route))
+        .respond_with(response)
+        .mount(server)
+        .await;
+}
+
+/// A server holding task 5/10 whose dependencies route answers `dependencies`.
+async fn dependency_server(dependencies: ResponseTemplate) -> MockServer {
+    let server = MockServer::start().await;
+    mount_get(
+        &server,
+        "/api/v1/projects/5/tasks/10",
+        ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "single": { "id": 10, "project_id": 5, "name": "Deploy", "is_completed": false },
+            "comments": [],
+            "tracked_time": 0
+        })),
+    )
+    .await;
+    mount_get(
+        &server,
+        "/api/v1/users",
+        ResponseTemplate::new(200).set_body_json(serde_json::json!([])),
+    )
+    .await;
+    mount_get(&server, DEPENDENCIES_PATH, dependencies).await;
+    server
+}
+
+fn dependencies_body(
+    parents: &[serde_json::Value],
+    children: &[serde_json::Value],
+) -> ResponseTemplate {
+    ResponseTemplate::new(200)
+        .set_body_json(serde_json::json!({ "parents": parents, "children": children }))
+}
+
+async fn requests_to(server: &MockServer, route: &str) -> usize {
+    server
+        .received_requests()
+        .await
+        .unwrap_or_default()
+        .iter()
+        .filter(|request| request.url.path() == route)
+        .count()
+}
+
+async fn get_json(server: &MockServer, flags: &DisplayFlags) -> serde_json::Value {
+    let (_dir, store) = make_store();
+    let cache = TaskCache::new(store.conn());
+    let (out, _) = read_task(server, &cache, flags).await;
+    serde_json::from_str(out.trim_end()).expect("the output is one JSON object")
+}
+
+fn json_get_flags() -> DisplayFlags {
+    DisplayFlags {
+        json: true,
+        ..default_flags()
+    }
+}
+
+#[tokio::test]
+async fn get_dependencies_lists_parents_in_payload_order_with_list_names_and_labels() {
+    let server = dependency_server(dependencies_body(
+        &[
+            dependency_entry(78972, 817, "Go live task", 8852, serde_json::json!({})),
+            dependency_entry(
+                78973,
+                817,
+                "Dev task",
+                8851,
+                serde_json::json!({ "labels": [{ "id": 9, "name": "ROTINA MENSAL" }] }),
+            ),
+        ],
+        &[],
+    ))
+    .await;
+    mount_get(
+        &server,
+        "/api/v1/projects/817/task-lists",
+        ResponseTemplate::new(200).set_body_json(task_lists_body(&[
+            (8851, "Desenvolvimento"),
+            (8852, "Go live"),
+        ])),
+    )
+    .await;
+
+    let obj = get_json(&server, &json_get_flags()).await;
+
+    assert_eq!(
+        obj["parents"],
+        serde_json::json!([
+            {
+                "ref": "817/78972",
+                "project_id": 817,
+                "task_id": 78972,
+                "task_number": 72,
+                "name": "Go live task",
+                "status": "open",
+                "task_list_id": 8852,
+                "task_list": "Go live",
+                "labels": [{ "id": 707, "name": "STATUS:GO LIVE" }]
+            },
+            {
+                "ref": "817/78973",
+                "project_id": 817,
+                "task_id": 78973,
+                "task_number": 73,
+                "name": "Dev task",
+                "status": "open",
+                "task_list_id": 8851,
+                "task_list": "Desenvolvimento",
+                "labels": [{ "id": 9, "name": "ROTINA MENSAL" }]
+            }
+        ])
+    );
+    assert_eq!(obj["children"], serde_json::json!([]));
+}
+
+#[tokio::test]
+async fn get_dependencies_lists_children_and_marks_a_completed_parent() {
+    let server = dependency_server(dependencies_body(
+        &[dependency_entry(
+            78972,
+            817,
+            "Done",
+            8852,
+            serde_json::json!({ "is_completed": true }),
+        )],
+        &[dependency_entry(
+            78980,
+            817,
+            "Child",
+            8852,
+            serde_json::json!({}),
+        )],
+    ))
+    .await;
+    mount_get(
+        &server,
+        "/api/v1/projects/817/task-lists",
+        ResponseTemplate::new(200).set_body_json(task_lists_body(&[(8852, "Go live")])),
+    )
+    .await;
+
+    let obj = get_json(&server, &json_get_flags()).await;
+
+    assert_eq!(obj["parents"][0]["status"], "completed");
+    assert_eq!(obj["children"][0]["ref"], "817/78980");
+    assert_eq!(obj["children"][0]["task_list"], "Go live");
+}
+
+#[tokio::test]
+async fn get_dependencies_without_any_prints_empty_arrays() {
+    let server = dependency_server(dependencies_body(&[], &[])).await;
+
+    let obj = get_json(&server, &json_get_flags()).await;
+
+    assert_eq!(obj["parents"], serde_json::json!([]));
+    assert_eq!(obj["children"], serde_json::json!([]));
+    assert_eq!(
+        requests_to(&server, "/api/v1/projects/817/task-lists").await,
+        0
+    );
+}
+
+#[tokio::test]
+async fn get_dependencies_leave_out_trashed_and_unreferenceable_entries() {
+    let server = dependency_server(dependencies_body(
+        &[
+            dependency_entry(
+                1,
+                817,
+                "Trashed",
+                8852,
+                serde_json::json!({ "is_trashed": true }),
+            ),
+            dependency_entry(2, 817, "No id", 8852, serde_json::json!({ "id": "two" })),
+            dependency_entry(
+                3,
+                817,
+                "No project",
+                8852,
+                serde_json::json!({ "project_id": null }),
+            ),
+            dependency_entry(4, 817, "Kept", 8852, serde_json::json!({})),
+        ],
+        &[],
+    ))
+    .await;
+    mount_get(
+        &server,
+        "/api/v1/projects/817/task-lists",
+        ResponseTemplate::new(200).set_body_json(task_lists_body(&[(8852, "Go live")])),
+    )
+    .await;
+
+    let obj = get_json(&server, &json_get_flags()).await;
+
+    let names: Vec<&str> = obj["parents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|p| p["name"].as_str())
+        .collect();
+    assert_eq!(names, ["Kept"]);
+}
+
+#[tokio::test]
+async fn get_dependencies_resolve_list_names_once_per_distinct_project() {
+    let server = dependency_server(dependencies_body(
+        &[
+            dependency_entry(78972, 817, "A", 8852, serde_json::json!({})),
+            dependency_entry(78973, 817, "B", 8851, serde_json::json!({})),
+            dependency_entry(900, 42, "C", 8852, serde_json::json!({})),
+        ],
+        &[dependency_entry(901, 42, "D", 7, serde_json::json!({}))],
+    ))
+    .await;
+    mount_get(
+        &server,
+        "/api/v1/projects/817/task-lists",
+        ResponseTemplate::new(200).set_body_json(task_lists_body(&[
+            (8851, "Desenvolvimento"),
+            (8852, "Go live"),
+        ])),
+    )
+    .await;
+    mount_get(
+        &server,
+        "/api/v1/projects/42/task-lists",
+        ResponseTemplate::new(200)
+            .set_body_json(task_lists_body(&[(8852, "Other board"), (7, "Backlog")])),
+    )
+    .await;
+
+    let obj = get_json(&server, &json_get_flags()).await;
+
+    assert_eq!(obj["parents"][0]["task_list"], "Go live");
+    assert_eq!(obj["parents"][1]["task_list"], "Desenvolvimento");
+    assert_eq!(obj["parents"][2]["task_list"], "Other board");
+    assert_eq!(obj["children"][0]["task_list"], "Backlog");
+    assert_eq!(
+        requests_to(&server, "/api/v1/projects/817/task-lists").await,
+        1
+    );
+    assert_eq!(
+        requests_to(&server, "/api/v1/projects/42/task-lists").await,
+        1
+    );
+}
+
+#[tokio::test]
+async fn get_dependencies_are_printed_again_on_a_cache_hit() {
+    let server = dependency_server(dependencies_body(
+        &[dependency_entry(
+            78972,
+            817,
+            "A",
+            8852,
+            serde_json::json!({}),
+        )],
+        &[],
+    ))
+    .await;
+    mount_get(
+        &server,
+        "/api/v1/projects/817/task-lists",
+        ResponseTemplate::new(200).set_body_json(task_lists_body(&[(8852, "Go live")])),
+    )
+    .await;
+    let (_dir, store) = make_store();
+    let cache = TaskCache::new(store.conn());
+
+    let (first, _) = read_task(&server, &cache, &json_get_flags()).await;
+    let (second, _) = read_task(&server, &cache, &json_get_flags()).await;
+
+    let second: serde_json::Value = serde_json::from_str(second.trim_end()).unwrap();
+    assert_eq!(second["parents"][0]["ref"], "817/78972");
+    assert!(first.contains("817/78972"), "{first}");
+    assert_eq!(
+        requests_to(&server, "/api/v1/projects/5/tasks/10").await,
+        1,
+        "the second read comes from the cache"
+    );
+    assert_eq!(requests_to(&server, DEPENDENCIES_PATH).await, 2);
+}
+
+#[tokio::test]
+async fn get_dependencies_are_not_requested_by_the_human_or_short_output() {
+    let server = dependency_server(dependencies_body(&[], &[])).await;
+    let (_dir, store) = make_store();
+    let cache = TaskCache::new(store.conn());
+
+    read_task(&server, &cache, &default_flags()).await;
+    let short = DisplayFlags {
+        short: true,
+        ..default_flags()
+    };
+    read_task(&server, &cache, &short).await;
+
+    assert_eq!(requests_to(&server, DEPENDENCIES_PATH).await, 0);
+}
+
+#[tokio::test]
+async fn get_dependencies_failure_http_status_prints_null_and_keeps_the_task() {
+    for status in [500_u16, 401, 404] {
+        let server = dependency_server(ResponseTemplate::new(status).set_body_string("no")).await;
+
+        let obj = get_json(&server, &json_get_flags()).await;
+
+        assert!(obj["parents"].is_null(), "status {status}");
+        assert!(obj["children"].is_null(), "status {status}");
+        assert_eq!(obj["ref"], "5/10", "status {status}");
+        assert_eq!(obj["name"], "Deploy", "status {status}");
+    }
+}
+
+#[tokio::test]
+async fn get_dependencies_failure_malformed_body_prints_null() {
+    let bodies = [
+        ResponseTemplate::new(200).set_body_string("<html>not json</html>"),
+        ResponseTemplate::new(200)
+            .set_body_json(serde_json::json!({ "parents": "x", "children": [] })),
+        ResponseTemplate::new(200).set_body_json(serde_json::json!({ "children": [] })),
+        ResponseTemplate::new(200).set_body_json(serde_json::json!([])),
+    ];
+    for (case, body) in bodies.into_iter().enumerate() {
+        let server = dependency_server(body).await;
+
+        let obj = get_json(&server, &json_get_flags()).await;
+
+        assert!(obj["parents"].is_null(), "case {case}");
+        assert!(obj["children"].is_null(), "case {case}");
+    }
+}
+
+#[tokio::test]
+async fn get_dependencies_failure_of_one_task_lists_request_keeps_the_other_names() {
+    let server = dependency_server(dependencies_body(
+        &[
+            dependency_entry(78972, 817, "A", 8852, serde_json::json!({})),
+            dependency_entry(900, 42, "B", 7, serde_json::json!({})),
+        ],
+        &[],
+    ))
+    .await;
+    mount_get(
+        &server,
+        "/api/v1/projects/817/task-lists",
+        ResponseTemplate::new(500).set_body_string("boom"),
+    )
+    .await;
+    mount_get(
+        &server,
+        "/api/v1/projects/42/task-lists",
+        ResponseTemplate::new(200).set_body_json(task_lists_body(&[(7, "Backlog")])),
+    )
+    .await;
+
+    let obj = get_json(&server, &json_get_flags()).await;
+
+    assert_eq!(obj["parents"][0]["task_list_id"], 8852);
+    assert!(obj["parents"][0]["task_list"].is_null());
+    assert_eq!(obj["parents"][1]["task_list"], "Backlog");
+}
+
+#[tokio::test]
+async fn no_dependencies_flag_prints_null_and_makes_no_dependencies_request() {
+    let server = dependency_server(dependencies_body(
+        &[dependency_entry(
+            78972,
+            817,
+            "A",
+            8852,
+            serde_json::json!({}),
+        )],
+        &[],
+    ))
+    .await;
+    let flags = DisplayFlags {
+        no_dependencies: true,
+        ..json_get_flags()
+    };
+
+    let obj = get_json(&server, &flags).await;
+
+    assert!(obj["parents"].is_null());
+    assert!(obj["children"].is_null());
+    assert_eq!(obj["ref"], "5/10");
+    assert_eq!(requests_to(&server, DEPENDENCIES_PATH).await, 0);
+    assert_eq!(
+        requests_to(&server, "/api/v1/projects/817/task-lists").await,
+        0
     );
 }

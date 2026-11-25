@@ -92,9 +92,59 @@ pub struct MineTask {
     /// Estimated hours; `None` when the task has no estimate (absent, null or 0).
     #[serde(default)]
     pub estimate: Option<f64>,
+    /// The task list the task sits in; `None` when the payload carries no integer id.
+    #[serde(default)]
+    pub task_list_id: Option<i64>,
+    /// Name of that list; `None` until resolved from the response's `related.TaskList`.
+    #[serde(skip)]
+    pub task_list: Option<String>,
+    /// Labels in payload order; entries without an integer id or a non-empty name are dropped.
+    #[serde(skip)]
+    pub labels: Vec<Label>,
     /// Set by the client from the instance name, not from the API payload.
     #[serde(skip)]
     pub instance_name: String,
+}
+
+/// A task label reduced to what an agent needs.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Label {
+    pub id: i64,
+    pub name: String,
+}
+
+/// The labels of a task payload; absent, null or non-array yields none, and an
+/// entry without an integer `id` or a non-empty string `name` is skipped.
+pub fn parse_labels(task: &serde_json::Value) -> Vec<Label> {
+    task.get("labels")
+        .and_then(|v| v.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| {
+            let id = entry.get("id").and_then(|v| v.as_i64())?;
+            let name = entry
+                .get("name")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())?;
+            Some(Label {
+                id,
+                name: name.to_string(),
+            })
+        })
+        .collect()
+}
+
+/// The name of task list `id` in a response's `related` side-load. The side-load
+/// keys lists by id string; PHP serializes an empty map as `[]`, so an array or
+/// a missing level simply has no name.
+pub fn related_task_list_name(related: &serde_json::Value, id: i64) -> Option<String> {
+    related
+        .get("TaskList")
+        .and_then(|lists| lists.get(id.to_string()))
+        .and_then(|list| list.get("name"))
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
 }
 
 impl MineTask {
@@ -133,6 +183,11 @@ impl MineTask {
                 .and_then(|o| o.get("estimate"))
                 .and_then(|v| v.as_f64())
                 .filter(|hours| *hours > 0.0),
+            task_list_id: obj
+                .and_then(|o| o.get("task_list_id"))
+                .and_then(|v| v.as_i64()),
+            task_list: None,
+            labels: parse_labels(data),
             instance_name: instance_name.to_string(),
         })
     }

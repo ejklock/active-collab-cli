@@ -191,6 +191,7 @@ fn encode_comment_body(body: &str) -> String {
         .join("")
 }
 
+#[derive(Clone)]
 pub struct ActiveCollabClient {
     instance: Instance,
     http: Http,
@@ -378,6 +379,22 @@ impl ActiveCollabClient {
         Ok((status, None))
     }
 
+    /// GET /api/v1/dependencies/tasks/{task_id}: the `{parents, children}`
+    /// task arrays. Returns (200, Some(payload)) on 200 with a JSON body,
+    /// (status, None) otherwise.
+    pub async fn fetch_task_dependencies(&self, task_id: i64) -> Result<(u16, Option<Value>)> {
+        let base = self.instance.base_url.trim_end_matches('/');
+        let url = format!("{}/api/v1/dependencies/tasks/{}", base, task_id);
+        let (status, body) = self
+            .http
+            .authed_get(&url, &self.instance.base_url, &self.instance.token)
+            .await?;
+        if status == 200 {
+            return Ok((status, serde_json::from_slice(&body).ok()));
+        }
+        Ok((status, None))
+    }
+
     /// Fetch open tasks assigned to this user. Returns empty on missing user_id
     /// or non-200 response. Excludes is_completed and is_trashed tasks, and
     /// entries without an integer id or project_id.
@@ -418,6 +435,15 @@ impl ActiveCollabClient {
                         .unwrap_or(false)
             })
             .filter_map(|t| MineTask::from_api(t, &self.instance.name))
+            .map(|mut task| {
+                task.task_list = task.task_list_id.and_then(|id| {
+                    crate::models::related_task_list_name(
+                        data.get("related").unwrap_or(&Value::Null),
+                        id,
+                    )
+                });
+                task
+            })
             .collect();
         Ok(tasks)
     }

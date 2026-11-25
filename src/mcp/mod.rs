@@ -7,8 +7,8 @@
 
 use crate::commands::{
     self, comment_core, current_core, current_git_branch, get_core, mine_core, task_set_core,
-    time_log_core, DisplayFlags, InstanceContext, MineOutcome, OwnedReportPeriod, PeriodPreset,
-    ReportFormat, ReportRequest,
+    time_log_core, DisplayFlags, InstanceContext, MineFilter, MineOutcome, OwnedReportPeriod,
+    PeriodPreset, ReportFormat, ReportRequest,
 };
 use crate::store::cache::TaskCache;
 use crate::store::instances::InstanceRepository;
@@ -481,6 +481,30 @@ fn parse_operation<T: DeserializeOwned>(arguments: JsonObject) -> Result<T, McpE
         .map_err(|e| McpError::invalid_params(format!("invalid arguments: {e}"), None))
 }
 
+/// Rejects an empty label name, as `ac mine --label ""` does.
+fn non_empty_labels<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let labels = Vec::<String>::deserialize(deserializer)?;
+    if labels.iter().any(String::is_empty) {
+        return Err(serde::de::Error::custom("a label must not be empty"));
+    }
+    Ok(labels)
+}
+
+/// Rejects an empty task list, as `ac mine --task-list ""` does.
+fn non_empty_task_list<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let task_list = Option::<String>::deserialize(deserializer)?;
+    if task_list.as_deref() == Some("") {
+        return Err(serde::de::Error::custom("task_list must not be empty"));
+    }
+    Ok(task_list)
+}
+
 /// `get`/`current` read a task, `mine` lists the open tasks assigned to you.
 /// Every operation takes an optional `instance` name. `mine` without
 /// `instance` lists every configured instance; `get` and `current` need
@@ -499,6 +523,9 @@ enum ReadOperation {
         /// Ignore the cache and re-fetch.
         #[serde(default)]
         refresh: bool,
+        /// Skip the parents/children lookup: `parents` and `children` print null.
+        #[serde(default)]
+        no_dependencies: bool,
         instance: Option<String>,
     },
     /// Fetch the task of a git branch named feature/PROJECT_ID-TASK_ID.
@@ -508,7 +535,15 @@ enum ReadOperation {
         instance: Option<String>,
     },
     /// List open tasks assigned to you, across instances unless one is named.
-    Mine { instance: Option<String> },
+    Mine {
+        /// Label names a task must all carry.
+        #[serde(default, deserialize_with = "non_empty_labels")]
+        labels: Vec<String>,
+        /// Task list id or name.
+        #[serde(default, deserialize_with = "non_empty_task_list")]
+        task_list: Option<String>,
+        instance: Option<String>,
+    },
 }
 
 /// Download the attachments and inline images of one task.
@@ -764,6 +799,7 @@ fn json_flags() -> DisplayFlags {
         no_comments: false,
         download_attachments: false,
         attachments_dir: None,
+        no_dependencies: false,
     }
 }
 
@@ -802,11 +838,13 @@ async fn run_read(operation: ReadOperation) -> CoreRun {
             task_ref,
             no_comments,
             refresh,
+            no_dependencies,
             instance,
         } => {
             let flags = DisplayFlags {
                 refresh,
                 no_comments,
+                no_dependencies,
                 ..json_flags()
             };
             return run_get(&task_ref, instance.as_deref(), &flags).await;
@@ -828,7 +866,11 @@ async fn run_read(operation: ReadOperation) -> CoreRun {
             )
             .await;
         }
-        ReadOperation::Mine { instance } => {
+        ReadOperation::Mine {
+            labels,
+            task_list,
+            instance,
+        } => {
             let (store, http) = match commands::open_store_and_http(&mut run.err) {
                 Ok(pair) => pair,
                 Err(code) => {
@@ -841,6 +883,7 @@ async fn run_read(operation: ReadOperation) -> CoreRun {
                 &repo,
                 &http,
                 instance.as_deref(),
+                &MineFilter::new(&labels, task_list.as_deref()),
                 true,
                 false,
                 &mut run.out,

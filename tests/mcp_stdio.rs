@@ -127,7 +127,16 @@ fn expected_flat_schema(tool: &str) -> (BTreeSet<String>, BTreeSet<String>) {
     match tool {
         "ac_read" => (
             set(&["get", "current", "mine"]),
-            set(&["ref", "no_comments", "refresh", "branch", "instance"]),
+            set(&[
+                "ref",
+                "no_comments",
+                "refresh",
+                "no_dependencies",
+                "branch",
+                "labels",
+                "task_list",
+                "instance",
+            ]),
         ),
         "ac_write" => (
             set(&["comment", "log_time", "set_task", "time_report"]),
@@ -1194,8 +1203,10 @@ async fn a_long_task_call_with_a_progress_token_reports_progress_below_its_total
 /// Upper bound on the compact JSON size of the `tools/list` result, which a
 /// client pays in context on every session. Set from the measured size of the
 /// trimmed list, rounded up by under 1%; it includes the one sentence on each
-/// long-call tool that says what cancelling a task does.
-const MAX_TOOLS_LIST_BYTES: usize = 3600;
+/// long-call tool that says what cancelling a task does, the two `mine`
+/// filter arguments and the `get` argument that skips the dependencies lookup
+/// (3925 bytes measured).
+const MAX_TOOLS_LIST_BYTES: usize = 3950;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn tools_list_stays_within_its_size_bound() {
@@ -1319,4 +1330,136 @@ async fn skill_requests_for_anything_else_are_invalid_params_and_tools_keep_work
         "{result:?}"
     );
     client.cancel().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn mine_filter_reaches_the_cli_and_the_mcp_read() {
+    let server = MockServer::start().await;
+    let fixture = Fixture::seeded();
+    mount_seeded(&server, &fixture).await;
+    let env = Env::new(&[("alpha", &server, fixture.user_id)]);
+    let client = env.connect().await;
+
+    let unfiltered = ok_text(&client, "ac_read", json!({ "operation": "mine" })).await;
+    assert!(!unfiltered.contains(r#""tasks":[]"#), "{unfiltered}");
+
+    let by_label = ok_text(
+        &client,
+        "ac_read",
+        json!({ "operation": "mine", "labels": ["nope"] }),
+    )
+    .await;
+    assert!(by_label.contains(r#""count":0,"tasks":[]"#), "{by_label}");
+    assert_eq!(by_label, env.cli(&["mine", "--label", "nope", "--json"]));
+
+    let by_list = ok_text(
+        &client,
+        "ac_read",
+        json!({ "operation": "mine", "task_list": "99999" }),
+    )
+    .await;
+    assert!(by_list.contains(r#""count":0,"tasks":[]"#), "{by_list}");
+    assert_eq!(
+        by_list,
+        env.cli(&["mine", "--task-list", "99999", "--json"])
+    );
+
+    let beyond_i64 = env.cli(&["mine", "--task-list", "99999999999999999999", "--json"]);
+    assert!(
+        beyond_i64.contains(r#""count":0,"tasks":[]"#),
+        "{beyond_i64}"
+    );
+    client.cancel().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn dependencies_are_printed_the_same_by_the_cli_and_the_mcp_read() {
+    let server = MockServer::start().await;
+    let fixture = Fixture::seeded();
+    mount_seeded(&server, &fixture).await;
+    let env = Env::new(&[("alpha", &server, fixture.user_id)]);
+    let client = env.connect().await;
+    let target = reference(&report_task());
+    let target = target.as_str();
+
+    let read = ok_text(
+        &client,
+        "ac_read",
+        json!({ "operation": "get", "ref": target, "refresh": true }),
+    )
+    .await;
+    let cli = env.cli(&["get", target, "--json", "--refresh"]);
+    assert_eq!(read, cli);
+    let task: Value = serde_json::from_str(read.trim_end()).unwrap();
+    assert_eq!(task["parents"][0]["ref"], "10/102");
+    assert_eq!(task["parents"][0]["task_list"], TASK_LISTS[0].1);
+    assert_eq!(task["parents"][0]["labels"][0]["name"], "STATUS:GO LIVE");
+    assert_eq!(task["children"], json!([]));
+
+    let skipped = ok_text(
+        &client,
+        "ac_read",
+        json!({ "operation": "get", "ref": target, "no_dependencies": true }),
+    )
+    .await;
+    assert_eq!(
+        skipped,
+        env.cli(&["get", target, "--json", "--no-dependencies"])
+    );
+    let skipped: Value = serde_json::from_str(skipped.trim_end()).unwrap();
+    assert!(skipped["parents"].is_null() && skipped["children"].is_null());
+    client.cancel().await.unwrap();
+}
+
+/// Runs `ac current` as if the working directory were a git checkout on
+/// `branch`, by putting a `git` stand-in that reports it first on `PATH`.
+fn current_on_branch(env: &Env, branch: &str, args: &[&str]) -> Value {
+    use std::os::unix::fs::PermissionsExt;
+    let bin = env.dir.path().join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let git = bin.join("git");
+    std::fs::write(&git, format!("#!/bin/sh\necho '{branch}'\n")).unwrap();
+    std::fs::set_permissions(&git, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let path = format!(
+        "{}:{}",
+        bin.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let output = env
+        .command()
+        .env("PATH", path)
+        .arg("current")
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "ac current failed: {output:?}");
+    serde_json::from_slice(&output.stdout).unwrap()
+}
+
+async fn dependency_requests(server: &MockServer) -> usize {
+    server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .filter(|r| r.url.path().starts_with("/api/v1/dependencies/"))
+        .count()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn current_dependencies_are_looked_up_unless_no_dependencies_is_passed() {
+    let server = MockServer::start().await;
+    let fixture = Fixture::seeded();
+    mount_seeded(&server, &fixture).await;
+    let env = Env::new(&[("alpha", &server, fixture.user_id)]);
+    let task = report_task();
+    let branch = format!("feature/{}-{}", task.project_id, task.id);
+
+    let skipped = current_on_branch(&env, &branch, &["--json", "--no-dependencies"]);
+    assert!(skipped["parents"].is_null() && skipped["children"].is_null());
+    assert_eq!(dependency_requests(&server).await, 0);
+
+    let looked_up = current_on_branch(&env, &branch, &["--json"]);
+    assert!(looked_up["parents"].is_array() && looked_up["children"].is_array());
+    assert_eq!(dependency_requests(&server).await, 1);
 }

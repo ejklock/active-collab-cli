@@ -299,6 +299,9 @@ fn sample_mine_rows() -> Vec<crate::render::MineTableRow> {
             task_id: 75159,
             name: "Fix the widget".to_owned(),
             due_on: None,
+            task_list_id: None,
+            task_list: None,
+            labels: Vec::new(),
             project_name: None,
             estimate: None,
             logged_week: None,
@@ -310,6 +313,9 @@ fn sample_mine_rows() -> Vec<crate::render::MineTableRow> {
             task_number: 5,
             task_id: 500,
             name: "Another task".to_owned(),
+            task_list_id: None,
+            task_list: None,
+            labels: Vec::new(),
             due_on: None,
             project_name: None,
             estimate: None,
@@ -753,6 +759,9 @@ fn mine_row_with_hours(
         task_id: 10,
         name: "A".to_owned(),
         due_on: due_on.map(str::to_owned),
+        task_list_id: None,
+        task_list: None,
+        labels: Vec::new(),
         project_name: None,
         estimate,
         logged_week,
@@ -795,7 +804,15 @@ fn mine_json_keeps_the_existing_task_keys() {
     assert_eq!(task["task_number"], 1);
     assert_eq!(task["task_id"], 10);
     assert_eq!(task["name"], "A");
-    assert_eq!(task.as_object().unwrap().len(), 11);
+    assert_eq!(task["due_bucket"], "none");
+    assert!(task["due_on"].is_null());
+    assert!(task["estimate_hours"].is_null());
+    assert!(task["logged_week_hours"].is_null());
+    assert!(task["logged_total_hours"].is_null());
+    assert!(task["task_list_id"].is_null());
+    assert!(task["task_list"].is_null());
+    assert_eq!(task["labels"], json!([]));
+    assert_eq!(task.as_object().unwrap().len(), 14);
 }
 
 fn bucket_today() -> chrono::NaiveDate {
@@ -876,12 +893,15 @@ fn mine_json_buckets_add_only_the_buckets_key_and_the_due_bucket_key() {
             "due_on",
             "estimate_hours",
             "instance",
+            "labels",
             "logged_total_hours",
             "logged_week_hours",
             "name",
             "project_id",
             "ref",
             "task_id",
+            "task_list",
+            "task_list_id",
             "task_number"
         ]
     );
@@ -898,4 +918,136 @@ fn mine_json_buckets_add_only_the_buckets_key_and_the_due_bucket_key() {
             "logged_week_hours"
         ]
     );
+}
+
+fn task_with_labels(labels: Value) -> Value {
+    let mut task = open_task();
+    task["labels"] = labels;
+    task
+}
+
+fn labels_of(task: &Value) -> Value {
+    task_object(task, &[], &user_map_with_12(), "work", false)["labels"].clone()
+}
+
+#[test]
+fn task_object_labels_keep_payload_order_and_only_id_and_name() {
+    let labels = labels_of(&task_with_labels(json!([
+        {"id": 707, "name": "STATUS:GO LIVE", "color": "#FBBB75", "is_default": false},
+        {"id": 3, "name": "ROTINA MENSAL", "color": "#000000"}
+    ])));
+    assert_eq!(
+        labels,
+        json!([
+            {"id": 707, "name": "STATUS:GO LIVE"},
+            {"id": 3, "name": "ROTINA MENSAL"}
+        ])
+    );
+}
+
+#[test]
+fn task_object_labels_empty_array_stays_empty() {
+    assert_eq!(labels_of(&task_with_labels(json!([]))), json!([]));
+}
+
+#[test]
+fn task_object_labels_absent_or_null_is_empty_array() {
+    assert_eq!(labels_of(&open_task()), json!([]));
+    assert_eq!(labels_of(&task_with_labels(Value::Null)), json!([]));
+}
+
+#[test]
+fn task_object_labels_skip_entries_without_integer_id_or_name() {
+    let labels = labels_of(&task_with_labels(json!([
+        {"id": "7", "name": "string id"},
+        {"id": 8},
+        {"id": 9, "name": ""},
+        {"id": 10, "name": "kept"}
+    ])));
+    assert_eq!(labels, json!([{"id": 10, "name": "kept"}]));
+}
+
+#[test]
+fn task_object_task_list_comes_from_the_task_list_object_and_the_id_field() {
+    let mut task = open_task();
+    task["task_list_id"] = json!(8852);
+    task["task_list"] = json!({"id": 8852, "name": "Go live", "class": "TaskList"});
+    let obj = task_object(&task, &[], &user_map_with_12(), "work", false);
+    assert_eq!(obj["task_list_id"], 8852);
+    assert_eq!(obj["task_list"], "Go live");
+}
+
+#[test]
+fn task_object_task_list_name_is_null_without_a_task_list_object() {
+    let mut task = open_task();
+    task["task_list_id"] = json!(8852);
+    let obj = task_object(&task, &[], &user_map_with_12(), "work", false);
+    assert_eq!(obj["task_list_id"], 8852);
+    assert!(obj["task_list"].is_null());
+    task["task_list"] = json!("Go live");
+    let obj = task_object(&task, &[], &user_map_with_12(), "work", false);
+    assert!(obj["task_list"].is_null());
+}
+
+#[test]
+fn task_object_task_list_id_is_null_when_absent() {
+    let obj = task_object(&open_task(), &[], &user_map_with_12(), "work", false);
+    assert!(obj.get("task_list_id").is_some_and(Value::is_null));
+}
+
+#[test]
+fn task_object_keeps_every_previous_key_with_its_value() {
+    let obj = task_object(&open_task(), &[], &user_map_with_12(), "work", false);
+    let mut previous = obj.clone();
+    let map = previous.as_object_mut().unwrap();
+    map.remove("task_list_id");
+    map.remove("task_list");
+    map.remove("labels");
+    assert_eq!(
+        previous,
+        json!({
+            "ref": "665/75159",
+            "instance": "work",
+            "project_id": 665,
+            "task_id": 75159,
+            "name": "Fix the widget",
+            "status": "open",
+            "assignee": "Jane Doe",
+            "assignee_id": 12,
+            "project_name": "Acme Project",
+            "start_on": "2025-01-02",
+            "due_on": "2025-01-09",
+            "estimate_hours": "8",
+            "logged_hours": "3",
+            "url": "work/projects/665/tasks/75159",
+            "description": "Do the thing",
+            "assets": [],
+            "comments": []
+        })
+    );
+}
+
+#[test]
+fn dependency_object_prints_the_ref_status_list_and_label_objects() {
+    let dep = crate::models::MineTask::from_api(
+        &json!({
+            "id": 78972, "project_id": 817, "task_number": 36, "name": "Ship it",
+            "is_completed": true, "task_list_id": 8852,
+            "labels": [{ "id": 707, "name": "STATUS:GO LIVE", "color": "#FBBB75" }]
+        }),
+        "",
+    )
+    .unwrap();
+
+    assert_eq!(
+        dependency_object(&dep, Some("Go live")),
+        json!({
+            "ref": "817/78972", "project_id": 817, "task_id": 78972, "task_number": 36,
+            "name": "Ship it", "status": "completed", "task_list_id": 8852,
+            "task_list": "Go live", "labels": [{ "id": 707, "name": "STATUS:GO LIVE" }]
+        })
+    );
+    let unresolved = dependency_object(&dep, None);
+    assert!(unresolved["task_list"].is_null());
+    assert_eq!(unresolved["task_list_id"], 8852);
 }

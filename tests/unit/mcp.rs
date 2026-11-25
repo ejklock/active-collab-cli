@@ -68,3 +68,140 @@ fn heartbeat_progress_rises_with_every_beat_and_stays_below_the_total() {
     );
     assert!(values.iter().all(|v| *v < PROGRESS_TOTAL), "{values:?}");
 }
+
+fn read_operation(arguments: serde_json::Value) -> Result<ReadOperation, McpError> {
+    let Value::Object(map) = arguments else {
+        panic!("arguments must be an object");
+    };
+    parse_operation(map)
+}
+
+#[test]
+fn mcp_mine_filter_accepts_labels_and_task_list() {
+    let op = read_operation(json!({
+        "operation": "mine",
+        "labels": ["STATUS:GO LIVE", "ROTINA MENSAL"],
+        "task_list": "Go live"
+    }));
+    let Ok(ReadOperation::Mine {
+        labels, task_list, ..
+    }) = op
+    else {
+        panic!("labels and task_list must be accepted by the mine operation");
+    };
+    assert_eq!(labels, ["STATUS:GO LIVE", "ROTINA MENSAL"]);
+    assert_eq!(task_list.as_deref(), Some("Go live"));
+}
+
+#[test]
+fn mcp_mine_filter_defaults_to_no_filter() {
+    let Ok(ReadOperation::Mine {
+        labels, task_list, ..
+    }) = read_operation(json!({ "operation": "mine" }))
+    else {
+        panic!("a bare mine operation must parse");
+    };
+    assert!(labels.is_empty());
+    assert!(task_list.is_none());
+}
+
+#[test]
+fn mcp_mine_filter_rejects_labels_given_as_a_string() {
+    let err = read_operation(json!({ "operation": "mine", "labels": "STATUS:GO LIVE" }))
+        .err()
+        .expect("a string is not an array of labels");
+    assert_eq!(err.code, rmcp::model::ErrorCode::INVALID_PARAMS);
+}
+
+#[test]
+fn mcp_mine_filter_still_rejects_an_unknown_argument() {
+    let err = read_operation(json!({ "operation": "mine", "label": ["x"] }))
+        .err()
+        .expect("an unknown argument must be rejected");
+    assert_eq!(err.code, rmcp::model::ErrorCode::INVALID_PARAMS);
+}
+
+#[test]
+fn mcp_mine_filter_schema_describes_both_arguments() {
+    let schema = input_schema::<ReadOperation>();
+    for name in ["labels", "task_list"] {
+        let description = schema["properties"][name]["description"].as_str();
+        assert!(
+            description.is_some_and(|d| !d.is_empty()),
+            "{name} must be listed with a description"
+        );
+    }
+    assert_eq!(schema["properties"]["labels"]["type"], "array");
+}
+
+#[test]
+fn mcp_mine_filter_rejects_an_empty_label() {
+    for labels in [json!([""]), json!(["STATUS:GO LIVE", ""])] {
+        let err = read_operation(json!({ "operation": "mine", "labels": labels }))
+            .err()
+            .expect("an empty label must be rejected");
+        assert_eq!(err.code, rmcp::model::ErrorCode::INVALID_PARAMS);
+    }
+}
+
+#[test]
+fn mcp_mine_filter_rejects_an_empty_task_list() {
+    let err = read_operation(json!({ "operation": "mine", "task_list": "" }))
+        .err()
+        .expect("an empty task list must be rejected");
+    assert_eq!(err.code, rmcp::model::ErrorCode::INVALID_PARAMS);
+}
+
+#[test]
+fn mcp_mine_filter_accepts_empty_array_and_a_blank_label() {
+    let Ok(ReadOperation::Mine { labels, .. }) =
+        read_operation(json!({ "operation": "mine", "labels": [] }))
+    else {
+        panic!("an empty labels array must be accepted");
+    };
+    assert!(labels.is_empty());
+    let Ok(ReadOperation::Mine { labels, .. }) =
+        read_operation(json!({ "operation": "mine", "labels": [" "] }))
+    else {
+        panic!("a blank label is not the empty string and must be accepted");
+    };
+    assert_eq!(labels, [" "]);
+}
+
+#[test]
+fn mcp_get_no_dependencies_is_accepted_and_defaults_to_false() {
+    let Ok(ReadOperation::Get {
+        no_dependencies, ..
+    }) = read_operation(json!({ "operation": "get", "ref": "5/10", "no_dependencies": true }))
+    else {
+        panic!("no_dependencies must be accepted by the get operation");
+    };
+    assert!(no_dependencies);
+
+    let Ok(ReadOperation::Get {
+        no_dependencies, ..
+    }) = read_operation(json!({ "operation": "get", "ref": "5/10" }))
+    else {
+        panic!("a bare get operation must parse");
+    };
+    assert!(!no_dependencies);
+}
+
+#[test]
+fn mcp_get_no_dependencies_rejects_a_string() {
+    let err =
+        read_operation(json!({ "operation": "get", "ref": "5/10", "no_dependencies": "yes" }))
+            .err()
+            .expect("a string is not a boolean");
+    assert_eq!(err.code, rmcp::model::ErrorCode::INVALID_PARAMS);
+}
+
+#[test]
+fn mcp_get_no_dependencies_schema_has_a_description() {
+    let schema = input_schema::<ReadOperation>();
+    let description = schema["properties"]["no_dependencies"]["description"].as_str();
+    assert!(
+        description.is_some_and(|d| !d.is_empty()),
+        "no_dependencies must be listed with a description"
+    );
+}

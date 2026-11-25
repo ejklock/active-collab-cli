@@ -414,6 +414,15 @@ pub struct MineTableRow {
     /// All hours logged on the task; `None` when unknown.
     #[serde(default)]
     pub logged_total: Option<f64>,
+    /// The task list the task sits in; `None` when unknown.
+    #[serde(default)]
+    pub task_list_id: Option<i64>,
+    /// Name of that list; `None` when unknown.
+    #[serde(default)]
+    pub task_list: Option<String>,
+    /// The task's labels in payload order.
+    #[serde(default)]
+    pub labels: Vec<crate::models::Label>,
 }
 
 /// Parity: render.py render_mine_table.

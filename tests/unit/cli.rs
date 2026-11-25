@@ -736,3 +736,73 @@ fn parse_mcp_subcommand_takes_no_arguments() {
 fn normalize_argv_keeps_mcp_as_a_command_not_a_task_ref() {
     assert_eq!(normalize_argv(&argv(&["mcp"]), None), argv(&["mcp"]));
 }
+
+#[test]
+fn mine_filter_output_flags_collect_every_label_and_one_task_list() {
+    let cli = parse(&[
+        "mine",
+        "--label",
+        "STATUS:GO LIVE",
+        "--label",
+        "ROTINA MENSAL",
+        "--task-list",
+        "Go live",
+    ])
+    .expect("the filter flags must parse");
+    let Some(Command::Mine(args)) = cli.command else {
+        panic!("expected the mine command");
+    };
+    let shown = format!("{args:?}");
+    assert!(
+        shown.contains(r#"label: ["STATUS:GO LIVE", "ROTINA MENSAL"]"#),
+        "{shown}"
+    );
+    assert!(shown.contains(r#"task_list: Some("Go live")"#), "{shown}");
+}
+
+#[test]
+fn mine_filter_output_flags_are_absent_by_default() {
+    let cli = parse(&["mine"]).unwrap();
+    let Some(Command::Mine(args)) = cli.command else {
+        panic!("expected the mine command");
+    };
+    let shown = format!("{args:?}");
+    assert!(shown.contains("task_list: None"), "{shown}");
+}
+
+#[test]
+fn mine_filter_output_rejects_an_empty_label_with_usage_exit_2() {
+    let err = parse(&["mine", "--label", ""]).unwrap_err();
+    assert_eq!(err.exit_code(), 2);
+    assert_eq!(err.kind(), clap::error::ErrorKind::ValueValidation);
+}
+
+#[test]
+fn mine_filter_output_rejects_an_empty_task_list_with_usage_exit_2() {
+    let err = parse(&["mine", "--task-list", ""]).unwrap_err();
+    assert_eq!(err.kind(), clap::error::ErrorKind::ValueValidation);
+}
+
+#[test]
+fn parse_get_and_current_accept_no_dependencies() {
+    let cli = parse(&["get", "665/75159", "--json", "--no-dependencies"]).unwrap();
+    let Command::Get(g) = cli.command.unwrap() else {
+        panic!()
+    };
+    assert!(g.display.no_dependencies);
+
+    let cli = parse(&["current", "--json", "--no-dependencies"]).unwrap();
+    let Command::Current(d) = cli.command.unwrap() else {
+        panic!()
+    };
+    assert!(d.no_dependencies);
+}
+
+#[test]
+fn parse_get_looks_dependencies_up_by_default() {
+    let cli = parse(&["get", "665/75159", "--json"]).unwrap();
+    let Command::Get(g) = cli.command.unwrap() else {
+        panic!()
+    };
+    assert!(!g.display.no_dependencies);
+}

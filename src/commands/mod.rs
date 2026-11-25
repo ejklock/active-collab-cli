@@ -18,7 +18,8 @@ pub(crate) use hours_report::{
     ExportedReport, OwnedReportPeriod, PeriodPreset, ReportFormat, ReportPeriod, ReportRequest,
 };
 pub(crate) use mine::{
-    collect_mine_hours, collect_mine_task_lists, mine_core, mine_rows_of, MineHours, MineOutcome,
+    collect_mine_hours, collect_mine_task_lists, mine_core, mine_rows_of, MineFilter, MineHours,
+    MineOutcome,
 };
 pub(crate) use resolve::*;
 pub(crate) use setup::{

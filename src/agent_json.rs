@@ -1,5 +1,6 @@
 use crate::client::TaskList;
 use crate::controller::extract_assets;
+use crate::models::{parse_labels, MineTask};
 use crate::render::buckets::{due_bucket, group_by_bucket};
 use crate::render::{fmt_date, fmt_hours, fmt_ts, html_to_text};
 use serde_json::{json, Value};
@@ -41,6 +42,29 @@ pub fn task_object(
         "description": html_to_text(task.get("body").and_then(|v| v.as_str()).unwrap_or("")),
         "assets": shape_assets(task, comments),
         "comments": shape_comments(comments, no_comments),
+        "task_list_id": task.get("task_list_id").and_then(|v| v.as_i64()),
+        "task_list": task
+            .get("task_list")
+            .and_then(|list| list.get("name"))
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty()),
+        "labels": parse_labels(task),
+    })
+}
+
+/// One parent or child task of `get --json`; `task_list` is the resolved list
+/// name, `None` when it could not be resolved.
+pub fn dependency_object(dep: &MineTask, task_list: Option<&str>) -> Value {
+    json!({
+        "ref": format!("{}/{}", dep.project_id, dep.id),
+        "project_id": dep.project_id,
+        "task_id": dep.id,
+        "task_number": dep.task_number,
+        "name": dep.name,
+        "status": if dep.is_completed { "completed" } else { "open" },
+        "task_list_id": dep.task_list_id,
+        "task_list": task_list,
+        "labels": dep.labels,
     })
 }
 
@@ -274,6 +298,9 @@ fn mine_task_object(row: &crate::render::MineTableRow, today: chrono::NaiveDate)
         "estimate_hours": hours_or_null(row.estimate),
         "logged_week_hours": hours_or_null(row.logged_week),
         "logged_total_hours": hours_or_null(row.logged_total),
+        "task_list_id": row.task_list_id,
+        "task_list": row.task_list,
+        "labels": row.labels,
     })
 }
 
