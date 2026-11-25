@@ -208,7 +208,10 @@ every other operation needs `instance` only when several instances are configure
 `ac task set <ref> --list <id|name>` (and `set_task` `list`) moves a task to another task list of its project: an all-digits value is a list id, any other value a list name matched exactly, ignoring case. An unknown or ambiguous list exits 2, prints the candidates and sends no write. The `--json` result then carries `task_list_id` and `task_list` (the list name). In the interactive TUI task detail, `l` opens a searchable picker that moves the task to another list.
 
 `time_report` has no JSON form: it returns the human line and writes the file in
-the server's working directory. On `ac_read` and `ac_download_attachments`, an
+the server's working directory. When the client declares the MCP tasks extension,
+`ac_download_attachments` and `ac_write` `time_report` return a task; cancelling it
+ends it `cancelled` at once, but the command still finishes in the background, its
+result is dropped and the files it wrote stay. On `ac_read` and `ac_download_attachments`, an
 unknown `operation`, a missing required parameter or an unknown parameter is a
 JSON-RPC `invalid_params` error.
 

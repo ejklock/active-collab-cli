@@ -14,15 +14,17 @@ use crate::store::cache::TaskCache;
 use crate::store::instances::InstanceRepository;
 use rmcp::handler::server::tool::{ToolCallContext, ToolRouter};
 use rmcp::model::{
-    CallToolRequestParams, CallToolResponse, CallToolResult, ConstString, ContentBlock,
-    CustomRequest, CustomResult, ErrorCode, GetSkillRequestMethod, GetSkillRequestParams,
-    GetSkillResult, Implementation, JsonObject, ListResourcesResult, ListSkillsResult,
-    ListToolsResult, PaginatedRequestParams, ReadResourceRequestParams, ReadResourceResponse,
+    CallToolRequestParams, CallToolResponse, CallToolResult, CancelTaskParams, ConstString,
+    ContentBlock, CreateTaskResult, CustomRequest, CustomResult, ErrorCode, GetSkillRequestMethod,
+    GetSkillRequestParams, GetSkillResult, GetTaskParams, GetTaskResult, Implementation,
+    JsonObject, ListResourcesResult, ListSkillsResult, ListToolsResult, PaginatedRequestParams,
+    ProgressNotificationParam, ProgressToken, ReadResourceRequestParams, ReadResourceResponse,
     ReadResourceResult, ResourceContents, ServerCapabilities, ServerConfig, Tool,
 };
 use rmcp::service::RequestContext;
+use rmcp::task_manager::{TaskExit, TaskManager, TaskOptions};
 use rmcp::transport::stdio;
-use rmcp::{tool, tool_router, ErrorData as McpError, RoleServer, ServerHandler, ServiceExt};
+use rmcp::{tool, tool_router, ErrorData as McpError, Peer, RoleServer, ServerHandler, ServiceExt};
 use schemars::generate::SchemaSettings;
 use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
@@ -30,6 +32,8 @@ use serde::Deserialize;
 use serde_json::Value;
 use std::future::Future;
 use std::sync::Arc;
+use std::time::Duration;
+use tokio::task::{JoinError, JoinHandle};
 
 mod skills;
 use skills::SkillCatalog;
@@ -43,14 +47,18 @@ pub(crate) async fn serve() -> i32 {
             return 1;
         }
     };
-    let running = match AcServer::new(skills).serve(stdio()).await {
+    let server = AcServer::new(skills);
+    let tasks = server.tasks.clone();
+    let running = match server.serve(stdio()).await {
         Ok(running) => running,
         Err(e) => {
             eprintln!("Error starting MCP server: {e}");
             return 1;
         }
     };
-    match running.waiting().await {
+    let ended = running.waiting().await;
+    tasks.shutdown();
+    match ended {
         Ok(_) => 0,
         Err(e) => {
             eprintln!("Error serving MCP: {e}");
@@ -59,9 +67,21 @@ pub(crate) async fn serve() -> i32 {
     }
 }
 
+/// How often a client is told to poll a task. A task is created with no lifetime (rmcp would
+/// drop a running task after five minutes): it lives until the server exits.
+const TASK_POLL_INTERVAL_MS: u64 = 1_000;
+
+/// How often a long call reports that it is still running.
+const HEARTBEAT: Duration = Duration::from_secs(5);
+
+/// The `total` of every progress notification: a running call stays below it, the finished
+/// call reaches it.
+const PROGRESS_TOTAL: f64 = 100.0;
+
 struct AcServer {
     router: ToolRouter<AcServer>,
     skills: SkillCatalog,
+    tasks: TaskManager,
 }
 
 #[tool_router]
@@ -70,6 +90,7 @@ impl AcServer {
         Self {
             router: Self::tool_router(),
             skills,
+            tasks: TaskManager::new(),
         }
     }
 
@@ -84,29 +105,88 @@ impl AcServer {
     }
 
     #[tool(
-        description = "Change ActiveCollab data.",
+        description = "Change ActiveCollab data. A cancelled `time_report` task drops its \
+                       result; the file stays.",
         input_schema = input_schema::<WriteOperation>(),
         annotations(destructive_hint = true)
     )]
-    async fn ac_write(&self, arguments: JsonObject) -> Result<CallToolResult, McpError> {
+    async fn ac_write(
+        &self,
+        arguments: JsonObject,
+        context: RequestContext<RoleServer>,
+    ) -> Result<CallToolResponse, McpError> {
         let operation: WriteOperation = parse_operation(arguments)?;
         let period = operation.report_period()?;
-        run_isolated(move || run_write(operation, period)).await
+        let long = matches!(operation, WriteOperation::TimeReport { .. });
+        let work = move || run_write(operation, period);
+        if long {
+            return self.run_long(context, work).await;
+        }
+        run_isolated(work).await.map(Into::into)
     }
 
     #[tool(
         description = "Save a task's attachments and inline images to a directory on the \
                        server; returns the task as `ac get --json`, plus \
-                       `downloaded_attachments` (each file's path or error).",
+                       `downloaded_attachments` (each file's path or error). A cancelled task \
+                       drops the result; saved files stay.",
         input_schema = input_schema::<DownloadArguments>(),
         annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = true)
     )]
     async fn ac_download_attachments(
         &self,
         arguments: JsonObject,
-    ) -> Result<CallToolResult, McpError> {
+        context: RequestContext<RoleServer>,
+    ) -> Result<CallToolResponse, McpError> {
         let arguments: DownloadArguments = parse_operation(arguments)?;
-        run_isolated(move || run_download(arguments)).await
+        self.run_long(context, move || run_download(arguments))
+            .await
+    }
+}
+
+impl AcServer {
+    /// Runs a long call. A client that declared the tasks extension gets a task at once and the
+    /// call finishes behind it; any other client waits for the result. Either way a progress
+    /// token receives the start, a heartbeat while it runs and the end.
+    async fn run_long<F, Fut>(
+        &self,
+        context: RequestContext<RoleServer>,
+        make: F,
+    ) -> Result<CallToolResponse, McpError>
+    where
+        F: FnOnce() -> Fut + Send + 'static,
+        Fut: Future<Output = CoreRun>,
+    {
+        let progress = Progress {
+            peer: context.peer.clone(),
+            token: context.meta.get_progress_token(),
+        };
+        let declared_tasks = context
+            .client_capabilities()
+            .is_some_and(|capabilities| capabilities.supports_tasks());
+        if !declared_tasks {
+            let joined = progress
+                .follow(spawn_core(make), std::future::pending())
+                .await;
+            return match joined {
+                Some(Ok(run)) => Ok(run.into_result().into()),
+                Some(Err(e)) => Err(join_failure(&e)),
+                None => Err(McpError::internal_error("tool call was cancelled", None)),
+            };
+        }
+        let options = TaskOptions::new()
+            .with_poll_interval_ms(TASK_POLL_INTERVAL_MS)
+            .with_ttl_ms(None);
+        let task = self.tasks.spawn(options, move |task| {
+            Box::pin(async move {
+                match progress.follow(spawn_core(make), task.cancelled()).await {
+                    Some(Ok(run)) => Ok(run.into_result()),
+                    Some(Err(e)) => Err(TaskExit::Error(join_failure(&e))),
+                    None => Err(TaskExit::Cancelled),
+                }
+            })
+        });
+        Ok(CallToolResponse::Task(CreateTaskResult::new(task)))
     }
 }
 
@@ -119,6 +199,7 @@ impl ServerHandler for AcServer {
         ServerConfig::new(
             ServerCapabilities::builder()
                 .enable_tools()
+                .enable_tasks()
                 .enable_resources()
                 .enable_skills()
                 .build(),
@@ -193,6 +274,24 @@ impl ServerHandler for AcServer {
             McpError::invalid_params(format!("no such skill: {}", request.uri), None)
         })?;
         Ok(GetSkillResult::new(skill.clone()))
+    }
+
+    async fn get_task(
+        &self,
+        request: GetTaskParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<GetTaskResult, McpError> {
+        self.tasks
+            .get_task(&request.task_id)
+            .map(GetTaskResult::new)
+    }
+
+    async fn cancel_task(
+        &self,
+        request: CancelTaskParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<(), McpError> {
+        self.tasks.cancel_task(&request.task_id)
     }
 
     /// A `skills/get` whose parameters did not parse (no `uri`, or one that is not text) reaches
@@ -574,11 +673,67 @@ where
     F: FnOnce() -> Fut + Send + 'static,
     Fut: Future<Output = CoreRun>,
 {
-    let handle = tokio::runtime::Handle::current();
-    tokio::task::spawn_blocking(move || handle.block_on(make()))
+    spawn_core(make)
         .await
         .map(CoreRun::into_result)
-        .map_err(|e| McpError::internal_error(format!("tool task failed: {e}"), None))
+        .map_err(|e| join_failure(&e))
+}
+
+fn spawn_core<F, Fut>(make: F) -> JoinHandle<CoreRun>
+where
+    F: FnOnce() -> Fut + Send + 'static,
+    Fut: Future<Output = CoreRun>,
+{
+    let handle = tokio::runtime::Handle::current();
+    tokio::task::spawn_blocking(move || handle.block_on(make()))
+}
+
+fn join_failure(error: &JoinError) -> McpError {
+    McpError::internal_error(format!("tool task failed: {error}"), None)
+}
+
+/// Where a long call reports its progress: the requester's token, if it sent one.
+struct Progress {
+    peer: Peer<RoleServer>,
+    token: Option<ProgressToken>,
+}
+
+impl Progress {
+    async fn send(&self, progress: f64, message: &str) {
+        let Some(token) = &self.token else { return };
+        let notification = ProgressNotificationParam::new(token.clone(), progress)
+            .with_total(PROGRESS_TOTAL)
+            .with_message(message);
+        let _ = self.peer.notify_progress(notification).await;
+    }
+
+    /// Waits for the core to finish, reporting the start, a heartbeat every few seconds and the
+    /// end. `cancel` resolving stops the wait and returns `None`: the core cannot be
+    /// interrupted, so it runs on to its end on its thread and its result is dropped.
+    async fn follow(
+        &self,
+        core: JoinHandle<CoreRun>,
+        cancel: impl Future<Output = ()>,
+    ) -> Option<Result<CoreRun, JoinError>> {
+        tokio::pin!(core, cancel);
+        self.send(0.0, "started").await;
+        let first_beat = tokio::time::Instant::now() + HEARTBEAT;
+        let mut heartbeat = tokio::time::interval_at(first_beat, HEARTBEAT);
+        let mut beats = 0.0_f64;
+        loop {
+            tokio::select! {
+                () = &mut cancel => return None,
+                _ = heartbeat.tick() => {
+                    beats = (beats + 1.0).min(PROGRESS_TOTAL - 1.0);
+                    self.send(beats, "running").await;
+                }
+                joined = &mut core => {
+                    self.send(PROGRESS_TOTAL, "finished").await;
+                    return Some(joined);
+                }
+            }
+        }
+    }
 }
 
 fn open_instance(instance: Option<&str>, run: &mut CoreRun) -> Option<InstanceContext> {

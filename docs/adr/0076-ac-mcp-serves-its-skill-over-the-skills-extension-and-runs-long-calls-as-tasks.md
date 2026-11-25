@@ -19,6 +19,8 @@ timestamp: 2026-11-25T12:00:00Z
 - Only that exact URI is served, from the embedded text; any other `resources/read` or `skills/get` URI is `invalid_params`, and no request argument reaches the filesystem. A `skills/get` without a text `uri` is `invalid_params`, not method-not-found.
 - The catalog reads the skill's `name` and `description` from the two single-line frontmatter fields of the embedded file with a minimal line parse; no YAML dependency is added for a block the project owns and tests.
 - A call becomes a task only when the client declares the tasks extension and the call is `ac_download_attachments` or `ac_write` with `operation` `time_report`; every other call stays synchronous.
+- A task is created through rmcp's `TaskManager`, with no lifetime (rmcp's default drops a running task after five minutes), and the server answers `tasks/get` and `tasks/cancel` from it; an unknown task id is a protocol error. A request's progress token receives a notification when the work starts, one every 5 s while it runs (rising, always below the total of 100) and a final one at the total; the same goes to the token of a task.
+- The command cores cannot be interrupted mid-run. On `tasks/cancel` the task ends `cancelled` at once; the core finishes on its blocking thread, its result is discarded and the files it already wrote stay. Each long tool's description says so in one short sentence, which raised the `tools/list` size bound by about 140 bytes.
 
 ## Alternatives
 
