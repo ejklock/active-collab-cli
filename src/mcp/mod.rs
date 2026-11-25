@@ -11,10 +11,10 @@ use crate::commands::{
 };
 use crate::store::cache::TaskCache;
 use crate::store::instances::InstanceRepository;
-use rmcp::handler::server::common::{schema_for_empty_input, schema_for_input};
 use rmcp::model::{CallToolResult, ContentBlock, JsonObject};
 use rmcp::transport::stdio;
 use rmcp::{tool, tool_router, ErrorData as McpError, ServiceExt};
+use schemars::generate::SchemaSettings;
 use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
@@ -46,8 +46,7 @@ struct AcServer;
 #[tool_router(server_handler)]
 impl AcServer {
     #[tool(
-        description = "Read ActiveCollab data as the `ac ... --json` commands print it. \
-                       Select the command with `operation`.",
+        description = "Read ActiveCollab data as `ac ... --json` prints it.",
         input_schema = input_schema::<ReadOperation>(),
         annotations(read_only_hint = true)
     )]
@@ -57,8 +56,7 @@ impl AcServer {
     }
 
     #[tool(
-        description = "Change ActiveCollab data (post a comment, log time, edit a task, export \
-                       the hours report). Select the command with `operation`.",
+        description = "Change ActiveCollab data.",
         input_schema = input_schema::<WriteOperation>(),
         annotations(destructive_hint = true)
     )]
@@ -69,10 +67,9 @@ impl AcServer {
     }
 
     #[tool(
-        description = "Download the attachments and inline images of one task into a local \
-                       directory and return the task as `ac get --json` prints it, with \
-                       `downloaded_attachments` listing each file's path or error. Writes \
-                       files on the server's machine; it changes nothing in ActiveCollab.",
+        description = "Save a task's attachments and inline images to a directory on the \
+                       server; returns the task as `ac get --json`, plus \
+                       `downloaded_attachments` (each file's path or error).",
         input_schema = input_schema::<DownloadArguments>(),
         annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = true)
     )]
@@ -85,13 +82,47 @@ impl AcServer {
     }
 }
 
-/// The tool's input schema. A tagged enum derives as a top-level `oneOf`,
-/// which Claude's tool API rejects, so the variants are merged into one flat
-/// object (see `flatten_operations`).
+/// The tool's input schema, without what a caller gets no meaning from: the
+/// meta-schema URL, `$defs` indirection, the root's type name and doc, the
+/// numeric `format` and the false default. A tagged enum derives as a
+/// top-level `oneOf`, which Claude's tool API rejects, so the variants are
+/// merged into one flat object (see `flatten_operations`).
 fn input_schema<T: JsonSchema + 'static>() -> Arc<JsonObject> {
-    let mut schema = schema_for_input::<T>().unwrap_or_else(|_| schema_for_empty_input());
-    flatten_operations(Arc::make_mut(&mut schema));
-    schema
+    let settings = SchemaSettings::draft2020_12().with(|settings| {
+        settings.meta_schema = None;
+        settings.inline_subschemas = true;
+    });
+    let root = settings.into_generator().into_root_schema_for::<T>();
+    let mut schema = match serde_json::to_value(root) {
+        Ok(Value::Object(object)) => object,
+        _ => schema_for_empty_object(),
+    };
+    schema.remove("title");
+    schema.remove("description");
+    flatten_operations(&mut schema);
+    strip_noise(&mut schema);
+    Arc::new(schema)
+}
+
+fn schema_for_empty_object() -> JsonObject {
+    let mut object = JsonObject::new();
+    object.insert("type".into(), Value::String("object".into()));
+    object.insert("properties".into(), serde_json::json!({}));
+    object
+}
+
+/// Drop `"format": "double"` and the like (the `type` already says number) and
+/// `"default": false` (an absent flag is off).
+fn strip_noise(schema: &mut JsonObject) {
+    let Some(Value::Object(properties)) = schema.get_mut("properties") else {
+        return;
+    };
+    for field in properties.values_mut().filter_map(Value::as_object_mut) {
+        field.remove("format");
+        if field.get("default") == Some(&Value::Bool(false)) {
+            field.remove("default");
+        }
+    }
 }
 
 /// Rewrite a schema whose root is a `oneOf` of tagged variants into one object:
@@ -105,7 +136,7 @@ fn flatten_operations(schema: &mut JsonObject) {
     };
     let mut operations: Vec<Value> = Vec::new();
     let mut properties = serde_json::Map::new();
-    let mut takers: Vec<(String, Vec<String>)> = Vec::new();
+    let mut takers: Vec<(String, Vec<Taker>)> = Vec::new();
     let mut summaries: Vec<String> = Vec::new();
     for variant in &variants {
         if let Some(name) = variant["properties"]["operation"]["const"].as_str() {
@@ -117,9 +148,14 @@ fn flatten_operations(schema: &mut JsonObject) {
             merge_variant(name, variant, &mut properties, &mut takers);
         }
     }
-    for (field, labels) in takers {
+    for (field, field_takers) in takers {
+        let everyone_takes_it = field_takers.len() == operations.len();
+        let any_requires_it = field_takers.iter().any(|taker| taker.required);
+        if everyone_takes_it && !any_requires_it {
+            continue;
+        }
         if let Some(Value::Object(field_schema)) = properties.get_mut(&field) {
-            annotate_takers(field_schema, &labels);
+            annotate_takers(field_schema, &field_takers);
         }
     }
     let mut flat = serde_json::Map::new();
@@ -128,7 +164,7 @@ fn flatten_operations(schema: &mut JsonObject) {
         serde_json::json!({
             "type": "string",
             "enum": operations,
-            "description": format!("The command to run. {}", summaries.join(" "))
+            "description": summaries.join(" ")
         }),
     );
     flat.extend(properties);
@@ -145,7 +181,7 @@ fn merge_variant(
     name: &str,
     variant: &Value,
     properties: &mut serde_json::Map<String, Value>,
-    takers: &mut Vec<(String, Vec<String>)>,
+    takers: &mut Vec<(String, Vec<Taker>)>,
 ) {
     let required: Vec<&str> = variant["required"]
         .as_array()
@@ -160,20 +196,43 @@ fn merge_variant(
             published, field_schema,
             "operation {name} declares field {field} differently from an earlier operation"
         );
-        let label = if required.contains(&field.as_str()) {
-            format!("{name} (required)")
-        } else {
-            name.to_owned()
+        let taker = Taker {
+            operation: name.to_owned(),
+            required: required.contains(&field.as_str()),
         };
         match takers.iter_mut().find(|(taken, _)| taken == field) {
-            Some((_, labels)) => labels.push(label),
-            None => takers.push((field.clone(), vec![label])),
+            Some((_, field_takers)) => field_takers.push(taker),
+            None => takers.push((field.clone(), vec![taker])),
         }
     }
 }
 
-fn annotate_takers(field_schema: &mut serde_json::Map<String, Value>, labels: &[String]) {
-    let note = format!("Taken by: {}.", labels.join(", "));
+/// An operation that takes a field, and whether it requires it.
+struct Taker {
+    operation: String,
+    required: bool,
+}
+
+/// Name the operations that take a field in a trailing parenthesis, marking
+/// the ones that require it: all of them, or the listed ones.
+fn annotate_takers(field_schema: &mut serde_json::Map<String, Value>, takers: &[Taker]) {
+    let names: Vec<&str> = takers
+        .iter()
+        .map(|taker| taker.operation.as_str())
+        .collect();
+    let required: Vec<&str> = takers
+        .iter()
+        .filter(|taker| taker.required)
+        .map(|taker| taker.operation.as_str())
+        .collect();
+    let marker = if required.is_empty() {
+        String::new()
+    } else if required.len() == names.len() {
+        "; required".to_owned()
+    } else {
+        format!("; required: {}", required.join(", "))
+    };
+    let note = format!("({}{marker})", names.join(", "));
     let text = match field_schema.get("description").and_then(Value::as_str) {
         Some(doc) => format!("{doc} {note}"),
         None => note,
@@ -209,9 +268,9 @@ enum ReadOperation {
         refresh: bool,
         instance: Option<String>,
     },
-    /// Fetch the task of a git branch named like feature/PROJECT_ID-TASK_ID.
+    /// Fetch the task of a git branch named feature/PROJECT_ID-TASK_ID.
     Current {
-        /// Defaults to the git branch of the server's working directory.
+        /// Defaults to the server's git branch.
         branch: Option<String>,
         instance: Option<String>,
     },
@@ -226,10 +285,9 @@ struct DownloadArguments {
     /// Task URL or PROJECT_ID/TASK_ID.
     #[serde(rename = "ref")]
     task_ref: String,
-    /// Destination directory; defaults to a per-task directory under the OS
-    /// temp directory.
+    /// Destination directory; defaults to a per-task one in the OS temp directory.
     attachments_dir: Option<String>,
-    /// Needed only when several instances are configured.
+    /// Only when several instances are configured.
     instance: Option<String>,
 }
 
@@ -246,7 +304,7 @@ enum WriteOperation {
         #[serde(rename = "ref")]
         task_ref: String,
         body: String,
-        /// Post `body` as HTML unchanged instead of encoding plain text.
+        /// Post `body` as raw HTML.
         #[serde(default)]
         html: bool,
         instance: Option<String>,
@@ -256,12 +314,12 @@ enum WriteOperation {
         /// Task URL or PROJECT_ID/TASK_ID.
         #[serde(rename = "ref")]
         task_ref: String,
-        /// Positive number of hours.
+        /// Positive hours.
         hours: f64,
         /// YYYY-MM-DD, defaults to today.
         date: Option<String>,
         summary: Option<String>,
-        /// Job type id or name, defaults to the instance default.
+        /// Job type id or name; defaults to the instance's.
         job_type: Option<String>,
         instance: Option<String>,
     },
@@ -272,17 +330,17 @@ enum WriteOperation {
         task_ref: String,
         /// open or completed.
         status: Option<String>,
-        /// A numeric user id or a name.
+        /// User id or name.
         assignee: Option<String>,
-        /// Hours, zero or positive.
+        /// Hours, zero or more.
         estimate: Option<f64>,
-        /// A numeric task list id or a task list name of the task's project.
+        /// Task list id or name in the task's project.
         list: Option<String>,
         instance: Option<String>,
     },
-    /// Write your hours report to a file in the server's working directory.
+    /// Write your hours report to a file in the server's cwd.
     TimeReport {
-        /// A preset period; give it or both `start` and `end`.
+        /// Preset period; or give `start` and `end`.
         period: Option<ReportPeriodArg>,
         /// DD-MM-YYYY.
         start: Option<String>,

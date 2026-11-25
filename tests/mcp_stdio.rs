@@ -202,9 +202,11 @@ async fn operation_tools_publish_exactly_the_fields_their_operations_take() {
             let description = schema["properties"][field]["description"]
                 .as_str()
                 .unwrap_or_default();
-            assert!(
-                description.contains("Taken by:"),
-                "{} {field} does not say which operations take it: {schema}",
+            let taken_by_every_operation = field == "instance";
+            assert_eq!(
+                description.ends_with(')'),
+                !taken_by_every_operation,
+                "{} {field} names the operations that take it exactly when not all do: {schema}",
                 tool.name
             );
         }
@@ -258,19 +260,17 @@ async fn field_descriptions_name_exactly_the_operations_that_take_each_field() {
 
     assert_eq!(
         description_of(&write, "ref"),
-        "Task URL or PROJECT_ID/TASK_ID. Taken by: comment (required), log_time (required), set_task (required)."
+        "Task URL or PROJECT_ID/TASK_ID. (comment, log_time, set_task; required)"
     );
-    assert_eq!(
-        description_of(&write, "instance"),
-        "Taken by: comment, log_time, set_task, time_report."
-    );
+    assert!(write["properties"]["instance"].get("description").is_none());
+    assert!(read["properties"]["instance"].get("description").is_none());
     assert_eq!(
         description_of(&read, "ref"),
-        "Task URL or PROJECT_ID/TASK_ID. Taken by: get (required)."
+        "Task URL or PROJECT_ID/TASK_ID. (get; required)"
     );
     assert_eq!(
         description_of(&write, "hours"),
-        "Positive number of hours. Taken by: log_time (required)."
+        "Positive hours. (log_time; required)"
     );
     client.cancel().await.unwrap();
 }
@@ -916,4 +916,22 @@ async fn stdout_carries_only_protocol_frames() {
         let frame: Value = serde_json::from_str(&line).unwrap();
         assert_eq!(frame["jsonrpc"], "2.0", "not a JSON-RPC frame: {line}");
     }
+}
+
+/// Upper bound on the compact JSON size of the `tools/list` result, which a
+/// client pays in context on every session. Set from the measured size of the
+/// trimmed list, rounded up by under 1%.
+const MAX_TOOLS_LIST_BYTES: usize = 3460;
+
+#[tokio::test(flavor = "multi_thread")]
+async fn tools_list_stays_within_its_size_bound() {
+    let env = Env::new(&[]);
+    let client = env.connect().await;
+    let tools = client.list_all_tools().await.unwrap();
+    let size = serde_json::to_string(&tools).unwrap().len();
+    assert!(
+        size <= MAX_TOOLS_LIST_BYTES,
+        "tools list is {size} bytes, bound is {MAX_TOOLS_LIST_BYTES}"
+    );
+    client.cancel().await.unwrap();
 }
