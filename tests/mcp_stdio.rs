@@ -1,4 +1,8 @@
-use rmcp::model::{CallToolRequestParams, CallToolResult, ErrorCode, Tool};
+use rmcp::model::{
+    CallToolRequestParams, CallToolResult, ClientRequest, CustomRequest, ErrorCode,
+    GetSkillRequestParams, ReadResourceRequestParams, ResourceContents, Tool, SKILLS_EXTENSION_ID,
+    TASKS_EXTENSION_ID,
+};
 use rmcp::service::{RoleClient, RunningService, ServiceError};
 use rmcp::transport::{ConfigureCommandExt, TokioChildProcess};
 use rmcp::ServiceExt;
@@ -202,9 +206,11 @@ async fn operation_tools_publish_exactly_the_fields_their_operations_take() {
             let description = schema["properties"][field]["description"]
                 .as_str()
                 .unwrap_or_default();
-            assert!(
-                description.contains("Taken by:"),
-                "{} {field} does not say which operations take it: {schema}",
+            let taken_by_every_operation = field == "instance";
+            assert_eq!(
+                description.ends_with(')'),
+                !taken_by_every_operation,
+                "{} {field} names the operations that take it exactly when not all do: {schema}",
                 tool.name
             );
         }
@@ -258,19 +264,17 @@ async fn field_descriptions_name_exactly_the_operations_that_take_each_field() {
 
     assert_eq!(
         description_of(&write, "ref"),
-        "Task URL or PROJECT_ID/TASK_ID. Taken by: comment (required), log_time (required), set_task (required)."
+        "Task URL or PROJECT_ID/TASK_ID. (comment, log_time, set_task; required)"
     );
-    assert_eq!(
-        description_of(&write, "instance"),
-        "Taken by: comment, log_time, set_task, time_report."
-    );
+    assert!(write["properties"]["instance"].get("description").is_none());
+    assert!(read["properties"]["instance"].get("description").is_none());
     assert_eq!(
         description_of(&read, "ref"),
-        "Task URL or PROJECT_ID/TASK_ID. Taken by: get (required)."
+        "Task URL or PROJECT_ID/TASK_ID. (get; required)"
     );
     assert_eq!(
         description_of(&write, "hours"),
-        "Positive number of hours. Taken by: log_time (required)."
+        "Positive hours. (log_time; required)"
     );
     client.cancel().await.unwrap();
 }
@@ -788,6 +792,14 @@ struct RawSession {
 
 impl RawSession {
     fn start(env: &Env) -> RawSession {
+        RawSession::start_declaring(env, json!({}))
+    }
+
+    fn start_declaring_tasks(env: &Env) -> RawSession {
+        RawSession::start_declaring(env, json!({ "extensions": { TASKS_EXTENSION_ID: {} } }))
+    }
+
+    fn start_declaring(env: &Env, capabilities: Value) -> RawSession {
         let mut child = env
             .command()
             .arg("mcp")
@@ -809,7 +821,7 @@ impl RawSession {
             "initialize",
             json!({
                 "protocolVersion": "2025-06-18",
-                "capabilities": {},
+                "capabilities": capabilities,
                 "clientInfo": { "name": "raw-test", "version": "0" }
             }),
         );
@@ -846,6 +858,48 @@ impl RawSession {
 
     fn tool(&mut self, name: &str, args: Value) -> Value {
         self.request("tools/call", json!({ "name": name, "arguments": args }))
+    }
+
+    fn tool_with_progress(&mut self, name: &str, args: Value, token: &str) -> Value {
+        self.request(
+            "tools/call",
+            json!({ "name": name, "arguments": args, "_meta": { "progressToken": token } }),
+        )
+    }
+
+    fn task_state(&mut self, task: &str) -> Value {
+        self.request("tasks/get", json!({ "taskId": task }))
+    }
+
+    /// Polls `tasks/get` until the task leaves `working`; returns its last state.
+    fn task_terminal(&mut self, task: &str) -> Value {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        loop {
+            let state = self.task_state(task);
+            assert!(state["error"].is_null(), "tasks/get failed: {state}");
+            if state["result"]["status"] != "working" {
+                return state["result"].clone();
+            }
+            assert!(std::time::Instant::now() < deadline, "task never ended");
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+    }
+
+    fn progress_for(&self, token: &str) -> Vec<Value> {
+        self.lines
+            .iter()
+            .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+            .filter(|frame| frame["method"] == "notifications/progress")
+            .map(|frame| frame["params"].clone())
+            .filter(|params| params["progressToken"] == json!(token))
+            .collect()
+    }
+
+    /// Ends the server without waiting for a call that is still running on its thread.
+    fn kill(mut self) {
+        drop(self.stdin.take());
+        self.child.kill().unwrap();
+        self.child.wait().unwrap();
     }
 
     fn finish(mut self) -> Vec<String> {
@@ -916,4 +970,353 @@ async fn stdout_carries_only_protocol_frames() {
         let frame: Value = serde_json::from_str(&line).unwrap();
         assert_eq!(frame["jsonrpc"], "2.0", "not a JSON-RPC frame: {line}");
     }
+}
+
+fn text_in(result: &Value) -> String {
+    result["content"]
+        .as_array()
+        .unwrap_or_else(|| panic!("not a tool result: {result}"))
+        .iter()
+        .filter_map(|block| block["text"].as_str())
+        .collect()
+}
+
+/// The id of the task a call answered with; the answer must be a task, not a result.
+fn task_id_of(response: &Value) -> String {
+    let result = &response["result"];
+    assert_eq!(result["resultType"], "task", "not a task: {response}");
+    result["taskId"].as_str().expect("a task id").to_owned()
+}
+
+/// Serves the first attachment of `task` after `delay`, ahead of the ordinary route.
+async fn mount_slow_attachment(server: &MockServer, task: &SeedTask, delay: std::time::Duration) {
+    let file = &task.attachments[0];
+    Mock::given(method("GET"))
+        .and(path(format!("/files/{}", file.name)))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_bytes(file.bytes.unwrap())
+                .set_delay(delay),
+        )
+        .with_priority(1)
+        .mount(server)
+        .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn long_calls_declared_as_tasks_complete_with_the_synchronous_result() {
+    let server = MockServer::start().await;
+    let task = offsite_task();
+    let target = reference(&task);
+    mount_seeded(&server, &Fixture::seeded()).await;
+    let env = Env::new(&[("alpha", &server, Fixture::seeded().user_id)]);
+    let dest = env.dir.path().join("downloads");
+    let download = json!({ "ref": target, "attachments_dir": dest.to_str().unwrap() });
+    let report = json!({ "operation": "time_report", "start": "01-11-2026", "end": "02-11-2026", "format": "csv" });
+
+    let mut plain = RawSession::start(&env);
+    let sync_download = text_in(&plain.tool("ac_download_attachments", download.clone())["result"]);
+    let sync_report = text_in(&plain.tool("ac_write", report.clone())["result"]);
+    plain.finish();
+    std::fs::remove_dir_all(&dest).unwrap();
+
+    let mut session = RawSession::start_declaring_tasks(&env);
+    let response = session.tool("ac_download_attachments", download);
+    let id = task_id_of(&response);
+    let state = session.task_terminal(&id);
+    assert_eq!(state["status"], "completed", "{state}");
+    assert_eq!(text_in(&state["result"]), sync_download);
+    let good = &task.attachments[0];
+    assert_eq!(
+        std::fs::read(dest.join(good.name)).unwrap(),
+        good.bytes.unwrap()
+    );
+
+    let response = session.tool("ac_write", report);
+    let id = task_id_of(&response);
+    let state = session.task_terminal(&id);
+    assert_eq!(state["status"], "completed", "{state}");
+    assert_eq!(text_in(&state["result"]), sync_report);
+    let written = sync_report
+        .strip_prefix("Hours report written to ")
+        .and_then(|rest| rest.split(" (").next())
+        .unwrap_or_else(|| panic!("unexpected report text: {sync_report}"));
+    assert!(Path::new(written).starts_with(env.dir.path()), "{written}");
+    assert!(Path::new(written).exists(), "{written}");
+
+    let get = session.tool(
+        "ac_read",
+        json!({ "operation": "get", "ref": reference(&report_task()) }),
+    );
+    assert_ne!(get["result"]["resultType"], "task", "{get}");
+    assert!(text_in(&get["result"]).contains(COMMENT_TEXT), "{get}");
+    let comment = session.tool(
+        "ac_write",
+        json!({ "operation": "comment", "ref": reference(&report_task()), "body": "hi" }),
+    );
+    assert_ne!(comment["result"]["resultType"], "task", "{comment}");
+    assert_ne!(comment["result"]["isError"], json!(true), "{comment}");
+    session.finish();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn without_the_tasks_extension_long_calls_answer_in_the_call_and_a_failing_task_ends_as_the_same_error(
+) {
+    let server = MockServer::start().await;
+    let task = offsite_task();
+    let target = reference(&task);
+    mount_seeded(&server, &Fixture::seeded()).await;
+    mount_status(&server, "/api/v1/projects/10/tasks/500", 500).await;
+    let env = Env::new(&[("alpha", &server, Fixture::seeded().user_id)]);
+
+    let mut plain = RawSession::start(&env);
+    let download = plain.tool("ac_download_attachments", json!({ "ref": target }));
+    assert_ne!(download["result"]["resultType"], "task", "{download}");
+    assert!(
+        text_in(&download["result"]).contains(task.name),
+        "{download}"
+    );
+    let report = plain.tool(
+        "ac_write",
+        json!({ "operation": "time_report", "start": "01-11-2026", "end": "02-11-2026" }),
+    );
+    assert_ne!(report["result"]["resultType"], "task", "{report}");
+    assert!(text_in(&report["result"]).starts_with("Hours report written to "));
+    let failing = json!({ "ref": "10/500" });
+    let sync_failure = plain.tool("ac_download_attachments", failing.clone());
+    assert_eq!(
+        sync_failure["result"]["isError"],
+        json!(true),
+        "{sync_failure}"
+    );
+    plain.finish();
+
+    let mut session = RawSession::start_declaring_tasks(&env);
+    let response = session.tool("ac_download_attachments", failing);
+    let id = task_id_of(&response);
+    let state = session.task_terminal(&id);
+    assert_eq!(state["status"], "completed", "{state}");
+    assert_eq!(state["result"]["isError"], json!(true), "{state}");
+    assert_eq!(text_in(&state["result"]), text_in(&sync_failure["result"]));
+    assert!(text_in(&state["result"]).contains("HTTP 500"), "{state}");
+    session.finish();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn cancelling_a_running_task_ends_it_cancelled_and_unknown_task_ids_are_protocol_errors() {
+    let server = MockServer::start().await;
+    let task = offsite_task();
+    mount_seeded(&server, &Fixture::seeded()).await;
+    mount_slow_attachment(&server, &task, std::time::Duration::from_secs(4)).await;
+    let env = Env::new(&[("alpha", &server, Fixture::seeded().user_id)]);
+    let mut session = RawSession::start_declaring_tasks(&env);
+
+    let response = session.tool(
+        "ac_download_attachments",
+        json!({ "ref": reference(&task) }),
+    );
+    let id = task_id_of(&response);
+    assert_eq!(session.task_state(&id)["result"]["status"], "working");
+    let cancelled_at = std::time::Instant::now();
+    let ack = session.request("tasks/cancel", json!({ "taskId": id }));
+    assert!(ack["error"].is_null(), "{ack}");
+    let state = session.task_terminal(&id);
+    assert_eq!(state["status"], "cancelled", "{state}");
+    assert!(
+        cancelled_at.elapsed() < std::time::Duration::from_secs(2),
+        "cancelled after {:?}",
+        cancelled_at.elapsed()
+    );
+
+    for method in ["tasks/get", "tasks/cancel"] {
+        let response = session.request(method, json!({ "taskId": "no-such-task" }));
+        assert!(response["result"].is_null(), "{method}: {response}");
+        assert!(response["error"]["code"].is_i64(), "{method}: {response}");
+    }
+    session.kill();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_long_task_call_with_a_progress_token_reports_progress_below_its_total_until_it_ends() {
+    let server = MockServer::start().await;
+    let task = offsite_task();
+    mount_seeded(&server, &Fixture::seeded()).await;
+    mount_slow_attachment(&server, &task, std::time::Duration::from_millis(5600)).await;
+    let env = Env::new(&[("alpha", &server, Fixture::seeded().user_id)]);
+
+    let mut plain = RawSession::start(&env);
+    let answered = plain.tool_with_progress(
+        "ac_download_attachments",
+        json!({ "ref": reference(&task) }),
+        "sync-token",
+    );
+    assert_ne!(answered["result"]["isError"], json!(true), "{answered}");
+    let reported = plain.progress_for("sync-token");
+    assert!(reported.len() >= 3, "{reported:?}");
+    let progress: Vec<f64> = reported
+        .iter()
+        .map(|p| p["progress"].as_f64().unwrap())
+        .collect();
+    let totals: Vec<f64> = reported
+        .iter()
+        .map(|p| p["total"].as_f64().unwrap())
+        .collect();
+    assert!(
+        progress.windows(2).all(|pair| pair[0] < pair[1]),
+        "{progress:?}"
+    );
+    assert!(
+        progress.iter().zip(&totals).all(|(p, t)| p <= t),
+        "{reported:?}"
+    );
+    assert_eq!(progress[1], 50.0, "first heartbeat: {progress:?}");
+    let running = progress.len() - 1;
+    assert!(
+        progress[..running].iter().zip(&totals).all(|(p, t)| p < t),
+        "{reported:?}"
+    );
+    plain.finish();
+
+    let mut session = RawSession::start_declaring_tasks(&env);
+    let response = session.tool_with_progress(
+        "ac_download_attachments",
+        json!({ "ref": reference(&task) }),
+        "task-token",
+    );
+    let id = task_id_of(&response);
+    let state = session.task_terminal(&id);
+    assert_eq!(state["status"], "completed", "{state}");
+    let reported = session.progress_for("task-token");
+    assert!(reported.len() >= 2, "{reported:?}");
+    session.finish();
+}
+
+/// Upper bound on the compact JSON size of the `tools/list` result, which a
+/// client pays in context on every session. Set from the measured size of the
+/// trimmed list, rounded up by under 1%; it includes the one sentence on each
+/// long-call tool that says what cancelling a task does.
+const MAX_TOOLS_LIST_BYTES: usize = 3600;
+
+#[tokio::test(flavor = "multi_thread")]
+async fn tools_list_stays_within_its_size_bound() {
+    let env = Env::new(&[]);
+    let client = env.connect().await;
+    let tools = client.list_all_tools().await.unwrap();
+    let size = serde_json::to_string(&tools).unwrap().len();
+    assert!(
+        size <= MAX_TOOLS_LIST_BYTES,
+        "tools list is {size} bytes, bound is {MAX_TOOLS_LIST_BYTES}"
+    );
+    client.cancel().await.unwrap();
+}
+
+const SKILL_URI: &str = "skill://active-collab/SKILL.md";
+const SKILL_TEXT: &str = include_str!("../.claude/skills/active-collab/SKILL.md");
+
+fn skill_description() -> &'static str {
+    SKILL_TEXT
+        .lines()
+        .find_map(|line| line.strip_prefix("description: "))
+        .expect("the skill frontmatter has a description")
+}
+
+fn protocol_code(error: ServiceError) -> ErrorCode {
+    match error {
+        ServiceError::McpError(data) => data.code,
+        other => panic!("expected a protocol error, got {other:?}"),
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn skill_is_declared_listed_read_and_fetched() {
+    let env = Env::new(&[]);
+    let client = env.connect().await;
+
+    let info = client.peer_info().expect("the server answered initialize");
+    assert!(info.capabilities.tools.is_some(), "{:?}", info.capabilities);
+    assert!(
+        info.capabilities.resources.is_some(),
+        "{:?}",
+        info.capabilities
+    );
+    assert!(
+        info.capabilities
+            .extensions
+            .as_ref()
+            .is_some_and(|extensions| extensions.contains_key(SKILLS_EXTENSION_ID)),
+        "{:?}",
+        info.capabilities
+    );
+    let instructions = info.instructions.as_deref().expect("instructions are set");
+    assert!(instructions.contains(SKILL_URI), "{instructions}");
+
+    let resources = client.list_all_resources().await.unwrap();
+    assert_eq!(resources.len(), 1, "{resources:?}");
+    assert_eq!(resources[0].uri, SKILL_URI);
+    assert_eq!(resources[0].mime_type.as_deref(), Some("text/markdown"));
+    assert_eq!(resources[0].name, "active-collab");
+
+    let read = client
+        .read_resource(ReadResourceRequestParams::new(SKILL_URI))
+        .await
+        .unwrap();
+    let [ResourceContents::TextResourceContents { text, .. }] = read.contents.as_slice() else {
+        panic!("expected one text content, got {:?}", read.contents);
+    };
+    assert_eq!(text, SKILL_TEXT);
+
+    let skills = client.list_all_skills().await.unwrap();
+    assert_eq!(skills.len(), 1, "{skills:?}");
+    assert_eq!(skills[0].uri, SKILL_URI);
+    assert_eq!(skills[0].frontmatter.name, "active-collab");
+    assert_eq!(skills[0].frontmatter.description, skill_description());
+
+    let got = client
+        .get_skill(GetSkillRequestParams::new(SKILL_URI))
+        .await
+        .unwrap();
+    assert_eq!(got.skill.uri, SKILL_URI);
+    assert_eq!(got.skill.frontmatter.name, "active-collab");
+    client.cancel().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn skill_requests_for_anything_else_are_invalid_params_and_tools_keep_working() {
+    let env = Env::new(&[]);
+    let client = env.connect().await;
+
+    for uri in [
+        "skill://active-collab/OTHER.md",
+        "skill://other/SKILL.md",
+        "file:///etc/passwd",
+        "skill://active-collab/../SKILL.md",
+    ] {
+        let error = client
+            .read_resource(ReadResourceRequestParams::new(uri))
+            .await
+            .expect_err(uri);
+        assert_eq!(protocol_code(error), ErrorCode::INVALID_PARAMS, "{uri}");
+    }
+    let error = client
+        .get_skill(GetSkillRequestParams::new("skill://other/SKILL.md"))
+        .await
+        .expect_err("unknown skill");
+    assert_eq!(protocol_code(error), ErrorCode::INVALID_PARAMS);
+
+    let missing_uri =
+        ClientRequest::CustomRequest(CustomRequest::new("skills/get", Some(json!({}))));
+    let error = client
+        .send_request(missing_uri)
+        .await
+        .expect_err("skills/get without a uri");
+    assert_eq!(protocol_code(error), ErrorCode::INVALID_PARAMS);
+
+    let result = call(&client, "ac_read", json!({"operation": "mine"}))
+        .await
+        .unwrap();
+    assert!(
+        result.content.iter().any(|block| block.as_text().is_some()),
+        "{result:?}"
+    );
+    client.cancel().await.unwrap();
 }

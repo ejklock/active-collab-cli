@@ -1,4 +1,5 @@
-//! MCP server over stdio. Two tools, `ac_read` and `ac_write`, select a
+//! MCP server over stdio. It serves the `active-collab` skill as a resource and over the skills
+//! extension (see `skills`). Two tools, `ac_read` and `ac_write`, select a
 //! command core by `operation` and return the core's `--json` output, so the
 //! agent contract stays the one in `agent_json`; a third, `ac_download_attachments`,
 //! saves a task's attachments to disk. While the server runs, stdout
@@ -11,27 +12,53 @@ use crate::commands::{
 };
 use crate::store::cache::TaskCache;
 use crate::store::instances::InstanceRepository;
-use rmcp::handler::server::common::{schema_for_empty_input, schema_for_input};
-use rmcp::model::{CallToolResult, ContentBlock, JsonObject};
+use rmcp::handler::server::tool::{ToolCallContext, ToolRouter};
+use rmcp::model::{
+    CallToolRequestParams, CallToolResponse, CallToolResult, CancelTaskParams, ConstString,
+    ContentBlock, CreateTaskResult, CustomRequest, CustomResult, ErrorCode, GetSkillRequestMethod,
+    GetSkillRequestParams, GetSkillResult, GetTaskParams, GetTaskResult, Implementation,
+    JsonObject, ListResourcesResult, ListSkillsResult, ListToolsResult, PaginatedRequestParams,
+    ProgressNotificationParam, ProgressToken, ReadResourceRequestParams, ReadResourceResponse,
+    ReadResourceResult, ResourceContents, ServerCapabilities, ServerConfig, Tool,
+};
+use rmcp::service::RequestContext;
+use rmcp::task_manager::{TaskExit, TaskManager, TaskOptions};
 use rmcp::transport::stdio;
-use rmcp::{tool, tool_router, ErrorData as McpError, ServiceExt};
+use rmcp::{tool, tool_router, ErrorData as McpError, Peer, RoleServer, ServerHandler, ServiceExt};
+use schemars::generate::SchemaSettings;
 use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde_json::Value;
 use std::future::Future;
 use std::sync::Arc;
+use std::time::Duration;
+use tokio::task::{JoinError, JoinHandle};
+
+mod skills;
+use skills::SkillCatalog;
 
 /// Serve MCP on stdin/stdout until the client closes the connection.
 pub(crate) async fn serve() -> i32 {
-    let running = match AcServer.serve(stdio()).await {
+    let skills = match SkillCatalog::embedded() {
+        Ok(skills) => skills,
+        Err(e) => {
+            eprintln!("Error starting MCP server: {e}");
+            return 1;
+        }
+    };
+    let server = AcServer::new(skills);
+    let tasks = server.tasks.clone();
+    let running = match server.serve(stdio()).await {
         Ok(running) => running,
         Err(e) => {
             eprintln!("Error starting MCP server: {e}");
             return 1;
         }
     };
-    match running.waiting().await {
+    let ended = running.waiting().await;
+    tasks.shutdown();
+    match ended {
         Ok(_) => 0,
         Err(e) => {
             eprintln!("Error serving MCP: {e}");
@@ -40,14 +67,35 @@ pub(crate) async fn serve() -> i32 {
     }
 }
 
-#[derive(Clone, Copy)]
-struct AcServer;
+/// How often a client is told to poll a task. A task is created with no lifetime (rmcp would
+/// drop a running task after five minutes): it lives until the server exits.
+const TASK_POLL_INTERVAL_MS: u64 = 1_000;
 
-#[tool_router(server_handler)]
+/// How often a long call reports that it is still running.
+const HEARTBEAT: Duration = Duration::from_secs(5);
+
+/// The `total` of every progress notification: a running call stays below it, the finished
+/// call reaches it.
+const PROGRESS_TOTAL: f64 = 100.0;
+
+struct AcServer {
+    router: ToolRouter<AcServer>,
+    skills: SkillCatalog,
+    tasks: TaskManager,
+}
+
+#[tool_router]
 impl AcServer {
+    fn new(skills: SkillCatalog) -> Self {
+        Self {
+            router: Self::tool_router(),
+            skills,
+            tasks: TaskManager::new(),
+        }
+    }
+
     #[tool(
-        description = "Read ActiveCollab data as the `ac ... --json` commands print it. \
-                       Select the command with `operation`.",
+        description = "Read ActiveCollab data as `ac ... --json` prints it.",
         input_schema = input_schema::<ReadOperation>(),
         annotations(read_only_hint = true)
     )]
@@ -57,41 +105,257 @@ impl AcServer {
     }
 
     #[tool(
-        description = "Change ActiveCollab data (post a comment, log time, edit a task, export \
-                       the hours report). Select the command with `operation`.",
+        description = "Change ActiveCollab data. A cancelled `time_report` task drops its \
+                       result; the file stays.",
         input_schema = input_schema::<WriteOperation>(),
         annotations(destructive_hint = true)
     )]
-    async fn ac_write(&self, arguments: JsonObject) -> Result<CallToolResult, McpError> {
+    async fn ac_write(
+        &self,
+        arguments: JsonObject,
+        context: RequestContext<RoleServer>,
+    ) -> Result<CallToolResponse, McpError> {
         let operation: WriteOperation = parse_operation(arguments)?;
         let period = operation.report_period()?;
-        run_isolated(move || run_write(operation, period)).await
+        let long = matches!(operation, WriteOperation::TimeReport { .. });
+        let work = move || run_write(operation, period);
+        if long {
+            return self.run_long(context, work).await;
+        }
+        run_isolated(work).await.map(Into::into)
     }
 
     #[tool(
-        description = "Download the attachments and inline images of one task into a local \
-                       directory and return the task as `ac get --json` prints it, with \
-                       `downloaded_attachments` listing each file's path or error. Writes \
-                       files on the server's machine; it changes nothing in ActiveCollab.",
+        description = "Save a task's attachments and inline images to a directory on the \
+                       server; returns the task as `ac get --json`, plus \
+                       `downloaded_attachments` (each file's path or error). A cancelled task \
+                       drops the result; saved files stay.",
         input_schema = input_schema::<DownloadArguments>(),
         annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = true)
     )]
     async fn ac_download_attachments(
         &self,
         arguments: JsonObject,
-    ) -> Result<CallToolResult, McpError> {
+        context: RequestContext<RoleServer>,
+    ) -> Result<CallToolResponse, McpError> {
         let arguments: DownloadArguments = parse_operation(arguments)?;
-        run_isolated(move || run_download(arguments)).await
+        self.run_long(context, move || run_download(arguments))
+            .await
     }
 }
 
-/// The tool's input schema. A tagged enum derives as a top-level `oneOf`,
-/// which Claude's tool API rejects, so the variants are merged into one flat
-/// object (see `flatten_operations`).
+impl AcServer {
+    /// Runs a long call. A client that declared the tasks extension gets a task at once and the
+    /// call finishes behind it; any other client waits for the result. Either way a progress
+    /// token receives the start, a heartbeat while it runs and the end.
+    async fn run_long<F, Fut>(
+        &self,
+        context: RequestContext<RoleServer>,
+        make: F,
+    ) -> Result<CallToolResponse, McpError>
+    where
+        F: FnOnce() -> Fut + Send + 'static,
+        Fut: Future<Output = CoreRun>,
+    {
+        let progress = Progress {
+            peer: context.peer.clone(),
+            token: context.meta.get_progress_token(),
+        };
+        let declared_tasks = context
+            .client_capabilities()
+            .is_some_and(|capabilities| capabilities.supports_tasks());
+        if !declared_tasks {
+            let joined = progress
+                .follow(spawn_core(make), std::future::pending())
+                .await;
+            return match joined {
+                Some(Ok(run)) => Ok(run.into_result().into()),
+                Some(Err(e)) => Err(join_failure(&e)),
+                None => Err(McpError::internal_error("tool call was cancelled", None)),
+            };
+        }
+        let options = TaskOptions::new()
+            .with_poll_interval_ms(TASK_POLL_INTERVAL_MS)
+            .with_ttl_ms(None);
+        let task = self.tasks.spawn(options, move |task| {
+            Box::pin(async move {
+                match progress.follow(spawn_core(make), task.cancelled()).await {
+                    Some(Ok(run)) => Ok(run.into_result()),
+                    Some(Err(e)) => Err(TaskExit::Error(join_failure(&e))),
+                    None => Err(TaskExit::Cancelled),
+                }
+            })
+        });
+        Ok(CallToolResponse::Task(CreateTaskResult::new(task)))
+    }
+}
+
+impl ServerHandler for AcServer {
+    fn get_info(&self) -> ServerConfig {
+        let instructions = format!(
+            "Read the resource {} before you use the tools; they mirror the `ac … --json` commands.",
+            self.skills.uri()
+        );
+        ServerConfig::new(
+            ServerCapabilities::builder()
+                .enable_tools()
+                .enable_tasks()
+                .enable_resources()
+                .enable_skills()
+                .build(),
+        )
+        .with_server_info(Implementation::new("ac", env!("CARGO_PKG_VERSION")))
+        .with_instructions(instructions)
+    }
+
+    async fn call_tool(
+        &self,
+        request: CallToolRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<CallToolResponse, McpError> {
+        self.router
+            .call(ToolCallContext::new(self, request, context))
+            .await
+    }
+
+    async fn list_tools(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListToolsResult, McpError> {
+        Ok(ListToolsResult::with_all_items(self.router.list_all()))
+    }
+
+    fn get_tool(&self, name: &str) -> Option<Tool> {
+        self.router.get(name).cloned()
+    }
+
+    async fn list_resources(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListResourcesResult, McpError> {
+        Ok(ListResourcesResult::with_all_items(self.skills.resources()))
+    }
+
+    async fn read_resource(
+        &self,
+        request: ReadResourceRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ReadResourceResponse, McpError> {
+        let text = self.skills.read(&request.uri).ok_or_else(|| {
+            McpError::invalid_params(format!("no such resource: {}", request.uri), None)
+        })?;
+        Ok(
+            ReadResourceResult::new(vec![ResourceContents::TextResourceContents {
+                uri: request.uri,
+                mime_type: Some("text/markdown".to_string()),
+                text: text.to_string(),
+                meta: None,
+            }])
+            .into(),
+        )
+    }
+
+    async fn list_skills(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListSkillsResult, McpError> {
+        Ok(ListSkillsResult::with_all_items(self.skills.skills()))
+    }
+
+    async fn get_skill(
+        &self,
+        request: GetSkillRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<GetSkillResult, McpError> {
+        let skill = self.skills.skill(&request.uri).ok_or_else(|| {
+            McpError::invalid_params(format!("no such skill: {}", request.uri), None)
+        })?;
+        Ok(GetSkillResult::new(skill.clone()))
+    }
+
+    async fn get_task(
+        &self,
+        request: GetTaskParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<GetTaskResult, McpError> {
+        self.tasks
+            .get_task(&request.task_id)
+            .map(GetTaskResult::new)
+    }
+
+    async fn cancel_task(
+        &self,
+        request: CancelTaskParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<(), McpError> {
+        self.tasks.cancel_task(&request.task_id)
+    }
+
+    /// A `skills/get` whose parameters did not parse (no `uri`, or one that is not text) reaches
+    /// here instead of `get_skill`; it is a malformed request, not an unknown method.
+    async fn on_custom_request(
+        &self,
+        request: CustomRequest,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<CustomResult, McpError> {
+        if request.method == GetSkillRequestMethod::VALUE {
+            return Err(McpError::invalid_params(
+                "skills/get needs a text `uri`",
+                None,
+            ));
+        }
+        Err(McpError::new(
+            ErrorCode::METHOD_NOT_FOUND,
+            request.method,
+            None,
+        ))
+    }
+}
+
+/// The tool's input schema, without what a caller gets no meaning from: the
+/// meta-schema URL, `$defs` indirection, the root's type name and doc, the
+/// numeric `format` and the false default. A tagged enum derives as a
+/// top-level `oneOf`, which Claude's tool API rejects, so the variants are
+/// merged into one flat object (see `flatten_operations`).
 fn input_schema<T: JsonSchema + 'static>() -> Arc<JsonObject> {
-    let mut schema = schema_for_input::<T>().unwrap_or_else(|_| schema_for_empty_input());
-    flatten_operations(Arc::make_mut(&mut schema));
-    schema
+    let settings = SchemaSettings::draft2020_12().with(|settings| {
+        settings.meta_schema = None;
+        settings.inline_subschemas = true;
+    });
+    let root = settings.into_generator().into_root_schema_for::<T>();
+    let mut schema = match serde_json::to_value(root) {
+        Ok(Value::Object(object)) => object,
+        _ => schema_for_empty_object(),
+    };
+    schema.remove("title");
+    schema.remove("description");
+    flatten_operations(&mut schema);
+    strip_noise(&mut schema);
+    Arc::new(schema)
+}
+
+fn schema_for_empty_object() -> JsonObject {
+    let mut object = JsonObject::new();
+    object.insert("type".into(), Value::String("object".into()));
+    object.insert("properties".into(), serde_json::json!({}));
+    object
+}
+
+/// Drop `"format": "double"` and the like (the `type` already says number) and
+/// `"default": false` (an absent flag is off).
+fn strip_noise(schema: &mut JsonObject) {
+    let Some(Value::Object(properties)) = schema.get_mut("properties") else {
+        return;
+    };
+    for field in properties.values_mut().filter_map(Value::as_object_mut) {
+        field.remove("format");
+        if field.get("default") == Some(&Value::Bool(false)) {
+            field.remove("default");
+        }
+    }
 }
 
 /// Rewrite a schema whose root is a `oneOf` of tagged variants into one object:
@@ -105,7 +369,7 @@ fn flatten_operations(schema: &mut JsonObject) {
     };
     let mut operations: Vec<Value> = Vec::new();
     let mut properties = serde_json::Map::new();
-    let mut takers: Vec<(String, Vec<String>)> = Vec::new();
+    let mut takers: Vec<(String, Vec<Taker>)> = Vec::new();
     let mut summaries: Vec<String> = Vec::new();
     for variant in &variants {
         if let Some(name) = variant["properties"]["operation"]["const"].as_str() {
@@ -117,9 +381,14 @@ fn flatten_operations(schema: &mut JsonObject) {
             merge_variant(name, variant, &mut properties, &mut takers);
         }
     }
-    for (field, labels) in takers {
+    for (field, field_takers) in takers {
+        let everyone_takes_it = field_takers.len() == operations.len();
+        let any_requires_it = field_takers.iter().any(|taker| taker.required);
+        if everyone_takes_it && !any_requires_it {
+            continue;
+        }
         if let Some(Value::Object(field_schema)) = properties.get_mut(&field) {
-            annotate_takers(field_schema, &labels);
+            annotate_takers(field_schema, &field_takers);
         }
     }
     let mut flat = serde_json::Map::new();
@@ -128,7 +397,7 @@ fn flatten_operations(schema: &mut JsonObject) {
         serde_json::json!({
             "type": "string",
             "enum": operations,
-            "description": format!("The command to run. {}", summaries.join(" "))
+            "description": summaries.join(" ")
         }),
     );
     flat.extend(properties);
@@ -145,7 +414,7 @@ fn merge_variant(
     name: &str,
     variant: &Value,
     properties: &mut serde_json::Map<String, Value>,
-    takers: &mut Vec<(String, Vec<String>)>,
+    takers: &mut Vec<(String, Vec<Taker>)>,
 ) {
     let required: Vec<&str> = variant["required"]
         .as_array()
@@ -160,20 +429,43 @@ fn merge_variant(
             published, field_schema,
             "operation {name} declares field {field} differently from an earlier operation"
         );
-        let label = if required.contains(&field.as_str()) {
-            format!("{name} (required)")
-        } else {
-            name.to_owned()
+        let taker = Taker {
+            operation: name.to_owned(),
+            required: required.contains(&field.as_str()),
         };
         match takers.iter_mut().find(|(taken, _)| taken == field) {
-            Some((_, labels)) => labels.push(label),
-            None => takers.push((field.clone(), vec![label])),
+            Some((_, field_takers)) => field_takers.push(taker),
+            None => takers.push((field.clone(), vec![taker])),
         }
     }
 }
 
-fn annotate_takers(field_schema: &mut serde_json::Map<String, Value>, labels: &[String]) {
-    let note = format!("Taken by: {}.", labels.join(", "));
+/// An operation that takes a field, and whether it requires it.
+struct Taker {
+    operation: String,
+    required: bool,
+}
+
+/// Name the operations that take a field in a trailing parenthesis, marking
+/// the ones that require it: all of them, or the listed ones.
+fn annotate_takers(field_schema: &mut serde_json::Map<String, Value>, takers: &[Taker]) {
+    let names: Vec<&str> = takers
+        .iter()
+        .map(|taker| taker.operation.as_str())
+        .collect();
+    let required: Vec<&str> = takers
+        .iter()
+        .filter(|taker| taker.required)
+        .map(|taker| taker.operation.as_str())
+        .collect();
+    let marker = if required.is_empty() {
+        String::new()
+    } else if required.len() == names.len() {
+        "; required".to_owned()
+    } else {
+        format!("; required: {}", required.join(", "))
+    };
+    let note = format!("({}{marker})", names.join(", "));
     let text = match field_schema.get("description").and_then(Value::as_str) {
         Some(doc) => format!("{doc} {note}"),
         None => note,
@@ -209,9 +501,9 @@ enum ReadOperation {
         refresh: bool,
         instance: Option<String>,
     },
-    /// Fetch the task of a git branch named like feature/PROJECT_ID-TASK_ID.
+    /// Fetch the task of a git branch named feature/PROJECT_ID-TASK_ID.
     Current {
-        /// Defaults to the git branch of the server's working directory.
+        /// Defaults to the server's git branch.
         branch: Option<String>,
         instance: Option<String>,
     },
@@ -226,10 +518,9 @@ struct DownloadArguments {
     /// Task URL or PROJECT_ID/TASK_ID.
     #[serde(rename = "ref")]
     task_ref: String,
-    /// Destination directory; defaults to a per-task directory under the OS
-    /// temp directory.
+    /// Destination directory; defaults to a per-task one in the OS temp directory.
     attachments_dir: Option<String>,
-    /// Needed only when several instances are configured.
+    /// Only when several instances are configured.
     instance: Option<String>,
 }
 
@@ -246,7 +537,7 @@ enum WriteOperation {
         #[serde(rename = "ref")]
         task_ref: String,
         body: String,
-        /// Post `body` as HTML unchanged instead of encoding plain text.
+        /// Post `body` as raw HTML.
         #[serde(default)]
         html: bool,
         instance: Option<String>,
@@ -256,12 +547,12 @@ enum WriteOperation {
         /// Task URL or PROJECT_ID/TASK_ID.
         #[serde(rename = "ref")]
         task_ref: String,
-        /// Positive number of hours.
+        /// Positive hours.
         hours: f64,
         /// YYYY-MM-DD, defaults to today.
         date: Option<String>,
         summary: Option<String>,
-        /// Job type id or name, defaults to the instance default.
+        /// Job type id or name; defaults to the instance's.
         job_type: Option<String>,
         instance: Option<String>,
     },
@@ -272,17 +563,17 @@ enum WriteOperation {
         task_ref: String,
         /// open or completed.
         status: Option<String>,
-        /// A numeric user id or a name.
+        /// User id or name.
         assignee: Option<String>,
-        /// Hours, zero or positive.
+        /// Hours, zero or more.
         estimate: Option<f64>,
-        /// A numeric task list id or a task list name of the task's project.
+        /// Task list id or name in the task's project.
         list: Option<String>,
         instance: Option<String>,
     },
-    /// Write your hours report to a file in the server's working directory.
+    /// Write your hours report to a file in the server's cwd.
     TimeReport {
-        /// A preset period; give it or both `start` and `end`.
+        /// Preset period; or give `start` and `end`.
         period: Option<ReportPeriodArg>,
         /// DD-MM-YYYY.
         start: Option<String>,
@@ -382,11 +673,77 @@ where
     F: FnOnce() -> Fut + Send + 'static,
     Fut: Future<Output = CoreRun>,
 {
-    let handle = tokio::runtime::Handle::current();
-    tokio::task::spawn_blocking(move || handle.block_on(make()))
+    spawn_core(make)
         .await
         .map(CoreRun::into_result)
-        .map_err(|e| McpError::internal_error(format!("tool task failed: {e}"), None))
+        .map_err(|e| join_failure(&e))
+}
+
+fn spawn_core<F, Fut>(make: F) -> JoinHandle<CoreRun>
+where
+    F: FnOnce() -> Fut + Send + 'static,
+    Fut: Future<Output = CoreRun>,
+{
+    let handle = tokio::runtime::Handle::current();
+    tokio::task::spawn_blocking(move || handle.block_on(make()))
+}
+
+fn join_failure(error: &JoinError) -> McpError {
+    McpError::internal_error(format!("tool task failed: {error}"), None)
+}
+
+/// Progress of heartbeat `beat` (1-based): rises with every beat and approaches the total
+/// without reaching it, so a call of any length keeps reporting increasing progress.
+fn heartbeat_progress(beat: u32) -> f64 {
+    PROGRESS_TOTAL - PROGRESS_TOTAL / (f64::from(beat) + 1.0)
+}
+
+/// Where a long call reports its progress: the requester's token, if it sent one.
+struct Progress {
+    peer: Peer<RoleServer>,
+    token: Option<ProgressToken>,
+}
+
+impl Progress {
+    async fn send(&self, progress: f64, message: &str) {
+        let Some(token) = &self.token else { return };
+        let notification = ProgressNotificationParam::new(token.clone(), progress)
+            .with_total(PROGRESS_TOTAL)
+            .with_message(message);
+        let _ = self.peer.notify_progress(notification).await;
+    }
+
+    /// Waits for the core to finish, reporting the start, a heartbeat every few seconds and the
+    /// end. `cancel` resolving stops the wait and returns `None`: the core cannot be
+    /// interrupted, so it runs on to its end on its thread and its result is dropped.
+    async fn follow(
+        &self,
+        core: JoinHandle<CoreRun>,
+        cancel: impl Future<Output = ()>,
+    ) -> Option<Result<CoreRun, JoinError>> {
+        tokio::pin!(core, cancel);
+        self.send(0.0, "started").await;
+        let first_beat = tokio::time::Instant::now() + HEARTBEAT;
+        let mut heartbeat = tokio::time::interval_at(first_beat, HEARTBEAT);
+        // Skip missed ticks so a slow send cannot fire a burst that starves the cancel arm.
+        heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        let mut beats = 0_u32;
+        loop {
+            // Biased so a heartbeat due at the instant the core ends is sent before the end.
+            tokio::select! {
+                biased;
+                _ = heartbeat.tick() => {
+                    beats = beats.saturating_add(1);
+                    self.send(heartbeat_progress(beats), "running").await;
+                }
+                () = &mut cancel => return None,
+                joined = &mut core => {
+                    self.send(PROGRESS_TOTAL, "finished").await;
+                    return Some(joined);
+                }
+            }
+        }
+    }
 }
 
 fn open_instance(instance: Option<&str>, run: &mut CoreRun) -> Option<InstanceContext> {
