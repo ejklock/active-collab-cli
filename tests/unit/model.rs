@@ -3454,6 +3454,7 @@ fn compose_open_when_already_active_is_noop() {
             kind: ComposeKind::New,
             editor: tui_textarea::TextArea::from(["existing"]),
             status: ComposeStatus::Editing,
+            attach: crate::tui::model::ComposeAttach::default(),
         });
     }
     let (m, _) = update(m, Msg::ComposeOpen);
@@ -3623,11 +3624,13 @@ fn compose_submit_nonempty_editor_emits_submit_comment_cmd() {
             project_id,
             task_id,
             body,
+            attachments,
         } => {
             assert_eq!(instance, "myinst");
             assert_eq!(*project_id, 5);
             assert_eq!(*task_id, 99);
             assert_eq!(body, "hi");
+            assert!(attachments.is_empty());
         }
         other => panic!("expected Cmd::SubmitComment, got {other:?}"),
     }
@@ -6037,6 +6040,7 @@ fn comment_mutation_err_does_not_emit_refresh() {
             editor: tui_textarea::TextArea::default(),
             status: crate::tui::model::ComposeStatus::Submitting,
             kind: crate::tui::model::ComposeKind::New,
+            attach: crate::tui::model::ComposeAttach::default(),
         });
     }
 
@@ -6699,6 +6703,7 @@ fn reflow_detail_with_compose_does_not_append_compose_lines() {
         kind: ComposeKind::New,
         editor: tui_textarea::TextArea::from(["compose body text"]),
         status: ComposeStatus::Editing,
+        attach: crate::tui::model::ComposeAttach::default(),
     };
     let mut m = Model {
         stack: vec![Screen::Detail {
@@ -6773,6 +6778,7 @@ fn ac7_regression_compose_enter_input_inserts_newline_not_submit_after_modal_mig
                 kind: ComposeKind::New,
                 editor: tui_textarea::TextArea::from(["hello"]),
                 status: ComposeStatus::Editing,
+                attach: crate::tui::model::ComposeAttach::default(),
             }),
             current_user_id: None,
             affordances: vec![],
@@ -6830,6 +6836,7 @@ fn ac7_regression_compose_cancel_clears_compose_emits_no_cmd_after_modal_migrati
                 kind: ComposeKind::New,
                 editor: tui_textarea::TextArea::from(["draft text"]),
                 status: ComposeStatus::Editing,
+                attach: crate::tui::model::ComposeAttach::default(),
             }),
             current_user_id: None,
             affordances: vec![],
@@ -6882,6 +6889,7 @@ fn ac7_regression_compose_submit_emits_write_cmd_after_modal_migration() {
                 kind: ComposeKind::New,
                 editor: tui_textarea::TextArea::from(["non empty"]),
                 status: ComposeStatus::Editing,
+                attach: crate::tui::model::ComposeAttach::default(),
             }),
             current_user_id: None,
             affordances: vec![],
@@ -11403,4 +11411,265 @@ mod mine_reload_tests {
         let (_, cmds) = update(opened_again, Msg::Back);
         assert!(cmds.is_empty(), "{cmds:?}");
     }
+}
+
+fn compose_with_path(model: Model, path: &str) -> Model {
+    let (mut m, _) = update(model, Msg::ComposeAttachOpen);
+    for c in path.chars() {
+        m = update(m, Msg::ComposeAttachChar(c)).0;
+    }
+    update(m, Msg::ComposeAttachConfirm).0
+}
+
+fn key(code: crossterm::event::KeyCode, modifiers: KeyModifiers) -> crossterm::event::KeyEvent {
+    crossterm::event::KeyEvent::new(code, modifiers)
+}
+
+#[test]
+fn a_confirmed_path_joins_the_picked_files_and_closes_the_field() {
+    let (m, _) = update(detail_model_for_compose("inst", 10, 42), Msg::ComposeOpen);
+    let m = compose_with_path(m, "qa/report.html");
+    let m = compose_with_path(m, "shot.png");
+
+    let cp = extract_compose(&m).expect("compose stays open");
+    assert_eq!(
+        cp.attach.files,
+        vec![
+            std::path::PathBuf::from("qa/report.html"),
+            std::path::PathBuf::from("shot.png")
+        ]
+    );
+    assert_eq!(cp.attach.path_input, None);
+}
+
+#[test]
+fn the_path_field_opens_empty_and_takes_typed_characters() {
+    let (m, _) = update(detail_model_for_compose("inst", 10, 42), Msg::ComposeOpen);
+    let (m, _) = update(m, Msg::ComposeAttachOpen);
+    assert_eq!(
+        extract_compose(&m)
+            .expect("compose")
+            .attach
+            .path_input
+            .as_deref(),
+        Some("")
+    );
+    let (m, _) = update(m, Msg::ComposeAttachChar('a'));
+    let (m, _) = update(m, Msg::ComposeAttachChar('b'));
+    let (m, _) = update(m, Msg::ComposeAttachBackspace);
+    assert_eq!(
+        extract_compose(&m)
+            .expect("compose")
+            .attach
+            .path_input
+            .as_deref(),
+        Some("a")
+    );
+}
+
+#[test]
+fn confirming_a_blank_path_adds_nothing() {
+    let (m, _) = update(detail_model_for_compose("inst", 10, 42), Msg::ComposeOpen);
+    let m = compose_with_path(m, "   ");
+    let cp = extract_compose(&m).expect("compose");
+    assert!(cp.attach.files.is_empty());
+    assert_eq!(cp.attach.path_input, None);
+}
+
+#[test]
+fn backspace_on_an_empty_path_field_drops_the_last_picked_file() {
+    let (m, _) = update(detail_model_for_compose("inst", 10, 42), Msg::ComposeOpen);
+    let m = compose_with_path(m, "a.txt");
+    let m = compose_with_path(m, "b.txt");
+    let (m, _) = update(m, Msg::ComposeAttachOpen);
+    let (m, _) = update(m, Msg::ComposeAttachBackspace);
+    assert_eq!(
+        extract_compose(&m).expect("compose").attach.files,
+        vec![std::path::PathBuf::from("a.txt")]
+    );
+}
+
+#[test]
+fn cancelling_the_path_field_keeps_the_picked_files_and_the_text() {
+    let (m, _) = update(detail_model_for_compose("inst", 10, 42), Msg::ComposeOpen);
+    let (m, _) = update(m, Msg::ComposeInput(char_input('x')));
+    let m = compose_with_path(m, "a.txt");
+    let (m, _) = update(m, Msg::ComposeAttachOpen);
+    let (m, _) = update(m, Msg::ComposeAttachChar('z'));
+    let (m, cmds) = update(m, Msg::ComposeAttachCancel);
+    assert!(cmds.is_empty());
+    let cp = extract_compose(&m).expect("compose stays open");
+    assert_eq!(cp.attach.path_input, None);
+    assert_eq!(cp.attach.files, vec![std::path::PathBuf::from("a.txt")]);
+    assert_eq!(cp.editor.lines(), ["x"]);
+}
+
+#[test]
+fn editing_an_existing_comment_does_not_open_the_path_field() {
+    let mut m = detail_model_for_compose("inst", 10, 42);
+    if let Some(Screen::Detail {
+        ref mut overlay, ..
+    }) = m.stack.last_mut()
+    {
+        *overlay = DetailOverlay::Compose(Compose {
+            kind: ComposeKind::Edit { comment_id: 7 },
+            editor: tui_textarea::TextArea::from(["old"]),
+            status: ComposeStatus::Editing,
+            attach: crate::tui::model::ComposeAttach::default(),
+        });
+    }
+    let (m, _) = update(m, Msg::ComposeAttachOpen);
+    assert_eq!(
+        extract_compose(&m).expect("compose").attach.path_input,
+        None
+    );
+}
+
+#[test]
+fn submitting_with_files_and_no_text_sends_the_files() {
+    let (m, _) = update(detail_model_for_compose("inst", 10, 42), Msg::ComposeOpen);
+    let m = compose_with_path(m, "a.txt");
+    let (_m, cmds) = update(m, Msg::ComposeSubmit);
+    match cmds.as_slice() {
+        [Cmd::SubmitComment {
+            body, attachments, ..
+        }] => {
+            assert_eq!(body, "");
+            assert_eq!(attachments, &vec![std::path::PathBuf::from("a.txt")]);
+        }
+        other => panic!("expected one SubmitComment, got {other:?}"),
+    }
+}
+
+#[test]
+fn submitting_with_text_carries_the_picked_files() {
+    let (m, _) = update(detail_model_for_compose("inst", 10, 42), Msg::ComposeOpen);
+    let (m, _) = update(m, Msg::ComposeInput(char_input('o')));
+    let m = compose_with_path(m, "a.txt");
+    let (_m, cmds) = update(m, Msg::ComposeSubmit);
+    assert!(
+        matches!(cmds.as_slice(), [Cmd::SubmitComment { attachments, .. }] if attachments.len() == 1),
+        "{cmds:?}"
+    );
+}
+
+#[test]
+fn ctrl_o_in_compose_opens_the_path_field() {
+    let (m, _) = update(detail_model_for_compose("inst", 10, 42), Msg::ComposeOpen);
+    let msg = crate::tui::route_key_event(
+        &m,
+        key(crossterm::event::KeyCode::Char('o'), KeyModifiers::CONTROL),
+    );
+    assert!(matches!(msg, Some(Msg::ComposeAttachOpen)));
+}
+
+#[test]
+fn keys_go_to_the_path_field_while_it_is_open() {
+    use crossterm::event::KeyCode;
+    let (m, _) = update(detail_model_for_compose("inst", 10, 42), Msg::ComposeOpen);
+    let (m, _) = update(m, Msg::ComposeAttachOpen);
+    let route = |code, modifiers| crate::tui::route_key_event(&m, key(code, modifiers));
+    assert!(matches!(
+        route(KeyCode::Char('q'), KeyModifiers::NONE),
+        Some(Msg::ComposeAttachChar('q'))
+    ));
+    assert!(matches!(
+        route(KeyCode::Char('Q'), KeyModifiers::SHIFT),
+        Some(Msg::ComposeAttachChar('Q'))
+    ));
+    assert!(matches!(
+        route(KeyCode::Enter, KeyModifiers::NONE),
+        Some(Msg::ComposeAttachConfirm)
+    ));
+    assert!(matches!(
+        route(KeyCode::Esc, KeyModifiers::NONE),
+        Some(Msg::ComposeAttachCancel)
+    ));
+    assert!(matches!(
+        route(KeyCode::Backspace, KeyModifiers::NONE),
+        Some(Msg::ComposeAttachBackspace)
+    ));
+    assert!(route(KeyCode::Char('s'), KeyModifiers::CONTROL).is_none());
+}
+
+#[test]
+fn typing_after_a_failed_send_resumes_editing_with_the_text_kept() {
+    let (m, _) = update(detail_model_for_compose("inst", 10, 42), Msg::ComposeOpen);
+    let (m, _) = update(m, Msg::ComposeInput(char_input('o')));
+    let (m, _) = update(m, Msg::ComposeInput(char_input('k')));
+    let (m, _) = update(m, Msg::ComposeSubmit);
+    let (m, _) = update(m, Msg::CommentMutationErr("cannot attach x".into()));
+    let (m, _) = update(m, Msg::ComposeInput(char_input('!')));
+    let cp = extract_compose(&m).expect("compose stays open");
+    assert_eq!(cp.status, ComposeStatus::Editing);
+    assert_eq!(cp.editor.lines(), ["ok!"]);
+}
+
+#[test]
+fn a_failed_send_can_be_fixed_in_the_path_field_and_sent_again() {
+    let (m, _) = update(detail_model_for_compose("inst", 10, 42), Msg::ComposeOpen);
+    let (m, _) = update(m, Msg::ComposeInput(char_input('o')));
+    let m = compose_with_path(m, "nope.txt");
+    let (m, _) = update(m, Msg::ComposeSubmit);
+    let (m, _) = update(m, Msg::CommentMutationErr("cannot attach nope.txt".into()));
+    let (m, _) = update(m, Msg::ComposeAttachOpen);
+    let (m, _) = update(m, Msg::ComposeAttachBackspace);
+    let m = compose_with_path(m, "a.txt");
+    let (m, cmds) = update(m, Msg::ComposeSubmit);
+    match cmds.as_slice() {
+        [Cmd::SubmitComment {
+            body, attachments, ..
+        }] => {
+            assert_eq!(body, "o");
+            assert_eq!(attachments, &vec![std::path::PathBuf::from("a.txt")]);
+        }
+        other => panic!("expected one SubmitComment, got {other:?}"),
+    }
+    assert_eq!(
+        extract_compose(&m).expect("compose").status,
+        ComposeStatus::Submitting
+    );
+}
+
+#[test]
+fn a_send_retried_from_the_error_state_emits_the_command_again() {
+    let (m, _) = update(detail_model_for_compose("inst", 10, 42), Msg::ComposeOpen);
+    let (m, _) = update(m, Msg::ComposeInput(char_input('o')));
+    let (m, _) = update(m, Msg::ComposeSubmit);
+    let (m, _) = update(m, Msg::CommentMutationErr("network".into()));
+    let (_m, cmds) = update(m, Msg::ComposeSubmit);
+    assert!(
+        matches!(cmds.as_slice(), [Cmd::SubmitComment { .. }]),
+        "{cmds:?}"
+    );
+}
+
+#[test]
+fn nothing_is_typed_while_a_send_is_in_flight() {
+    let (m, _) = update(detail_model_for_compose("inst", 10, 42), Msg::ComposeOpen);
+    let (m, _) = update(m, Msg::ComposeInput(char_input('o')));
+    let (m, _) = update(m, Msg::ComposeSubmit);
+    let (m, _) = update(m, Msg::ComposeInput(char_input('x')));
+    let (m, cmds) = update(m, Msg::ComposeSubmit);
+    assert!(cmds.is_empty());
+    let cp = extract_compose(&m).expect("compose");
+    assert_eq!(cp.editor.lines(), ["o"]);
+    assert_eq!(cp.status, ComposeStatus::Submitting);
+}
+
+#[test]
+fn altgr_characters_reach_the_path_field_but_single_chords_do_not() {
+    use crossterm::event::KeyCode;
+    let (m, _) = update(detail_model_for_compose("inst", 10, 42), Msg::ComposeOpen);
+    let (m, _) = update(m, Msg::ComposeAttachOpen);
+    let route = |code, modifiers| crate::tui::route_key_event(&m, key(code, modifiers));
+    assert!(matches!(
+        route(
+            KeyCode::Char('\\'),
+            KeyModifiers::CONTROL | KeyModifiers::ALT
+        ),
+        Some(Msg::ComposeAttachChar('\\'))
+    ));
+    assert!(route(KeyCode::Char('x'), KeyModifiers::ALT).is_none());
+    assert!(route(KeyCode::Char('s'), KeyModifiers::CONTROL).is_none());
 }

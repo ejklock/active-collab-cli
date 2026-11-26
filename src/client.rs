@@ -80,6 +80,41 @@ struct RawTaskList {
     name: Option<String>,
 }
 
+/// Typed outcome of one file upload.
+#[derive(Debug, PartialEq, Eq)]
+pub enum UploadOutcome {
+    /// 2xx carrying the code that a comment or task write attaches.
+    Uploaded(String),
+    /// 2xx whose body holds no upload code.
+    NoCode,
+    /// HTTP 401.
+    Unauthorized,
+    /// Any other status.
+    Failed(u16),
+}
+
+/// An upload reply entry; only the code matters to the caller.
+#[derive(serde::Deserialize)]
+struct RawUploadedFile {
+    code: Option<String>,
+}
+
+fn classify_upload(status: u16, raw: &[u8]) -> UploadOutcome {
+    match classify_write_status(status) {
+        WriteStatus::Ok => serde_json::from_slice::<Vec<RawUploadedFile>>(raw)
+            .ok()
+            .and_then(|files| files.into_iter().find_map(|f| f.code))
+            .filter(|code| !code.is_empty())
+            .map_or(UploadOutcome::NoCode, UploadOutcome::Uploaded),
+        WriteStatus::Unauthorized => UploadOutcome::Unauthorized,
+        WriteStatus::Failed(status) => UploadOutcome::Failed(status),
+    }
+}
+
+/// An upload has no size limit on this side, so it may outlast the default
+/// request timeout by far.
+const UPLOAD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(600);
+
 /// The three buckets every write response falls into, shared by every
 /// per-endpoint `classify_*_write` function so the (200..=299)/401/else
 /// logic lives in one place.
@@ -521,6 +556,40 @@ impl ActiveCollabClient {
         Ok((status, body))
     }
 
+    /// POST /api/v1/upload-files with one file. The returned code is what
+    /// `attach_uploaded_files` takes on a comment or task write.
+    pub async fn upload_file(&self, path: &std::path::Path) -> Result<UploadOutcome> {
+        let base = self.instance.base_url.trim_end_matches('/');
+        let url = format!("{}/api/v1/upload-files", base);
+        let (status, raw) = self
+            .http
+            .authed_post_file(
+                &url,
+                &self.instance.base_url,
+                &self.instance.token,
+                "attachment_1",
+                path,
+                UPLOAD_TIMEOUT,
+            )
+            .await?;
+        Ok(classify_upload(status, &raw))
+    }
+
+    /// PUT /api/v1/projects/{project_id}/tasks/{task_id} carrying only
+    /// `attach_uploaded_files`, which adds the uploaded files to the task.
+    pub async fn attach_to_task(
+        &self,
+        project_id: i64,
+        task_id: i64,
+        uploaded: &[String],
+    ) -> Result<TaskWriteOutcome> {
+        let base = self.instance.base_url.trim_end_matches('/');
+        let url = format!("{}/api/v1/projects/{}/tasks/{}", base, project_id, task_id);
+        let payload = serde_json::json!({ "attach_uploaded_files": uploaded });
+        let (status, body) = self.put_json_write(&url, &payload).await?;
+        Ok(classify_task_write(status, body))
+    }
+
     /// POST /api/v1/comments/task/{task_id}. `format` controls whether `body`
     /// is run through `encode_comment_body` (`BodyFormat::Text`) or sent
     /// unchanged (`BodyFormat::Html`). Classifies the response
@@ -531,6 +600,7 @@ impl ActiveCollabClient {
         task_id: i64,
         body: &str,
         format: BodyFormat,
+        uploaded: &[String],
     ) -> Result<CommentWriteOutcome> {
         let base = self.instance.base_url.trim_end_matches('/');
         let url = format!("{}/api/v1/comments/task/{}", base, task_id);
@@ -538,7 +608,10 @@ impl ActiveCollabClient {
             BodyFormat::Text => encode_comment_body(body),
             BodyFormat::Html => body.to_string(),
         };
-        let payload = serde_json::json!({ "body": encoded_body });
+        let mut payload = serde_json::json!({ "body": encoded_body });
+        if !uploaded.is_empty() {
+            payload["attach_uploaded_files"] = Value::from(uploaded.to_vec());
+        }
         let (status, body) = self.post_json_write(&url, &payload).await?;
         Ok(classify_comment_write(status, body))
     }

@@ -4881,6 +4881,7 @@ fn hint_for_screen_detail_shows_browsing_hint_for_every_overlay() {
             kind,
             editor: tui_textarea::TextArea::default(),
             status: ComposeStatus::Editing,
+            attach: crate::tui::model::ComposeAttach::default(),
         })
     };
     let cases: Vec<(&str, DetailOverlay)> = vec![
@@ -5885,6 +5886,7 @@ mod compose_render {
             kind: ComposeKind::New,
             editor: TextArea::from(text.lines()),
             status: ComposeStatus::Editing,
+            attach: crate::tui::model::ComposeAttach::default(),
         }
     }
 
@@ -5893,6 +5895,7 @@ mod compose_render {
             kind: ComposeKind::Edit { comment_id },
             editor: TextArea::from(text.lines()),
             status: ComposeStatus::Editing,
+            attach: crate::tui::model::ComposeAttach::default(),
         }
     }
 
@@ -6215,6 +6218,97 @@ mod compose_render {
             "backdrop cell (0,0) must carry modal_backdrop_style's bg (surface_base token); got {:?}",
             cell.style().bg
         );
+    }
+
+    fn compose_with_files(files: &[&str], path_input: Option<&str>) -> Compose {
+        Compose {
+            kind: ComposeKind::New,
+            editor: TextArea::from(["QA report"]),
+            status: ComposeStatus::Editing,
+            attach: crate::tui::model::ComposeAttach {
+                files: files.iter().map(std::path::PathBuf::from).collect(),
+                path_input: path_input.map(str::to_owned),
+            },
+        }
+    }
+
+    #[test]
+    fn picked_files_are_listed_under_the_text() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let model = make_detail_model(DetailOverlay::Compose(compose_with_files(
+            &["qa/report.html", "shot.png"],
+            None,
+        )));
+        let text = buf_text(&render_via_view(&model, 100, 30));
+        assert!(text.contains("QA report"), "{text}");
+        assert!(text.contains("+ qa/report.html"), "{text}");
+        assert!(text.contains("+ shot.png"), "{text}");
+    }
+
+    #[test]
+    fn the_open_path_field_shows_what_is_typed() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let model = make_detail_model(DetailOverlay::Compose(compose_with_files(
+            &[],
+            Some("qa/rep"),
+        )));
+        let text = buf_text(&render_via_view(&model, 100, 30));
+        assert!(text.contains("File: qa/rep"), "{text}");
+        assert!(text.contains("Enter add"), "{text}");
+    }
+
+    #[test]
+    fn a_failed_upload_shows_its_reason_after_the_generic_error() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let mut compose = compose_with_files(&["a.txt"], None);
+        compose.status = ComposeStatus::Error("cannot attach a.txt: missing".to_owned());
+        let text = buf_text(&render_via_view(
+            &make_detail_model(DetailOverlay::Compose(compose)),
+            120,
+            30,
+        ));
+        assert!(
+            text.contains("Failed to post comment: cannot attach a.txt: missing"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn a_failed_send_says_it_can_be_retried() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let mut compose = compose_editing("x");
+        compose.status = ComposeStatus::Error("Failed to post comment".to_owned());
+        let text = buf_text(&render_via_view(
+            &make_detail_model(DetailOverlay::Compose(compose)),
+            120,
+            30,
+        ));
+        assert!(
+            text.contains("Failed to post comment · edit or Ctrl+S to retry"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn a_new_comment_hint_offers_attaching_and_an_edit_does_not() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let new = buf_text(&render_via_view(
+            &make_detail_model(DetailOverlay::Compose(compose_editing("x"))),
+            100,
+            30,
+        ));
+        let edit = buf_text(&render_via_view(
+            &make_detail_model(DetailOverlay::Compose(compose_edit_existing(3, "x"))),
+            100,
+            30,
+        ));
+        assert!(new.contains("Ctrl+O attach"), "{new}");
+        assert!(!edit.contains("Ctrl+O attach"), "{edit}");
     }
 }
 
@@ -8194,6 +8288,7 @@ mod contextual_footer {
             kind: ComposeKind::New,
             editor: TextArea::default(),
             status: ComposeStatus::Editing,
+            attach: crate::tui::model::ComposeAttach::default(),
         }
     }
 
@@ -8202,6 +8297,7 @@ mod contextual_footer {
             kind: ComposeKind::New,
             editor: TextArea::default(),
             status: ComposeStatus::Submitting,
+            attach: crate::tui::model::ComposeAttach::default(),
         }
     }
 
@@ -8210,6 +8306,7 @@ mod contextual_footer {
             kind: ComposeKind::New,
             editor: TextArea::default(),
             status: ComposeStatus::Error(msg.to_string()),
+            attach: crate::tui::model::ComposeAttach::default(),
         }
     }
 
@@ -9384,6 +9481,7 @@ mod auth_error_render {
             kind: ComposeKind::New,
             editor: TextArea::from(["my draft"]),
             status: ComposeStatus::Editing,
+            attach: crate::tui::model::ComposeAttach::default(),
         };
         let model = make_detail_model(false, DetailOverlay::Compose(compose));
         let (model, _) = update(model, Msg::AuthExpired);

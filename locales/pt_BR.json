@@ -240,5 +240,19 @@
   "Due-date list": "Lista por prazo",
   "Horizontal kanban": "Kanban horizontal",
   "Vertical kanban": "Kanban vertical",
-  "↑/↓ choose · Enter apply · Esc close": "↑/↓ escolher · Enter aplicar · Esc fechar"
+  "↑/↓ choose · Enter apply · Esc close": "↑/↓ escolher · Enter aplicar · Esc fechar",
+  "cannot attach {path}: {reason}": "não foi possível anexar {path}: {reason}",
+  "not a regular file": "não é um arquivo comum",
+  "upload of {name} failed with HTTP {status}; nothing was posted": "o envio de {name} falhou com HTTP {status}; nada foi publicado",
+  "upload of {name} returned no file code; nothing was posted": "o envio de {name} não devolveu código de arquivo; nada foi publicado",
+  "upload of {name} failed: {reason}; nothing was posted": "o envio de {name} falhou: {reason}; nada foi publicado",
+  "upload cancelled; nothing was posted": "envio cancelado; nada foi publicado",
+  "no file to attach": "nenhum arquivo para anexar",
+  "HTTP {status} attaching files to task {project_id}/{task_id}": "HTTP {status} ao anexar arquivos à tarefa {project_id}/{task_id}",
+  "Attached {count} file(s) to task {project_id}/{task_id}: {names}": "{count} arquivo(s) anexado(s) à tarefa {project_id}/{task_id}: {names}",
+  "Attached {count} file(s): {names}": "{count} arquivo(s) anexado(s): {names}",
+  "Ctrl+S send · Ctrl+O attach · Esc cancel": "Ctrl+S enviar · Ctrl+O anexar · Esc cancelar",
+  "Enter add · Backspace on empty removes last · Esc close": "Enter adicionar · Backspace vazio remove o último · Esc fechar",
+  "File": "Arquivo",
+  "edit or Ctrl+S to retry": "edite ou Ctrl+S para tentar de novo"
 }

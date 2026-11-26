@@ -58,17 +58,8 @@ impl Http {
         instance_base_url: &str,
         token: &str,
     ) -> Result<(u16, bytes::Bytes)> {
-        let mut builder = self.client.get(url).header(ACCEPT, ACCEPT_JSON);
-
-        if let Some((name, value)) = Self::origin_gated_token_header(url, instance_base_url, token)
-        {
-            builder = builder.header(name, value);
-        }
-
-        let resp = builder.send().await?;
-        let status = resp.status().as_u16();
-        let body = resp.bytes().await?;
-        Ok((status, body))
+        let builder = self.client.get(url);
+        Self::send_authed(builder, url, instance_base_url, token).await
     }
 
     /// Authenticated POST with JSON body. Returns Ok((status, body)) for any
@@ -80,22 +71,32 @@ impl Http {
         token: &str,
         body: &serde_json::Value,
     ) -> Result<(u16, bytes::Bytes)> {
-        let mut builder = self
+        let builder = self
             .client
             .post(url)
-            .header(ACCEPT, ACCEPT_JSON)
             .header(CONTENT_TYPE, "application/json")
             .json(body);
+        Self::send_authed(builder, url, instance_base_url, token).await
+    }
 
-        if let Some((name, value)) = Self::origin_gated_token_header(url, instance_base_url, token)
-        {
-            builder = builder.header(name, value);
-        }
-
-        let resp = builder.send().await?;
-        let status = resp.status().as_u16();
-        let bytes = resp.bytes().await?;
-        Ok((status, bytes))
+    /// Authenticated multipart POST of the file at `path` under `field`,
+    /// streamed from disk with its name and a MIME type guessed from its
+    /// extension. An upload may outlast the 30 s default timeout, so this
+    /// request gets `timeout`. Returns Ok((status, body)) for any HTTP
+    /// response. Only transport failures, opening the file included, are Err.
+    pub async fn authed_post_file(
+        &self,
+        url: &str,
+        instance_base_url: &str,
+        token: &str,
+        field: &str,
+        path: &std::path::Path,
+        timeout: Duration,
+    ) -> Result<(u16, bytes::Bytes)> {
+        let part = reqwest::multipart::Part::file(path).await?;
+        let form = reqwest::multipart::Form::new().part(field.to_owned(), part);
+        let builder = self.client.post(url).timeout(timeout).multipart(form);
+        Self::send_authed(builder, url, instance_base_url, token).await
     }
 
     /// Authenticated PUT with JSON body. Returns Ok((status, body)) for any
@@ -107,22 +108,12 @@ impl Http {
         token: &str,
         body: &serde_json::Value,
     ) -> Result<(u16, bytes::Bytes)> {
-        let mut builder = self
+        let builder = self
             .client
             .put(url)
-            .header(ACCEPT, ACCEPT_JSON)
             .header(CONTENT_TYPE, "application/json")
             .json(body);
-
-        if let Some((name, value)) = Self::origin_gated_token_header(url, instance_base_url, token)
-        {
-            builder = builder.header(name, value);
-        }
-
-        let resp = builder.send().await?;
-        let status = resp.status().as_u16();
-        let bytes = resp.bytes().await?;
-        Ok((status, bytes))
+        Self::send_authed(builder, url, instance_base_url, token).await
     }
 
     /// Authenticated DELETE. Returns Ok((status, body)) for any HTTP response.
@@ -133,13 +124,23 @@ impl Http {
         instance_base_url: &str,
         token: &str,
     ) -> Result<(u16, bytes::Bytes)> {
-        let mut builder = self.client.delete(url).header(ACCEPT, ACCEPT_JSON);
+        let builder = self.client.delete(url);
+        Self::send_authed(builder, url, instance_base_url, token).await
+    }
 
+    /// Send `builder` asking for JSON, with the token header only when `url`
+    /// shares the instance origin.
+    async fn send_authed(
+        builder: reqwest::RequestBuilder,
+        url: &str,
+        instance_base_url: &str,
+        token: &str,
+    ) -> Result<(u16, bytes::Bytes)> {
+        let mut builder = builder.header(ACCEPT, ACCEPT_JSON);
         if let Some((name, value)) = Self::origin_gated_token_header(url, instance_base_url, token)
         {
             builder = builder.header(name, value);
         }
-
         let resp = builder.send().await?;
         let status = resp.status().as_u16();
         let bytes = resp.bytes().await?;

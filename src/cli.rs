@@ -243,6 +243,10 @@ pub struct CommentArgs {
     /// encoding. The caller is responsible for valid markup.
     #[arg(long)]
     pub html: bool,
+    /// Attach a local file to the comment; repeat for more files. With at
+    /// least one file the body may be empty.
+    #[arg(long, value_name = "PATH")]
+    pub attach: Vec<std::path::PathBuf>,
     /// Force a named instance.
     #[arg(long)]
     pub instance: Option<String>,
@@ -331,6 +335,23 @@ pub struct TaskOpts {
 pub enum TaskCmd {
     /// Set the status, assignee, time estimate, and/or task list on a task.
     Set(TaskSetArgs),
+    /// Attach local files directly to a task.
+    Attach(TaskAttachArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct TaskAttachArgs {
+    /// Task URL or PROJECT_ID/TASK_ID. When omitted, resolved from the current git branch.
+    pub task_ref: Option<String>,
+    /// A local file to attach; repeat for more files. All upload or none is attached.
+    #[arg(long, value_name = "PATH", required = true)]
+    pub attach: Vec<std::path::PathBuf>,
+    /// Print curated minified JSON write result for agent/LLM consumption.
+    #[arg(long)]
+    pub json: bool,
+    /// Force a named instance.
+    #[arg(long)]
+    pub instance: Option<String>,
 }
 
 #[derive(Args, Debug)]

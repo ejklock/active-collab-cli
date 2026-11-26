@@ -542,7 +542,9 @@ fn parse_task_set_with_all_flags() {
     let Command::Task(opts) = cli.command.unwrap() else {
         panic!("expected Task")
     };
-    let TaskCmd::Set(set) = opts.subcommand;
+    let TaskCmd::Set(set) = opts.subcommand else {
+        panic!("expected task set")
+    };
     assert_eq!(set.task_ref.as_deref(), Some("665/75159"));
     assert_eq!(set.status.as_deref(), Some("completed"));
     assert_eq!(set.assignee.as_deref(), Some("42"));
@@ -557,7 +559,9 @@ fn parse_task_set_list_alone_carries_the_list_value() {
     let Command::Task(opts) = cli.command.unwrap() else {
         panic!("expected Task")
     };
-    let TaskCmd::Set(set) = opts.subcommand;
+    let TaskCmd::Set(set) = opts.subcommand else {
+        panic!("expected task set")
+    };
     assert_eq!(set.task_ref.as_deref(), Some("10/99"));
     assert_eq!(set.list.as_deref(), Some("In progress"));
     assert!(set.status.is_none() && set.assignee.is_none() && set.estimate.is_none());
@@ -582,7 +586,9 @@ fn parse_task_set_list_combines_with_status_assignee_and_estimate() {
     let Command::Task(opts) = cli.command.unwrap() else {
         panic!("expected Task")
     };
-    let TaskCmd::Set(set) = opts.subcommand;
+    let TaskCmd::Set(set) = opts.subcommand else {
+        panic!("expected task set")
+    };
     assert_eq!(set.status.as_deref(), Some("done"));
     assert_eq!(set.assignee.as_deref(), Some("9"));
     assert_eq!(set.estimate, Some(2.0));
@@ -595,7 +601,9 @@ fn parse_task_set_without_task_ref_defaults_to_none() {
     let Command::Task(opts) = cli.command.unwrap() else {
         panic!("expected Task")
     };
-    let TaskCmd::Set(set) = opts.subcommand;
+    let TaskCmd::Set(set) = opts.subcommand else {
+        panic!("expected task set")
+    };
     assert!(set.task_ref.is_none());
     assert_eq!(set.status.as_deref(), Some("open"));
     assert!(set.assignee.is_none());
@@ -609,7 +617,9 @@ fn parse_task_set_with_no_flags_still_parses() {
     let Command::Task(opts) = cli.command.unwrap() else {
         panic!("expected Task")
     };
-    let TaskCmd::Set(set) = opts.subcommand;
+    let TaskCmd::Set(set) = opts.subcommand else {
+        panic!("expected task set")
+    };
     assert!(set.status.is_none());
     assert!(set.assignee.is_none());
     assert!(set.estimate.is_none());
@@ -892,4 +902,68 @@ fn parse_setup_board_reset() {
         panic!()
     };
     assert!(matches!(board.action, Some(BoardCmd::Reset)));
+}
+
+#[test]
+fn parse_comment_attach_repeats_in_order() {
+    let cli = parse(&[
+        "comment",
+        "1/2",
+        "--attach",
+        "a.png",
+        "--attach",
+        "qa/r.html",
+    ])
+    .unwrap();
+    let Command::Comment(args) = cli.command.unwrap() else {
+        panic!("expected Comment")
+    };
+    assert_eq!(
+        args.attach,
+        vec![
+            std::path::PathBuf::from("a.png"),
+            std::path::PathBuf::from("qa/r.html")
+        ]
+    );
+}
+
+#[test]
+fn parse_comment_without_attach_has_no_files() {
+    let cli = parse(&["comment", "1/2", "-m", "hi"]).unwrap();
+    let Command::Comment(args) = cli.command.unwrap() else {
+        panic!("expected Comment")
+    };
+    assert!(args.attach.is_empty());
+}
+
+#[test]
+fn parse_task_attach_carries_ref_files_json_and_instance() {
+    let cli = parse(&[
+        "task",
+        "attach",
+        "10/99",
+        "--attach",
+        "a.png",
+        "--attach",
+        "b.pdf",
+        "--json",
+        "--instance",
+        "work",
+    ])
+    .unwrap();
+    let Command::Task(opts) = cli.command.unwrap() else {
+        panic!("expected Task")
+    };
+    let TaskCmd::Attach(attach) = opts.subcommand else {
+        panic!("expected task attach")
+    };
+    assert_eq!(attach.task_ref.as_deref(), Some("10/99"));
+    assert_eq!(attach.attach.len(), 2);
+    assert!(attach.json);
+    assert_eq!(attach.instance.as_deref(), Some("work"));
+}
+
+#[test]
+fn parse_task_attach_without_a_file_is_refused() {
+    assert!(parse(&["task", "attach", "10/99"]).is_err());
 }
