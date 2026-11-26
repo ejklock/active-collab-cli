@@ -10512,3 +10512,132 @@ mod kanban_reload_tests {
         assert_eq!(selected(&down), 2);
     }
 }
+
+mod mine_refresh_tests {
+    use super::empty_header;
+    use crate::board::Phase;
+    use crate::render::MineTableRow;
+    use crate::tui::model::{init_mine_on, update, Cmd, Model, Msg, Screen};
+
+    fn today() -> chrono::NaiveDate {
+        chrono::NaiveDate::from_ymd_opt(2026, 11, 25).unwrap()
+    }
+
+    fn row(id: i64) -> MineTableRow {
+        MineTableRow {
+            instance: "inst".into(),
+            project_id: 10 + id,
+            task_number: id,
+            task_id: id,
+            name: format!("Task {id}"),
+            due_on: None,
+            project_name: None,
+            estimate: None,
+            logged_week: None,
+            logged_total: None,
+            task_list_id: None,
+            task_list: None,
+            labels: vec![],
+            phase: Phase::ToDo,
+            flagged: false,
+        }
+    }
+
+    fn rows(ids: &[i64]) -> Vec<MineTableRow> {
+        ids.iter().map(|id| row(*id)).collect()
+    }
+
+    fn loaded(model: Model, ids: &[i64]) -> Model {
+        update(
+            model,
+            Msg::LoadedMineTasks {
+                rows: rows(ids),
+                loaded_at: "2026-11-25T10:00:00".into(),
+            },
+        )
+        .0
+    }
+
+    fn settled_list() -> Model {
+        loaded(
+            init_mine_on(empty_header(), Some(rows(&[1, 2])), today()).0,
+            &[1, 2],
+        )
+    }
+
+    fn settled_kanban() -> Model {
+        update(settled_list(), Msg::ToggleMineView).0
+    }
+
+    fn flags(model: &Model) -> (bool, bool, Vec<i64>) {
+        match model.stack.last() {
+            Some(Screen::Tasks {
+                loading,
+                revalidating,
+                tasks,
+                ..
+            }) => (
+                *loading,
+                *revalidating,
+                tasks.iter().map(|t| t.task_id).collect(),
+            ),
+            other => panic!("expected tasks, got {other:?}"),
+        }
+    }
+
+    fn assert_reload_cycle(model: Model) {
+        let (model, cmds) = update(model, Msg::Refresh);
+        assert!(matches!(cmds.as_slice(), [Cmd::LoadMineTasks]), "{cmds:?}");
+        assert_eq!(flags(&model), (false, true, vec![1, 2]));
+
+        let (model, cmds) = update(model, Msg::Refresh);
+        assert!(cmds.is_empty(), "{cmds:?}");
+
+        let model = loaded(model, &[1, 2, 3]);
+        assert_eq!(flags(&model), (false, false, vec![1, 2, 3]));
+
+        let (_, cmds) = update(model, Msg::Refresh);
+        assert!(matches!(cmds.as_slice(), [Cmd::LoadMineTasks]), "{cmds:?}");
+    }
+
+    #[test]
+    fn mine_refresh_list_reloads_once_and_leaves_the_state_when_rows_arrive() {
+        assert_reload_cycle(settled_list());
+    }
+
+    #[test]
+    fn mine_refresh_kanban_reloads_once_and_leaves_the_state_when_rows_arrive() {
+        assert_reload_cycle(settled_kanban());
+    }
+
+    #[test]
+    fn mine_refresh_kanban_keeps_the_selected_task_after_the_reply() {
+        let model = update(settled_kanban(), Msg::Down).0;
+        let model = update(model, Msg::Refresh).0;
+        let model = loaded(model, &[1, 2, 3]);
+        match model.stack.last() {
+            Some(Screen::Tasks {
+                tasks,
+                kanban: Some(focus),
+                ..
+            }) => assert_eq!(
+                focus.selected_task(tasks).map(|i| tasks[i].task_id),
+                Some(2)
+            ),
+            other => panic!("expected the kanban, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn mine_refresh_browse_task_list_still_reloads_by_project() {
+        let mut model = settled_list();
+        if let Some(Screen::Tasks { due_today, .. }) = model.stack.last_mut() {
+            *due_today = None;
+        }
+        let (_, cmds) = update(model, Msg::Refresh);
+        assert!(
+            matches!(cmds.as_slice(), [Cmd::LoadTasksByProject]),
+            "{cmds:?}"
+        );
+    }
+}

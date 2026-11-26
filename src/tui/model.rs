@@ -2457,6 +2457,19 @@ fn handle_refresh(mut model: Model) -> (Model, Vec<Cmd>) {
             // Single-flight guard: drop the duplicate refresh while one is in flight.
             return (model, cmds);
         }
+        if let Screen::Tasks {
+            due_today: Some(_),
+            revalidating,
+            ..
+        } = top
+        {
+            // The mine rows stay painted while the reload runs; its reply clears the flag.
+            if !*revalidating {
+                *revalidating = true;
+                cmds.push(Cmd::LoadMineTasks);
+            }
+            return (model, cmds);
+        }
         match top {
             Screen::Detail {
                 instance,

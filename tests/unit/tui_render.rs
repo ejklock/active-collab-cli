@@ -11759,3 +11759,92 @@ mod kanban_chrome_tests {
         }
     }
 }
+
+mod mine_refresh_frame_tests {
+    use super::{buf_to_string, LANG_MUTEX};
+    use crate::board::Phase;
+    use crate::i18n::set_language;
+    use crate::render::MineTableRow;
+    use crate::tui::model::{init_mine_on, update, Header, Model, Msg};
+    use crate::tui::view::view;
+    use ratatui::{backend::TestBackend, Terminal};
+
+    fn today() -> chrono::NaiveDate {
+        chrono::NaiveDate::from_ymd_opt(2026, 11, 25).unwrap()
+    }
+
+    fn row() -> MineTableRow {
+        MineTableRow {
+            instance: "inst".into(),
+            project_id: 1,
+            task_number: 1,
+            task_id: 1,
+            name: "Reloadable task".into(),
+            due_on: Some("2026-11-28".into()),
+            project_name: Some("Project".into()),
+            estimate: Some(2.0),
+            logged_week: None,
+            logged_total: None,
+            task_list_id: None,
+            task_list: None,
+            labels: vec![],
+            phase: Phase::ToDo,
+            flagged: false,
+        }
+    }
+
+    fn loaded(model: Model) -> Model {
+        update(
+            model,
+            Msg::LoadedMineTasks {
+                rows: vec![row()],
+                loaded_at: "2026-11-25T10:00:00".into(),
+            },
+        )
+        .0
+    }
+
+    fn settled_list() -> Model {
+        loaded(
+            init_mine_on(
+                Header::from_instances(&[], None),
+                Some(vec![row()]),
+                today(),
+            )
+            .0,
+        )
+    }
+
+    fn draw(model: &Model) -> String {
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal
+            .draw(|frame| view(model, frame, &mut vec![], &mut vec![]))
+            .unwrap();
+        buf_to_string(terminal.backend().buffer())
+    }
+
+    #[test]
+    fn mine_refresh_frame_list_keeps_the_rows_with_the_marker() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let settled = draw(&settled_list());
+        assert!(!settled.contains('↻'), "{settled}");
+        let screen = draw(&update(settled_list(), Msg::Refresh).0);
+        assert!(screen.contains("Reloadable task"), "{screen}");
+        assert!(screen.contains('↻'), "{screen}");
+        assert!(!screen.contains("Loading"), "{screen}");
+    }
+
+    #[test]
+    fn mine_refresh_frame_kanban_shows_the_columns_with_the_marker_then_clears() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let kanban = update(settled_list(), Msg::ToggleMineView).0;
+        let (refreshing, _) = update(kanban, Msg::Refresh);
+        let screen = draw(&refreshing);
+        assert!(screen.contains("TO DO 1 ↻"), "{screen}");
+        assert!(screen.contains("IN PROGRESS"), "{screen}");
+        let after = draw(&loaded(refreshing));
+        assert!(!after.contains('↻'), "{after}");
+    }
+}

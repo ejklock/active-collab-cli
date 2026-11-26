@@ -2,7 +2,7 @@
 type: Issue
 title: r on the ac mine TUI screen stays on Loading forever
 description: handle_refresh on a mine Tasks screen emits LoadTasksByProject, whose reply only a Projects screen applies, so the mine list (and now the kanban) stays on Loading and a second r is dropped.
-status: open
+status: closed
 timestamp: 2026-11-25T23:29:17Z
 ---
 
