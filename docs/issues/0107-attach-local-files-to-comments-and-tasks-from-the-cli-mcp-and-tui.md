@@ -2,7 +2,7 @@
 type: Issue
 title: Attach local files to comments and tasks from the CLI, MCP and TUI
 description: Upload local files as attachments to a new comment or directly to a task from ac comment, ac_write, the TUI compose and a task command.
-status: in-progress
+status: closed
 timestamp: 2026-11-26T16:42:32Z
 ---
 
@@ -52,6 +52,7 @@ Excluded: attaching files when editing an existing comment, deleting or replacin
 - Gates: fmt, clippy --all-targets, 2147 tests single-threaded, comment_policy, release build pass. se-gates: quality (arborist, jscpd) pass, arch pass, security pass (3 pre-existing cargo-audit advisories); with the coverage receipt below, se-gates check passes (verdict pass).
 - Upload request timeout is 600 s (cheap decision: no client size limit, so the 30 s default would cut large files).
 - Owner authorized (2026-11-26) rewriting the Docker `SF:/app/` paths in the local, untracked `coverage/lcov.info` after `cargo llvm-cov`. What works: repository-relative paths (`sed -i 's#^SF:/app/#SF:#' coverage/lcov.info`), then `se-gates qg coverage-receipt`, then `se-gates check` → verdict pass with real coverage. Absolute host paths map to 0% everywhere. Not taken: shipping with the skip; a separate issue.
+- Merged as PR #63 (merge commit 8db78a4) after CI green and reviewer approval. Owner chose to merge without a walkthrough (2026-11-26): the project has none yet; the live post on 694/81989 stands as the visible proof. Not taken: authoring a terminal walkthrough first; leaving the PR open.
 
 ### Acceptance
 

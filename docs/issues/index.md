@@ -33,7 +33,6 @@ TUI/UX work (V/R/ARCH slices), tracing to
 * [0103 — r on a browse task list in the TUI stays on Loading forever](0103-r-on-a-browse-task-list-in-the-tui-stays-on-loading-forever.md) - open
 * [0105 — The vertical kanban edge-cut test never cuts a box at the top](0105-the-vertical-kanban-edge-cut-test-never-cuts-a-box-at-the-top.md) - open
 * [0106 — An edit reply that lands after Back never reloads the ac mine screen](0106-an-edit-reply-that-lands-after-back-never-reloads-the-ac-mine-screen.md) - open
-* [0107 — Attach local files to comments and tasks from the CLI, MCP and TUI](0107-attach-local-files-to-comments-and-tasks-from-the-cli-mcp-and-tui.md) - in-progress
 
 ## Closed
 
@@ -115,3 +114,4 @@ TUI/UX work (V/R/ARCH slices), tracing to
 * [0100 — Open work by phase: kanban in the ac mine TUI and phase in ac mine --json](0100-open-work-by-phase-kanban-in-the-ac-mine-tui-and-phase-in-ac-mine-json.md) - closed
 * [0101 — r on the ac mine TUI screen stays on Loading forever](0101-r-on-the-ac-mine-tui-screen-stays-on-loading-forever.md) - closed
 * [0104 — The TUI due-date text shows raw catalog keys in English](0104-the-tui-due-date-text-shows-raw-catalog-keys-in-english.md) - closed
+* [0107 — Attach local files to comments and tasks from the CLI, MCP and TUI](0107-attach-local-files-to-comments-and-tasks-from-the-cli-mcp-and-tui.md) - closed
