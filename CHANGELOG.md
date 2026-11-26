@@ -11,7 +11,7 @@ pre-cutover Python package's history is preserved verbatim under
 version numbers are a separate line and do not continue into the Rust crate
 (issue 0055).
 
-## [Unreleased]
+## [0.12.9] - 2026-11-26
 
 ### Added
 
