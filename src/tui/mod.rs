@@ -33,9 +33,9 @@ use crossterm::{
 };
 use events::{
     map_assignee_picker_key_event, map_browse_key_event, map_browse_mouse_event,
-    map_compose_key_event, map_confirm_key_event, map_estimate_key_event, map_log_time_key_event,
-    map_report_key_event, map_status_confirm_key_event, map_task_list_picker_key_event,
-    map_view_modal_key_event,
+    map_compose_key_event, map_compose_path_key_event, map_confirm_key_event,
+    map_estimate_key_event, map_log_time_key_event, map_report_key_event,
+    map_status_confirm_key_event, map_task_list_picker_key_event, map_view_modal_key_event,
 };
 use model::DownloadOutcome;
 use ratatui::{backend::CrosstermBackend, Terminal};
@@ -97,6 +97,15 @@ fn compose_active(model: &Model) -> bool {
     matches!(
         model.top(),
         Some(model::Screen::Detail { overlay, .. }) if overlay.is_compose()
+    )
+}
+
+/// Return true when the compose path field is open on the top screen.
+fn compose_path_active(model: &Model) -> bool {
+    matches!(
+        model.top(),
+        Some(model::Screen::Detail { overlay, .. })
+            if overlay.compose().is_some_and(|cp| cp.attach.path_input.is_some())
     )
 }
 
@@ -174,10 +183,11 @@ type ModalActive = fn(&Model) -> bool;
 
 /// The modal owners of the keyboard, each with the mapper of its keys; at most one
 /// is active at a time, and no match leaves the browse map.
-const KEY_ROUTES: [(ModalActive, KeyMapper); 9] = [
+const KEY_ROUTES: [(ModalActive, KeyMapper); 10] = [
     (report_active, map_report_key_event),
     (view_modal_active, map_view_modal_key_event),
     (confirm_active, map_confirm_key_event),
+    (compose_path_active, map_compose_path_key_event),
     (compose_active, map_compose_key_event),
     (log_time_active, map_log_time_key_event),
     (estimate_active, map_estimate_key_event),
@@ -596,6 +606,7 @@ fn dispatch_comment_write(
             instance,
             task_id,
             body,
+            attachments,
             ..
         } => spawn_comment_write(
             targets,
@@ -603,7 +614,10 @@ fn dispatch_comment_write(
             tx,
             instance,
             body,
-            CommentWrite::Create { task_id },
+            CommentWrite::Create {
+                task_id,
+                attachments,
+            },
         ),
         Cmd::UpdateComment {
             instance,
@@ -926,9 +940,16 @@ fn spawn_with_client<F, Fut>(
 }
 
 enum CommentWrite {
-    Create { task_id: i64 },
-    Update { comment_id: i64 },
-    Delete { comment_id: i64 },
+    Create {
+        task_id: i64,
+        attachments: Vec<std::path::PathBuf>,
+    },
+    Update {
+        comment_id: i64,
+    },
+    Delete {
+        comment_id: i64,
+    },
 }
 
 fn spawn_comment_write(
@@ -947,32 +968,57 @@ fn spawn_comment_write(
         &instance,
         missing,
         move |client, tx| async move {
-            let outcome = match write {
-                CommentWrite::Create { task_id } => {
-                    client
-                        .create_comment(task_id, &body, crate::client::BodyFormat::Text)
-                        .await
-                }
+            let msg = match write {
+                CommentWrite::Create {
+                    task_id,
+                    attachments,
+                } => post_comment_with_files(&client, task_id, &body, &attachments).await,
                 CommentWrite::Update { comment_id } => {
-                    client.update_comment(comment_id, &body).await
+                    comment_write_msg(client.update_comment(comment_id, &body).await)
                 }
-                CommentWrite::Delete { comment_id } => client.delete_comment(comment_id).await,
+                CommentWrite::Delete { comment_id } => {
+                    comment_write_msg(client.delete_comment(comment_id).await)
+                }
             };
-            match outcome {
-                Ok(CommentWriteOutcome::Ok(_)) => {
-                    let _ = tx.send(Msg::CommentMutationOk);
-                }
-                Ok(CommentWriteOutcome::Unauthorized) => {
-                    let _ = tx.send(Msg::AuthExpired);
-                }
-                Ok(CommentWriteOutcome::Failed(_)) | Err(_) => {
-                    let _ = tx.send(Msg::CommentMutationErr(crate::i18n::t(
-                        "Failed to post comment",
-                    )));
-                }
-            }
+            let _ = tx.send(msg);
         },
     );
+}
+
+/// The message a finished comment write reports to the model.
+fn comment_write_msg(outcome: anyhow::Result<CommentWriteOutcome>) -> Msg {
+    match outcome {
+        Ok(CommentWriteOutcome::Ok(_)) => Msg::CommentMutationOk,
+        Ok(CommentWriteOutcome::Unauthorized) => Msg::AuthExpired,
+        Ok(CommentWriteOutcome::Failed(_)) | Err(_) => {
+            Msg::CommentMutationErr(crate::i18n::t("Failed to post comment"))
+        }
+    }
+}
+
+/// Upload the picked files, then post the comment carrying their codes. A
+/// failed upload posts nothing and reports why.
+async fn post_comment_with_files(
+    client: &crate::client::ActiveCollabClient,
+    task_id: i64,
+    body: &str,
+    attachments: &[std::path::PathBuf],
+) -> Msg {
+    let reporter = crate::commands::UploadReporter::silent();
+    match crate::commands::upload_files(client, attachments, &reporter).await {
+        Ok(uploaded) => comment_write_msg(
+            client
+                .create_comment(
+                    task_id,
+                    body,
+                    crate::client::BodyFormat::Text,
+                    &uploaded.codes,
+                )
+                .await,
+        ),
+        Err(crate::commands::UploadFailure::Unauthorized) => Msg::AuthExpired,
+        Err(failure) => Msg::CommentMutationErr(failure.message()),
+    }
 }
 
 /// Spawn the log-time write: fetch the instance's job types, resolve the default one,
@@ -1314,3 +1360,7 @@ fn platform_opener() -> &'static str {
 #[cfg(test)]
 #[path = "../../tests/unit/tui_mine_snapshot.rs"]
 mod mine_snapshot_tests;
+
+#[cfg(test)]
+#[path = "../../tests/unit/tui_comment_write.rs"]
+mod comment_write_tests;

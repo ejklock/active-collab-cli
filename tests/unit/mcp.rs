@@ -30,7 +30,13 @@ fn write_schema_is_one_flat_object_naming_every_write_operation() {
     assert_eq!(schema["required"], json!(["operation"]));
     assert_eq!(
         operation_names(&schema),
-        ["comment", "log_time", "set_task", "time_report"]
+        [
+            "comment",
+            "log_time",
+            "set_task",
+            "time_report",
+            "attach_task"
+        ]
     );
     assert!(schema["properties"]["hours"].is_object());
 }

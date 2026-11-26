@@ -7,9 +7,9 @@
 
 use crate::board::Phase;
 use crate::commands::{
-    self, comment_core, current_core, current_git_branch, get_core, mine_core, task_set_core,
-    time_log_core, DisplayFlags, InstanceContext, MineFilter, MineOutcome, OwnedReportPeriod,
-    PeriodPreset, ReportFormat, ReportRequest,
+    self, comment_core, current_core, current_git_branch, get_core, mine_core, task_attach_core,
+    task_set_core, time_log_core, DisplayFlags, InstanceContext, MineFilter, MineOutcome,
+    OwnedReportPeriod, PeriodPreset, ReportFormat, ReportRequest, UploadReporter,
 };
 use crate::store::cache::TaskCache;
 use crate::store::instances::InstanceRepository;
@@ -33,8 +33,11 @@ use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde_json::Value;
 use std::future::Future;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::task::{JoinError, JoinHandle};
 
 mod skills;
@@ -108,7 +111,7 @@ impl AcServer {
 
     #[tool(
         description = "Change ActiveCollab data. A cancelled `time_report` task drops its \
-                       result; the file stays.",
+                       result; the file stays; a cancelled upload posts nothing.",
         input_schema = input_schema::<WriteOperation>(),
         annotations(destructive_hint = true)
     )]
@@ -119,12 +122,17 @@ impl AcServer {
     ) -> Result<CallToolResponse, McpError> {
         let operation: WriteOperation = parse_operation(arguments)?;
         let period = operation.report_period()?;
-        let long = matches!(operation, WriteOperation::TimeReport { .. });
-        let work = move || run_write(operation, period);
-        if long {
-            return self.run_long(context, work).await;
+        operation.check_attachments()?;
+        if operation.is_long() {
+            return self
+                .run_long(context, move |reporter| {
+                    run_write(operation, period, reporter)
+                })
+                .await;
         }
-        run_isolated(work).await.map(Into::into)
+        run_isolated(move || run_write(operation, period, UploadReporter::silent()))
+            .await
+            .map(Into::into)
     }
 
     #[tool(
@@ -141,7 +149,7 @@ impl AcServer {
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, McpError> {
         let arguments: DownloadArguments = parse_operation(arguments)?;
-        self.run_long(context, move || run_download(arguments))
+        self.run_long(context, move |_reporter| run_download(arguments))
             .await
     }
 }
@@ -149,26 +157,37 @@ impl AcServer {
 impl AcServer {
     /// Runs a long call. A client that declared the tasks extension gets a task at once and the
     /// call finishes behind it; any other client waits for the result. Either way a progress
-    /// token receives the start, a heartbeat while it runs and the end.
+    /// token receives the start, each step the core reports, a heartbeat while it runs and the
+    /// end. The core gets a reporter whose cancel flag a task cancel sets.
     async fn run_long<F, Fut>(
         &self,
         context: RequestContext<RoleServer>,
         make: F,
     ) -> Result<CallToolResponse, McpError>
     where
-        F: FnOnce() -> Fut + Send + 'static,
+        F: FnOnce(UploadReporter) -> Fut + Send + 'static,
         Fut: Future<Output = CoreRun>,
     {
+        let (steps, step_messages) = tokio::sync::mpsc::unbounded_channel();
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let reporter = UploadReporter::new(steps, Arc::clone(&cancelled));
+        let make = move || make(reporter);
         let progress = Progress {
             peer: context.peer.clone(),
             token: context.meta.get_progress_token(),
+            cancelled,
         };
         let declared_tasks = context
             .client_capabilities()
             .is_some_and(|capabilities| capabilities.supports_tasks());
         if !declared_tasks {
+            let request_cancelled = context.ct.clone();
             let joined = progress
-                .follow(spawn_core(make), std::future::pending())
+                .follow(
+                    spawn_core(make),
+                    step_messages,
+                    request_cancelled.cancelled_owned(),
+                )
                 .await;
             return match joined {
                 Some(Ok(run)) => Ok(run.into_result().into()),
@@ -181,7 +200,10 @@ impl AcServer {
             .with_ttl_ms(None);
         let task = self.tasks.spawn(options, move |task| {
             Box::pin(async move {
-                match progress.follow(spawn_core(make), task.cancelled()).await {
+                match progress
+                    .follow(spawn_core(make), step_messages, task.cancelled())
+                    .await
+                {
                     Some(Ok(run)) => Ok(run.into_result()),
                     Some(Err(e)) => Err(TaskExit::Error(join_failure(&e))),
                     None => Err(TaskExit::Cancelled),
@@ -576,10 +598,15 @@ enum WriteOperation {
         /// Task URL or PROJECT_ID/TASK_ID.
         #[serde(rename = "ref")]
         task_ref: String,
+        /// Optional with `attachments`.
+        #[serde(default)]
         body: String,
         /// Post `body` as raw HTML.
         #[serde(default)]
         html: bool,
+        /// Local file paths; all or none.
+        #[serde(default)]
+        attachments: Vec<PathBuf>,
         instance: Option<String>,
     },
     /// Log time against a task.
@@ -623,6 +650,16 @@ enum WriteOperation {
         format: Option<ReportFormatArg>,
         instance: Option<String>,
     },
+    /// Attach local files to a task.
+    AttachTask {
+        /// Task URL or PROJECT_ID/TASK_ID.
+        #[serde(rename = "ref")]
+        task_ref: String,
+        /// Local file paths; all or none.
+        #[serde(default)]
+        attachments: Vec<PathBuf>,
+        instance: Option<String>,
+    },
 }
 
 #[derive(Clone, Copy, Deserialize, JsonSchema)]
@@ -641,6 +678,30 @@ enum ReportFormatArg {
 }
 
 impl WriteOperation {
+    /// An `attach_task` with no file is refused before any task starts. The
+    /// field cannot be required in the schema: `comment` shares it as optional.
+    fn check_attachments(&self) -> Result<(), McpError> {
+        match self {
+            WriteOperation::AttachTask { attachments, .. } if attachments.is_empty() => {
+                Err(McpError::invalid_params(
+                    "attach_task needs at least one path in attachments",
+                    None,
+                ))
+            }
+            _ => Ok(()),
+        }
+    }
+
+    /// Calls that may take long enough to run as a task: the hours export
+    /// and every upload.
+    fn is_long(&self) -> bool {
+        match self {
+            WriteOperation::TimeReport { .. } | WriteOperation::AttachTask { .. } => true,
+            WriteOperation::Comment { attachments, .. } => !attachments.is_empty(),
+            WriteOperation::LogTime { .. } | WriteOperation::SetTask { .. } => false,
+        }
+    }
+
     /// The period of a `time_report` operation; `None` for every other
     /// operation. A missing or contradictory period is an `invalid_params`
     /// protocol error.
@@ -742,6 +803,7 @@ fn heartbeat_progress(beat: u32) -> f64 {
 struct Progress {
     peer: Peer<RoleServer>,
     token: Option<ProgressToken>,
+    cancelled: Arc<AtomicBool>,
 }
 
 impl Progress {
@@ -753,12 +815,14 @@ impl Progress {
         let _ = self.peer.notify_progress(notification).await;
     }
 
-    /// Waits for the core to finish, reporting the start, a heartbeat every few seconds and the
-    /// end. `cancel` resolving stops the wait and returns `None`: the core cannot be
-    /// interrupted, so it runs on to its end on its thread and its result is dropped.
+    /// Waits for the core to finish, reporting the start, each step the core sends, a heartbeat
+    /// every few seconds and the end. `cancel` resolving raises the cancel flag, stops the wait
+    /// and returns `None`: a core that checks the flag stops at its next check; any other runs
+    /// on to its end on its thread and its result is dropped.
     async fn follow(
         &self,
         core: JoinHandle<CoreRun>,
+        mut steps: UnboundedReceiver<String>,
         cancel: impl Future<Output = ()>,
     ) -> Option<Result<CoreRun, JoinError>> {
         tokio::pin!(core, cancel);
@@ -768,6 +832,7 @@ impl Progress {
         // Skip missed ticks so a slow send cannot fire a burst that starves the cancel arm.
         heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         let mut beats = 0_u32;
+        let mut steps_open = true;
         loop {
             // Biased so a heartbeat due at the instant the core ends is sent before the end.
             tokio::select! {
@@ -776,7 +841,17 @@ impl Progress {
                     beats = beats.saturating_add(1);
                     self.send(heartbeat_progress(beats), "running").await;
                 }
-                () = &mut cancel => return None,
+                step = steps.recv(), if steps_open => match step {
+                    Some(message) => {
+                        beats = beats.saturating_add(1);
+                        self.send(heartbeat_progress(beats), &message).await;
+                    }
+                    None => steps_open = false,
+                },
+                () = &mut cancel => {
+                    self.cancelled.store(true, Ordering::SeqCst);
+                    return None;
+                }
                 joined = &mut core => {
                     self.send(PROGRESS_TOTAL, "finished").await;
                     return Some(joined);
@@ -910,13 +985,18 @@ async fn run_read(operation: ReadOperation) -> CoreRun {
     run
 }
 
-async fn run_write(operation: WriteOperation, period: Option<OwnedReportPeriod>) -> CoreRun {
+async fn run_write(
+    operation: WriteOperation,
+    period: Option<OwnedReportPeriod>,
+    reporter: UploadReporter,
+) -> CoreRun {
     let mut run = CoreRun::default();
     match operation {
         WriteOperation::Comment {
             task_ref,
             body,
             html,
+            attachments,
             instance,
         } => {
             let Some(ctx) = open_instance(instance.as_deref(), &mut run) else {
@@ -927,6 +1007,8 @@ async fn run_write(operation: WriteOperation, period: Option<OwnedReportPeriod>)
                 None,
                 &body,
                 html,
+                &attachments,
+                &reporter,
                 &ctx.instance,
                 &ctx.client,
                 true,
@@ -1012,6 +1094,26 @@ async fn run_write(operation: WriteOperation, period: Option<OwnedReportPeriod>)
             };
             run.code =
                 commands::time_report_core(&request, &ctx.client, &mut run.out, &mut run.err).await;
+        }
+        WriteOperation::AttachTask {
+            task_ref,
+            attachments,
+            instance,
+        } => {
+            let Some(ctx) = open_instance(instance.as_deref(), &mut run) else {
+                return run;
+            };
+            run.code = task_attach_core(
+                Some(&task_ref),
+                None,
+                &attachments,
+                &reporter,
+                &ctx.client,
+                true,
+                &mut run.out,
+                &mut run.err,
+            )
+            .await;
         }
     }
     run

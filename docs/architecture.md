@@ -39,7 +39,7 @@ flowchart TD
     screens --> theme
     main --> cli["cli (clap)"]
     cli --> commands
-    main --> mcp["mcp/mod.rs\nac mcp · rmcp stdio server\nac_read · ac_write (flat schema, operation enum) · ac_download_attachments\nskills.rs · the active-collab skill as a resource and over the skills extension\ntasks · ac_download_attachments and the time report run as cancellable tasks with progress"]
+    main --> mcp["mcp/mod.rs\nac mcp · rmcp stdio server\nac_read · ac_write (flat schema, operation enum) · ac_download_attachments\nskills.rs · the active-collab skill as a resource and over the skills extension\ntasks · ac_download_attachments, the time report and uploads run as cancellable tasks with progress"]
     mcp --> commands
     subgraph commands["commands/ — three masters (ADR 0055)"]
         direction TB
@@ -47,6 +47,7 @@ flowchart TD
         cmd_setup["setup.rs\nsetup list·remove·language·test·add·board"]
         cmd_task["task.rs\nget · current"]
         cmd_comment["comment.rs\ncomment_core"]
+        cmd_attach["attach.rs\nupload_files · task_attach_core\nUploadReporter (progress steps + cancel flag)"]
         cmd_hours["hours_report.rs\nexport_hours_report · time_report_core · resolve_period · render_hours_report_csv · render_hours_report_xlsx"]
         cmd_mine["mine.rs\nmine_core · collect_mine_task_lists · mine_rows_of · collect_mine_hours"]
         cmd_skill["skill.rs\nskill_output · SKILL registry\n(body = include_str! canonical SKILL.md)"]
@@ -56,6 +57,9 @@ flowchart TD
         cmd_task --> cmd_presenter
         cmd_comment --> cmd_resolve
         cmd_comment --> cmd_presenter
+        cmd_comment --> cmd_attach
+        cmd_attach --> cmd_resolve
+        cmd_attach --> cmd_presenter
         cmd_mine --> cmd_presenter
         cmd_hours --> cmd_presenter
     end
@@ -149,7 +153,7 @@ flowchart TD
   ([ADR 0070](/adr/0070-ac-mcp-serves-mcp-over-stdio-as-an-adapter-over-the-command-cores.md)):
   `src/mcp/mod.rs` serves MCP over stdio with `rmcp` and exposes three tools, `ac_read`
   (`readOnlyHint`: `get` · `current` · `mine`), `ac_write` (`destructiveHint`: `comment` ·
-  `log_time` · `set_task` · `time_report`), each selecting a core by an `operation` field, and
+  `log_time` · `set_task` · `time_report` · `attach_task`), each selecting a core by an `operation` field, and
   `ac_download_attachments` (writes files; neither read-only nor destructive, idempotent; `get`
   never downloads, see [ADR 0072](/adr/0072-ac-mcp-exposes-downloads-as-a-third-tool-with-honest-annotations.md)). An
   operation calls the existing `*_core` with `json = true` and in-memory writers, returns `out`
@@ -164,7 +168,10 @@ flowchart TD
   ([ADR 0076](/adr/0076-ac-mcp-serves-its-skill-over-the-skills-extension-and-runs-long-calls-as-tasks.md));
   any other URI is `invalid_params`. When the client declares the tasks extension, `ac_download_attachments`
   and the `time_report` write run as tasks (rmcp `TaskManager`; `tasks/get`, `tasks/cancel`) and report
-  progress every 5 s, rising and always below the total.
+  progress every 5 s, rising and always below the total. Uploads (`comment` with `attachments`,
+  `attach_task`) also run as tasks, report each file as a progress step, and honor a cancel
+  before each file and before the write, so a cancelled upload posts nothing
+  ([ADR 0077](/adr/0077-ac-mcp-runs-uploads-as-tasks-with-per-file-progress-and-a-cancel-the-core-honors.md)).
   Fitness: `tests/mcp_stdio.rs` drives the built binary over stdio and asserts the tool list,
   byte-identical output against the `--json` commands, error mapping, the skill resource and
   catalog, the task lifecycle and progress, and that every stdout line is a JSON-RPC frame.
@@ -324,6 +331,39 @@ Background results (e.g. `Msg::LoadedTasksByProject`) are delivered over a
 `tokio::sync::mpsc` channel that is a first-class arm of the `tokio::select!`
 loop. The model is updated and the screen repainted as soon as the result
 arrives — no input event is required.
+
+## Attachment upload flow
+
+`ac comment --attach`, `ac task attach`, the MCP `comment`/`attach_task` operations and the TUI
+compose (Ctrl+O) share `commands/attach.rs` `upload_files`: a leading `~/` expands to the home
+directory, every path is checked before the first upload, each file streams from disk as one
+`POST /api/v1/upload-files`, and the codes ride on the comment or task write as
+`attach_uploaded_files`. The first failure stops the batch and nothing is posted. The cancel flag
+is raised by an MCP `tasks/cancel` or, for a call made without the tasks extension, by its
+`notifications/cancelled`; the TUI and CLI never raise it.
+
+```mermaid
+sequenceDiagram
+    participant Caller as CLI | MCP call or task | TUI shell
+    participant Core as attach.rs upload_files
+    participant API as ActiveCollab
+
+    Caller->>Core: paths + UploadReporter
+    Core->>Core: expand ~/, check every path is a readable regular file
+    alt a path fails
+        Core-->>Caller: Unreadable (exit 2), no request sent
+    else all readable
+        loop each file
+            Core->>Core: cancel flag set? stop, nothing posted
+            Core-->>Caller: step "uploading i/n name"
+            Core->>API: POST /api/v1/upload-files (multipart)
+            API-->>Core: [{code}] | 401 | error
+        end
+        Core->>Core: cancel flag set? stop, nothing posted
+        Core-->>Caller: codes
+        Caller->>API: POST comment or PUT task with attach_uploaded_files
+    end
+```
 
 ## MCP tool-call data flow
 

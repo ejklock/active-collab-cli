@@ -25,7 +25,7 @@ exactly what the matching `--json` command prints.
 | Tool | Operations | Instead of |
 |---|---|---|
 | `ac_read` | `get` · `current` · `mine` | `ac get` · `ac current` · `ac mine` with `--json` |
-| `ac_write` | `comment` · `log_time` · `set_task` · `time_report` | `ac comment` · `ac time log` · `ac task set` · `ac time report` |
+| `ac_write` | `comment` · `log_time` · `set_task` · `time_report` · `attach_task` | `ac comment` · `ac time log` · `ac task set` · `ac time report` · `ac task attach` |
 | `ac_download_attachments` | no `operation`; takes `ref` | `ac get --download-attachments --json` |
 
 The parameters of each operation are in the section `MCP server — ac mcp` below.
@@ -219,6 +219,30 @@ ac comment 665/75159 --html -m "<p><strong>Section one</strong></p><p>Lorem ipsu
 ac comment 665/75159 --html < body.html
 ```
 
+### Attaching files — `--attach` and `ac task attach`
+
+`--attach <path>` uploads a local file and attaches it to the new comment;
+repeat it for more files. With at least one file the body may be empty; pass
+`-m ""` then, since without `-m` the body is read from a non-terminal stdin.
+`ac task attach <ref> --attach <path>…` attaches files directly to the task.
+Every path is checked first; then each file is uploaded in order, and the first
+failure stops everything: nothing is posted, and the error names the file
+(a bad path exits 2, an upload failure 1). A leading `~/` expands to your home
+directory. Files stream from disk; there is no size limit on this side.
+The `--json` result adds `attachments`, the file names in order.
+
+```bash
+ac comment 665/75159 -m "QA report attached." --attach qa/report.html --attach qa/shot-1.png
+ac comment 665/75159 -m "Screenshot." --attach qa/shot-1.png --json
+# {"attachments":["shot-1.png"],"comment_id":123,"ok":true,"project_id":665,"task_id":75159}
+ac task attach 665/75159 --attach spec.pdf --json
+# {"attachments":["spec.pdf"],"ok":true,"project_id":665,"task_id":75159}
+```
+
+In the TUI compose of a new comment, Ctrl+O opens a path field: Enter adds the
+file, Backspace on an empty field removes the last one, Esc closes the field.
+After a failed send the text stays: fix it or the files and send again.
+
 ## MCP server — `ac mcp`
 
 `ac mcp` serves the same commands as MCP tools over stdio, so a harness calls
@@ -235,16 +259,20 @@ every other operation needs `instance` only when several instances are configure
 | Tool | Hint | Operations (parameters) |
 |---|---|---|
 | `ac_read` | read-only | `get` (`ref`, `no_comments`, `refresh`, `no_dependencies` to skip the parents/children lookup) · `current` (optional `branch`, else the git branch of the server's working directory) · `mine` (optional `labels`, an array of label names that must all match, and `task_list`, a list id or name, and `phase`, one of the four phase keys; same rules as `--label`, `--task-list` and `--phase`) |
-| `ac_write` | destructive | `comment` (`ref`, `body`, `html`) · `log_time` (`ref`, `hours`, `date`, `summary`, `job_type`) · `set_task` (`ref`, `status`, `assignee`, `estimate`, `list`) · `time_report` (`period` or `start` + `end`, `format`) |
+| `ac_write` | destructive | `comment` (`ref`, `body`, `html`, `attachments`: local paths) · `attach_task` (`ref`, `attachments`) · `log_time` (`ref`, `hours`, `date`, `summary`, `job_type`) · `set_task` (`ref`, `status`, `assignee`, `estimate`, `list`) · `time_report` (`period` or `start` + `end`, `format`) |
 | `ac_download_attachments` | writes files, idempotent | `ref`, `attachments_dir` (default: the per-task temp path), `instance`; no `operation` field. Fetches the attachments of the task and of its comments, plus inline images. Returns what `ac get --download-attachments --json` prints. `ac_read` `get` does not download. |
 
 `ac task set <ref> --list <id|name>` (and `set_task` `list`) moves a task to another task list of its project: an all-digits value is a list id, any other value a list name matched exactly, ignoring case. An unknown or ambiguous list exits 2, prints the candidates and sends no write. The `--json` result then carries `task_list_id` and `task_list` (the list name). In the interactive TUI task detail, `l` opens a searchable picker that moves the task to another list.
 
 `time_report` has no JSON form: it returns the human line and writes the file in
 the server's working directory. When the client declares the MCP tasks extension,
-`ac_download_attachments` and `ac_write` `time_report` return a task; cancelling it
-ends it `cancelled` at once, but the command still finishes in the background, its
-result is dropped and the files it wrote stay. On `ac_read` and `ac_download_attachments`, an
+`ac_download_attachments`, `ac_write` `time_report` and the uploads (`comment` with
+`attachments`, `attach_task`) return a task. Cancelling a download or report ends it
+`cancelled` at once, but the command still finishes in the background, its result is
+dropped and the files it wrote stay. An upload reports `uploading <i>/<n> <name>` as
+progress, and `tasks/cancel` stops it before the next file and before the write, so
+nothing is posted; a write already in flight completes. Without the tasks extension,
+`notifications/cancelled` on the call stops it the same way. On `ac_read` and `ac_download_attachments`, an
 unknown `operation`, a missing required parameter or an unknown parameter is a
 JSON-RPC `invalid_params` error.
 

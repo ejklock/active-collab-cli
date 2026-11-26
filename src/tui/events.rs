@@ -71,8 +71,26 @@ pub fn map_compose_key_event(key: crossterm::event::KeyEvent) -> Option<Msg> {
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
     match key.code {
         KeyCode::Char('s') if ctrl => Some(Msg::ComposeSubmit),
+        KeyCode::Char('o') if ctrl => Some(Msg::ComposeAttachOpen),
         KeyCode::Esc => Some(Msg::ComposeCancel),
         _ => Some(Msg::ComposeInput(Input::from(key))),
+    }
+}
+
+/// Map a key event while the compose path field is open: printable characters
+/// type the path, Enter adds it, Backspace edits it, Esc closes the field.
+/// A Ctrl or an Alt chord is dropped so a send cannot fire mid-path; both
+/// together are AltGr on many terminals and type the character.
+pub fn map_compose_path_key_event(key: crossterm::event::KeyEvent) -> Option<Msg> {
+    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    let alt = key.modifiers.contains(KeyModifiers::ALT);
+    let chord = ctrl != alt;
+    match key.code {
+        KeyCode::Enter => Some(Msg::ComposeAttachConfirm),
+        KeyCode::Esc => Some(Msg::ComposeAttachCancel),
+        KeyCode::Backspace => Some(Msg::ComposeAttachBackspace),
+        KeyCode::Char(c) if !chord => Some(Msg::ComposeAttachChar(c)),
+        _ => None,
     }
 }
 

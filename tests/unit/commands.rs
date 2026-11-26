@@ -3012,6 +3012,8 @@ async fn comment_core_flag_body_explicit_ref_calls_create_comment_and_returns_0(
         None,
         "Deploy em homolog.",
         false,
+        &[],
+        &UploadReporter::silent(),
         &inst,
         &client,
         false,
@@ -3061,6 +3063,8 @@ async fn comment_core_multiline_stdin_body_encoded_as_br() {
         None,
         multiline,
         false,
+        &[],
+        &UploadReporter::silent(),
         &inst,
         &client,
         false,
@@ -3092,6 +3096,8 @@ async fn comment_core_json_flag_stdout_is_exact_minified_result_line() {
         None,
         "ok",
         false,
+        &[],
+        &UploadReporter::silent(),
         &inst,
         &client,
         true,
@@ -3133,6 +3139,8 @@ async fn comment_core_empty_body_returns_exit2_and_no_create_comment_call() {
         None,
         "",
         false,
+        &[],
+        &UploadReporter::silent(),
         &inst,
         &client,
         false,
@@ -3165,6 +3173,8 @@ async fn comment_core_whitespace_only_body_returns_exit2() {
         None,
         "   \n  ",
         false,
+        &[],
+        &UploadReporter::silent(),
         &inst,
         &client,
         false,
@@ -3200,6 +3210,8 @@ async fn comment_core_branch_resolved_task_posts_to_branch_task() {
         Some("feature/665-75159"),
         "branch comment",
         false,
+        &[],
+        &UploadReporter::silent(),
         &inst,
         &client,
         false,
@@ -3231,6 +3243,8 @@ async fn comment_core_no_ref_and_no_branch_returns_exit2_without_write() {
         None,
         "some body",
         false,
+        &[],
+        &UploadReporter::silent(),
         &inst,
         &client,
         false,
@@ -3397,6 +3411,8 @@ async fn comment_core_unresolvable_branch_returns_exit2_without_write() {
         Some("main"),
         "some body",
         false,
+        &[],
+        &UploadReporter::silent(),
         &inst,
         &client,
         false,
@@ -3437,6 +3453,8 @@ async fn comment_core_http_4xx_returns_nonzero_without_success_line() {
         None,
         "body text",
         false,
+        &[],
+        &UploadReporter::silent(),
         &inst,
         &client,
         false,
@@ -3478,6 +3496,8 @@ async fn comment_core_http_failure_with_json_flag_emits_error_object() {
         None,
         "body text",
         false,
+        &[],
+        &UploadReporter::silent(),
         &inst,
         &client,
         true,
@@ -3601,6 +3621,8 @@ async fn comment_core_401_prints_reauth_message_and_returns_nonzero() {
         None,
         "some body",
         false,
+        &[],
+        &UploadReporter::silent(),
         &inst,
         &client,
         false,
@@ -3644,6 +3666,8 @@ async fn comment_core_401_json_emits_failure_shape_without_ok_true() {
         None,
         "some body",
         false,
+        &[],
+        &UploadReporter::silent(),
         &inst,
         &client,
         true,
@@ -3733,6 +3757,8 @@ async fn comment_core_404_keeps_existing_output_without_reauth_message() {
         None,
         "some body",
         false,
+        &[],
+        &UploadReporter::silent(),
         &inst,
         &client,
         false,
@@ -3790,6 +3816,8 @@ async fn comment_core_html_flag_posts_body_verbatim() {
             None,
             body,
             true,
+            &[],
+            &UploadReporter::silent(),
             &inst,
             &client,
             false,
@@ -3824,6 +3852,8 @@ async fn comment_core_html_flag_whitespace_only_body_returns_exit2() {
             None,
             body,
             true,
+            &[],
+            &UploadReporter::silent(),
             &inst,
             &client,
             false,
@@ -3865,6 +3895,8 @@ async fn comment_core_html_flag_markup_only_body_is_posted() {
         None,
         "<p></p>",
         true,
+        &[],
+        &UploadReporter::silent(),
         &inst,
         &client,
         false,
@@ -3898,6 +3930,8 @@ async fn comment_core_html_flag_json_output_is_unchanged() {
         None,
         "<p>ok</p>",
         true,
+        &[],
+        &UploadReporter::silent(),
         &inst,
         &client,
         true,
@@ -3940,6 +3974,8 @@ async fn comment_core_html_flag_http_4xx_returns_nonzero() {
         None,
         "<p>body</p>",
         true,
+        &[],
+        &UploadReporter::silent(),
         &inst,
         &client,
         false,
@@ -3976,6 +4012,8 @@ async fn comment_core_html_flag_401_prints_reauth_message() {
         None,
         "<p>body</p>",
         true,
+        &[],
+        &UploadReporter::silent(),
         &inst,
         &client,
         false,
@@ -7743,7 +7781,7 @@ fn instance_not_found_message_stays_english_under_en() {
 fn presenter_success_lines_are_translated_with_values_filled() {
     let _lang = PtBrLanguage::on();
     let mut out = Vec::new();
-    presenter::write_comment_success(7, 75346, 524, false, &mut out);
+    presenter::write_comment_success(7, 75346, 524, &[], false, &mut out);
     presenter::write_time_success(8, 75346, 524, 1.5, false, &mut out);
     presenter::write_task_success(75346, 524, None, None, None, None, false, &mut out);
     assert_eq!(
@@ -7757,7 +7795,7 @@ fn presenter_success_lines_are_translated_with_values_filled() {
 #[test]
 fn presenter_success_lines_stay_english_under_en() {
     let mut out = Vec::new();
-    presenter::write_comment_success(7, 75346, 524, false, &mut out);
+    presenter::write_comment_success(7, 75346, 524, &[], false, &mut out);
     presenter::write_time_success(8, 75346, 524, 1.5, false, &mut out);
     presenter::write_task_success(75346, 524, None, None, None, None, false, &mut out);
     assert_eq!(

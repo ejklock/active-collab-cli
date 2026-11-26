@@ -752,7 +752,7 @@ async fn create_comment_posts_to_correct_path_with_body() {
 
     let client = make_client(&server.uri());
     let outcome = client
-        .create_comment(42, "hello", BodyFormat::Text)
+        .create_comment(42, "hello", BodyFormat::Text, &[])
         .await
         .unwrap();
     match outcome {
@@ -774,7 +774,7 @@ async fn create_comment_non_2xx_returns_failed_with_status() {
 
     let client = make_client(&server.uri());
     let outcome = client
-        .create_comment(42, "hello", BodyFormat::Text)
+        .create_comment(42, "hello", BodyFormat::Text, &[])
         .await
         .unwrap();
     match outcome {
@@ -795,7 +795,7 @@ async fn create_comment_401_returns_unauthorized() {
 
     let client = make_client(&server.uri());
     let outcome = client
-        .create_comment(42, "hello", BodyFormat::Text)
+        .create_comment(42, "hello", BodyFormat::Text, &[])
         .await
         .unwrap();
     assert!(
@@ -817,7 +817,7 @@ async fn create_comment_attaches_token_header() {
 
     let client = make_client(&server.uri());
     let outcome = client
-        .create_comment(5, "text", BodyFormat::Text)
+        .create_comment(5, "text", BodyFormat::Text, &[])
         .await
         .unwrap();
     assert!(matches!(outcome, CommentWriteOutcome::Ok(_)));

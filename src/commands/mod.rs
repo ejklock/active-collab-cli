@@ -1,3 +1,4 @@
+mod attach;
 mod comment;
 mod context;
 mod hours_report;
@@ -9,6 +10,7 @@ mod skill;
 mod task;
 pub(crate) mod time;
 
+pub(crate) use attach::{task_attach_core, upload_files, UploadFailure, UploadReporter};
 pub(crate) use comment::comment_core;
 pub(crate) use context::{
     current_git_branch, open_store, open_store_and_http, setup_instance_client, InstanceContext,

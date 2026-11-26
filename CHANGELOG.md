@@ -11,6 +11,26 @@ pre-cutover Python package's history is preserved verbatim under
 version numbers are a separate line and do not continue into the Rust crate
 (issue 0055).
 
+## [Unreleased]
+
+### Added
+
+- `ac comment --attach <path>` (repeatable) uploads local files and attaches
+  them to the comment; the body may be empty when a file is given.
+- `ac task attach <ref> --attach <path>…` attaches files directly to a task.
+- The MCP `ac_write` `comment` takes `attachments`, and a new `attach_task`
+  operation attaches files to a task. Both run as MCP tasks, report each file as
+  progress, and a cancel posts nothing.
+- In the TUI compose of a new comment, Ctrl+O adds a file by path.
+- Uploads are all or nothing: every path is checked first, and the first failed
+  upload stops the write. Files stream from disk, and a leading `~/` expands to
+  the home directory.
+
+### Fixed
+
+- The TUI comment compose no longer strands its text after a failed send:
+  typing, editing the files or sending again resumes it.
+
 ## [0.12.8] - 2026-11-26
 
 ### Added

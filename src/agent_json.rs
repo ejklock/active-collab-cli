@@ -161,6 +161,35 @@ pub fn comment_result(comment_id: i64, task_id: i64, project_id: i64) -> String 
     )
 }
 
+/// Build the write-result for a comment posted with attachments: the
+/// `comment_result` fields plus the attached file names in upload order.
+pub fn attached_comment_result(
+    comment_id: i64,
+    task_id: i64,
+    project_id: i64,
+    attachments: &[String],
+) -> String {
+    serde_json::json!({
+        "ok": true,
+        "comment_id": comment_id,
+        "task_id": task_id,
+        "project_id": project_id,
+        "attachments": attachments,
+    })
+    .to_string()
+}
+
+/// Build the write-result for files attached directly to a task.
+pub fn task_attach_result(task_id: i64, project_id: i64, attachments: &[String]) -> String {
+    serde_json::json!({
+        "ok": true,
+        "task_id": task_id,
+        "project_id": project_id,
+        "attachments": attachments,
+    })
+    .to_string()
+}
+
 /// Build the error object for a failed comment write.
 ///
 /// Returns a minified single-line JSON string:

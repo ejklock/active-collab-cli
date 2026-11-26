@@ -7,16 +7,17 @@ pub(crate) fn write_comment_success(
     comment_id: i64,
     task_id: i64,
     project_id: i64,
+    attachments: &[String],
     json: bool,
     out: &mut dyn Write,
 ) {
     if json {
-        writeln!(
-            out,
-            "{}",
+        let line = if attachments.is_empty() {
             agent_json::comment_result(comment_id, task_id, project_id)
-        )
-        .ok();
+        } else {
+            agent_json::attached_comment_result(comment_id, task_id, project_id, attachments)
+        };
+        writeln!(out, "{line}").ok();
     } else {
         writeln!(
             out,
@@ -27,6 +28,20 @@ pub(crate) fn write_comment_success(
                 .replace("{task_id}", &task_id.to_string())
         )
         .ok();
+        if !attachments.is_empty() {
+            writeln!(
+                out,
+                "{}",
+                crate::i18n::fill(
+                    &t("Attached {count} file(s): {names}"),
+                    &[
+                        ("{count}", &attachments.len().to_string()),
+                        ("{names}", &attachments.join(", ")),
+                    ],
+                )
+            )
+            .ok();
+        }
     }
 }
 

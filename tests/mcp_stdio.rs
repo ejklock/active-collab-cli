@@ -140,10 +140,31 @@ fn expected_flat_schema(tool: &str) -> (BTreeSet<String>, BTreeSet<String>) {
             ]),
         ),
         "ac_write" => (
-            set(&["comment", "log_time", "set_task", "time_report"]),
             set(&[
-                "ref", "body", "html", "hours", "date", "summary", "job_type", "status",
-                "assignee", "estimate", "list", "period", "start", "end", "format", "instance",
+                "comment",
+                "log_time",
+                "set_task",
+                "time_report",
+                "attach_task",
+            ]),
+            set(&[
+                "ref",
+                "body",
+                "html",
+                "attachments",
+                "hours",
+                "date",
+                "summary",
+                "job_type",
+                "status",
+                "assignee",
+                "estimate",
+                "list",
+                "period",
+                "start",
+                "end",
+                "format",
+                "instance",
             ]),
         ),
         other => panic!("unexpected tool {other}"),
@@ -256,6 +277,7 @@ async fn operation_description_names_every_operation_with_its_own_text() {
             "Edit task fields; give at least one of status, assignee, estimate, list",
         ),
         (&write, "time_report", "Write your hours report to a file"),
+        (&write, "attach_task", "Attach local files to a task"),
     ] {
         let paired = format!("{operation}: {text}");
         assert!(description.contains(&paired), "{paired}: {description}");
@@ -274,7 +296,7 @@ async fn field_descriptions_name_exactly_the_operations_that_take_each_field() {
 
     assert_eq!(
         description_of(&write, "ref"),
-        "Task URL or PROJECT_ID/TASK_ID. (comment, log_time, set_task; required)"
+        "Task URL or PROJECT_ID/TASK_ID. (comment, log_time, set_task, attach_task; required)"
     );
     assert!(write["properties"]["instance"].get("description").is_none());
     assert!(read["properties"]["instance"].get("description").is_none());
@@ -1205,9 +1227,9 @@ async fn a_long_task_call_with_a_progress_token_reports_progress_below_its_total
 /// client pays in context on every session. Set from the measured size of the
 /// trimmed list, rounded up by under 1%; it includes the one sentence on each
 /// long-call tool that says what cancelling a task does, the three `mine`
-/// filter arguments and the `get` argument that skips the dependencies lookup
-/// (4098 bytes measured).
-const MAX_TOOLS_LIST_BYTES: usize = 4130;
+/// filter arguments, the `get` argument that skips the dependencies lookup, and
+/// the `attach_task` operation with the `attachments` field (4374 bytes measured).
+const MAX_TOOLS_LIST_BYTES: usize = 4410;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn tools_list_stays_within_its_size_bound() {
@@ -1540,4 +1562,209 @@ async fn mcp_mine_phase_matches_the_cli_output() {
     assert_eq!(to_do, unfiltered);
     assert_eq!(to_do, env.cli(&["mine", "--phase", "to_do", "--json"]));
     client.cancel().await.unwrap();
+}
+
+const UPLOAD_ROUTE: &str = "/api/v1/upload-files";
+
+/// Answers every upload with one code, after `delay`.
+async fn mount_upload(server: &MockServer, delay: std::time::Duration) {
+    Mock::given(method("POST"))
+        .and(path(UPLOAD_ROUTE))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!([{ "code": "code-x", "name": "x" }]))
+                .set_delay(delay),
+        )
+        .with_priority(1)
+        .mount(server)
+        .await;
+}
+
+fn write_files(env: &Env, names: &[&str]) -> Vec<String> {
+    names
+        .iter()
+        .map(|name| {
+            let file = env.dir.path().join(name);
+            std::fs::write(&file, name.as_bytes()).unwrap();
+            file.display().to_string()
+        })
+        .collect()
+}
+
+async fn requests_to(server: &MockServer, verb: &str, route: &str) -> Vec<Value> {
+    server
+        .received_requests()
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|r| r.method.as_str() == verb && r.url.path() == route)
+        .map(|r| serde_json::from_slice(&r.body).unwrap_or(Value::Null))
+        .collect()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_comment_with_attachments_uploads_them_and_posts_their_codes() {
+    let server = MockServer::start().await;
+    let task = report_task();
+    mount_seeded(&server, &Fixture::seeded()).await;
+    mount_upload(&server, std::time::Duration::ZERO).await;
+    let env = Env::new(&[("alpha", &server, Fixture::seeded().user_id)]);
+    let files = write_files(&env, &["shot.png", "report.html"]);
+    let client = env.connect().await;
+
+    let text = ok_text(
+        &client,
+        "ac_write",
+        json!({ "operation": "comment", "ref": reference(&task), "attachments": files }),
+    )
+    .await;
+
+    let result: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(
+        result["attachments"],
+        json!(["shot.png", "report.html"]),
+        "{text}"
+    );
+    assert_eq!(requests_to(&server, "POST", UPLOAD_ROUTE).await.len(), 2);
+    let comments = requests_to(
+        &server,
+        "POST",
+        &format!("/api/v1/comments/task/{}", task.id),
+    )
+    .await;
+    assert_eq!(
+        comments,
+        vec![json!({ "body": "", "attach_uploaded_files": ["code-x", "code-x"] })]
+    );
+    client.cancel().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn attach_task_runs_as_a_task_and_reports_each_file() {
+    let server = MockServer::start().await;
+    let task = report_task();
+    mount_seeded(&server, &Fixture::seeded()).await;
+    mount_upload(&server, std::time::Duration::ZERO).await;
+    let task_route = format!("/api/v1/projects/{}/tasks/{}", task.project_id, task.id);
+    Mock::given(method("PUT"))
+        .and(path(task_route.clone()))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "single": {} })))
+        .with_priority(1)
+        .mount(&server)
+        .await;
+    let env = Env::new(&[("alpha", &server, Fixture::seeded().user_id)]);
+    let files = write_files(&env, &["a.txt", "b.txt"]);
+    let mut session = RawSession::start_declaring_tasks(&env);
+
+    let response = session.tool_with_progress(
+        "ac_write",
+        json!({ "operation": "attach_task", "ref": reference(&task), "attachments": files }),
+        "attach-token",
+    );
+    let id = task_id_of(&response);
+    let state = session.task_terminal(&id);
+    assert_eq!(state["status"], "completed", "{state}");
+
+    let messages: Vec<String> = session
+        .progress_for("attach-token")
+        .iter()
+        .filter_map(|p| p["message"].as_str().map(str::to_owned))
+        .collect();
+    assert!(
+        messages.contains(&"uploading 1/2 a.txt".to_owned())
+            && messages.contains(&"uploading 2/2 b.txt".to_owned()),
+        "{messages:?}"
+    );
+    assert_eq!(
+        requests_to(&server, "PUT", &task_route).await,
+        vec![json!({ "attach_uploaded_files": ["code-x", "code-x"] })]
+    );
+    session.finish();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn cancelling_an_upload_task_posts_no_comment() {
+    let server = MockServer::start().await;
+    let task = report_task();
+    mount_seeded(&server, &Fixture::seeded()).await;
+    mount_upload(&server, std::time::Duration::from_millis(1500)).await;
+    let env = Env::new(&[("alpha", &server, Fixture::seeded().user_id)]);
+    let files = write_files(&env, &["a.txt", "b.txt"]);
+    let mut session = RawSession::start_declaring_tasks(&env);
+
+    let response = session.tool(
+        "ac_write",
+        json!({ "operation": "comment", "ref": reference(&task), "body": "QA", "attachments": files }),
+    );
+    let id = task_id_of(&response);
+    let ack = session.request("tasks/cancel", json!({ "taskId": id }));
+    assert!(ack["error"].is_null(), "{ack}");
+    assert_eq!(session.task_terminal(&id)["status"], "cancelled");
+
+    std::thread::sleep(std::time::Duration::from_millis(4000));
+    let comment_route = format!("/api/v1/comments/task/{}", task.id);
+    assert!(requests_to(&server, "POST", &comment_route)
+        .await
+        .is_empty());
+    assert!(requests_to(&server, "POST", UPLOAD_ROUTE).await.len() < 2);
+    session.kill();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn attach_task_without_files_is_refused_before_any_request() {
+    let server = MockServer::start().await;
+    let task = report_task();
+    mount_seeded(&server, &Fixture::seeded()).await;
+    let env = Env::new(&[("alpha", &server, Fixture::seeded().user_id)]);
+    let client = env.connect().await;
+
+    for args in [
+        json!({ "operation": "attach_task", "ref": reference(&task) }),
+        json!({ "operation": "attach_task", "ref": reference(&task), "attachments": [] }),
+    ] {
+        match call(&client, "ac_write", args.clone()).await {
+            Err(ServiceError::McpError(error)) => {
+                assert_eq!(error.code, ErrorCode::INVALID_PARAMS, "{args}");
+                assert!(error.message.contains("attachments"), "{}", error.message);
+            }
+            other => panic!("{args} should be invalid_params, got {other:?}"),
+        }
+    }
+    assert!(server.received_requests().await.unwrap().is_empty());
+    client.cancel().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn cancelling_a_plain_upload_call_posts_no_comment() {
+    let server = MockServer::start().await;
+    let task = report_task();
+    mount_seeded(&server, &Fixture::seeded()).await;
+    mount_upload(&server, std::time::Duration::from_millis(1500)).await;
+    let env = Env::new(&[("alpha", &server, Fixture::seeded().user_id)]);
+    let files = write_files(&env, &["a.txt"]);
+    let mut session = RawSession::start(&env);
+
+    session.send(&json!({
+        "jsonrpc": "2.0",
+        "id": 900,
+        "method": "tools/call",
+        "params": {
+            "name": "ac_write",
+            "arguments": { "operation": "comment", "ref": reference(&task), "body": "QA", "attachments": files }
+        }
+    }));
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    session.send(&json!({
+        "jsonrpc": "2.0",
+        "method": "notifications/cancelled",
+        "params": { "requestId": 900 }
+    }));
+
+    std::thread::sleep(std::time::Duration::from_millis(3000));
+    let comment_route = format!("/api/v1/comments/task/{}", task.id);
+    assert!(requests_to(&server, "POST", UPLOAD_ROUTE).await.len() <= 1);
+    assert!(requests_to(&server, "POST", &comment_route)
+        .await
+        .is_empty());
+    session.kill();
 }

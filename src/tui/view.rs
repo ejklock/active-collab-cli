@@ -36,7 +36,15 @@ const MIN_HEIGHT: u16 = 6;
 pub(crate) fn compose_modal_status(compose: &Compose) -> Option<String> {
     match &compose.status {
         ComposeStatus::Submitting => Some(t("Sending…")),
-        ComposeStatus::Error(_) => Some(t("Failed to post comment")),
+        ComposeStatus::Error(reason) => {
+            let generic = t("Failed to post comment");
+            let retry = t("edit or Ctrl+S to retry");
+            if reason.is_empty() || *reason == generic {
+                Some(format!("{generic} · {retry}"))
+            } else {
+                Some(format!("{generic}: {reason} · {retry}"))
+            }
+        }
         ComposeStatus::Editing => None,
     }
 }
@@ -294,10 +302,30 @@ fn compose_modal_title(cp: &Compose) -> String {
 }
 
 fn compose_modal_hint(cp: &Compose) -> String {
-    match compose_modal_status(cp) {
-        Some(status) => status,
-        None => t("Ctrl+S send · Esc cancel"),
+    if let Some(status) = compose_modal_status(cp) {
+        return status;
     }
+    match (&cp.kind, &cp.attach.path_input) {
+        (ComposeKind::Edit { .. }, _) => t("Ctrl+S send · Esc cancel"),
+        (ComposeKind::New, None) => t("Ctrl+S send · Ctrl+O attach · Esc cancel"),
+        (ComposeKind::New, Some(_)) => t("Enter add · Backspace on empty removes last · Esc close"),
+    }
+}
+
+/// The rows under the editor: one per picked file, then the path field while
+/// it is open.
+fn compose_attach_lines(cp: &Compose) -> Vec<String> {
+    let files = cp
+        .attach
+        .files
+        .iter()
+        .map(|file| format!("+ {}", file.display()));
+    let field = cp
+        .attach
+        .path_input
+        .as_ref()
+        .map(|input| format!("{}: {input}█", t("File")));
+    files.chain(field).collect()
 }
 
 /// Render the compose modal chrome (backdrop/border/title/hint) via `render_modal`
@@ -318,7 +346,28 @@ fn render_compose_modal(frame: &mut Frame, frame_area: ratatui::layout::Rect, cp
             hint: Some(&hint),
         },
     );
-    frame.render_widget(&cp.editor, body_rect);
+    let attach_lines = compose_attach_lines(cp);
+    let attach_rows = u16::try_from(attach_lines.len())
+        .unwrap_or(u16::MAX)
+        .min(body_rect.height.saturating_sub(1));
+    let editor_rect = ratatui::layout::Rect {
+        height: body_rect.height - attach_rows,
+        ..body_rect
+    };
+    frame.render_widget(&cp.editor, editor_rect);
+    if attach_rows > 0 {
+        let attach_rect = ratatui::layout::Rect {
+            y: editor_rect.y + editor_rect.height,
+            height: attach_rows,
+            ..body_rect
+        };
+        let shown = attach_lines.len() - usize::from(attach_rows);
+        frame.render_widget(
+            ratatui::widgets::Paragraph::new(attach_lines[shown..].join("\n"))
+                .style(theme::modal_body_style()),
+            attach_rect,
+        );
+    }
 }
 
 fn log_time_modal_hint(form: &LogTimeForm) -> String {

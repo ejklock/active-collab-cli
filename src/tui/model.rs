@@ -7,6 +7,7 @@ use crate::tui::detail_geometry::Selection;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use tui_textarea::TextArea;
 
 /// Identity bar shown at the top of every screen.
@@ -380,6 +381,7 @@ pub enum Cmd {
         project_id: i64,
         task_id: i64,
         body: String,
+        attachments: Vec<PathBuf>,
     },
     /// PUT an existing comment body (edit path).
     UpdateComment {
@@ -516,6 +518,15 @@ pub struct Compose {
     pub kind: ComposeKind,
     pub editor: TextArea<'static>,
     pub status: ComposeStatus,
+    pub attach: ComposeAttach,
+}
+
+/// Files picked for a new comment, and the path field while it is open.
+/// Paths are taken as typed; they are checked when the comment is sent.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ComposeAttach {
+    pub files: Vec<PathBuf>,
+    pub path_input: Option<String>,
 }
 
 /// Which field of the log-time modal currently has focus.
@@ -1325,6 +1336,17 @@ pub enum Msg {
     ComposeSubmit,
     /// Cancel the compose area, discarding the buffer.
     ComposeCancel,
+    /// Open the path field of a new comment's compose area.
+    ComposeAttachOpen,
+    /// Type one character into the open path field.
+    ComposeAttachChar(char),
+    /// Delete the last character of the path field; on an empty field, drop
+    /// the last picked file.
+    ComposeAttachBackspace,
+    /// Add the typed path to the picked files and close the field.
+    ComposeAttachConfirm,
+    /// Close the path field, keeping the picked files.
+    ComposeAttachCancel,
     /// The comment POST succeeded; refresh the detail view.
     CommentMutationOk,
     /// The comment POST failed; preserve the buffer and show an error.
@@ -1668,6 +1690,11 @@ fn update_by_family(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
         | Msg::ComposeInput(_)
         | Msg::ComposeSubmit
         | Msg::ComposeCancel
+        | Msg::ComposeAttachOpen
+        | Msg::ComposeAttachChar(_)
+        | Msg::ComposeAttachBackspace
+        | Msg::ComposeAttachConfirm
+        | Msg::ComposeAttachCancel
         | Msg::CommentMutationOk
         | Msg::CommentMutationErr(_)
         | Msg::AuthExpired) => update_compose(model, m),
@@ -1921,7 +1948,7 @@ fn update_compose(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
         Msg::CommentMutationOk => handle_comment_mutation_ok(model),
         Msg::CommentMutationErr(msg) => (handle_comment_mutation_err(model, msg), vec![]),
         Msg::AuthExpired => (handle_auth_expired(model), vec![]),
-        _ => (model, vec![]),
+        attach => (update_compose_attach(model, attach), vec![]),
     }
 }
 
@@ -3020,6 +3047,7 @@ fn handle_compose_open(mut model: Model) -> Model {
                 kind: ComposeKind::New,
                 editor: TextArea::default(),
                 status: ComposeStatus::Editing,
+                attach: ComposeAttach::default(),
             });
             *rendered_width = usize::MAX;
         }
@@ -3039,13 +3067,85 @@ fn handle_compose_input(mut model: Model, input: tui_textarea::Input) -> Model {
     }) = model.top_mut()
     {
         if let Some(cp) = overlay.compose_mut() {
-            if cp.status == ComposeStatus::Editing {
+            if resume_editing(cp) {
                 cp.editor.input(input);
                 *rendered_width = usize::MAX;
             }
         }
     }
     model
+}
+
+/// A compose takes edits while editing and after a failed send, so a typo
+/// or a dropped connection never strands the text; only a send in flight
+/// locks it. Returns whether the edit may apply.
+fn resume_editing(cp: &mut Compose) -> bool {
+    if cp.status == ComposeStatus::Submitting {
+        return false;
+    }
+    cp.status = ComposeStatus::Editing;
+    true
+}
+
+fn update_compose_attach(model: Model, msg: Msg) -> Model {
+    match msg {
+        Msg::ComposeAttachOpen => with_attach(model, open_path_field),
+        Msg::ComposeAttachChar(c) => with_attach(model, |attach| {
+            if let Some(input) = attach.path_input.as_mut() {
+                input.push(c);
+            }
+        }),
+        Msg::ComposeAttachBackspace => with_attach(model, path_backspace),
+        Msg::ComposeAttachConfirm => with_attach(model, confirm_path),
+        Msg::ComposeAttachCancel => with_attach(model, |attach| attach.path_input = None),
+        _ => model,
+    }
+}
+
+/// Apply `change` to the picked files of a new comment being edited; a no-op
+/// for an edit of an existing comment or a compose already sending.
+fn with_attach(mut model: Model, change: impl FnOnce(&mut ComposeAttach)) -> Model {
+    if let Some(Screen::Detail {
+        ref mut overlay,
+        ref mut rendered_width,
+        ..
+    }) = model.top_mut()
+    {
+        if let Some(cp) = overlay.compose_mut() {
+            if cp.kind == ComposeKind::New && resume_editing(cp) {
+                change(&mut cp.attach);
+                *rendered_width = usize::MAX;
+            }
+        }
+    }
+    model
+}
+
+fn open_path_field(attach: &mut ComposeAttach) {
+    if attach.path_input.is_none() {
+        attach.path_input = Some(String::new());
+    }
+}
+
+fn path_backspace(attach: &mut ComposeAttach) {
+    match attach.path_input.as_mut() {
+        Some(input) if input.is_empty() => {
+            attach.files.pop();
+        }
+        Some(input) => {
+            input.pop();
+        }
+        None => {}
+    }
+}
+
+fn confirm_path(attach: &mut ComposeAttach) {
+    if let Some(input) = attach.path_input.take() {
+        let path = input.trim();
+        if !path.is_empty() {
+            attach.files.push(PathBuf::from(path));
+        }
+    }
 }
 
 fn handle_compose_submit(mut model: Model) -> (Model, Vec<Cmd>) {
@@ -3055,6 +3155,7 @@ fn handle_compose_submit(mut model: Model) -> (Model, Vec<Cmd>) {
         return (model, vec![]);
     };
 
+    let mut attachments = Vec::new();
     if let Some(Screen::Detail {
         ref mut overlay,
         ref mut rendered_width,
@@ -3063,6 +3164,7 @@ fn handle_compose_submit(mut model: Model) -> (Model, Vec<Cmd>) {
     {
         if let Some(cp) = overlay.compose_mut() {
             cp.status = ComposeStatus::Submitting;
+            attachments.clone_from(&cp.attach.files);
             *rendered_width = usize::MAX;
         }
     }
@@ -3073,6 +3175,7 @@ fn handle_compose_submit(mut model: Model) -> (Model, Vec<Cmd>) {
             project_id,
             task_id,
             body,
+            attachments,
         },
         ComposeKind::Edit { comment_id } => Cmd::UpdateComment {
             instance,
@@ -3085,8 +3188,9 @@ fn handle_compose_submit(mut model: Model) -> (Model, Vec<Cmd>) {
 
 /// Extract the fields needed to submit a compose buffer, or None when the guard fails.
 ///
-/// Guard: overlay must be Compose, status must be `Editing`, and the joined editor
-/// body must be non-empty after trimming (blocks whitespace-only submits).
+/// Guard: overlay must be Compose, no send may be in flight, and the joined editor
+/// body must be non-empty after trimming (blocks whitespace-only submits) unless
+/// at least one file is picked.
 fn extract_compose_submit_info(model: &Model) -> Option<(String, i64, i64, ComposeKind, String)> {
     match model.top() {
         Some(Screen::Detail {
@@ -3098,7 +3202,8 @@ fn extract_compose_submit_info(model: &Model) -> Option<(String, i64, i64, Compo
         }) => {
             let cp = overlay.compose()?;
             let body = cp.editor.lines().join("\n");
-            if cp.status == ComposeStatus::Editing && !body.trim().is_empty() {
+            let has_content = !body.trim().is_empty() || !cp.attach.files.is_empty();
+            if cp.status != ComposeStatus::Submitting && has_content {
                 Some((
                     instance.clone(),
                     *project_id,
@@ -3151,6 +3256,7 @@ fn handle_edit_comment_request(mut model: Model, comment_id: i64) -> Model {
             kind: ComposeKind::Edit { comment_id },
             editor: TextArea::from(body.lines()),
             status: ComposeStatus::Editing,
+            attach: ComposeAttach::default(),
         });
         *rendered_width = usize::MAX;
     }

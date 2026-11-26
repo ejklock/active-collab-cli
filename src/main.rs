@@ -20,8 +20,8 @@ use clap::FromArgMatches;
 use cli::{bare_no_command_action, BareNoCommandAction, Cli, Command};
 use commands::{
     comment_core, current_core, current_git_branch, get_core, mine_core, setup_add, setup_language,
-    setup_list, setup_remove, setup_test, setup_theme, skill_output, task_set_core, time_log_core,
-    DisplayFlags, MineOutcome, SetupAddFields,
+    setup_list, setup_remove, setup_test, setup_theme, skill_output, task_attach_core,
+    task_set_core, time_log_core, DisplayFlags, MineOutcome, SetupAddFields, UploadReporter,
 };
 use std::io::IsTerminal;
 use std::process;
@@ -505,6 +505,8 @@ async fn dispatch_comment(args: cli::CommentArgs) -> i32 {
         branch.as_deref(),
         &body,
         args.html,
+        &args.attach,
+        &UploadReporter::silent(),
         &inst,
         &ac_client,
         args.json,
@@ -586,7 +588,27 @@ async fn dispatch_time_log(args: cli::TimeLogArgs) -> i32 {
 async fn dispatch_task(cmd: cli::TaskCmd) -> i32 {
     match cmd {
         cli::TaskCmd::Set(args) => dispatch_task_set(args).await,
+        cli::TaskCmd::Attach(args) => dispatch_task_attach(args).await,
     }
+}
+
+async fn dispatch_task_attach(args: cli::TaskAttachArgs) -> i32 {
+    let ac_client = match setup_instance_client(args.instance.as_deref()) {
+        Ok((_store, _inst, client)) => client,
+        Err(code) => return code,
+    };
+    let (mut out, mut err) = (std::io::stdout(), std::io::stderr());
+    task_attach_core(
+        args.task_ref.as_deref(),
+        current_git_branch().as_deref(),
+        &args.attach,
+        &UploadReporter::silent(),
+        &ac_client,
+        args.json,
+        &mut out,
+        &mut err,
+    )
+    .await
 }
 
 async fn dispatch_task_set(args: cli::TaskSetArgs) -> i32 {
