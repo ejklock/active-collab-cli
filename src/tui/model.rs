@@ -223,12 +223,28 @@ impl KanbanFocus {
             .copied()
     }
 
-    /// After a reload keep the focused column and, in every column, the same
-    /// task (by instance and id) wherever it moved; a task that is gone leaves
+    /// After a reload keep, in every column, the same task (by instance and id)
+    /// wherever it moved; the focus follows the selected task when it moved to
+    /// another column, else it stays on its column. A task that is gone leaves
     /// the old position clamped into its column.
     fn reselected(mut self, earlier: &[TaskRow], fresh: &[TaskRow]) -> Self {
         let before = kanban_columns(earlier);
         let after = kanban_columns(fresh);
+        let followed = before[self.column]
+            .get(self.cards[self.column])
+            .and_then(|&i| {
+                let prior = &earlier[i];
+                fresh
+                    .iter()
+                    .position(|r| r.instance == prior.instance && r.task_id == prior.task_id)
+            })
+            .and_then(|at| {
+                after.iter().enumerate().find_map(|(column, rows)| {
+                    rows.iter()
+                        .position(|&j| j == at)
+                        .map(|card| (column, card))
+                })
+            });
         for ((card, old), new) in self.cards.iter_mut().zip(&before).zip(&after) {
             let moved = old.get(*card).and_then(|&i| {
                 let prior = &earlier[i];
@@ -237,6 +253,10 @@ impl KanbanFocus {
                 })
             });
             *card = moved.unwrap_or_else(|| (*card).min(new.len().saturating_sub(1)));
+        }
+        if let Some((column, card)) = followed {
+            self.column = column;
+            self.cards[column] = card;
         }
         self
     }
@@ -740,6 +760,9 @@ pub enum DetailOverlay {
         status: EditStatus,
     },
     TaskListPicker(TaskListPicker),
+    /// The detail was opened by `l` on the mine screen: it shows nothing yet, and
+    /// the task list picker opens once the task has loaded.
+    TaskListPickerPending,
     ConfirmDelete {
         comment_id: i64,
     },
@@ -1000,6 +1023,9 @@ pub enum Screen {
         /// True while an in-flight revalidation fetch is running on a warm-seeded mine list.
         /// Distinct from `loading`: revalidating keeps rows painted while the refresh runs.
         revalidating: bool,
+        /// True after a task opened from the mine screen was edited successfully. Back
+        /// consumes it by reloading the mine screen, whether or not a reload is in flight.
+        stale_after_edit: bool,
         /// Per-slot heights (rows) computed by reflow_tasks; a slot is a card plus, for the
         /// first card of a due-date bucket, the bucket header row above it. Mirrors Detail's
         /// `lines` cache.
@@ -1849,7 +1875,7 @@ fn update_pointer(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
 fn update_navigation(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
     match msg {
         Msg::Select => handle_select(model),
-        Msg::Back => (handle_back(model), vec![]),
+        Msg::Back => handle_back_reloading_mine(model),
         Msg::Quit => (handle_quit(model), vec![]),
         Msg::Refresh => handle_refresh(model),
         Msg::ColumnLeft => (move_kanban(model, false, false), vec![]),
@@ -1878,7 +1904,7 @@ fn update_loaded(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
             (handle_loaded_mine_tasks(model, rows, loaded_at), vec![])
         }
         Msg::LoadedMineHours { hours } => (handle_loaded_mine_hours(model, hours), vec![]),
-        Msg::LoadedDetail(load) => (handle_loaded_detail(model, load), vec![]),
+        Msg::LoadedDetail(load) => handle_loaded_detail(model, load),
         Msg::UserMapResolved(map) => (handle_user_map_resolved(model, map), vec![]),
         Msg::AssetActionResult => (model, vec![]),
         Msg::HeaderNameResolved(name) => (handle_header_name_resolved(model, name), vec![]),
@@ -2555,6 +2581,7 @@ fn handle_select(model: Model) -> (Model, Vec<Cmd>) {
                     selected: 0,
                     loading: false,
                     revalidating: false,
+                    stale_after_edit: false,
                     card_heights: Vec::new(),
                     card_offsets: Vec::new(),
                     rendered_width: usize::MAX,
@@ -2618,6 +2645,48 @@ fn handle_back(model: Model) -> Model {
         model.stack.pop();
     }
     model
+}
+
+/// The mine screen directly below a Detail on top of the stack.
+fn mine_screen_below_detail(model: &mut Model) -> Option<&mut Screen> {
+    let below = model.stack.len().checked_sub(2)?;
+    if !matches!(model.stack.last(), Some(Screen::Detail { .. })) {
+        return None;
+    }
+    model.stack.get_mut(below).filter(|s| {
+        matches!(
+            s,
+            Screen::Tasks {
+                due_today: Some(_),
+                ..
+            }
+        )
+    })
+}
+
+/// Back, reloading the mine screen it returns to when an edit marked it stale.
+fn handle_back_reloading_mine(model: Model) -> (Model, Vec<Cmd>) {
+    let from_detail = matches!(model.top(), Some(Screen::Detail { .. }));
+    let depth = model.stack.len();
+    let mut model = handle_back(model);
+    let popped_detail = from_detail && model.stack.len() < depth;
+    if !popped_detail {
+        return (model, vec![]);
+    }
+    if let Some(Screen::Tasks {
+        due_today: Some(_),
+        stale_after_edit,
+        revalidating,
+        ..
+    }) = model.top_mut()
+    {
+        if std::mem::take(stale_after_edit) {
+            // A reload already in flight may predate the edit; the newer reply wins.
+            *revalidating = true;
+            return (model, vec![Cmd::LoadMineTasks]);
+        }
+    }
+    (model, vec![])
 }
 
 fn handle_quit(mut model: Model) -> Model {
@@ -2844,7 +2913,15 @@ fn rows_to_task_rows(rows: Vec<MineTableRow>) -> Vec<TaskRow> {
         .collect()
 }
 
-fn handle_loaded_detail(mut model: Model, load: DetailLoad) -> Model {
+fn handle_loaded_detail(mut model: Model, load: DetailLoad) -> (Model, Vec<Cmd>) {
+    let picker_pending = matches!(
+        model.top(),
+        Some(Screen::Detail {
+            overlay: DetailOverlay::TaskListPickerPending,
+            ..
+        })
+    );
+    let loaded_ok = !load.task.is_null() && !load.unauthorized;
     if let Some(Screen::Detail {
         task: ref mut t,
         comments: ref mut c,
@@ -2880,7 +2957,10 @@ fn handle_loaded_detail(mut model: Model, load: DetailLoad) -> Model {
         *comment_spans = vec![];
     }
     model.last_loaded = Some(load.loaded_at);
-    model
+    if picker_pending && loaded_ok {
+        return handle_task_list_picker_open(model);
+    }
+    (model, vec![])
 }
 
 /// Set auth_error on the Detail screen without disturbing the compose buffer.
@@ -3614,7 +3694,13 @@ fn handle_estimate_submit(mut model: Model) -> (Model, Vec<Cmd>) {
     )
 }
 
-fn handle_task_edit_ok(model: Model) -> (Model, Vec<Cmd>) {
+fn handle_task_edit_ok(mut model: Model) -> (Model, Vec<Cmd>) {
+    if let Some(Screen::Tasks {
+        stale_after_edit, ..
+    }) = mine_screen_below_detail(&mut model)
+    {
+        *stale_after_edit = true;
+    }
     refresh_detail_after_write(model)
 }
 
@@ -3950,6 +4036,15 @@ fn handle_assignee_picker_submit(model: Model) -> (Model, Vec<Cmd>) {
 /// read of the project's lists. A no-op off the Detail screen or while any overlay
 /// (including the picker itself) is already open.
 fn handle_task_list_picker_open(mut model: Model) -> (Model, Vec<Cmd>) {
+    if matches!(
+        model.top(),
+        Some(Screen::Tasks {
+            due_today: Some(_),
+            ..
+        })
+    ) {
+        return open_detail_with_picker(model);
+    }
     let Some(Screen::Detail {
         instance,
         project_id,
@@ -3981,6 +4076,18 @@ fn handle_task_list_picker_open(mut model: Model) -> (Model, Vec<Cmd>) {
     });
     *rendered_width = usize::MAX;
     (model, vec![cmd])
+}
+
+/// `l` on the mine screen: open the selected task's detail as Enter does, and
+/// have its task list picker open once the task has loaded.
+fn open_detail_with_picker(model: Model) -> (Model, Vec<Cmd>) {
+    let (mut model, cmds) = handle_select(model);
+    if !cmds.is_empty() {
+        if let Some(Screen::Detail { overlay, .. }) = model.top_mut() {
+            *overlay = DetailOverlay::TaskListPickerPending;
+        }
+    }
+    (model, cmds)
 }
 
 /// Apply a task-lists read to the open picker when it still waits for the Detail
@@ -4123,6 +4230,7 @@ pub fn init_mine_in_view(
             selected: 0,
             loading,
             revalidating,
+            stale_after_edit: false,
             card_heights: Vec::new(),
             card_offsets: Vec::new(),
             rendered_width: usize::MAX,

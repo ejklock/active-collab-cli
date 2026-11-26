@@ -75,3 +75,18 @@ Cheap choices already taken: cards in each column keep the due-date view's order
 
 - 2026-11-25: S1–S3 committed (0943e8f); issue 0101 fixed (ca98c15). S4 (view modal, vertical kanban as bordered phase boxes) approved through three rounds; after round 3 one blocking test gap remained (the top-cut test cannot fail; production correct). The owner chose to close S4 and track the gap as issue 0105 instead of a fourth round. Not taken: a fourth test-only round.
 - Next: issue 0104 (raw due-date keys in English) as its own commit, then S5 (narrow tabs for the horizontal kanban, `l` on a card, reload after a list move), then pull request and release.
+
+### Outcome
+
+Implemented on branch `feat/ek-0100-open-work-phase-kanban` (2026-11-25/26) in five reviewed slices, plus three bug fixes found on the way:
+
+- S1: `phase`, `flagged` and `phases` in `ac mine --json` and `ac_read mine`; `--phase` and the `ac_read` `phase` argument; the rule in `src/board.rs`.
+- S2: `ac setup board` (show, set, reset); the settings hold only the user's overrides over the built-in keywords.
+- S3: the horizontal kanban in the `ac mine` TUI, remembered across launches.
+- S4: `v` opens a view modal (due-date list, horizontal kanban, vertical kanban); the vertical kanban draws one list of bordered phase boxes.
+- S5: `l` on a mine task opens its detail with the task list picker; Back after a successful edit reloads the mine screen; the horizontal kanban turns into tabs below 100 columns.
+- Fixes: `r` on the mine screen (issue 0101), English due-date text (issue 0104).
+
+Proof: live `ac mine --json` on 2026-11-25 placed the owner's 14 open tasks as to_do 4, in_progress 4, in_review 0, ready_for_release 6; `ac mine --phase in_progress` returned the 4. Each slice was reviewed with planted mutants; final run `cargo test -- --test-threads=1` green (2101 unit tests and every integration suite), clippy `--all-targets -D warnings`, `fmt --check`, `comment_policy`, the skill stub check, the Node package tests and `se-gates check` green.
+
+Left open, tracked: 0102 (a failed mine reload blanks the screen and cache), 0103 (`r` on a browse task list), 0105 (the top-cut test cannot fail; accepted by the owner), 0106 (an edit reply after Back does not reload), the crate-wide test language lock (memory task locale-test-race).

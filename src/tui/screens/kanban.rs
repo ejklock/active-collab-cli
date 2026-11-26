@@ -29,9 +29,14 @@ pub(super) fn phase_title(phase: Phase) -> String {
     }
 }
 
+/// Width below which four columns no longer fit their titles and card facts.
+const NARROW_BELOW: u16 = 100;
+
 /// Draw the mine tasks as four equal columns, one per board phase, in
 /// `Phase::ALL` order. The focused column's border and its selected card carry
-/// the selection style; each card keeps the order of `tasks`.
+/// the selection style; each card keeps the order of `tasks`. Below
+/// `NARROW_BELOW` columns a row of phase tabs and only the focused column are
+/// drawn instead.
 pub fn draw_kanban(
     frame: &mut Frame,
     area: Rect,
@@ -40,6 +45,10 @@ pub fn draw_kanban(
     revalidating: bool,
     today: chrono::NaiveDate,
 ) {
+    if area.width < NARROW_BELOW {
+        draw_tabs_and_focused_column(frame, area, tasks, focus, revalidating, today);
+        return;
+    }
     let slots = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Ratio(1, 4); 4])
@@ -67,6 +76,53 @@ pub fn draw_kanban(
         frame.render_widget(block, slots[column]);
         draw_cards(frame, inner, tasks, &cards, selected, today);
     }
+}
+
+/// One tab row with the four phase titles and counts (the focused one
+/// highlighted) and, below it, the focused column at the full width.
+fn draw_tabs_and_focused_column(
+    frame: &mut Frame,
+    area: Rect,
+    tasks: &[TaskRow],
+    focus: &KanbanFocus,
+    revalidating: bool,
+    today: chrono::NaiveDate,
+) {
+    let [tab_row, body] = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Min(0)])
+        .areas(area);
+    let columns = kanban_columns(tasks);
+    let mut tabs: Vec<Span> = Vec::new();
+    for (column, (phase, cards)) in Phase::ALL.iter().zip(&columns).enumerate() {
+        let marker = if revalidating && column == 0 {
+            " ↻"
+        } else {
+            ""
+        };
+        let style = if column == focus.column {
+            theme::selection_style()
+        } else {
+            theme::column_header_style()
+        };
+        let text = format!(" {} {}{marker} ", phase_title(*phase), cards.len());
+        tabs.push(Span::styled(text, style));
+        tabs.push(Span::raw(" "));
+    }
+    frame.render_widget(Paragraph::new(Line::from(tabs)), tab_row);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(theme::selection_style());
+    let inner = block.inner(body);
+    frame.render_widget(block, body);
+    draw_cards(
+        frame,
+        inner,
+        tasks,
+        &columns[focus.column],
+        Some(focus.cards[focus.column]),
+        today,
+    );
 }
 
 /// Draw the cards of one column top to bottom, scrolled so the selected card

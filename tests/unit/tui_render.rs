@@ -2910,6 +2910,7 @@ mod v2b_click_targets {
                 revalidating: false,
                 card_heights: vec![],
                 card_offsets: vec![],
+                stale_after_edit: false,
                 rendered_width: usize::MAX,
                 due_today: None,
                 kanban: None,
@@ -3062,6 +3063,7 @@ mod v2b_click_targets {
                 revalidating: false,
                 card_heights: vec![],
                 card_offsets: vec![],
+                stale_after_edit: false,
                 rendered_width: usize::MAX,
                 due_today: None,
                 kanban: None,
@@ -12459,11 +12461,11 @@ mod kanban_vertical_frame_tests {
         for (language, hint) in [
             (
                 "en",
-                "↑/↓ card  ←/→ phase  Enter open  v view  r refresh  q quit",
+                "↑/↓ card  ←/→ phase  Enter open  l move  v view  r refresh  q quit",
             ),
             (
                 "pt_BR",
-                "↑/↓ card  ←/→ fase  Enter abrir  v visão  r atualizar  q sair",
+                "↑/↓ card  ←/→ fase  Enter abrir  l mover  v visão  r atualizar  q sair",
             ),
         ] {
             set_language(language);
@@ -12587,4 +12589,198 @@ fn vertical_due_line_leaves_the_list_frame_unchanged() {
         "└──────────────────────────────────────┘",
     ];
     assert_eq!(rows, expected);
+}
+
+mod kanban_narrow_frame_tests {
+    use super::{buf_to_string, LANG_MUTEX};
+    use crate::board::Phase;
+    use crate::i18n::set_language;
+    use crate::render::MineTableRow;
+    use crate::tui::model::{init_mine_in_view, update, Header, MineView, Model, Msg};
+    use crate::tui::view::view;
+    use ratatui::{backend::TestBackend, buffer::Buffer, Terminal};
+
+    fn today() -> chrono::NaiveDate {
+        chrono::NaiveDate::from_ymd_opt(2026, 11, 25).unwrap()
+    }
+
+    fn row(id: i64, name: &str, phase: Phase) -> MineTableRow {
+        MineTableRow {
+            instance: "inst".into(),
+            project_id: 1,
+            task_number: id,
+            task_id: id,
+            name: name.into(),
+            due_on: Some("2026-11-28".into()),
+            project_name: Some("Proj".into()),
+            estimate: Some(2.0),
+            logged_week: None,
+            logged_total: None,
+            task_list_id: None,
+            task_list: None,
+            labels: vec![],
+            phase,
+            flagged: false,
+        }
+    }
+
+    fn rows() -> Vec<MineTableRow> {
+        vec![
+            row(1, "Alpha todo", Phase::ToDo),
+            row(2, "Bravo todo", Phase::ToDo),
+            row(3, "Charlie doing", Phase::InProgress),
+            row(4, "Delta ready", Phase::ReadyForRelease),
+            row(5, "Echo ready", Phase::ReadyForRelease),
+            row(6, "Foxtrot ready", Phase::ReadyForRelease),
+        ]
+    }
+
+    fn model(view: MineView) -> Model {
+        let model = init_mine_in_view(
+            Header::from_instances(&[], None),
+            Some(rows()),
+            today(),
+            view,
+        )
+        .0;
+        update(
+            model,
+            Msg::LoadedMineTasks {
+                rows: rows(),
+                loaded_at: "2026-11-25T10:00:00".into(),
+            },
+        )
+        .0
+    }
+
+    fn buffer(model: &Model, width: u16) -> Buffer {
+        let mut terminal = Terminal::new(TestBackend::new(width, 24)).unwrap();
+        terminal
+            .draw(|frame| view(model, frame, &mut vec![], &mut vec![]))
+            .unwrap();
+        terminal.backend().buffer().clone()
+    }
+
+    fn draw(model: &Model, width: u16) -> String {
+        buf_to_string(&buffer(model, width))
+    }
+
+    fn line_index(screen: &str, needle: &str) -> Option<usize> {
+        screen.lines().position(|line| line.contains(needle))
+    }
+
+    /// The style of the first cell of `needle` on the screen.
+    fn style_at(buf: &Buffer, needle: &str) -> ratatui::style::Style {
+        let screen = buf_to_string(buf);
+        let y = line_index(&screen, needle).expect("needle drawn");
+        let line = screen.lines().nth(y).unwrap();
+        let x = line[..line.find(needle).unwrap()].chars().count();
+        buf[(x as u16, y as u16)].style()
+    }
+
+    #[test]
+    fn kanban_narrow_tabs_show_the_four_titles_on_one_row_and_the_focused_column_only() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let screen = draw(&model(MineView::KanbanHorizontal), 80);
+        let titles = [
+            "TO DO 2",
+            "IN PROGRESS 1",
+            "IN REVIEW 0",
+            "READY FOR RELEASE 3",
+        ];
+        let rows: Vec<Option<usize>> = titles.iter().map(|t| line_index(&screen, t)).collect();
+        assert!(
+            rows[0].is_some() && rows.iter().all(|r| *r == rows[0]),
+            "{screen}"
+        );
+        assert!(screen.contains("Alpha todo"), "{screen}");
+        assert!(screen.contains("Bravo todo"), "{screen}");
+        assert!(screen.contains("2026-11-28 · est 2"), "{screen}");
+        assert!(!screen.contains("Charlie doing"), "{screen}");
+        assert!(!screen.contains("Delta ready"), "{screen}");
+    }
+
+    #[test]
+    fn kanban_narrow_tabs_follow_the_language() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("pt_BR");
+        let screen = draw(&model(MineView::KanbanHorizontal), 80);
+        set_language("en");
+        for title in [
+            "A FAZER 2",
+            "EM ANDAMENTO 1",
+            "EM REVISÃO 0",
+            "PRONTO PARA RELEASE 3",
+        ] {
+            assert!(screen.contains(title), "{title}\n{screen}");
+        }
+    }
+
+    #[test]
+    fn kanban_narrow_tabs_right_arrow_switches_the_drawn_column_and_the_highlight() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let before = model(MineView::KanbanHorizontal);
+        let first = buffer(&before, 80);
+        let after = update(before, Msg::ColumnRight).0;
+        let second = buffer(&after, 80);
+        let screen = buf_to_string(&second);
+        assert!(screen.contains("Charlie doing"), "{screen}");
+        assert!(!screen.contains("Alpha todo"), "{screen}");
+        assert_ne!(
+            style_at(&first, "TO DO 2"),
+            style_at(&first, "IN PROGRESS 1")
+        );
+        assert_eq!(
+            style_at(&second, "IN PROGRESS 1"),
+            style_at(&first, "TO DO 2")
+        );
+        assert_ne!(
+            style_at(&second, "TO DO 2"),
+            style_at(&second, "IN PROGRESS 1")
+        );
+    }
+
+    #[test]
+    fn kanban_narrow_tabs_turn_into_four_columns_at_one_hundred_columns() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let narrow = draw(&model(MineView::KanbanHorizontal), 99);
+        assert!(!narrow.contains("Charlie doing"), "{narrow}");
+        assert!(narrow.contains("TO DO"), "{narrow}");
+        let wide = draw(&model(MineView::KanbanHorizontal), 100);
+        for name in ["Alpha todo", "Charlie doing", "Delta ready"] {
+            assert!(wide.contains(name), "{name}\n{wide}");
+        }
+    }
+
+    #[test]
+    fn kanban_narrow_tabs_leave_the_vertical_kanban_unchanged() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let screen = draw(&model(MineView::KanbanVertical), 80);
+        let todo = line_index(&screen, "TO DO 2").expect("to do header");
+        let doing = line_index(&screen, "IN PROGRESS 1").expect("in progress header");
+        assert!(todo < doing, "{screen}");
+        assert!(screen.contains("Alpha todo"), "{screen}");
+    }
+
+    #[test]
+    fn kanban_footer_move_names_l_on_both_kanbans_within_eighty_columns() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        for (language, view_kind, move_hint, quit_hint) in [
+            ("en", MineView::KanbanHorizontal, "l move", "q quit"),
+            ("en", MineView::KanbanVertical, "l move", "q quit"),
+            ("pt_BR", MineView::KanbanHorizontal, "l mover", "q sair"),
+            ("pt_BR", MineView::KanbanVertical, "l mover", "q sair"),
+        ] {
+            set_language(language);
+            let screen = draw(&model(view_kind), 80);
+            set_language("en");
+            let footer = screen.lines().skip(21).collect::<Vec<_>>().join("\n");
+            assert!(footer.contains(move_hint), "{language}: {footer}");
+            assert!(footer.contains(quit_hint), "{language}: {footer}");
+        }
+    }
 }

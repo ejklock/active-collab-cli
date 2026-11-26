@@ -33,6 +33,7 @@ TUI/UX work (V/R/ARCH slices), tracing to
 * [0102 — A failed mine reload empties the ac mine TUI and its cache instead of reporting the error](0102-a-failed-mine-reload-empties-the-ac-mine-tui-and-its-cache-instead-of-reporting-the-error.md) - open
 * [0103 — r on a browse task list in the TUI stays on Loading forever](0103-r-on-a-browse-task-list-in-the-tui-stays-on-loading-forever.md) - open
 * [0105 — The vertical kanban edge-cut test never cuts a box at the top](0105-the-vertical-kanban-edge-cut-test-never-cuts-a-box-at-the-top.md) - open
+* [0106 — An edit reply that lands after Back never reloads the ac mine screen](0106-an-edit-reply-that-lands-after-back-never-reloads-the-ac-mine-screen.md) - open
 
 ## Closed
 

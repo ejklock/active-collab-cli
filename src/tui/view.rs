@@ -168,6 +168,7 @@ pub fn view(
             due_today,
             kanban,
             view_modal: _,
+            stale_after_edit: _,
         } => {
             let today = chrono::Local::now().date_naive();
             if let (Some(focus), false) = (kanban, *loading) {

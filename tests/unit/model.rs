@@ -8149,6 +8149,7 @@ fn report_pointer_tasks_model() -> Model {
         revalidating: false,
         card_heights: vec![],
         card_offsets: vec![],
+        stale_after_edit: false,
         rendered_width: usize::MAX,
         due_today: None,
         kanban: None,
@@ -9314,6 +9315,7 @@ fn detail_download_key_on_the_tasks_screen_changes_nothing() {
         revalidating: false,
         card_heights: vec![],
         card_offsets: vec![],
+        stale_after_edit: false,
         rendered_width: usize::MAX,
         due_today: None,
         kanban: None,
@@ -9463,6 +9465,7 @@ fn task_list_picker_key_l_off_the_detail_changes_nothing() {
         revalidating: false,
         card_heights: vec![],
         card_offsets: vec![],
+        stale_after_edit: false,
         rendered_width: usize::MAX,
         due_today: None,
         kanban: None,
@@ -11033,4 +11036,371 @@ fn relative_due_reads_unchanged_portuguese_in_pt_br() {
             "atrasada 247 dias",
         ]
     );
+}
+
+mod mine_picker_tests {
+    use super::{choose_view, empty_header};
+    use crate::board::Phase;
+    use crate::render::MineTableRow;
+    use crate::tui::model::{
+        init_browse, init_mine_on, update, Cmd, DetailLoad, DetailOverlay, Model, Msg,
+        ProjectGroup, Screen, TaskRow,
+    };
+    use std::collections::HashMap;
+
+    fn today() -> chrono::NaiveDate {
+        chrono::NaiveDate::from_ymd_opt(2026, 11, 25).unwrap()
+    }
+
+    fn row(id: i64, phase: Phase) -> MineTableRow {
+        MineTableRow {
+            instance: "inst".into(),
+            project_id: 10 + id,
+            task_number: id,
+            task_id: id,
+            name: format!("Task {id}"),
+            due_on: None,
+            project_name: None,
+            estimate: None,
+            logged_week: None,
+            logged_total: None,
+            task_list_id: None,
+            task_list: None,
+            labels: vec![],
+            phase,
+            flagged: false,
+        }
+    }
+
+    fn rows() -> Vec<MineTableRow> {
+        vec![row(102, Phase::ToDo), row(103, Phase::InProgress)]
+    }
+
+    fn settled_list() -> Model {
+        let model = init_mine_on(empty_header(), Some(rows()), today()).0;
+        update(
+            model,
+            Msg::LoadedMineTasks {
+                rows: rows(),
+                loaded_at: "2026-11-25T10:00:00".into(),
+            },
+        )
+        .0
+    }
+
+    fn horizontal() -> Model {
+        choose_view(settled_list(), 1).0
+    }
+
+    fn vertical() -> Model {
+        choose_view(settled_list(), 2).0
+    }
+
+    fn load(task: serde_json::Value) -> Msg {
+        Msg::LoadedDetail(DetailLoad {
+            task,
+            comments: vec![],
+            assets: vec![],
+            user_map: HashMap::new(),
+            loaded_at: "2026-11-25T10:00:00".into(),
+            current_user_id: None,
+            unauthorized: false,
+        })
+    }
+
+    fn task_json() -> serde_json::Value {
+        serde_json::json!({"id": 102, "name": "Task 102", "task_list_id": 5})
+    }
+
+    fn overlay_is_picker(model: &Model) -> bool {
+        matches!(
+            model.stack.last(),
+            Some(Screen::Detail {
+                overlay: DetailOverlay::TaskListPicker(_),
+                ..
+            })
+        )
+    }
+
+    fn assert_l_opens_the_picker(build: fn() -> Model) {
+        let (by_enter, enter_cmds) = update(build(), Msg::Select);
+        let (opened, cmds) = update(build(), Msg::TaskListPickerOpen);
+        assert_eq!(cmds, enter_cmds);
+        assert!(
+            matches!(cmds.as_slice(), [Cmd::LoadDetail { task_id: 102, .. }]),
+            "{cmds:?}"
+        );
+        assert!(matches!(
+            opened.stack.last(),
+            Some(Screen::Detail { task_id: 102, .. })
+        ));
+        assert!(!overlay_is_picker(&opened));
+
+        let (loaded, picker_cmds) = update(opened, load(task_json()));
+        assert!(overlay_is_picker(&loaded));
+
+        let (by_enter, _) = update(by_enter, load(task_json()));
+        let (_, expected) = update(by_enter, Msg::TaskListPickerOpen);
+        assert_eq!(picker_cmds, expected);
+        assert!(
+            matches!(expected.as_slice(), [Cmd::LoadTaskLists { .. }]),
+            "{expected:?}"
+        );
+    }
+
+    #[test]
+    fn mine_l_opens_the_list_picker_from_the_list() {
+        assert_l_opens_the_picker(settled_list);
+    }
+
+    #[test]
+    fn mine_l_opens_the_list_picker_from_the_horizontal_kanban() {
+        assert_l_opens_the_picker(horizontal);
+    }
+
+    #[test]
+    fn mine_l_opens_the_list_picker_from_the_vertical_kanban() {
+        assert_l_opens_the_picker(vertical);
+    }
+
+    #[test]
+    fn mine_l_opens_the_list_picker_not_when_the_detail_load_fails() {
+        let (opened, _) = update(horizontal(), Msg::TaskListPickerOpen);
+        let (failed, cmds) = update(opened, load(serde_json::Value::Null));
+        assert!(cmds.is_empty(), "{cmds:?}");
+        assert!(!overlay_is_picker(&failed));
+        assert!(matches!(failed.stack.last(), Some(Screen::Detail { .. })));
+    }
+
+    #[test]
+    fn mine_l_opens_the_list_picker_not_on_an_empty_kanban_column() {
+        let model = update(horizontal(), Msg::ColumnRight).0;
+        let model = update(model, Msg::ColumnRight).0;
+        let (after, cmds) = update(model, Msg::TaskListPickerOpen);
+        assert!(cmds.is_empty(), "{cmds:?}");
+        assert_eq!(after.stack.len(), 1);
+    }
+
+    #[test]
+    fn mine_l_opens_the_list_picker_not_on_the_browse_task_list() {
+        let task = TaskRow {
+            task_id: 7,
+            task_number: 7,
+            name: "Task 7".into(),
+            instance: "inst".into(),
+            project_id: 1,
+            due_on: None,
+            project_name: None,
+            estimate: None,
+            logged_week: None,
+            logged_total: None,
+            phase: Phase::ToDo,
+            flagged: false,
+            task_list: None,
+        };
+        let group = ProjectGroup {
+            project_id: 1,
+            project_name: "P".into(),
+            instance: "inst".into(),
+            tasks: vec![task],
+        };
+        let model = init_browse(empty_header(), Some(vec![group])).0;
+        let model = update(model, Msg::Select).0;
+        let (after, cmds) = update(model, Msg::TaskListPickerOpen);
+        assert!(cmds.is_empty(), "{cmds:?}");
+        assert!(matches!(after.stack.last(), Some(Screen::Tasks { .. })));
+        assert_eq!(after.stack.len(), 2);
+    }
+}
+
+mod mine_reload_tests {
+    use super::{choose_view, empty_header};
+    use crate::board::Phase;
+    use crate::render::MineTableRow;
+    use crate::tui::model::{init_mine_on, update, Cmd, Model, Msg, Screen};
+
+    fn today() -> chrono::NaiveDate {
+        chrono::NaiveDate::from_ymd_opt(2026, 11, 25).unwrap()
+    }
+
+    fn row(id: i64, phase: Phase) -> MineTableRow {
+        MineTableRow {
+            instance: "inst".into(),
+            project_id: 10 + id,
+            task_number: id,
+            task_id: id,
+            name: format!("Task {id}"),
+            due_on: None,
+            project_name: None,
+            estimate: None,
+            logged_week: None,
+            logged_total: None,
+            task_list_id: None,
+            task_list: None,
+            labels: vec![],
+            phase,
+            flagged: false,
+        }
+    }
+
+    fn rows(phase_of_102: Phase) -> Vec<MineTableRow> {
+        vec![row(102, phase_of_102), row(103, Phase::InProgress)]
+    }
+
+    fn loaded(model: Model, rows: Vec<MineTableRow>) -> Model {
+        update(
+            model,
+            Msg::LoadedMineTasks {
+                rows,
+                loaded_at: "2026-11-25T10:00:00".into(),
+            },
+        )
+        .0
+    }
+
+    fn settled_kanban() -> Model {
+        let model = init_mine_on(empty_header(), Some(rows(Phase::ToDo)), today()).0;
+        choose_view(loaded(model, rows(Phase::ToDo)), 1).0
+    }
+
+    fn revalidating(model: &Model) -> bool {
+        match model.stack.last() {
+            Some(Screen::Tasks { revalidating, .. }) => *revalidating,
+            other => panic!("expected the mine screen, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn mine_reload_after_edit_back_reloads_and_keeps_the_task() {
+        let (opened, _) = update(settled_kanban(), Msg::Select);
+        let (edited, _) = update(opened, Msg::TaskEditOk);
+        let (back, cmds) = update(edited, Msg::Back);
+        assert!(matches!(back.stack.last(), Some(Screen::Tasks { .. })));
+        assert!(revalidating(&back));
+        assert_eq!(cmds, vec![Cmd::LoadMineTasks]);
+
+        let reloaded = loaded(back, rows(Phase::InReview));
+        match reloaded.stack.last() {
+            Some(Screen::Tasks {
+                tasks,
+                kanban: Some(focus),
+                ..
+            }) => {
+                let moved = tasks.iter().find(|t| t.task_id == 102).unwrap();
+                assert_eq!(moved.phase, Phase::InReview);
+                assert_eq!(
+                    focus.selected_task(tasks).map(|i| tasks[i].task_id),
+                    Some(102)
+                );
+            }
+            other => panic!("expected the kanban, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn mine_reload_after_edit_back_without_an_edit_does_not_reload() {
+        let (opened, _) = update(settled_kanban(), Msg::Select);
+        let (back, cmds) = update(opened, Msg::Back);
+        assert!(cmds.is_empty(), "{cmds:?}");
+        assert!(!revalidating(&back));
+    }
+
+    #[test]
+    fn mine_reload_after_edit_back_after_a_failed_edit_does_not_reload() {
+        let (opened, _) = update(settled_kanban(), Msg::Select);
+        let (failed, _) = update(opened, Msg::TaskEditErr("boom".into()));
+        let (back, cmds) = update(failed, Msg::Back);
+        assert!(cmds.is_empty(), "{cmds:?}");
+        assert!(!revalidating(&back));
+    }
+
+    fn launched_from_cache() -> Model {
+        let model = init_mine_on(empty_header(), Some(rows(Phase::ToDo)), today()).0;
+        choose_view(model, 1).0
+    }
+
+    fn after_refresh() -> Model {
+        let (model, cmds) = update(settled_kanban(), Msg::Refresh);
+        assert_eq!(cmds, vec![Cmd::LoadMineTasks]);
+        model
+    }
+
+    fn assert_edit_reloads_with_one_in_flight(start: Model) {
+        let (opened, _) = update(start, Msg::Select);
+        let (edited, _) = update(opened, Msg::TaskEditOk);
+        let edited = loaded(edited, rows(Phase::ToDo));
+        let (back, cmds) = update(edited, Msg::Back);
+        assert_eq!(cmds, vec![Cmd::LoadMineTasks]);
+        assert!(revalidating(&back));
+        let reloaded = loaded(back, rows(Phase::InReview));
+        match reloaded.stack.last() {
+            Some(Screen::Tasks {
+                tasks,
+                kanban: Some(focus),
+                ..
+            }) => {
+                let moved = tasks.iter().find(|t| t.task_id == 102).unwrap();
+                assert_eq!(moved.phase, Phase::InReview);
+                assert_eq!(
+                    focus.selected_task(tasks).map(|i| tasks[i].task_id),
+                    Some(102)
+                );
+            }
+            other => panic!("expected the kanban, got {other:?}"),
+        }
+    }
+
+    fn assert_back_without_edit_adds_no_reload(start: Model) {
+        let (opened, _) = update(start, Msg::Select);
+        let (back, cmds) = update(opened, Msg::Back);
+        assert!(cmds.is_empty(), "{cmds:?}");
+        assert!(revalidating(&back));
+    }
+
+    #[test]
+    fn mine_reload_with_one_in_flight_after_launch_reloads_after_an_edit() {
+        assert_edit_reloads_with_one_in_flight(launched_from_cache());
+    }
+
+    #[test]
+    fn mine_reload_with_one_in_flight_after_launch_adds_none_without_an_edit() {
+        assert_back_without_edit_adds_no_reload(launched_from_cache());
+    }
+
+    #[test]
+    fn mine_reload_with_one_in_flight_after_refresh_reloads_after_an_edit() {
+        assert_edit_reloads_with_one_in_flight(after_refresh());
+    }
+
+    #[test]
+    fn mine_reload_with_one_in_flight_after_refresh_adds_none_without_an_edit() {
+        assert_back_without_edit_adds_no_reload(after_refresh());
+    }
+
+    #[test]
+    fn mine_reload_mark_is_consumed_by_the_back_that_reloads() {
+        let (opened, _) = update(settled_kanban(), Msg::Select);
+        let (edited, _) = update(opened, Msg::TaskEditOk);
+        let (back, cmds) = update(edited, Msg::Back);
+        assert_eq!(cmds, vec![Cmd::LoadMineTasks]);
+        let settled = loaded(back, rows(Phase::InReview));
+
+        let (opened_again, _) = update(settled, Msg::Select);
+        let (back_again, cmds) = update(opened_again, Msg::Back);
+        assert!(cmds.is_empty(), "{cmds:?}");
+        assert!(!revalidating(&back_again));
+    }
+
+    #[test]
+    fn mine_reload_mark_is_consumed_with_one_in_flight() {
+        let (opened, _) = update(launched_from_cache(), Msg::Select);
+        let (edited, _) = update(opened, Msg::TaskEditOk);
+        let (back, cmds) = update(edited, Msg::Back);
+        assert_eq!(cmds, vec![Cmd::LoadMineTasks]);
+        let after_earlier_reply = loaded(back, rows(Phase::ToDo));
+
+        let (opened_again, _) = update(after_earlier_reply, Msg::Select);
+        let (_, cmds) = update(opened_again, Msg::Back);
+        assert!(cmds.is_empty(), "{cmds:?}");
+    }
 }

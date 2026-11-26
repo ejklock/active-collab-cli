@@ -46,10 +46,10 @@ pub(crate) fn hint_for_screen(screen: &Screen) -> String {
                     ..
                 }),
             ..
-        } => t("↑/↓ card  ←/→ phase  Enter open  v view  r refresh  q quit"),
+        } => t("↑/↓ card  ←/→ phase  Enter open  l move  v view  r refresh  q quit"),
         Screen::Tasks {
             kanban: Some(_), ..
-        } => t("←/→ column  ↑/↓ card  Enter open  v view  r refresh  H report  q quit"),
+        } => t("←/→ column  ↑/↓ card  Enter open  l move  v view  r refresh  q quit"),
         Screen::Tasks {
             due_today: Some(_), ..
         } => t("↑/↓ navigate  Enter select  v view  r refresh  H report  Esc/b back  q quit"),
