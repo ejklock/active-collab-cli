@@ -1,3 +1,4 @@
+use crate::board::Phase;
 use crate::client::TaskList;
 use crate::controller::extract_assets;
 use crate::models::{parse_labels, MineTask};
@@ -277,10 +278,20 @@ pub fn mine_object_on(rows: &[crate::render::MineTableRow], today: chrono::Naive
             })
         })
         .collect();
+    let phases: Vec<Value> = Phase::ALL
+        .iter()
+        .map(|phase| {
+            json!({
+                "key": phase.key(),
+                "count": rows.iter().filter(|row| row.phase == *phase).count(),
+            })
+        })
+        .collect();
     json!({
         "count": rows.len(),
         "tasks": rows.iter().map(|row| mine_task_object(row, today)).collect::<Vec<_>>(),
         "buckets": buckets,
+        "phases": phases,
     })
 }
 
@@ -301,6 +312,8 @@ fn mine_task_object(row: &crate::render::MineTableRow, today: chrono::NaiveDate)
         "task_list_id": row.task_list_id,
         "task_list": row.task_list,
         "labels": row.labels,
+        "phase": row.phase.key(),
+        "flagged": row.flagged,
     })
 }
 

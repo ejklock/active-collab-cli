@@ -23,7 +23,8 @@ pub(crate) use mine::{
 };
 pub(crate) use resolve::*;
 pub(crate) use setup::{
-    setup_add, setup_language, setup_list, setup_remove, setup_test, setup_theme, SetupAddFields,
+    setup_add, setup_board, setup_language, setup_list, setup_remove, setup_test, setup_theme,
+    BoardAction, SetupAddFields,
 };
 pub(crate) use skill::{skill_output, SKILLS};
 pub(crate) use task::{current_core, get_core, task_set_core, DisplayFlags};

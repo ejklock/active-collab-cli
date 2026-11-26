@@ -7,7 +7,9 @@
 
 use crate::i18n::t;
 use crate::render::{display_width, wrap_text};
-use crate::tui::model::{Compose, DownloadOutcome, DownloadState, Screen};
+use crate::tui::model::{
+    Compose, DownloadOutcome, DownloadState, KanbanFocus, KanbanLayout, Screen,
+};
 
 /// Reformat a BRT timestamp `YYYY-MM-DDTHH:MM:SS` into `DD/MM/YYYY HH:MM`.
 /// Returns None when the input is too short or cannot be sliced at the expected offsets.
@@ -37,6 +39,20 @@ pub(crate) fn hint_for_screen(screen: &Screen) -> String {
             current_user_id,
             ..
         } => detail_hint(*focused_comment, comments, *current_user_id),
+        Screen::Tasks {
+            kanban:
+                Some(KanbanFocus {
+                    layout: KanbanLayout::Vertical,
+                    ..
+                }),
+            ..
+        } => t("↑/↓ card  ←/→ phase  Enter open  l move  v view  r refresh  q quit"),
+        Screen::Tasks {
+            kanban: Some(_), ..
+        } => t("←/→ column  ↑/↓ card  Enter open  l move  v view  r refresh  q quit"),
+        Screen::Tasks {
+            due_today: Some(_), ..
+        } => t("↑/↓ navigate  Enter select  v view  r refresh  H report  Esc/b back  q quit"),
         _ => t("↑/↓ navigate  Enter select  r refresh  H report  Esc/b back  q quit"),
     }
 }

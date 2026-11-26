@@ -23,7 +23,7 @@ flowchart TD
     tui --> model["tui/model.rs\nModel · Msg · Cmd · Screen · update\nmine_model · init_browse · TaskRow (project_id)"]
     tui --> events["tui/events.rs\ncrossterm Event → Msg mapping"]
     tui --> view["tui/view.rs\nview()\nframe Layout split: header + content + footer"]
-    view --> screens["tui/screens/\nprojects.rs · tasks.rs · detail.rs\neach owns its draw_* fn\n(responsive Table · detail wraps text + assets panel)"]
+    view --> screens["tui/screens/\nprojects.rs · tasks.rs · detail.rs\nkanban.rs (horizontal: phase columns, tabs below 100 cols)\nkanban_vertical.rs (one list of bordered phase boxes)\neach owns its draw_* fn\n(responsive Table · detail wraps text + assets panel)"]
     screens --> task_layout["tui/task_layout.rs\npure Tasks card layout: card heights · first_visible\nbucket header rows (bucket_starts · slot_heights · bucket_header)"]
     task_layout --> buckets
     model --> task_layout
@@ -44,7 +44,7 @@ flowchart TD
     subgraph commands["commands/ — three masters (ADR 0055)"]
         direction TB
         cmd_context["context.rs\nsetup_instance_client · open_store_and_http\ncurrent_git_branch (shared by main and mcp)"]
-        cmd_setup["setup.rs\nsetup list·remove·language·test·add"]
+        cmd_setup["setup.rs\nsetup list·remove·language·test·add·board"]
         cmd_task["task.rs\nget · current"]
         cmd_comment["comment.rs\ncomment_core"]
         cmd_hours["hours_report.rs\nexport_hours_report · time_report_core · resolve_period · render_hours_report_csv · render_hours_report_xlsx"]
@@ -81,6 +81,10 @@ flowchart TD
     richtext --> sanitize
     cmd_task --> sanitize
     commands --> i18n["i18n (en · pt-BR)"]
+    cmd_mine --> board["board.rs\nPhase · BoardMapping · place\nSTATUS: label, then list keyword, else to_do\nsettings key board_mapping holds overrides only"]
+    cmd_setup --> board
+    model --> board
+    board --> store
     client --> models["models (serde)"]
 ```
 
@@ -96,6 +100,11 @@ flowchart TD
   low-level helpers/types both use, plus the re-export surface. Fitness: `text_measure` imports
   no `richtext`; `cli_render`/`detail_render` do not reference each other; the split is
   behavior-preserving (the whole `cargo test` suite is green on the combined tree).
+- **one phase rule for every reader** ([issue 0100](issues/0100-open-work-by-phase-kanban-in-the-ac-mine-tui-and-phase-in-ac-mine-json.md)):
+  `board::place` is the only code that turns a task's `STATUS:` labels and task list name into a
+  board phase and flag. `ac mine --json`, `ac_read mine`, `ac mine --phase` and both TUI kanbans
+  call it with the mapping `board::load` reads from the settings (built-in keywords laid over by
+  the user's overrides from `ac setup board`), so an agent and the screen never disagree.
 - **untrusted text is stripped of control characters at the write seam**
   ([ADR 0068](/adr/0068-control-characters-stripped-at-the-untrusted-text-render-boundary.md)):
   `sanitize::strip_control_chars` (keeps newline and tab, drops every Unicode Cc character)

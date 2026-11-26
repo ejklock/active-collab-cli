@@ -1,3 +1,4 @@
+use crate::board::Phase;
 use crate::commands::{validate_range, MineHours, OwnedReportPeriod, PeriodPreset, ReportFormat};
 use crate::i18n::t;
 use crate::render::{Asset, MineTableRow, StyleRun};
@@ -79,6 +80,228 @@ pub struct TaskRow {
     pub logged_week: Option<f64>,
     #[serde(default)]
     pub logged_total: Option<f64>,
+    /// The board column the task sits in.
+    #[serde(default)]
+    pub phase: crate::board::Phase,
+    /// A status label says the task is waiting or blocked.
+    #[serde(default)]
+    pub flagged: bool,
+    /// Name of the task list the task sits in; `None` when unknown.
+    #[serde(default)]
+    pub task_list: Option<String>,
+}
+
+/// How the mine Tasks screen lays its tasks out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MineView {
+    /// Grouped under due-date bucket headers.
+    #[default]
+    List,
+    /// One column per board phase, side by side, cards stacked.
+    KanbanHorizontal,
+    /// One list grouped by board phase: a bordered box per phase with its cards
+    /// stacked inside.
+    KanbanVertical,
+}
+
+impl MineView {
+    /// Every view, in the order the view modal lists them.
+    pub const ALL: [MineView; 3] = [
+        MineView::List,
+        MineView::KanbanHorizontal,
+        MineView::KanbanVertical,
+    ];
+
+    /// The value stored in the settings.
+    pub fn setting(self) -> &'static str {
+        match self {
+            MineView::List => "list",
+            MineView::KanbanHorizontal => "kanban_horizontal",
+            MineView::KanbanVertical => "kanban_vertical",
+        }
+    }
+
+    /// The view a stored setting names; an absent or unknown value is the list,
+    /// and the plain `kanban` an earlier version stored is the horizontal one.
+    pub fn from_setting(value: Option<&str>) -> Self {
+        match value {
+            Some("kanban" | "kanban_horizontal") => MineView::KanbanHorizontal,
+            Some("kanban_vertical") => MineView::KanbanVertical,
+            _ => MineView::List,
+        }
+    }
+
+    /// The kanban layout this view draws; `None` for the list.
+    fn layout(self) -> Option<KanbanLayout> {
+        match self {
+            MineView::List => None,
+            MineView::KanbanHorizontal => Some(KanbanLayout::Horizontal),
+            MineView::KanbanVertical => Some(KanbanLayout::Vertical),
+        }
+    }
+}
+
+/// How the kanban arranges the phases.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum KanbanLayout {
+    /// Phases are columns side by side.
+    #[default]
+    Horizontal,
+    /// Phases are sections of one list, top to bottom.
+    Vertical,
+}
+
+/// Where the kanban's focus sits: the focused phase and, per phase, the
+/// selected card (an index into that phase's cards). `column` is the phase
+/// index whichever way the phases are drawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct KanbanFocus {
+    pub column: usize,
+    pub cards: [usize; 4],
+    pub layout: KanbanLayout,
+}
+
+/// The indices into `tasks` of each column's cards, in `Phase::ALL` order and
+/// keeping the order of `tasks`.
+pub fn kanban_columns(tasks: &[TaskRow]) -> [Vec<usize>; 4] {
+    let mut columns: [Vec<usize>; 4] = Default::default();
+    for (index, task) in tasks.iter().enumerate() {
+        if let Some(column) = Phase::ALL.iter().position(|p| *p == task.phase) {
+            columns[column].push(index);
+        }
+    }
+    columns
+}
+
+/// The nearest phase after (`forward`) or before `from` that has cards.
+fn populated_phase(columns: &[Vec<usize>; 4], from: usize, forward: bool) -> Option<usize> {
+    let populated = |phase: &usize| !columns[*phase].is_empty();
+    if forward {
+        (from + 1..columns.len()).find(populated)
+    } else {
+        (0..from).rev().find(populated)
+    }
+}
+
+/// The card a move into a phase of `len` cards lands on: its first card going
+/// forward, its last going back.
+fn entering_card(len: usize, forward: bool) -> usize {
+    if forward {
+        0
+    } else {
+        len.saturating_sub(1)
+    }
+}
+
+impl KanbanFocus {
+    /// Focus on the first column that holds a card, else the first column.
+    fn first_populated(tasks: &[TaskRow]) -> Self {
+        let column = kanban_columns(tasks)
+            .iter()
+            .position(|cards| !cards.is_empty())
+            .unwrap_or(0);
+        Self {
+            column,
+            cards: [0; 4],
+            layout: KanbanLayout::default(),
+        }
+    }
+
+    /// The view this focus is drawn in.
+    fn view(&self) -> MineView {
+        match self.layout {
+            KanbanLayout::Horizontal => MineView::KanbanHorizontal,
+            KanbanLayout::Vertical => MineView::KanbanVertical,
+        }
+    }
+
+    /// The index into `tasks` of the focused column's selected card; `None`
+    /// when the column is empty.
+    pub fn selected_task(&self, tasks: &[TaskRow]) -> Option<usize> {
+        kanban_columns(tasks)[self.column]
+            .get(self.cards[self.column])
+            .copied()
+    }
+
+    /// After a reload keep, in every column, the same task (by instance and id)
+    /// wherever it moved; the focus follows the selected task when it moved to
+    /// another column, else it stays on its column. A task that is gone leaves
+    /// the old position clamped into its column.
+    fn reselected(mut self, earlier: &[TaskRow], fresh: &[TaskRow]) -> Self {
+        let before = kanban_columns(earlier);
+        let after = kanban_columns(fresh);
+        let followed = before[self.column]
+            .get(self.cards[self.column])
+            .and_then(|&i| {
+                let prior = &earlier[i];
+                fresh
+                    .iter()
+                    .position(|r| r.instance == prior.instance && r.task_id == prior.task_id)
+            })
+            .and_then(|at| {
+                after.iter().enumerate().find_map(|(column, rows)| {
+                    rows.iter()
+                        .position(|&j| j == at)
+                        .map(|card| (column, card))
+                })
+            });
+        for ((card, old), new) in self.cards.iter_mut().zip(&before).zip(&after) {
+            let moved = old.get(*card).and_then(|&i| {
+                let prior = &earlier[i];
+                new.iter().position(|&j| {
+                    fresh[j].instance == prior.instance && fresh[j].task_id == prior.task_id
+                })
+            });
+            *card = moved.unwrap_or_else(|| (*card).min(new.len().saturating_sub(1)));
+        }
+        if let Some((column, card)) = followed {
+            self.column = column;
+            self.cards[column] = card;
+        }
+        self
+    }
+
+    fn step_column(&mut self, forward: bool) {
+        self.column = if forward {
+            (self.column + 1).min(Phase::ALL.len() - 1)
+        } else {
+            self.column.saturating_sub(1)
+        };
+    }
+
+    /// Move the selection to the next or previous card of the whole list,
+    /// crossing from one phase into the next phase that has cards; at the very
+    /// first or last card it stays.
+    fn step_through(&mut self, tasks: &[TaskRow], forward: bool) {
+        let before = self.cards[self.column];
+        self.step_card(tasks, forward);
+        if self.cards[self.column] != before {
+            return;
+        }
+        let columns = kanban_columns(tasks);
+        if let Some(phase) = populated_phase(&columns, self.column, forward) {
+            self.column = phase;
+            self.cards[phase] = entering_card(columns[phase].len(), forward);
+        }
+    }
+
+    /// Jump to the first card of the next or previous phase that has cards.
+    fn jump_phase(&mut self, tasks: &[TaskRow], forward: bool) {
+        if let Some(phase) = populated_phase(&kanban_columns(tasks), self.column, forward) {
+            self.column = phase;
+            self.cards[phase] = 0;
+        }
+    }
+
+    fn step_card(&mut self, tasks: &[TaskRow], forward: bool) {
+        let last = kanban_columns(tasks)[self.column].len().saturating_sub(1);
+        let card = &mut self.cards[self.column];
+        *card = if forward {
+            (*card + 1).min(last)
+        } else {
+            card.saturating_sub(1)
+        };
+    }
 }
 
 /// Style classification produced by `relative_due`.
@@ -138,6 +361,8 @@ pub enum Cmd {
     LoadTasksByProject,
     /// Fetch the mine task list in the background (SWR revalidation for the mine TUI).
     LoadMineTasks,
+    /// Store the chosen mine view so the next launch opens in it.
+    SaveMineView(MineView),
     LoadDetail {
         instance: String,
         project_id: i64,
@@ -535,6 +760,9 @@ pub enum DetailOverlay {
         status: EditStatus,
     },
     TaskListPicker(TaskListPicker),
+    /// The detail was opened by `l` on the mine screen: it shows nothing yet, and
+    /// the task list picker opens once the task has loaded.
+    TaskListPickerPending,
     ConfirmDelete {
         comment_id: i64,
     },
@@ -795,6 +1023,9 @@ pub enum Screen {
         /// True while an in-flight revalidation fetch is running on a warm-seeded mine list.
         /// Distinct from `loading`: revalidating keeps rows painted while the refresh runs.
         revalidating: bool,
+        /// True after a task opened from the mine screen was edited successfully. Back
+        /// consumes it by reloading the mine screen, whether or not a reload is in flight.
+        stale_after_edit: bool,
         /// Per-slot heights (rows) computed by reflow_tasks; a slot is a card plus, for the
         /// first card of a due-date bucket, the bucket header row above it. Mirrors Detail's
         /// `lines` cache.
@@ -807,6 +1038,12 @@ pub enum Screen {
         /// `Some(today)` groups the tasks under due-date bucket headers, which use this
         /// date; `None` is a plain list. The tasks are kept in bucket order when set.
         due_today: Option<chrono::NaiveDate>,
+        /// `Some` shows the tasks as a kanban of board phases with this focus; `None`
+        /// shows the list. Only the mine screen (`due_today` set) ever holds `Some`.
+        kanban: Option<KanbanFocus>,
+        /// `Some` while the view modal is open: the highlighted choice. Only the mine
+        /// screen (`due_today` set) ever holds `Some`.
+        view_modal: Option<MineView>,
     },
     Detail {
         instance: String,
@@ -950,9 +1187,16 @@ fn select_action(stack: &[Screen]) -> Option<SelectAction> {
             })
         }
         Screen::Tasks {
-            tasks, selected, ..
+            tasks,
+            selected,
+            kanban,
+            ..
         } => {
-            let row = tasks.get(*selected)?;
+            let index = match kanban {
+                Some(focus) => focus.selected_task(tasks)?,
+                None => *selected,
+            };
+            let row = tasks.get(index)?;
             Some(SelectAction::PushDetail {
                 instance: row.instance.clone(),
                 project_id: row.project_id,
@@ -996,6 +1240,22 @@ pub struct Model {
 pub enum Msg {
     Up,
     Down,
+    /// `v`: open the view modal on the mine screen.
+    ViewModalOpen,
+    /// ↑ in the view modal: highlight the previous view.
+    ViewModalUp,
+    /// ↓ in the view modal: highlight the next view.
+    ViewModalDown,
+    /// Enter in the view modal: show the highlighted view and close.
+    ViewModalApply,
+    /// Esc in the view modal: close without changing the view.
+    ViewModalClose,
+    /// ←: move the kanban's focus one column left, or to the previous phase in
+    /// the vertical kanban.
+    ColumnLeft,
+    /// →: move the kanban's focus one column right, or to the next phase in the
+    /// vertical kanban.
+    ColumnRight,
     ScrollUp,
     ScrollDown,
     PageUp,
@@ -1254,6 +1514,14 @@ impl Model {
         self.stack.last()
     }
 
+    /// The view modal's highlighted choice while it is open on the top screen.
+    pub fn view_modal(&self) -> Option<MineView> {
+        match self.top() {
+            Some(Screen::Tasks { view_modal, .. }) => *view_modal,
+            _ => None,
+        }
+    }
+
     fn top_mut(&mut self) -> Option<&mut Screen> {
         self.stack.last_mut()
     }
@@ -1361,6 +1629,13 @@ impl Model {
 /// Dispatches to family sub-handlers to keep each function within the
 /// cyclomatic-complexity budget (≤ 10).
 pub fn update(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
+    if model.view_modal().is_some() && behind_view_modal(&msg) {
+        return (model, vec![]);
+    }
+    update_by_family(model, msg)
+}
+
+fn update_by_family(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
     match msg {
         m @ (Msg::Up
         | Msg::ScrollUp
@@ -1371,7 +1646,17 @@ pub fn update(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
         | Msg::Click { .. }
         | Msg::Drag { .. }
         | Msg::MouseUp { .. }) => update_input(model, m),
-        m @ (Msg::Select | Msg::Back | Msg::Quit | Msg::Refresh) => update_navigation(model, m),
+        m @ (Msg::Select
+        | Msg::Back
+        | Msg::Quit
+        | Msg::Refresh
+        | Msg::ViewModalOpen
+        | Msg::ViewModalUp
+        | Msg::ViewModalDown
+        | Msg::ViewModalApply
+        | Msg::ViewModalClose
+        | Msg::ColumnLeft
+        | Msg::ColumnRight) => update_navigation(model, m),
         m @ (Msg::LoadedTasksByProject { .. }
         | Msg::LoadedMineTasks { .. }
         | Msg::LoadedMineHours { .. }
@@ -1590,9 +1875,22 @@ fn update_pointer(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
 fn update_navigation(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
     match msg {
         Msg::Select => handle_select(model),
-        Msg::Back => (handle_back(model), vec![]),
+        Msg::Back => handle_back_reloading_mine(model),
         Msg::Quit => (handle_quit(model), vec![]),
         Msg::Refresh => handle_refresh(model),
+        Msg::ColumnLeft => (move_kanban(model, false, false), vec![]),
+        Msg::ColumnRight => (move_kanban(model, false, true), vec![]),
+        m => update_view_modal(model, m),
+    }
+}
+
+fn update_view_modal(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
+    match msg {
+        Msg::ViewModalOpen => (open_view_modal(model), vec![]),
+        Msg::ViewModalUp => (move_view_modal(model, false), vec![]),
+        Msg::ViewModalDown => (move_view_modal(model, true), vec![]),
+        Msg::ViewModalApply => apply_view_modal(model),
+        Msg::ViewModalClose => (close_view_modal(model), vec![]),
         _ => (model, vec![]),
     }
 }
@@ -1606,7 +1904,7 @@ fn update_loaded(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
             (handle_loaded_mine_tasks(model, rows, loaded_at), vec![])
         }
         Msg::LoadedMineHours { hours } => (handle_loaded_mine_hours(model, hours), vec![]),
-        Msg::LoadedDetail(load) => (handle_loaded_detail(model, load), vec![]),
+        Msg::LoadedDetail(load) => handle_loaded_detail(model, load),
         Msg::UserMapResolved(map) => (handle_user_map_resolved(model, map), vec![]),
         Msg::AssetActionResult => (model, vec![]),
         Msg::HeaderNameResolved(name) => (handle_header_name_resolved(model, name), vec![]),
@@ -1734,9 +2032,120 @@ fn update_task_list_picker(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
     }
 }
 
+/// Messages that must not reach the screen behind the open view modal: they
+/// would move or reload it while the modal owns the keyboard and the pointer.
+fn behind_view_modal(msg: &Msg) -> bool {
+    matches!(
+        msg,
+        Msg::Up
+            | Msg::Down
+            | Msg::ScrollUp
+            | Msg::ScrollDown
+            | Msg::PageUp
+            | Msg::PageDown
+            | Msg::Click { .. }
+            | Msg::Drag { .. }
+            | Msg::MouseUp { .. }
+            | Msg::Select
+            | Msg::Back
+            | Msg::Refresh
+            | Msg::ColumnLeft
+            | Msg::ColumnRight
+            | Msg::ViewModalOpen
+    )
+}
+
+/// Open the view modal on the mine screen with the current view highlighted;
+/// a no-op on every other screen.
+fn open_view_modal(mut model: Model) -> Model {
+    if let Some(Screen::Tasks {
+        due_today: Some(_),
+        kanban,
+        view_modal,
+        ..
+    }) = model.top_mut()
+    {
+        *view_modal = Some(kanban.as_ref().map_or(MineView::List, KanbanFocus::view));
+    }
+    model
+}
+
+/// Highlight the previous or next view, stopping at the ends of the list.
+fn move_view_modal(mut model: Model, forward: bool) -> Model {
+    if let Some(Screen::Tasks {
+        view_modal: Some(choice),
+        ..
+    }) = model.top_mut()
+    {
+        let at = MineView::ALL.iter().position(|v| v == choice).unwrap_or(0);
+        let next = if forward {
+            (at + 1).min(MineView::ALL.len() - 1)
+        } else {
+            at.saturating_sub(1)
+        };
+        *choice = MineView::ALL[next];
+    }
+    model
+}
+
+fn close_view_modal(mut model: Model) -> Model {
+    if let Some(Screen::Tasks { view_modal, .. }) = model.top_mut() {
+        *view_modal = None;
+    }
+    model
+}
+
+/// Show the highlighted view, close the modal and ask the shell to remember
+/// the choice. A kanban keeps the focus it already has, so switching between
+/// the two layouts leaves the same card selected.
+fn apply_view_modal(mut model: Model) -> (Model, Vec<Cmd>) {
+    let Some(Screen::Tasks {
+        tasks,
+        kanban,
+        view_modal,
+        ..
+    }) = model.top_mut()
+    else {
+        return (model, vec![]);
+    };
+    let Some(view) = view_modal.take() else {
+        return (model, vec![]);
+    };
+    *kanban = view.layout().map(|layout| KanbanFocus {
+        layout,
+        ..kanban.unwrap_or_else(|| KanbanFocus::first_populated(tasks))
+    });
+    (model, vec![Cmd::SaveMineView(view)])
+}
+
+/// Move the kanban's focus one step. ↑/↓ (`along_cards`) step the card within
+/// the focused column in the horizontal kanban and through the whole
+/// phase-grouped list in the vertical one; ←/→ step the column in the
+/// horizontal kanban and jump to the first card of the neighbouring phase that
+/// has cards in the vertical one.
+fn move_kanban(mut model: Model, along_cards: bool, forward: bool) -> Model {
+    if let Some(Screen::Tasks {
+        tasks,
+        kanban: Some(focus),
+        ..
+    }) = model.top_mut()
+    {
+        match (focus.layout, along_cards) {
+            (KanbanLayout::Horizontal, true) => focus.step_card(tasks, forward),
+            (KanbanLayout::Horizontal, false) => focus.step_column(forward),
+            (KanbanLayout::Vertical, true) => focus.step_through(tasks, forward),
+            (KanbanLayout::Vertical, false) => focus.jump_phase(tasks, forward),
+        }
+    }
+    model
+}
+
 fn handle_up(model: Model) -> Model {
     match model.top() {
         Some(Screen::Detail { .. }) => handle_focus_prev(model),
+        Some(Screen::Tasks {
+            kanban: Some(_), ..
+        }) => move_kanban(model, true, false),
         Some(_) => {
             let mut model = model;
             let sel = model.top().map(|s| s.selected()).unwrap_or(0);
@@ -1753,6 +2162,9 @@ fn handle_down(model: Model) -> Model {
     let (viewport_cols, viewport_rows) = model.viewport;
     match model.top() {
         Some(Screen::Detail { .. }) => handle_focus_next(model),
+        Some(Screen::Tasks {
+            kanban: Some(_), ..
+        }) => move_kanban(model, true, true),
         Some(screen) => {
             let count = screen.row_count();
             let sel = screen.selected();
@@ -1774,6 +2186,9 @@ fn handle_scroll_up(mut model: Model) -> Model {
         Some(Screen::Detail { offset, .. }) => {
             *offset = offset.saturating_sub(1);
         }
+        Some(Screen::Tasks {
+            kanban: Some(_), ..
+        }) => {}
         Some(screen) => {
             let sel = screen.selected();
             screen.set_selected(sel.saturating_sub(1));
@@ -1795,6 +2210,9 @@ fn handle_scroll_down(mut model: Model) -> Model {
             let max = detail_max_offset(viewport_rows, viewport_cols, lines.len(), assets);
             *offset = (*offset + 1).min(max);
         }
+        Some(Screen::Tasks {
+            kanban: Some(_), ..
+        }) => {}
         Some(screen) => {
             let count = screen.row_count();
             if count > 0 {
@@ -2163,10 +2581,13 @@ fn handle_select(model: Model) -> (Model, Vec<Cmd>) {
                     selected: 0,
                     loading: false,
                     revalidating: false,
+                    stale_after_edit: false,
                     card_heights: Vec::new(),
                     card_offsets: Vec::new(),
                     rendered_width: usize::MAX,
                     due_today: None,
+                    kanban: None,
+                    view_modal: None,
                 });
             }
             SelectAction::PushDetail {
@@ -2226,6 +2647,48 @@ fn handle_back(model: Model) -> Model {
     model
 }
 
+/// The mine screen directly below a Detail on top of the stack.
+fn mine_screen_below_detail(model: &mut Model) -> Option<&mut Screen> {
+    let below = model.stack.len().checked_sub(2)?;
+    if !matches!(model.stack.last(), Some(Screen::Detail { .. })) {
+        return None;
+    }
+    model.stack.get_mut(below).filter(|s| {
+        matches!(
+            s,
+            Screen::Tasks {
+                due_today: Some(_),
+                ..
+            }
+        )
+    })
+}
+
+/// Back, reloading the mine screen it returns to when an edit marked it stale.
+fn handle_back_reloading_mine(model: Model) -> (Model, Vec<Cmd>) {
+    let from_detail = matches!(model.top(), Some(Screen::Detail { .. }));
+    let depth = model.stack.len();
+    let mut model = handle_back(model);
+    let popped_detail = from_detail && model.stack.len() < depth;
+    if !popped_detail {
+        return (model, vec![]);
+    }
+    if let Some(Screen::Tasks {
+        due_today: Some(_),
+        stale_after_edit,
+        revalidating,
+        ..
+    }) = model.top_mut()
+    {
+        if std::mem::take(stale_after_edit) {
+            // A reload already in flight may predate the edit; the newer reply wins.
+            *revalidating = true;
+            return (model, vec![Cmd::LoadMineTasks]);
+        }
+    }
+    (model, vec![])
+}
+
 fn handle_quit(mut model: Model) -> Model {
     // When the image viewer is open, q closes it instead of quitting the app.
     if let Some(Screen::Detail { overlay, .. }) = model.top() {
@@ -2254,6 +2717,19 @@ fn handle_refresh(mut model: Model) -> (Model, Vec<Cmd>) {
     if let Some(top) = model.top_mut() {
         if top.is_loading() {
             // Single-flight guard: drop the duplicate refresh while one is in flight.
+            return (model, cmds);
+        }
+        if let Screen::Tasks {
+            due_today: Some(_),
+            revalidating,
+            ..
+        } = top
+        {
+            // The mine rows stay painted while the reload runs; its reply clears the flag.
+            if !*revalidating {
+                *revalidating = true;
+                cmds.push(Cmd::LoadMineTasks);
+            }
             return (model, cmds);
         }
         match top {
@@ -2320,6 +2796,7 @@ fn handle_loaded_mine_tasks(mut model: Model, rows: Vec<MineTableRow>, loaded_at
         rendered_width: ref mut rw,
         selected: ref mut sel,
         due_today,
+        kanban,
         ..
     }) = model.tasks_screen_mut()
     {
@@ -2327,6 +2804,16 @@ fn handle_loaded_mine_tasks(mut model: Model, rows: Vec<MineTableRow>, loaded_at
         *t = order_by_bucket(rows_to_task_rows(rows), *due_today);
         keep_earlier_hours(t, &earlier);
         *sel = reselect(*sel, &earlier, t);
+        if let Some(focus) = kanban {
+            *focus = if earlier.is_empty() {
+                KanbanFocus {
+                    layout: focus.layout,
+                    ..KanbanFocus::first_populated(t)
+                }
+            } else {
+                focus.reselected(&earlier, t)
+            };
+        }
         *l = false;
         *rv = false;
         // Invalidate card cache so reflow_tasks rebuilds at current width.
@@ -2419,11 +2906,22 @@ fn rows_to_task_rows(rows: Vec<MineTableRow>) -> Vec<TaskRow> {
             estimate: r.estimate,
             logged_week: r.logged_week,
             logged_total: r.logged_total,
+            phase: r.phase,
+            flagged: r.flagged,
+            task_list: r.task_list,
         })
         .collect()
 }
 
-fn handle_loaded_detail(mut model: Model, load: DetailLoad) -> Model {
+fn handle_loaded_detail(mut model: Model, load: DetailLoad) -> (Model, Vec<Cmd>) {
+    let picker_pending = matches!(
+        model.top(),
+        Some(Screen::Detail {
+            overlay: DetailOverlay::TaskListPickerPending,
+            ..
+        })
+    );
+    let loaded_ok = !load.task.is_null() && !load.unauthorized;
     if let Some(Screen::Detail {
         task: ref mut t,
         comments: ref mut c,
@@ -2459,7 +2957,10 @@ fn handle_loaded_detail(mut model: Model, load: DetailLoad) -> Model {
         *comment_spans = vec![];
     }
     model.last_loaded = Some(load.loaded_at);
-    model
+    if picker_pending && loaded_ok {
+        return handle_task_list_picker_open(model);
+    }
+    (model, vec![])
 }
 
 /// Set auth_error on the Detail screen without disturbing the compose buffer.
@@ -3193,7 +3694,13 @@ fn handle_estimate_submit(mut model: Model) -> (Model, Vec<Cmd>) {
     )
 }
 
-fn handle_task_edit_ok(model: Model) -> (Model, Vec<Cmd>) {
+fn handle_task_edit_ok(mut model: Model) -> (Model, Vec<Cmd>) {
+    if let Some(Screen::Tasks {
+        stale_after_edit, ..
+    }) = mine_screen_below_detail(&mut model)
+    {
+        *stale_after_edit = true;
+    }
     refresh_detail_after_write(model)
 }
 
@@ -3529,6 +4036,15 @@ fn handle_assignee_picker_submit(model: Model) -> (Model, Vec<Cmd>) {
 /// read of the project's lists. A no-op off the Detail screen or while any overlay
 /// (including the picker itself) is already open.
 fn handle_task_list_picker_open(mut model: Model) -> (Model, Vec<Cmd>) {
+    if matches!(
+        model.top(),
+        Some(Screen::Tasks {
+            due_today: Some(_),
+            ..
+        })
+    ) {
+        return open_detail_with_picker(model);
+    }
     let Some(Screen::Detail {
         instance,
         project_id,
@@ -3560,6 +4076,18 @@ fn handle_task_list_picker_open(mut model: Model) -> (Model, Vec<Cmd>) {
     });
     *rendered_width = usize::MAX;
     (model, vec![cmd])
+}
+
+/// `l` on the mine screen: open the selected task's detail as Enter does, and
+/// have its task list picker open once the task has loaded.
+fn open_detail_with_picker(model: Model) -> (Model, Vec<Cmd>) {
+    let (mut model, cmds) = handle_select(model);
+    if !cmds.is_empty() {
+        if let Some(Screen::Detail { overlay, .. }) = model.top_mut() {
+            *overlay = DetailOverlay::TaskListPickerPending;
+        }
+    }
+    (model, cmds)
 }
 
 /// Apply a task-lists read to the open picker when it still waits for the Detail
@@ -3658,16 +4186,28 @@ pub fn init_browse(header: Header, seed: Option<Vec<ProjectGroup>>) -> (Model, V
 ///
 /// ALWAYS emits `Cmd::LoadMineTasks` so the mine list is revalidated on every
 /// entry, regardless of whether a snapshot was present.
+#[cfg(test)]
 pub fn init_mine(header: Header, seed: Option<Vec<MineTableRow>>) -> (Model, Vec<Cmd>) {
     init_mine_on(header, seed, chrono::Local::now().date_naive())
 }
 
 /// `init_mine` with an explicit "today" for the due-date buckets, so tests
 /// inject the date.
+#[cfg(test)]
 pub fn init_mine_on(
     header: Header,
     seed: Option<Vec<MineTableRow>>,
     today: chrono::NaiveDate,
+) -> (Model, Vec<Cmd>) {
+    init_mine_in_view(header, seed, today, MineView::List)
+}
+
+/// `init_mine_on` opening in the given view.
+pub fn init_mine_in_view(
+    header: Header,
+    seed: Option<Vec<MineTableRow>>,
+    today: chrono::NaiveDate,
+    view: MineView,
 ) -> (Model, Vec<Cmd>) {
     let (tasks, loading, revalidating) = match seed {
         Some(rows) if !rows.is_empty() => (
@@ -3677,13 +4217,20 @@ pub fn init_mine_on(
         ),
         _ => (vec![], true, false),
     };
+    let kanban = view.layout().map(|layout| KanbanFocus {
+        layout,
+        ..KanbanFocus::first_populated(&tasks)
+    });
     let model = Model {
         stack: vec![Screen::Tasks {
             project_name: t("My Tasks"),
             tasks,
+            kanban,
+            view_modal: None,
             selected: 0,
             loading,
             revalidating,
+            stale_after_edit: false,
             card_heights: Vec::new(),
             card_offsets: Vec::new(),
             rendered_width: usize::MAX,
@@ -3704,7 +4251,7 @@ pub fn init_mine_on(
 
 const NEAR_DUE_WINDOW_DAYS: i64 = 3;
 
-/// Map an optional `YYYY-MM-DD` due date to a Brazilian-Portuguese label and style.
+/// Map an optional `YYYY-MM-DD` due date to a label translated into the active language, plus a style.
 ///
 /// Pure and total: no side effects, no I/O. Accepts an injected `today` so callers
 /// remain deterministic in tests.
@@ -3712,40 +4259,40 @@ pub fn relative_due(due_on: Option<&str>, today: chrono::NaiveDate) -> (String, 
     use chrono::NaiveDate;
 
     let Some(s) = due_on else {
-        return (t("due_none"), DueStyle::None);
+        return (t("no due date"), DueStyle::None);
     };
 
     let Ok(date) = NaiveDate::parse_from_str(s, "%Y-%m-%d") else {
-        return (t("due_none"), DueStyle::None);
+        return (t("no due date"), DueStyle::None);
     };
 
     let delta = (date - today).num_days();
 
     match delta {
-        0 => (t("due_today"), DueStyle::Near),
-        1 => (t("due_tomorrow"), DueStyle::Near),
+        0 => (t("today"), DueStyle::Near),
+        1 => (t("tomorrow"), DueStyle::Near),
         2..=NEAR_DUE_WINDOW_DAYS => {
             let day_word = day_word(delta);
             (
-                format!("{} {} {}", t("due_in"), delta, day_word),
+                format!("{} {} {}", t("due in"), delta, day_word),
                 DueStyle::Near,
             )
         }
         d if d > NEAR_DUE_WINDOW_DAYS => {
             let day_word = day_word(d);
             (
-                format!("{} {} {}", t("due_in"), d, day_word),
+                format!("{} {} {}", t("due in"), d, day_word),
                 DueStyle::Normal,
             )
         }
         -1 => (
-            format!("{} 1 {}", t("due_overdue"), t("due_day")),
+            format!("{} 1 {}", t("overdue"), t("day")),
             DueStyle::Overdue,
         ),
         d => {
             let abs_d = d.unsigned_abs() as i64;
             (
-                format!("{} {} {}", t("due_overdue"), abs_d, t("due_days")),
+                format!("{} {} {}", t("overdue"), abs_d, t("days")),
                 DueStyle::Overdue,
             )
         }
@@ -3754,9 +4301,9 @@ pub fn relative_due(due_on: Option<&str>, today: chrono::NaiveDate) -> (String, 
 
 fn day_word(n: i64) -> String {
     if n == 1 {
-        t("due_day")
+        t("day")
     } else {
-        t("due_days")
+        t("days")
     }
 }
 

@@ -10,7 +10,7 @@
 use crate::i18n::t;
 use crate::render::buckets::{bucket_sums, due_bucket, DueBucket};
 use crate::render::{fmt_hours_or_dash, wrap_text, PANEL_HPAD};
-use crate::tui::model::TaskRow;
+use crate::tui::model::{kanban_columns, TaskRow};
 use chrono::NaiveDate;
 
 /// Width consumed by one card's left+right chrome: 2 border cols + 2×PANEL_HPAD.
@@ -78,6 +78,74 @@ pub(crate) fn slot_heights(
         .zip(bucket_starts(tasks, today))
         .map(|(task, opens)| card_height(task, card_inner_w) + u16::from(opens.is_some()))
         .collect()
+}
+
+/// Columns a boxed card spends beside its text: the box's two side borders and
+/// the due-bucket bar with its space.
+const BOXED_CARD_CHROME: u16 = 2 + 2;
+
+/// Width of a boxed card's text inside a box area `inner_width` columns wide.
+pub(crate) fn boxed_text_w(inner_width: u16) -> usize {
+    inner_width.saturating_sub(BOXED_CARD_CHROME) as usize
+}
+
+/// Rows of a card drawn without its own border: the wrapped title, the hours
+/// line and the due-date line.
+pub(crate) fn boxed_card_height(task: &TaskRow, text_w: usize) -> u16 {
+    let title_rows = wrap_text(&card_content(task), text_w.max(1)).len().max(1);
+    title_rows as u16 + 2
+}
+
+/// One row-group of the vertical kanban: a piece of a phase's bordered box.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PhaseSlot {
+    /// The top border of the box of the phase at this `Phase::ALL` position,
+    /// carrying the title over `count` cards.
+    Top { phase: usize, count: usize },
+    /// The card of the task at this index into the task list; `separated` when
+    /// another card follows in the same box, so a dashed line closes this one.
+    Card { index: usize, separated: bool },
+    /// The blank row that keeps a box with no card visible.
+    Empty,
+    /// The bottom border of a box; `gap` adds the blank row before the next box.
+    Bottom { gap: bool },
+}
+
+/// The vertical kanban top to bottom: for each phase in `Phase::ALL` order its
+/// box, made of the top border, the cards in the order of `tasks` (or the blank
+/// row of an empty phase) and the bottom border.
+pub(crate) fn phase_slots(tasks: &[TaskRow]) -> Vec<PhaseSlot> {
+    let columns = kanban_columns(tasks);
+    let last = columns.len().saturating_sub(1);
+    let mut slots = Vec::new();
+    for (phase, cards) in columns.iter().enumerate() {
+        slots.push(PhaseSlot::Top {
+            phase,
+            count: cards.len(),
+        });
+        if cards.is_empty() {
+            slots.push(PhaseSlot::Empty);
+        }
+        for (position, &index) in cards.iter().enumerate() {
+            slots.push(PhaseSlot::Card {
+                index,
+                separated: position + 1 < cards.len(),
+            });
+        }
+        slots.push(PhaseSlot::Bottom { gap: phase < last });
+    }
+    slots
+}
+
+/// Rows a slot occupies, for card text `text_w` columns wide.
+pub(crate) fn phase_slot_height(slot: PhaseSlot, tasks: &[TaskRow], text_w: usize) -> u16 {
+    match slot {
+        PhaseSlot::Top { .. } | PhaseSlot::Empty => 1,
+        PhaseSlot::Card { index, separated } => {
+            boxed_card_height(&tasks[index], text_w) + u16::from(separated)
+        }
+        PhaseSlot::Bottom { gap } => 1 + u16::from(gap),
+    }
 }
 
 /// The header text of the bucket that starts at `start`, with the sums of the

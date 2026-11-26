@@ -5,11 +5,13 @@ use crate::tui::detail_geometry::Selection;
 use crate::tui::footer::{self, FooterPlan};
 use crate::tui::model::{
     filter_assignee_candidates, ClickTarget, Compose, ComposeKind, ComposeStatus, DetailOverlay,
-    EditStatus, EstimateForm, ImageAssetRef, ImageStatus, LogTimeField, LogTimeForm, LogTimeStatus,
-    ModalButtonTarget, Model, ReportField, ReportForm, ReportPeriodChoice, ReportStatus, Screen,
-    TaskListLoad, TaskListPicker,
+    EditStatus, EstimateForm, ImageAssetRef, ImageStatus, KanbanLayout, LogTimeField, LogTimeForm,
+    LogTimeStatus, MineView, ModalButtonTarget, Model, ReportField, ReportForm, ReportPeriodChoice,
+    ReportStatus, Screen, TaskListLoad, TaskListPicker,
 };
-use crate::tui::screens::{draw_detail, draw_projects, draw_tasks, DetailParams};
+use crate::tui::screens::{
+    draw_detail, draw_kanban, draw_kanban_vertical, draw_projects, draw_tasks, DetailParams,
+};
 use crate::tui::theme;
 use crate::tui::widgets::modal::ModalContent;
 use ratatui::{
@@ -164,23 +166,35 @@ pub fn view(
             card_offsets,
             rendered_width,
             due_today,
+            kanban,
+            view_modal: _,
+            stale_after_edit: _,
         } => {
             let today = chrono::Local::now().date_naive();
-            draw_tasks(
-                frame,
-                chunks[1],
-                project_name,
-                tasks,
-                *selected,
-                *loading,
-                *revalidating,
-                today,
-                targets,
-                card_heights,
-                card_offsets,
-                *rendered_width,
-                *due_today,
-            );
+            if let (Some(focus), false) = (kanban, *loading) {
+                targets.clear();
+                let draw = match focus.layout {
+                    KanbanLayout::Horizontal => draw_kanban,
+                    KanbanLayout::Vertical => draw_kanban_vertical,
+                };
+                draw(frame, chunks[1], tasks, focus, *revalidating, today);
+            } else {
+                draw_tasks(
+                    frame,
+                    chunks[1],
+                    project_name,
+                    tasks,
+                    *selected,
+                    *loading,
+                    *revalidating,
+                    today,
+                    targets,
+                    card_heights,
+                    card_offsets,
+                    *rendered_width,
+                    *due_today,
+                );
+            }
         }
         Screen::Detail {
             task,
@@ -222,11 +236,20 @@ pub fn view(
         }
     }
 
+    render_screen_modals(frame, area, model);
+
+    render_footer(frame, chunks[2], footer_plan, theme::footer_style());
+}
+
+/// Draw the hours-report modal and the view modal, whichever is open, over the
+/// whole frame.
+fn render_screen_modals(frame: &mut Frame, area: Rect, model: &Model) {
     if let Some(form) = &model.report {
         render_report_modal(frame, area, form, chrono::Local::now().date_naive());
     }
-
-    render_footer(frame, chunks[2], footer_plan, theme::footer_style());
+    if let Some(choice) = model.view_modal() {
+        render_view_modal(frame, area, choice);
+    }
 }
 
 /// Draw the Detail screen's text-selection highlight and whichever modal
@@ -404,6 +427,37 @@ fn report_modal_lines(form: &ReportForm, today: chrono::NaiveDate) -> Vec<String
         lines.push(status);
     }
     lines
+}
+
+/// The label of one view in the view modal.
+fn view_choice_label(view: MineView) -> String {
+    match view {
+        MineView::List => t("Due-date list"),
+        MineView::KanbanHorizontal => t("Horizontal kanban"),
+        MineView::KanbanVertical => t("Vertical kanban"),
+    }
+}
+
+/// Render the view modal over `frame_area`, marking the highlighted view.
+fn render_view_modal(frame: &mut Frame, frame_area: Rect, highlighted: MineView) {
+    use crate::tui::widgets::modal::render_modal;
+    let lines: Vec<String> = MineView::ALL
+        .iter()
+        .map(|&view| {
+            let marker = if view == highlighted { '>' } else { ' ' };
+            format!("{marker} {}", view_choice_label(view))
+        })
+        .collect();
+    let hint = t("↑/↓ choose · Enter apply · Esc close");
+    render_modal(
+        frame,
+        frame_area,
+        ModalContent {
+            title: &t("View"),
+            lines: &lines,
+            hint: Some(&hint),
+        },
+    );
 }
 
 /// Render the hours-report modal over `frame_area`.

@@ -5,6 +5,7 @@
 //! saves a task's attachments to disk. While the server runs, stdout
 //! belongs to the protocol: every core writes to in-memory buffers.
 
+use crate::board::Phase;
 use crate::commands::{
     self, comment_core, current_core, current_git_branch, get_core, mine_core, task_set_core,
     time_log_core, DisplayFlags, InstanceContext, MineFilter, MineOutcome, OwnedReportPeriod,
@@ -12,6 +13,7 @@ use crate::commands::{
 };
 use crate::store::cache::TaskCache;
 use crate::store::instances::InstanceRepository;
+use crate::store::settings::SettingsRepository;
 use rmcp::handler::server::tool::{ToolCallContext, ToolRouter};
 use rmcp::model::{
     CallToolRequestParams, CallToolResponse, CallToolResult, CancelTaskParams, ConstString,
@@ -542,6 +544,9 @@ enum ReadOperation {
         /// Task list id or name.
         #[serde(default, deserialize_with = "non_empty_task_list")]
         task_list: Option<String>,
+        /// Board phase a task must sit in.
+        #[serde(default)]
+        phase: Option<Phase>,
         instance: Option<String>,
     },
 }
@@ -869,6 +874,7 @@ async fn run_read(operation: ReadOperation) -> CoreRun {
         ReadOperation::Mine {
             labels,
             task_list,
+            phase,
             instance,
         } => {
             let (store, http) = match commands::open_store_and_http(&mut run.err) {
@@ -879,11 +885,14 @@ async fn run_read(operation: ReadOperation) -> CoreRun {
                 }
             };
             let repo = InstanceRepository::new(store.conn());
+            let mapping = crate::board::load(&SettingsRepository::new(store.conn()));
             match mine_core(
                 &repo,
                 &http,
                 instance.as_deref(),
-                &MineFilter::new(&labels, task_list.as_deref()),
+                &MineFilter::new(&labels, task_list.as_deref())
+                    .with_phase(phase)
+                    .with_mapping(mapping),
                 true,
                 false,
                 &mut run.out,

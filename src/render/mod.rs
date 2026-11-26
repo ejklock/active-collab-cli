@@ -423,6 +423,12 @@ pub struct MineTableRow {
     /// The task's labels in payload order.
     #[serde(default)]
     pub labels: Vec<crate::models::Label>,
+    /// The board column the task sits in.
+    #[serde(default)]
+    pub phase: crate::board::Phase,
+    /// A status label says the task is waiting or blocked.
+    #[serde(default)]
+    pub flagged: bool,
 }
 
 /// Parity: render.py render_mine_table.

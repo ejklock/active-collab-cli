@@ -2185,7 +2185,10 @@ async fn collect_mine_rows_aggregates_across_two_instances() {
     };
 
     let http = make_http();
-    let rows = mine_rows_of(&collect_mine_task_lists(&[inst_a, inst_b], &http).await);
+    let rows = mine_rows_of(
+        &collect_mine_task_lists(&[inst_a, inst_b], &http).await,
+        &crate::board::BoardMapping::default(),
+    );
 
     assert_eq!(rows.len(), 2, "should aggregate both instances");
     assert_eq!(rows[0].instance, "alpha");
@@ -2236,7 +2239,10 @@ async fn collect_mine_rows_concurrent_aggregates_all_instances() {
         user_id: Some(2),
     };
 
-    let rows = mine_rows_of(&collect_mine_task_lists(&[inst_a, inst_b], &make_http()).await);
+    let rows = mine_rows_of(
+        &collect_mine_task_lists(&[inst_a, inst_b], &make_http()).await,
+        &crate::board::BoardMapping::default(),
+    );
 
     assert_eq!(rows.len(), 2, "must aggregate from both instances");
     let names: Vec<&str> = rows.iter().map(|r| r.name.as_str()).collect();
@@ -2286,8 +2292,10 @@ async fn collect_mine_rows_preserves_instance_order() {
         user_id: Some(2),
     };
 
-    let rows =
-        mine_rows_of(&collect_mine_task_lists(&[inst_first, inst_second], &make_http()).await);
+    let rows = mine_rows_of(
+        &collect_mine_task_lists(&[inst_first, inst_second], &make_http()).await,
+        &crate::board::BoardMapping::default(),
+    );
 
     assert_eq!(rows.len(), 2);
     assert_eq!(
@@ -2324,7 +2332,10 @@ async fn collect_mine_task_lists_puts_the_first_instance_first() {
 
     let order: Vec<&str> = lists.iter().map(|(inst, _)| inst.name.as_str()).collect();
     assert_eq!(order, vec!["hours", "second"]);
-    assert_eq!(mine_rows_of(&lists)[0].name, "One");
+    assert_eq!(
+        mine_rows_of(&lists, &crate::board::BoardMapping::default())[0].name,
+        "One"
+    );
 }
 
 #[tokio::test]
@@ -2361,7 +2372,10 @@ async fn collect_mine_rows_failing_instance_yields_no_rows_for_it() {
         user_id: Some(2),
     };
 
-    let rows = mine_rows_of(&collect_mine_task_lists(&[inst_ok, inst_err], &make_http()).await);
+    let rows = mine_rows_of(
+        &collect_mine_task_lists(&[inst_ok, inst_err], &make_http()).await,
+        &crate::board::BoardMapping::default(),
+    );
 
     assert_eq!(rows.len(), 1, "failing instance must yield no rows");
     assert_eq!(rows[0].name, "Healthy Task");
@@ -2387,7 +2401,10 @@ async fn collect_mine_rows_falls_back_task_number_to_id_when_absent() {
         token: "tok".to_owned(),
         user_id: Some(42),
     };
-    let rows = mine_rows_of(&collect_mine_task_lists(&[inst], &make_http()).await);
+    let rows = mine_rows_of(
+        &collect_mine_task_lists(&[inst], &make_http()).await,
+        &crate::board::BoardMapping::default(),
+    );
     assert_eq!(rows.len(), 2);
     assert_eq!(
         rows[0].task_number, 55,
@@ -2695,6 +2712,8 @@ async fn mine_core_non_tty_writes_render_mine_table_exactly_and_returns_done() {
         task_list_id: None,
         task_list: None,
         labels: Vec::new(),
+        phase: crate::board::Phase::default(),
+        flagged: false,
         due_on: None,
         project_name: None,
         estimate: None,
@@ -3353,7 +3372,10 @@ async fn collect_mine_rows_401_returns_empty_via_unwrap_or_default_seam() {
         token: "bad-token".to_owned(),
         user_id: Some(42),
     };
-    let rows = mine_rows_of(&collect_mine_task_lists(&[inst], &make_http()).await);
+    let rows = mine_rows_of(
+        &collect_mine_task_lists(&[inst], &make_http()).await,
+        &crate::board::BoardMapping::default(),
+    );
 
     assert!(
         rows.is_empty(),
@@ -6832,11 +6854,13 @@ async fn mine_json_keeps_existing_keys_and_adds_the_four_hour_keys() {
             "due_bucket",
             "due_on",
             "estimate_hours",
+            "flagged",
             "instance",
             "labels",
             "logged_total_hours",
             "logged_week_hours",
             "name",
+            "phase",
             "project_id",
             "ref",
             "task_id",
@@ -6976,6 +7000,7 @@ async fn mine_week_hours_are_unknown_without_a_user_id_and_the_list_is_kept() {
         )
         .unwrap()],
         mine_date(2026, 11, 11),
+        &crate::board::BoardMapping::default(),
     )
     .await;
     assert_eq!(rows.len(), 1);
@@ -7001,6 +7026,7 @@ async fn mine_total_hours_is_unknown_when_the_server_is_unreachable() {
         )
         .unwrap()],
         mine_date(2026, 11, 11),
+        &crate::board::BoardMapping::default(),
     )
     .await;
     assert_eq!(rows.len(), 1);
@@ -8802,4 +8828,575 @@ async fn no_dependencies_flag_prints_null_and_makes_no_dependencies_request() {
         requests_to(&server, "/api/v1/projects/817/task-lists").await,
         0
     );
+}
+
+fn phase_case_tasks(cases: &[(&[&str], Option<&str>)]) -> serde_json::Value {
+    let mut tasks = Vec::new();
+    let mut lists = serde_json::Map::new();
+    for (idx, (labels, list)) in cases.iter().enumerate() {
+        let id = i64::try_from(idx).unwrap() + 1;
+        let labels: Vec<serde_json::Value> = labels
+            .iter()
+            .enumerate()
+            .map(|(n, name)| serde_json::json!({ "id": 100 + n, "name": name }))
+            .collect();
+        let mut task = serde_json::json!({
+            "id": id, "project_id": 3, "name": format!("T{id}"), "labels": labels
+        });
+        if let Some(list) = list {
+            let list_id = 7000 + id;
+            task["task_list_id"] = list_id.into();
+            lists.insert(
+                list_id.to_string(),
+                serde_json::json!({ "id": list_id, "name": list }),
+            );
+        }
+        tasks.push(task);
+    }
+    serde_json::json!({ "tasks": tasks, "related": { "TaskList": lists } })
+}
+
+#[tokio::test]
+async fn mine_phase_of_each_task_follows_its_status_labels_then_its_list() {
+    let cases: Vec<(&[&str], Option<&str>, &str, bool)> = vec![
+        (
+            &["STATUS:GO LIVE"],
+            Some("Doing"),
+            "ready_for_release",
+            false,
+        ),
+        (&["STATUS: GO LIVE"], None, "ready_for_release", false),
+        (&["STATUS:GOLI"], None, "ready_for_release", false),
+        (
+            &["STATUS:DESENVOLVIMENTO"],
+            Some("To Test"),
+            "in_progress",
+            false,
+        ),
+        (
+            &["STATUS:DESENVOLVIMENTO", "STATUS:GO LIVE"],
+            None,
+            "ready_for_release",
+            false,
+        ),
+        (
+            &["STATUS:AGUARDANDO CLIENTE"],
+            Some("🔍In review"),
+            "in_review",
+            true,
+        ),
+        (
+            &["STATUS:AGUARDANDO VALIDAÇÃO"],
+            Some("Doing"),
+            "in_review",
+            true,
+        ),
+        (
+            &["STATUS:AGUARDANDO DEPLOY PROD"],
+            None,
+            "ready_for_release",
+            true,
+        ),
+        (
+            &["STATUS: BLOQUEADO"],
+            Some("⚙️ Doing Geral"),
+            "in_progress",
+            true,
+        ),
+        (
+            &["ROTINA MENSAL"],
+            Some("✅ Ready to go"),
+            "ready_for_release",
+            false,
+        ),
+        (&[], Some("📝 To do"), "to_do", false),
+        (&[], Some("Acompanhamento de projeto"), "to_do", false),
+        (&[], None, "to_do", false),
+        (&[], Some("Done"), "ready_for_release", false),
+        (&["status:estimativa"], Some("Go live"), "to_do", false),
+    ];
+    let input: Vec<(&[&str], Option<&str>)> = cases.iter().map(|c| (c.0, c.1)).collect();
+    let run = run_filtered_mine(phase_case_tasks(&input), no_filter(), true, false).await;
+    let json = run.json();
+    let tasks = json["tasks"].as_array().unwrap();
+    assert_eq!(tasks.len(), cases.len());
+    for (idx, (labels, list, phase, flagged)) in cases.iter().enumerate() {
+        let task = tasks
+            .iter()
+            .find(|t| t["task_id"] == i64::try_from(idx).unwrap() + 1)
+            .unwrap();
+        assert_eq!(task["phase"], *phase, "labels {labels:?} list {list:?}");
+        assert_eq!(task["flagged"], *flagged, "labels {labels:?} list {list:?}");
+    }
+}
+
+fn phases_of(json: &serde_json::Value) -> Vec<(String, i64)> {
+    json["phases"]
+        .as_array()
+        .expect("phases must be an array")
+        .iter()
+        .map(|p| {
+            (
+                p["key"].as_str().unwrap().to_owned(),
+                p["count"].as_i64().unwrap(),
+            )
+        })
+        .collect()
+}
+
+fn phase_counts(counts: [i64; 4]) -> Vec<(String, i64)> {
+    ["to_do", "in_progress", "in_review", "ready_for_release"]
+        .iter()
+        .zip(counts)
+        .map(|(key, count)| ((*key).to_owned(), count))
+        .collect()
+}
+
+#[tokio::test]
+async fn mine_phases_summary_lists_all_four_keys_in_display_order() {
+    let body = phase_case_tasks(&[
+        (&[], Some("Backlog")),
+        (&[], Some("Backlog")),
+        (&["STATUS:DESENVOLVIMENTO"], None),
+        (&["STATUS:GO LIVE"], None),
+    ]);
+    let run = run_filtered_mine(body, no_filter(), true, false).await;
+    assert_eq!(phases_of(&run.json()), phase_counts([2, 1, 0, 1]));
+}
+
+#[tokio::test]
+async fn mine_phases_summary_is_all_zero_without_tasks() {
+    let run = run_filtered_mine(serde_json::json!({ "tasks": [] }), no_filter(), true, false).await;
+    assert_eq!(phases_of(&run.json()), phase_counts([0, 0, 0, 0]));
+}
+
+#[tokio::test]
+async fn mine_phases_summary_counts_only_the_tasks_a_label_filter_kept() {
+    let body = phase_case_tasks(&[
+        (&["ROTINA MENSAL"], Some("Backlog")),
+        (&[], Some("Backlog")),
+        (&["ROTINA MENSAL", "STATUS:GO LIVE"], None),
+    ]);
+    let run = run_filtered_mine(body, mine_filter_of(&["ROTINA MENSAL"], None), true, false).await;
+    assert_eq!(phases_of(&run.json()), phase_counts([1, 0, 0, 1]));
+}
+
+#[tokio::test]
+async fn mine_phases_summary_keeps_every_earlier_top_level_and_task_key() {
+    let run = run_filtered_mine(filter_fixture_tasks(), no_filter(), true, false).await;
+    let json = run.json();
+    for key in ["count", "tasks", "buckets"] {
+        assert!(json.get(key).is_some(), "missing top-level {key}");
+    }
+    let task = &json["tasks"][0];
+    for key in [
+        "due_bucket",
+        "ref",
+        "instance",
+        "project_id",
+        "task_number",
+        "task_id",
+        "name",
+        "due_on",
+        "estimate_hours",
+        "logged_week_hours",
+        "logged_total_hours",
+        "task_list_id",
+        "task_list",
+        "labels",
+    ] {
+        assert!(task.get(key).is_some(), "missing task key {key}");
+    }
+    assert_eq!(task["labels"][0]["name"], "STATUS:GO LIVE");
+    assert_eq!(task["task_list"], "Go live");
+}
+
+fn phase_filter_fixture() -> serde_json::Value {
+    serde_json::json!({
+        "tasks": [
+            { "id": 1, "project_id": 3, "name": "Alpha",
+              "labels": [{"id": 1, "name": "STATUS:VALIDAÇÃO"}] },
+            { "id": 2, "project_id": 4, "name": "Bravo",
+              "labels": [{"id": 2, "name": "ROTINA MENSAL"}, {"id": 3, "name": "STATUS:GO LIVE"}] },
+            { "id": 3, "project_id": 3, "name": "Charlie",
+              "labels": [{"id": 3, "name": "STATUS:GO LIVE"}] },
+            { "id": 4, "project_id": 5, "name": "Delta", "labels": [] }
+        ]
+    })
+}
+
+fn mine_phase_filter_of(labels: &[&str], phase: crate::board::Phase) -> MineFilter {
+    mine_filter_of(labels, None).with_phase(Some(phase))
+}
+
+#[tokio::test]
+async fn mine_phase_filter_keeps_only_tasks_of_that_phase() {
+    let run = run_filtered_mine(
+        phase_filter_fixture(),
+        mine_phase_filter_of(&[], crate::board::Phase::InReview),
+        true,
+        false,
+    )
+    .await;
+    assert_eq!(run.code, 0);
+    assert_eq!(run.task_ids(), [1]);
+    assert_eq!(run.json()["count"], 1);
+}
+
+#[tokio::test]
+async fn mine_phase_filter_combined_with_a_label_needs_both() {
+    let run = run_filtered_mine(
+        phase_filter_fixture(),
+        mine_phase_filter_of(&["ROTINA MENSAL"], crate::board::Phase::ReadyForRelease),
+        true,
+        false,
+    )
+    .await;
+    assert_eq!(run.task_ids(), [2]);
+}
+
+#[tokio::test]
+async fn mine_phase_filter_matching_nothing_prints_zero_and_succeeds() {
+    let run = run_filtered_mine(
+        phase_filter_fixture(),
+        mine_phase_filter_of(&[], crate::board::Phase::InProgress),
+        true,
+        false,
+    )
+    .await;
+    assert_eq!(run.code, 0);
+    assert_eq!(run.json()["count"], 0);
+    assert_eq!(run.json()["tasks"], serde_json::json!([]));
+}
+
+#[tokio::test]
+async fn mine_phase_filter_requests_hours_only_for_kept_tasks() {
+    let run = run_filtered_mine(
+        phase_filter_fixture(),
+        mine_phase_filter_of(&[], crate::board::Phase::InReview),
+        true,
+        false,
+    )
+    .await;
+    assert_eq!(run.hour_requests, ["/api/v1/projects/3/tasks/1"]);
+}
+
+#[tokio::test]
+async fn mine_phase_filter_a_tty_with_a_phase_prints_the_table() {
+    let run = run_filtered_mine(
+        phase_filter_fixture(),
+        mine_phase_filter_of(&[], crate::board::Phase::InReview),
+        false,
+        true,
+    )
+    .await;
+    assert_eq!(run.code, 0);
+    assert!(run.out.contains("Alpha"), "{}", run.out);
+    assert!(!run.out.contains("Bravo"), "{}", run.out);
+}
+
+fn run_board(settings: &SettingsRepository<'_>, action: BoardAction<'_>) -> Captured {
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let status = setup_board(settings, action, &mut out, &mut err);
+    captured(status, &out, &err)
+}
+
+fn board_set<'a>(
+    column: &'a str,
+    lists: Option<&'a str>,
+    labels: Option<&'a str>,
+) -> BoardAction<'a> {
+    BoardAction::Set {
+        column,
+        lists,
+        labels,
+    }
+}
+
+const BUILT_IN_BOARD: &str = "to_do  lists: backlog, to do  labels: estimativa, nova demanda, análise, analise\n\
+in_progress  lists: doing, desenvolvimento  labels: desenvolvimento\n\
+in_review  lists: to test, review, com o cliente, homolog  labels: validação, validacao\n\
+ready_for_release  lists: go live, ready to go, done  labels: go live, goli, deploy, publicação, publicacao, done\n\
+flag  labels: aguardando, aguarndo, bloqueado, stand-by\n";
+
+#[test]
+fn setup_board_fresh_store_shows_the_built_in_keywords_of_every_column() {
+    let (_dir, store) = make_store();
+    let settings = SettingsRepository::new(store.conn());
+    let (status, out, err) = run_board(&settings, BoardAction::Show);
+    assert_eq!((status, err.as_str()), (0, ""));
+    assert_eq!(out, BUILT_IN_BOARD);
+}
+
+#[test]
+fn setup_board_set_lists_replaces_only_that_list_and_trims_and_drops_empties() {
+    let (_dir, store) = make_store();
+    let settings = SettingsRepository::new(store.conn());
+    let (status, out, _) = run_board(
+        &settings,
+        board_set("in_review", Some("to test, homolog ,"), None),
+    );
+    assert_eq!(status, 0);
+    assert_eq!(
+        out,
+        "in_review  lists: to test, homolog  labels: validação, validacao\n"
+    );
+    let shown = run_board(&settings, BoardAction::Show).1;
+    assert_eq!(
+        shown,
+        BUILT_IN_BOARD.replace(
+            "to test, review, com o cliente, homolog",
+            "to test, homolog"
+        )
+    );
+}
+
+#[test]
+fn setup_board_set_empty_labels_clears_the_labels_and_keeps_the_lists() {
+    let (_dir, store) = make_store();
+    let settings = SettingsRepository::new(store.conn());
+    let (status, out, _) = run_board(&settings, board_set("in_review", None, Some("")));
+    assert_eq!(status, 0);
+    assert_eq!(
+        out,
+        "in_review  lists: to test, review, com o cliente, homolog  labels: \n"
+    );
+    let shown = run_board(&settings, BoardAction::Show).1;
+    assert!(shown.contains("in_review  lists: to test, review, com o cliente, homolog  labels: \n"));
+    assert!(shown.contains("in_progress  lists: doing, desenvolvimento  labels: desenvolvimento\n"));
+}
+
+#[test]
+fn setup_board_set_flag_labels_updates_the_flag_line() {
+    let (_dir, store) = make_store();
+    let settings = SettingsRepository::new(store.conn());
+    let (status, out, _) = run_board(&settings, board_set("flag", None, Some("aguardando")));
+    assert_eq!((status, out.as_str()), (0, "flag  labels: aguardando\n"));
+    assert!(run_board(&settings, BoardAction::Show)
+        .1
+        .ends_with("flag  labels: aguardando\n"));
+}
+
+#[test]
+fn setup_board_set_flag_with_lists_exits_2_and_stores_nothing() {
+    let (_dir, store) = make_store();
+    let settings = SettingsRepository::new(store.conn());
+    let (status, out, err) = run_board(&settings, board_set("flag", Some("x"), None));
+    assert_eq!(status, 2);
+    assert_eq!(out, "");
+    assert!(err.contains("flag"), "{err}");
+    assert_eq!(run_board(&settings, BoardAction::Show).1, BUILT_IN_BOARD);
+}
+
+#[test]
+fn setup_board_set_unknown_column_exits_2_naming_the_five_valid_ones() {
+    let (_dir, store) = make_store();
+    let settings = SettingsRepository::new(store.conn());
+    let (status, _, err) = run_board(&settings, board_set("done", Some("x"), None));
+    assert_eq!(status, 2);
+    assert_eq!(
+        err,
+        "Error: unknown board column 'done'. Valid: to_do, in_progress, in_review, ready_for_release, flag.\n"
+    );
+}
+
+#[test]
+fn setup_board_set_without_an_option_exits_2() {
+    let (_dir, store) = make_store();
+    let settings = SettingsRepository::new(store.conn());
+    let (status, out, err) = run_board(&settings, board_set("to_do", None, None));
+    assert_eq!(status, 2);
+    assert_eq!(out, "");
+    assert!(err.contains("--lists") && err.contains("--labels"), "{err}");
+}
+
+#[test]
+fn setup_board_reset_restores_the_built_in_keywords() {
+    let (_dir, store) = make_store();
+    let settings = SettingsRepository::new(store.conn());
+    run_board(&settings, board_set("to_do", Some("inbox"), Some("novo")));
+    assert_ne!(run_board(&settings, BoardAction::Show).1, BUILT_IN_BOARD);
+    let (status, out, _) = run_board(&settings, BoardAction::Reset);
+    assert_eq!(
+        (status, out.as_str()),
+        (0, "Board mapping reset to the defaults.\n")
+    );
+    assert_eq!(run_board(&settings, BoardAction::Show).1, BUILT_IN_BOARD);
+}
+
+#[test]
+fn setup_board_stored_value_that_is_not_json_shows_defaults_and_says_so() {
+    let (_dir, store) = make_store();
+    let settings = SettingsRepository::new(store.conn());
+    settings.set("board_mapping", "not json").unwrap();
+    let (status, out, err) = run_board(&settings, BoardAction::Show);
+    assert_eq!((status, err.as_str()), (0, ""));
+    assert_eq!(
+        out,
+        format!("Stored board mapping is invalid; using the defaults.\n{BUILT_IN_BOARD}")
+    );
+}
+
+#[test]
+fn setup_board_stored_value_missing_flag_labels_shows_that_field_default() {
+    let (_dir, store) = make_store();
+    let settings = SettingsRepository::new(store.conn());
+    settings
+        .set(
+            "board_mapping",
+            r#"{"to_do":{"lists":["inbox"],"labels":[]}}"#,
+        )
+        .unwrap();
+    let shown = run_board(&settings, BoardAction::Show).1;
+    assert!(
+        shown.starts_with("to_do  lists: inbox  labels: \n"),
+        "{shown}"
+    );
+    assert!(shown.ends_with("flag  labels: aguardando, aguarndo, bloqueado, stand-by\n"));
+    assert!(!shown.contains("invalid"), "{shown}");
+}
+
+#[test]
+fn setup_board_messages_are_translated_from_the_catalog() {
+    let _lang = PtBrLanguage::on();
+    let (_dir, store) = make_store();
+    let settings = SettingsRepository::new(store.conn());
+    let shown = run_board(&settings, BoardAction::Show).1;
+    assert!(
+        shown.starts_with("to_do  listas: backlog, to do  etiquetas: estimativa"),
+        "{shown}"
+    );
+    assert_eq!(
+        run_board(&settings, BoardAction::Reset).1,
+        "Mapeamento do quadro restaurado para o padrão.\n"
+    );
+    assert_eq!(
+        run_board(&settings, board_set("to_do", None, None)).2,
+        "Erro: informe --lists ou --labels.\n"
+    );
+    settings.set("board_mapping", "not json").unwrap();
+    assert_eq!(
+        run_board(&settings, BoardAction::Show).1.lines().next(),
+        Some("O mapeamento salvo do quadro é inválido; usando o padrão.")
+    );
+}
+
+fn triagem_list_fixture() -> serde_json::Value {
+    serde_json::json!({
+        "tasks": [
+            { "id": 1, "project_id": 3, "name": "Alpha", "task_list_id": 7, "labels": [] }
+        ],
+        "related": { "TaskList": { "7": { "id": 7, "name": "Triagem" } } }
+    })
+}
+
+fn stored_board_mapping(value: &str) -> crate::board::BoardMapping {
+    let (_dir, store) = make_store();
+    let settings = SettingsRepository::new(store.conn());
+    settings.set("board_mapping", value).unwrap();
+    crate::board::load(&settings)
+}
+
+const TRIAGEM_IN_REVIEW: &str = r#"{"in_review":{"lists":["triagem"],"labels":[]}}"#;
+
+async fn triagem_task_phase(filter: MineFilter) -> (i32, serde_json::Value) {
+    let run = run_filtered_mine(triagem_list_fixture(), filter, true, false).await;
+    (run.code, run.json())
+}
+
+#[tokio::test]
+async fn mine_board_mapping_defaults_place_an_unlisted_list_task_in_to_do() {
+    let (code, json) = triagem_task_phase(no_filter()).await;
+    assert_eq!(code, 0);
+    assert_eq!(json["tasks"][0]["phase"], "to_do");
+}
+
+#[tokio::test]
+async fn mine_board_mapping_stored_keywords_move_the_task_to_the_stored_column() {
+    let mapping = stored_board_mapping(TRIAGEM_IN_REVIEW);
+    let (_, json) = triagem_task_phase(no_filter().with_mapping(mapping)).await;
+    assert_eq!(json["tasks"][0]["phase"], "in_review");
+}
+
+#[tokio::test]
+async fn mine_board_mapping_phase_filter_uses_the_stored_mapping() {
+    let mapping = stored_board_mapping(TRIAGEM_IN_REVIEW);
+    let keeps = no_filter()
+        .with_mapping(mapping.clone())
+        .with_phase(Some(crate::board::Phase::InReview));
+    assert_eq!(triagem_task_phase(keeps).await.1["count"], 1);
+    let drops = no_filter()
+        .with_mapping(mapping)
+        .with_phase(Some(crate::board::Phase::ToDo));
+    assert_eq!(triagem_task_phase(drops).await.1["count"], 0);
+}
+
+#[tokio::test]
+async fn mine_board_mapping_stored_value_that_is_not_json_falls_back_to_the_defaults() {
+    let mapping = stored_board_mapping("not json");
+    let (code, json) = triagem_task_phase(no_filter().with_mapping(mapping)).await;
+    assert_eq!(code, 0);
+    assert_eq!(json["tasks"][0]["phase"], "to_do");
+}
+
+#[tokio::test]
+async fn mine_tui_board_mapping_rows_carry_the_phase_of_the_stored_mapping() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/users/42/tasks"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(triagem_list_fixture()))
+        .mount(&server)
+        .await;
+    let (_dir, store) = make_store();
+    let settings = SettingsRepository::new(store.conn());
+    settings
+        .set(
+            "board_mapping",
+            r#"{"ready_for_release":{"lists":["triagem"],"labels":[]}}"#,
+        )
+        .unwrap();
+    let mapping = crate::board::load(&settings);
+    let lists = collect_mine_task_lists(&[mine_hours_instance(&server)], &make_http()).await;
+    let rows = mine_rows_of(&lists, &mapping);
+    assert_eq!(rows[0].phase, crate::board::Phase::ReadyForRelease);
+    let defaults = mine_rows_of(&lists, &crate::board::BoardMapping::default());
+    assert_eq!(defaults[0].phase, crate::board::Phase::ToDo);
+}
+
+/// The raw value stored under the board settings key.
+fn stored_board_json(settings: &SettingsRepository<'_>) -> String {
+    settings.get("board_mapping", None).unwrap().unwrap()
+}
+
+#[test]
+fn setup_board_stores_overrides_only_and_reset_stores_none() {
+    let (_dir, store) = make_store();
+    let settings = SettingsRepository::new(store.conn());
+    run_board(&settings, board_set("in_review", Some("homolog"), None));
+    assert_eq!(
+        stored_board_json(&settings),
+        r#"{"in_review":{"lists":["homolog"]}}"#
+    );
+    run_board(&settings, board_set("flag", None, Some("aguardando")));
+    let both: serde_json::Value = serde_json::from_str(&stored_board_json(&settings)).unwrap();
+    assert_eq!(
+        both,
+        serde_json::json!({
+            "in_review": { "lists": ["homolog"] },
+            "flag_labels": ["aguardando"]
+        })
+    );
+    run_board(&settings, board_set("in_review", None, Some("")));
+    let kept: serde_json::Value = serde_json::from_str(&stored_board_json(&settings)).unwrap();
+    assert_eq!(
+        kept,
+        serde_json::json!({
+            "in_review": { "lists": ["homolog"], "labels": [] },
+            "flag_labels": ["aguardando"]
+        })
+    );
+    let (status, _, _) = run_board(&settings, BoardAction::Reset);
+    assert_eq!(status, 0);
+    assert_eq!(stored_board_json(&settings), "{}");
+    assert_eq!(run_board(&settings, BoardAction::Show).1, BUILT_IN_BOARD);
 }

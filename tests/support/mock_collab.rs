@@ -163,8 +163,22 @@ struct OpenTasks(Fixture);
 
 impl Respond for OpenTasks {
     fn respond(&self, _request: &Request) -> ResponseTemplate {
-        let tasks: Vec<Value> = self.0.tasks.iter().map(SeedTask::list_entry).collect();
-        ResponseTemplate::new(200).set_body_json(json!({ "tasks": tasks }))
+        let tasks: Vec<Value> = self
+            .0
+            .tasks
+            .iter()
+            .map(|task| {
+                let mut entry = task.list_entry();
+                entry["task_list_id"] = json!(FIRST_TASK_LIST);
+                entry
+            })
+            .collect();
+        let lists: serde_json::Map<String, Value> = TASK_LISTS
+            .iter()
+            .map(|(id, name)| (id.to_string(), json!({ "id": id, "name": name })))
+            .collect();
+        ResponseTemplate::new(200)
+            .set_body_json(json!({ "tasks": tasks, "related": { "TaskList": lists } }))
     }
 }
 

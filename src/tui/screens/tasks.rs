@@ -217,14 +217,6 @@ fn render_single_card(
     is_selected: bool,
     today: chrono::NaiveDate,
 ) {
-    let content = task_layout::card_content(task);
-    let wrapped = wrap_text(&content, card_inner_w.max(1));
-    let body_lines = if wrapped.is_empty() {
-        vec![String::new()]
-    } else {
-        wrapped
-    };
-
     let inner_w_cols = card_inner_w + 2 * PANEL_HPAD;
     let top_border = format!("{}{}{}", BOX_TL, BOX_H.repeat(inner_w_cols), BOX_TR);
     let bot_border = format!("{}{}{}", BOX_BL, BOX_H.repeat(inner_w_cols), BOX_BR);
@@ -238,36 +230,72 @@ fn render_single_card(
 
     let mut lines: Vec<Line<'static>> = Vec::new();
     lines.push(Line::styled(top_border, base_style));
-    for body in &body_lines {
-        let fitted = fit_to_card_width(body, card_inner_w);
-        let content_text = format!("{}{}{}{}{}", BOX_V, hpad, fitted, hpad, BOX_V);
-        lines.push(Line::styled(content_text, base_style));
+    for row in card_rows(task, card_inner_w, base_style, today, false) {
+        let mut spans = vec![Span::styled(format!("{BOX_V}{hpad}"), base_style)];
+        spans.extend(row);
+        spans.push(Span::styled(format!("{hpad}{BOX_V}"), base_style));
+        lines.push(Line::from(spans));
     }
-    let hours_text = fit_to_card_width(&task_layout::hours_line(task), card_inner_w);
-    lines.push(Line::styled(
-        format!("{}{}{}{}{}", BOX_V, hpad, hours_text, hpad, BOX_V),
-        base_style,
-    ));
-    lines.push(due_line(task, card_inner_w, &hpad, base_style, today));
     lines.push(Line::styled(bot_border, base_style));
 
     let text = Text::from(lines);
     frame.render_widget(Paragraph::new(text), card_rect);
 }
 
-/// Build the due-date content line (line 2) for a task card.
+/// The content rows of a task card without any border: the wrapped title rows,
+/// the hours row (prefixed with the flag mark when `flagged_mark` is set and
+/// the task is flagged) and the due-date row. Each row is a list of spans that
+/// together fill exactly `card_inner_w` columns. Shared by the due-date list and
+/// the vertical kanban so both format a card alike.
+pub(super) fn card_rows(
+    task: &TaskRow,
+    card_inner_w: usize,
+    base_style: Style,
+    today: chrono::NaiveDate,
+    flagged_mark: bool,
+) -> Vec<Vec<Span<'static>>> {
+    let wrapped = wrap_text(&task_layout::card_content(task), card_inner_w.max(1));
+    let body_lines = if wrapped.is_empty() {
+        vec![String::new()]
+    } else {
+        wrapped
+    };
+    let mut rows: Vec<Vec<Span<'static>>> = body_lines
+        .iter()
+        .map(|body| {
+            vec![Span::styled(
+                fit_to_card_width(body, card_inner_w),
+                base_style,
+            )]
+        })
+        .collect();
+    let hours = task_layout::hours_line(task);
+    let hours = if flagged_mark && task.flagged {
+        format!("{} {hours}", super::kanban::FLAG)
+    } else {
+        hours
+    };
+    rows.push(vec![Span::styled(
+        fit_to_card_width(&hours, card_inner_w),
+        base_style,
+    )]);
+    rows.push(due_spans(task, card_inner_w, base_style, today));
+    rows
+}
+
+/// Build the due-date content spans (line 3) for a task card, filling exactly
+/// `card_inner_w` columns.
 ///
 /// The due fg color (red/yellow/default) is applied over the base_style background
 /// so the urgency color survives even when the card is selected (amber bg).
 /// When project_name is Some(non-empty), appends ' · <project>' after the due text
 /// in the default style (no urgency color on the project portion).
-fn due_line(
+fn due_spans(
     task: &TaskRow,
     card_inner_w: usize,
-    hpad: &str,
     base_style: Style,
     today: chrono::NaiveDate,
-) -> Line<'static> {
+) -> Vec<Span<'static>> {
     let (due_text, due_kind) = relative_due(task.due_on.as_deref(), today);
     let due_fg = theme::due_style(due_kind);
     // Merge: keep the base bg (selection or default) but override fg with urgency color.
@@ -283,21 +311,16 @@ fn due_line(
                 split_due_project(&due_text, separator, proj, &composed, card_inner_w);
             let used = display_width(&due_part) + display_width(&proj_part);
             let padding = card_inner_w.saturating_sub(used);
-            Line::from(vec![
-                Span::styled(format!("{BOX_V}{hpad}"), base_style),
+            vec![
                 Span::styled(due_part, due_cell_style),
                 Span::styled(proj_part, base_style),
-                Span::styled(format!("{}{hpad}{BOX_V}", " ".repeat(padding)), base_style),
-            ])
+                Span::styled(" ".repeat(padding), base_style),
+            ]
         }
-        None => {
-            let fitted = fit_to_card_width(&due_text, card_inner_w);
-            Line::from(vec![
-                Span::styled(format!("{BOX_V}{hpad}"), base_style),
-                Span::styled(fitted, due_cell_style),
-                Span::styled(format!("{hpad}{BOX_V}"), base_style),
-            ])
-        }
+        None => vec![Span::styled(
+            fit_to_card_width(&due_text, card_inner_w),
+            due_cell_style,
+        )],
     }
 }
 
