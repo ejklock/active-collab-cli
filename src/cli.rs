@@ -1,3 +1,5 @@
+use crate::board::Phase;
+use clap::builder::TypedValueParser;
 use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
 
 pub const KNOWN_COMMANDS: [&str; 11] = [
@@ -80,6 +82,34 @@ pub enum SetupCmd {
     Language(LanguageArgs),
     /// Show or set the color theme (angie, slate, nord).
     Theme(ThemeArgs),
+    /// Show, set or reset the keywords that place tasks in board phases.
+    Board(BoardArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct BoardArgs {
+    #[command(subcommand)]
+    pub action: Option<BoardCmd>,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum BoardCmd {
+    /// Replace the list or label keywords of one column.
+    Set(BoardSetArgs),
+    /// Restore the built-in keywords.
+    Reset,
+}
+
+#[derive(Args, Debug)]
+pub struct BoardSetArgs {
+    /// Column: to_do, in_progress, in_review, ready_for_release or flag.
+    pub column: String,
+    /// Comma-separated task list name keywords; an empty value clears them.
+    #[arg(long)]
+    pub lists: Option<String>,
+    /// Comma-separated STATUS label keywords; an empty value clears them.
+    #[arg(long)]
+    pub labels: Option<String>,
 }
 
 #[derive(Args, Debug)]
@@ -171,6 +201,14 @@ pub struct MineArgs {
     /// Keep only tasks in this task list, by id (all digits) or name (case-insensitive).
     #[arg(long, value_name = "NAME|ID", value_parser = non_empty_filter)]
     pub task_list: Option<String>,
+    /// Keep only tasks in this board phase.
+    #[arg(long, value_name = "PHASE", value_parser = phase_parser())]
+    pub phase: Option<Phase>,
+}
+
+fn phase_parser() -> impl clap::builder::TypedValueParser<Value = Phase> {
+    clap::builder::PossibleValuesParser::new(Phase::ALL.map(Phase::key))
+        .try_map(|key| Phase::from_key(&key).ok_or_else(|| format!("unknown phase '{key}'")))
 }
 
 fn non_empty_filter(value: &str) -> Result<String, String> {

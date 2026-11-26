@@ -90,6 +90,13 @@
   "Current theme: {code}": "Tema atual: {code}",
   "Theme set to '{code}'.": "Tema definido para '{code}'.",
   "Error: unsupported theme '{code}'. Supported: {list}.": "Erro: tema '{code}' não suportado. Suportados: {list}.",
+  "lists:": "listas:",
+  "labels:": "etiquetas:",
+  "Stored board mapping is invalid; using the defaults.": "O mapeamento salvo do quadro é inválido; usando o padrão.",
+  "Board mapping reset to the defaults.": "Mapeamento do quadro restaurado para o padrão.",
+  "Error: unknown board column '{column}'. Valid: {valid}.": "Erro: coluna do quadro '{column}' desconhecida. Válidas: {valid}.",
+  "Error: give --lists or --labels.": "Erro: informe --lists ou --labels.",
+  "Error: the flag column takes only --labels.": "Erro: a coluna flag aceita apenas --labels.",
   "Settings": "Configurações",
   "Fetch ActiveCollab tasks from one or more configured instances.": "Busca tarefas do ActiveCollab em uma ou mais instâncias configuradas.",
   "Manage instance configuration.": "Gerenciar configuração de instâncias.",
@@ -122,6 +129,7 @@
   "↑/↓ scroll  r refresh  Esc/b back  q quit": "↑/↓ rolar  r atualizar  Esc/b voltar  q sair",
   "Ctrl/Cmd+click to open": "Ctrl/Cmd+clique abrir anexo",
   "↑/↓ navigate  Enter select  r refresh  H report  Esc/b back  q quit": "↑/↓ navegar  Enter selecionar  r atualizar  H relatório  Esc/b voltar  q sair",
+  "↑/↓ navigate  Enter select  v kanban  r refresh  H report  Esc/b back  q quit": "↑/↓ mover  Enter abrir  v kanban  r atualizar  H relatório  Esc voltar  q sair",
   "footer.hint.selection": "s seleção",
   "footer.selection_indicator": "SELEÇÃO",
   "footer.copied_indicator": "COPIADO",
@@ -221,5 +229,10 @@
   "No task lists": "Nenhuma lista de tarefas",
   "No matching task lists": "Nenhuma lista corresponde ao filtro",
   "current": "atual",
-  "Failed to load task lists": "Falha ao carregar as listas de tarefas"
+  "Failed to load task lists": "Falha ao carregar as listas de tarefas",
+  "TO DO": "A FAZER",
+  "IN PROGRESS": "EM ANDAMENTO",
+  "IN REVIEW": "EM REVISÃO",
+  "READY FOR RELEASE": "PRONTO PARA RELEASE",
+  "←/→ column  ↑/↓ card  Enter open  v list  r refresh  H report  Esc/b back  q quit": "←/→ coluna  ↑/↓ cartão  Enter abrir  v lista  r atualizar  H relatório  Esc/b voltar  q sair"
 }

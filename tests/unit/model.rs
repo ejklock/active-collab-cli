@@ -2068,6 +2068,8 @@ fn sample_mine_rows() -> Vec<MineTableRow> {
             task_list_id: None,
             task_list: None,
             labels: Vec::new(),
+            phase: crate::board::Phase::default(),
+            flagged: false,
             due_on: None,
             project_name: None,
             estimate: None,
@@ -2083,6 +2085,8 @@ fn sample_mine_rows() -> Vec<MineTableRow> {
             task_list_id: None,
             task_list: None,
             labels: Vec::new(),
+            phase: crate::board::Phase::default(),
+            flagged: false,
             due_on: None,
             project_name: None,
             estimate: None,
@@ -2188,6 +2192,8 @@ fn loaded_mine_tasks_replaces_rows_clears_revalidating_stamps_last_loaded() {
         task_list_id: None,
         task_list: None,
         labels: Vec::new(),
+        phase: crate::board::Phase::default(),
+        flagged: false,
         due_on: None,
         project_name: None,
         estimate: None,
@@ -2487,6 +2493,8 @@ fn mine_row_with_due(due_on: Option<&str>) -> MineTableRow {
         task_list_id: None,
         task_list: None,
         labels: Vec::new(),
+        phase: crate::board::Phase::default(),
+        flagged: false,
         project_name: None,
         estimate: None,
         logged_week: None,
@@ -2523,6 +2531,8 @@ fn mine_table_row_serde_round_trip_preserves_due_on() {
         task_list_id: None,
         task_list: None,
         labels: Vec::new(),
+        phase: crate::board::Phase::default(),
+        flagged: false,
         project_name: None,
         estimate: None,
         logged_week: None,
@@ -2559,6 +2569,8 @@ fn project_name_threads_mine_table_row_to_task_row_via_init_mine() {
             task_list_id: None,
             task_list: None,
             labels: Vec::new(),
+            phase: crate::board::Phase::default(),
+            flagged: false,
             estimate: None,
             logged_week: None,
             logged_total: None,
@@ -2572,6 +2584,8 @@ fn project_name_threads_mine_table_row_to_task_row_via_init_mine() {
             task_list_id: None,
             task_list: None,
             labels: Vec::new(),
+            phase: crate::board::Phase::default(),
+            flagged: false,
             due_on: None,
             project_name: None,
             estimate: None,
@@ -2610,6 +2624,8 @@ fn mine_table_row_serde_round_trip_preserves_project_name() {
         task_list_id: None,
         task_list: None,
         labels: Vec::new(),
+        phase: crate::board::Phase::default(),
+        flagged: false,
         estimate: None,
         logged_week: None,
         logged_total: None,
@@ -8104,6 +8120,9 @@ fn report_pointer_tasks_model() -> Model {
             task_number: 7,
             name: "T".into(),
             instance: "alpha".into(),
+            phase: Default::default(),
+            flagged: false,
+            task_list: None,
             project_id: 1,
             due_on: None,
             project_name: None,
@@ -8118,6 +8137,7 @@ fn report_pointer_tasks_model() -> Model {
         card_offsets: vec![],
         rendered_width: usize::MAX,
         due_today: None,
+        kanban: None,
     })
 }
 
@@ -8195,6 +8215,8 @@ fn mine_snapshot_row(
         task_list_id: None,
         task_list: None,
         labels: Vec::new(),
+        phase: crate::board::Phase::default(),
+        flagged: false,
         logged_week,
         logged_total,
     }
@@ -8270,6 +8292,8 @@ fn mine_row(instance: &str, task_id: i64, week: Option<f64>, total: Option<f64>)
         task_list_id: None,
         task_list: None,
         labels: Vec::new(),
+        phase: crate::board::Phase::default(),
+        flagged: false,
         task_id,
         name: format!("Task {task_id}"),
         due_on: None,
@@ -8716,6 +8740,9 @@ fn browse_rows_in_api_order() -> Vec<TaskRow> {
             task_number: id,
             name: format!("Task {id}"),
             instance: "a".into(),
+            phase: Default::default(),
+            flagged: false,
+            task_list: None,
             project_id: 1,
             due_on: due.map(str::to_owned),
             project_name: None,
@@ -9274,6 +9301,7 @@ fn detail_download_key_on_the_tasks_screen_changes_nothing() {
         card_offsets: vec![],
         rendered_width: usize::MAX,
         due_today: None,
+        kanban: None,
     }];
     let before = format!("{:?}", model.stack);
     let key =
@@ -9421,6 +9449,7 @@ fn task_list_picker_key_l_off_the_detail_changes_nothing() {
         card_offsets: vec![],
         rendered_width: usize::MAX,
         due_today: None,
+        kanban: None,
     }];
     let before = format!("{:?}", model.stack);
     let (model, cmds) = press(model, crossterm::event::KeyCode::Char('l'));
@@ -10165,4 +10194,321 @@ fn closing_the_image_viewer_overlay_shows_the_same_detail_body_on_the_next_frame
     assert_ne!(open, before, "the viewer must be visible while open");
     let mut m = update(m, Msg::Back).0;
     assert_eq!(frame_after_shell_reflow(&mut m), before);
+}
+
+mod kanban_model_tests {
+    use super::empty_header;
+    use crate::board::Phase;
+    use crate::render::MineTableRow;
+    use crate::tui::model::{
+        init_mine_in_view, init_mine_on, update, Cmd, KanbanFocus, MineView, Model, Msg, Screen,
+    };
+
+    fn today() -> chrono::NaiveDate {
+        chrono::NaiveDate::from_ymd_opt(2026, 11, 25).unwrap()
+    }
+
+    fn row(id: i64, phase: Phase) -> MineTableRow {
+        MineTableRow {
+            instance: "inst".into(),
+            project_id: 10 + id,
+            task_number: id,
+            task_id: id,
+            name: format!("Task {id}"),
+            due_on: None,
+            project_name: None,
+            estimate: None,
+            logged_week: None,
+            logged_total: None,
+            task_list_id: None,
+            task_list: None,
+            labels: vec![],
+            phase,
+            flagged: false,
+        }
+    }
+
+    fn list_model(rows: Vec<MineTableRow>) -> Model {
+        init_mine_on(empty_header(), Some(rows), today()).0
+    }
+
+    fn kanban_model(rows: Vec<MineTableRow>) -> Model {
+        update(list_model(rows), Msg::ToggleMineView).0
+    }
+
+    fn focus(model: &Model) -> KanbanFocus {
+        match model.stack.last() {
+            Some(Screen::Tasks {
+                kanban: Some(focus),
+                ..
+            }) => *focus,
+            other => panic!("expected the kanban, got {other:?}"),
+        }
+    }
+
+    fn press(model: Model, msgs: &[fn() -> Msg]) -> Model {
+        msgs.iter().fold(model, |m, msg| update(m, msg()).0)
+    }
+
+    fn right() -> Msg {
+        Msg::ColumnRight
+    }
+    fn left() -> Msg {
+        Msg::ColumnLeft
+    }
+    fn up() -> Msg {
+        Msg::Up
+    }
+    fn down() -> Msg {
+        Msg::Down
+    }
+
+    fn mixed_rows() -> Vec<MineTableRow> {
+        vec![
+            row(1, Phase::InProgress),
+            row(2, Phase::InProgress),
+            row(3, Phase::InProgress),
+            row(4, Phase::ReadyForRelease),
+        ]
+    }
+
+    #[test]
+    fn kanban_navigation_focus_starts_on_the_first_column_with_a_task() {
+        let model = kanban_model(mixed_rows());
+        assert_eq!(focus(&model).column, 1);
+    }
+
+    #[test]
+    fn kanban_navigation_columns_stop_at_both_ends() {
+        let model = kanban_model(mixed_rows());
+        let model = press(model, &[right, right, right, right]);
+        assert_eq!(focus(&model).column, 3);
+        let model = press(model, &[left, left, left, left, left, left]);
+        assert_eq!(focus(&model).column, 0);
+    }
+
+    #[test]
+    fn kanban_navigation_cards_stop_at_both_ends_of_the_column() {
+        let model = kanban_model(mixed_rows());
+        let model = press(model, &[down, down, down, down]);
+        assert_eq!(focus(&model).cards[1], 2);
+        let model = press(model, &[up, up, up, up]);
+        assert_eq!(focus(&model).cards[1], 0);
+    }
+
+    #[test]
+    fn kanban_navigation_empty_column_has_no_selected_card_and_enter_does_nothing() {
+        let model = kanban_model(mixed_rows());
+        let model = press(model, &[right]);
+        let Some(Screen::Tasks { tasks, .. }) = model.stack.last() else {
+            panic!("tasks screen expected");
+        };
+        assert_eq!(focus(&model).column, 2);
+        assert_eq!(focus(&model).selected_task(tasks), None);
+        let (after, cmds) = update(model, Msg::Select);
+        assert!(cmds.is_empty());
+        assert_eq!(after.stack.len(), 1);
+    }
+
+    #[test]
+    fn kanban_navigation_enter_opens_the_same_task_as_the_list_enter() {
+        let kanban = press(kanban_model(mixed_rows()), &[down]);
+        let (opened, kanban_cmds) = update(kanban, Msg::Select);
+        assert!(matches!(opened.stack.last(), Some(Screen::Detail { .. })));
+
+        let mut list = list_model(mixed_rows());
+        if let Some(Screen::Tasks { selected, .. }) = list.stack.last_mut() {
+            *selected = 1;
+        }
+        let (_, list_cmds) = update(list, Msg::Select);
+        assert_eq!(kanban_cmds, list_cmds);
+        assert!(matches!(
+            kanban_cmds.as_slice(),
+            [Cmd::LoadDetail { task_id: 2, .. }]
+        ));
+    }
+
+    #[test]
+    fn kanban_navigation_reload_keeps_the_column_and_clamps_the_card() {
+        let model = press(kanban_model(mixed_rows()), &[down, down]);
+        assert_eq!(focus(&model).cards[1], 2);
+        let shrunk = vec![row(1, Phase::InProgress), row(2, Phase::InProgress)];
+        let (model, _) = update(
+            model,
+            Msg::LoadedMineTasks {
+                rows: shrunk,
+                loaded_at: "2026-11-25T10:00:00".into(),
+            },
+        );
+        assert_eq!(focus(&model).column, 1);
+        assert_eq!(focus(&model).cards[1], 1);
+    }
+
+    #[test]
+    fn kanban_persistence_toggle_stores_the_chosen_view() {
+        let (model, cmds) = update(list_model(mixed_rows()), Msg::ToggleMineView);
+        assert_eq!(cmds, vec![Cmd::SaveMineView(MineView::Kanban)]);
+        let (_, cmds) = update(model, Msg::ToggleMineView);
+        assert_eq!(cmds, vec![Cmd::SaveMineView(MineView::List)]);
+    }
+
+    #[test]
+    fn kanban_persistence_toggle_on_the_browse_list_stores_nothing() {
+        let mut model = list_model(mixed_rows());
+        if let Some(Screen::Tasks { due_today, .. }) = model.stack.last_mut() {
+            *due_today = None;
+        }
+        let (model, cmds) = update(model, Msg::ToggleMineView);
+        assert!(cmds.is_empty());
+        assert!(matches!(
+            model.stack.last(),
+            Some(Screen::Tasks { kanban: None, .. })
+        ));
+    }
+
+    #[test]
+    fn kanban_persistence_launch_view_follows_the_stored_value() {
+        let open = |value: Option<&str>| {
+            let (model, _) = init_mine_in_view(
+                empty_header(),
+                Some(mixed_rows()),
+                today(),
+                MineView::from_setting(value),
+            );
+            matches!(
+                model.stack.last(),
+                Some(Screen::Tasks {
+                    kanban: Some(_),
+                    ..
+                })
+            )
+        };
+        assert!(open(Some("kanban")));
+        assert!(!open(Some("list")));
+        assert!(!open(Some("grid")));
+        assert!(!open(None));
+    }
+
+    #[test]
+    fn kanban_persistence_task_row_without_board_fields_loads_in_to_do() {
+        let old = r#"{"task_id":1,"task_number":2,"name":"A","instance":"i","project_id":3}"#;
+        let row: crate::tui::model::TaskRow = serde_json::from_str(old).unwrap();
+        assert_eq!(row.phase, Phase::ToDo);
+        assert!(!row.flagged);
+        assert_eq!(row.task_list, None);
+    }
+}
+
+mod kanban_reload_tests {
+    use super::empty_header;
+    use crate::board::Phase;
+    use crate::render::MineTableRow;
+    use crate::tui::model::{
+        init_mine_in_view, init_mine_on, update, MineView, Model, Msg, Screen,
+    };
+
+    fn today() -> chrono::NaiveDate {
+        chrono::NaiveDate::from_ymd_opt(2026, 11, 25).unwrap()
+    }
+
+    fn row(id: i64, phase: Phase) -> MineTableRow {
+        MineTableRow {
+            instance: "inst".into(),
+            project_id: 10 + id,
+            task_number: id,
+            task_id: id,
+            name: format!("Task {id}"),
+            due_on: None,
+            project_name: None,
+            estimate: None,
+            logged_week: None,
+            logged_total: None,
+            task_list_id: None,
+            task_list: None,
+            labels: vec![],
+            phase,
+            flagged: false,
+        }
+    }
+
+    fn to_do(ids: &[i64]) -> Vec<MineTableRow> {
+        ids.iter().map(|id| row(*id, Phase::ToDo)).collect()
+    }
+
+    fn kanban_with_card_selected(ids: &[i64], card_downs: usize) -> Model {
+        let list = init_mine_on(empty_header(), Some(to_do(ids)), today()).0;
+        let mut model = update(list, Msg::ToggleMineView).0;
+        for _ in 0..card_downs {
+            model = update(model, Msg::Down).0;
+        }
+        model
+    }
+
+    fn reload(model: Model, rows: Vec<MineTableRow>) -> Model {
+        update(
+            model,
+            Msg::LoadedMineTasks {
+                rows,
+                loaded_at: "2026-11-25T10:00:00".into(),
+            },
+        )
+        .0
+    }
+
+    fn selected_task_id(model: &Model) -> Option<i64> {
+        match model.stack.last() {
+            Some(Screen::Tasks {
+                tasks,
+                kanban: Some(focus),
+                ..
+            }) => focus.selected_task(tasks).map(|i| tasks[i].task_id),
+            other => panic!("expected the kanban, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn kanban_reload_keeps_the_task_when_an_earlier_card_disappears() {
+        let model = kanban_with_card_selected(&[101, 102, 107], 1);
+        assert_eq!(selected_task_id(&model), Some(102));
+        let model = reload(model, to_do(&[102, 107]));
+        assert_eq!(selected_task_id(&model), Some(102));
+    }
+
+    #[test]
+    fn kanban_reload_clamps_within_the_column_when_the_selected_task_is_gone() {
+        let model = kanban_with_card_selected(&[101, 102, 107], 2);
+        assert_eq!(selected_task_id(&model), Some(107));
+        let model = reload(model, to_do(&[101, 102]));
+        assert_eq!(selected_task_id(&model), Some(102));
+    }
+
+    #[test]
+    fn kanban_reload_cold_launch_focuses_the_first_column_with_rows() {
+        let (model, _) = init_mine_in_view(empty_header(), None, today(), MineView::Kanban);
+        let model = reload(model, vec![row(1, Phase::ReadyForRelease)]);
+        match model.stack.last() {
+            Some(Screen::Tasks {
+                kanban: Some(focus),
+                ..
+            }) => assert_eq!(focus.column, 3),
+            other => panic!("expected the kanban, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn kanban_reload_wheel_scroll_leaves_the_hidden_list_selection_alone() {
+        let list = init_mine_on(empty_header(), Some(to_do(&[101, 102, 107])), today()).0;
+        let list = update(list, Msg::Down).0;
+        let list = update(list, Msg::Down).0;
+        let model = update(list, Msg::ToggleMineView).0;
+        let selected = |m: &Model| match m.stack.last() {
+            Some(Screen::Tasks { selected, .. }) => *selected,
+            other => panic!("expected tasks, got {other:?}"),
+        };
+        assert_eq!(selected(&model), 2);
+        let up = update(model, Msg::ScrollUp).0;
+        assert_eq!(selected(&up), 2);
+        let down = update(up, Msg::ScrollDown).0;
+        assert_eq!(selected(&down), 2);
+    }
 }

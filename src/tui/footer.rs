@@ -37,6 +37,12 @@ pub(crate) fn hint_for_screen(screen: &Screen) -> String {
             current_user_id,
             ..
         } => detail_hint(*focused_comment, comments, *current_user_id),
+        Screen::Tasks {
+            kanban: Some(_), ..
+        } => t("←/→ column  ↑/↓ card  Enter open  v list  r refresh  H report  Esc/b back  q quit"),
+        Screen::Tasks {
+            due_today: Some(_), ..
+        } => t("↑/↓ navigate  Enter select  v kanban  r refresh  H report  Esc/b back  q quit"),
         _ => t("↑/↓ navigate  Enter select  r refresh  H report  Esc/b back  q quit"),
     }
 }

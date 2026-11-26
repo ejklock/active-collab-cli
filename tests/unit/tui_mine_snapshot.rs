@@ -25,6 +25,8 @@ fn row(
         task_list_id: None,
         task_list: None,
         labels: Vec::new(),
+        phase: crate::board::Phase::default(),
+        flagged: false,
         task_id,
         name: format!("Task {task_id}"),
         due_on: None,
@@ -364,4 +366,150 @@ fn mine_list_under_detail_is_written_to_the_snapshot_with_the_hours() {
     let read = read_mine_snapshot(&[target()], &db_path).expect("snapshot must load");
     assert_eq!(read[0].logged_week, Some(1.5));
     assert_eq!(read[0].logged_total, Some(7.0));
+}
+
+fn triagem_task_body() -> serde_json::Value {
+    serde_json::json!({
+        "tasks": [
+            { "id": 1, "task_number": 1, "name": "Alpha", "project_id": 3,
+              "task_list_id": 7, "labels": [] }
+        ],
+        "related": { "TaskList": { "7": { "id": 7, "name": "Triagem" } } }
+    })
+}
+
+/// The phase of the one row the loader sends, with `stored` written to the
+/// settings of the database the loader is given.
+async fn loaded_row_phase(stored: Option<&str>) -> crate::board::Phase {
+    let server = MockServer::start().await;
+    mount_open_tasks(
+        &server,
+        ResponseTemplate::new(200).set_body_json(triagem_task_body()),
+    )
+    .await;
+    let dir = TempDir::new().unwrap();
+    let db_path = dir.path().join("loader.db");
+    if let Some(stored) = stored {
+        let store = crate::store::Store::open(&crate::config::Config {
+            db_path: db_path.clone(),
+            task_cache_ttl_hours: 24,
+        })
+        .unwrap();
+        crate::store::settings::SettingsRepository::new(store.conn())
+            .set("board_mapping", stored)
+            .unwrap();
+    }
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    tokio::spawn(load_mine_tasks(
+        vec![named_instance(&server, "a")],
+        Http::new().unwrap(),
+        db_path,
+        tx,
+    ));
+    let Some(Msg::LoadedMineTasks { rows, .. }) = rx.recv().await else {
+        panic!("the rows message must come first");
+    };
+    assert_eq!(rows.len(), 1);
+    rows[0].phase
+}
+
+#[tokio::test]
+async fn mine_tui_loader_reads_the_stored_board_mapping() {
+    assert_eq!(
+        loaded_row_phase(Some(r#"{"in_review":{"lists":["triagem"]}}"#)).await,
+        crate::board::Phase::InReview
+    );
+    assert_eq!(loaded_row_phase(None).await, crate::board::Phase::ToDo);
+}
+
+#[test]
+fn kanban_persistence_snapshot_keeps_phase_flag_and_task_list() {
+    let read = round_trip(vec![
+        MineTableRow {
+            phase: crate::board::Phase::InReview,
+            flagged: true,
+            task_list: Some("Doing".to_owned()),
+            ..row(1, None, None, None)
+        },
+        row(2, None, None, None),
+    ]);
+    assert_eq!(read[0].phase, crate::board::Phase::InReview);
+    assert!(read[0].flagged);
+    assert_eq!(read[0].task_list.as_deref(), Some("Doing"));
+    assert_eq!(read[1].phase, crate::board::Phase::ToDo);
+    assert!(!read[1].flagged);
+    assert_eq!(read[1].task_list, None);
+}
+
+#[test]
+fn kanban_persistence_snapshot_written_before_the_board_fields_loads_in_to_do() {
+    let dir = TempDir::new().unwrap();
+    let db_path = dir.path().join("old.db");
+    let targets = [target()];
+    let old = r#"[{"instance":"inst","project_id":1,"task_number":3,"task_id":3,"name":"Old"}]"#;
+    let config = crate::config::Config {
+        db_path: db_path.clone(),
+        task_cache_ttl_hours: 24,
+    };
+    let store = crate::store::Store::open(&config).unwrap();
+    TaskListCache::new(store.conn())
+        .write("mine", &instances_key(&targets), old)
+        .unwrap();
+    let read = read_mine_snapshot(&targets, &db_path).expect("snapshot must load");
+    assert_eq!(read[0].phase, crate::board::Phase::ToDo);
+    assert!(!read[0].flagged);
+}
+
+#[test]
+fn kanban_persistence_save_command_writes_the_view_read_at_the_next_launch() {
+    let dir = TempDir::new().unwrap();
+    let db_path = dir.path().join("view.db");
+    assert_eq!(stored_mine_view(&db_path), MineView::List);
+    let (tx, _rx) = mpsc::unbounded_channel();
+    let mut model = snapshot_model(vec![row(1, None, None, None)]);
+    let http = Http::new().unwrap();
+    dispatch_cmds(
+        vec![Cmd::SaveMineView(MineView::Kanban)],
+        &mut model,
+        &[],
+        &http,
+        &db_path,
+        tx.clone(),
+    );
+    assert_eq!(stored_mine_view(&db_path), MineView::Kanban);
+    dispatch_cmds(
+        vec![Cmd::SaveMineView(MineView::List)],
+        &mut model,
+        &[],
+        &http,
+        &db_path,
+        tx,
+    );
+    assert_eq!(stored_mine_view(&db_path), MineView::List);
+}
+
+#[test]
+fn kanban_persistence_key_is_mine_view() {
+    let dir = TempDir::new().unwrap();
+    let db_path = dir.path().join("view.db");
+    let (tx, _rx) = mpsc::unbounded_channel();
+    let mut model = snapshot_model(vec![row(1, None, None, None)]);
+    dispatch_cmds(
+        vec![Cmd::SaveMineView(MineView::Kanban)],
+        &mut model,
+        &[],
+        &Http::new().unwrap(),
+        &db_path,
+        tx,
+    );
+    let config = crate::config::Config {
+        db_path,
+        task_cache_ttl_hours: 24,
+    };
+    let store = crate::store::Store::open(&config).unwrap();
+    let settings = crate::store::settings::SettingsRepository::new(store.conn());
+    assert_eq!(
+        settings.get("mine_view", None).unwrap().as_deref(),
+        Some("kanban")
+    );
 }

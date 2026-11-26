@@ -9,7 +9,7 @@ use crate::tui::model::{
     ModalButtonTarget, Model, ReportField, ReportForm, ReportPeriodChoice, ReportStatus, Screen,
     TaskListLoad, TaskListPicker,
 };
-use crate::tui::screens::{draw_detail, draw_projects, draw_tasks, DetailParams};
+use crate::tui::screens::{draw_detail, draw_kanban, draw_projects, draw_tasks, DetailParams};
 use crate::tui::theme;
 use crate::tui::widgets::modal::ModalContent;
 use ratatui::{
@@ -164,23 +164,29 @@ pub fn view(
             card_offsets,
             rendered_width,
             due_today,
+            kanban,
         } => {
             let today = chrono::Local::now().date_naive();
-            draw_tasks(
-                frame,
-                chunks[1],
-                project_name,
-                tasks,
-                *selected,
-                *loading,
-                *revalidating,
-                today,
-                targets,
-                card_heights,
-                card_offsets,
-                *rendered_width,
-                *due_today,
-            );
+            if let (Some(focus), false) = (kanban, *loading) {
+                targets.clear();
+                draw_kanban(frame, chunks[1], tasks, focus, *revalidating, today);
+            } else {
+                draw_tasks(
+                    frame,
+                    chunks[1],
+                    project_name,
+                    tasks,
+                    *selected,
+                    *loading,
+                    *revalidating,
+                    today,
+                    targets,
+                    card_heights,
+                    card_offsets,
+                    *rendered_width,
+                    *due_today,
+                );
+            }
         }
         Screen::Detail {
             task,

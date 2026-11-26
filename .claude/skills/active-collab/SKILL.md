@@ -41,7 +41,7 @@ When those tools are not available, run the `ac` commands documented below.
 |---|---|---|
 | `ac get <ref> --json` | one task object | n/a |
 | `ac current --json` | one task object (task on the current git branch) | n/a |
-| `ac mine --json` | `{count, tasks[]}` (tasks assigned to you) | never launches |
+| `ac mine --json` | `{count, tasks[], buckets[], phases[]}` (tasks assigned to you) | never launches |
 | `ac browse --json` | `{projects[]}` (open tasks grouped by project) | never launches |
 
 All output is a **single line** (`serde_json::to_string`, compact). Pipe to a
@@ -53,7 +53,7 @@ Every task in every schema carries `"ref": "PROJECT_ID/TASK_ID"`, the exact form
 `ac get` accepts. Discover with `mine`/`browse`, then fetch detail:
 
 ```bash
-ac mine --json                 # → {"count":1,"tasks":[{"ref":"665/75159",...}]}
+ac mine --json                 # → {"count":1,"tasks":[{"ref":"665/75159",...}],"buckets":[...],"phases":[...]}
 ac get 665/75159 --json        # → the full task object for that ref
 ```
 
@@ -102,13 +102,25 @@ ac get 665/75159 --json        # → the full task object for that ref
 {"count":2,"tasks":[
   {"ref":"665/75159","instance":"work","project_id":665,"task_number":75159,"task_id":75159,"name":"...",
    "due_on":"2026-11-13","due_bucket":"this_week","estimate_hours":"4","logged_week_hours":"3.5","logged_total_hours":"7.25",
-   "task_list_id":8852,"task_list":"Go live","labels":[{"id":707,"name":"STATUS:GO LIVE"}]}],
+   "task_list_id":8852,"task_list":"Go live","labels":[{"id":707,"name":"STATUS:GO LIVE"}],
+   "phase":"ready_for_release","flagged":false}],
+ "phases":[{"key":"ready_for_release","count":1}],
  "buckets":[{"key":"overdue","count":0,"estimate_hours":null,"logged_week_hours":"0","logged_total_hours":"0"}]}
 ```
 
 - `due_on` is `YYYY-MM-DD` or `null`.
 - `task_list_id`, `task_list` and `labels` mean the same as in `get`: the list id (or `null`),
   the list name (or `null`) and the `{id, name}` labels (`[]` when none).
+- `phase` is the board column of the task: `to_do`, `in_progress`, `in_review` or
+  `ready_for_release`. A `STATUS:` label decides it (the furthest wins when several match),
+  else the task list name, else `to_do`. `flagged` is `true` when a `STATUS:` label says the
+  task is waiting or blocked (such as `STATUS:AGUARDANDO CLIENTE`). The keywords that place
+  a task follow the local mapping (`ac setup board` shows it; `ac setup board set <column>
+  --lists "a, b" --labels "x, y"` changes one column, with `flag` as a column that takes only
+  `--labels`; `ac setup board reset` restores the built-ins), so two machines with different
+  mappings can report different phases for one task.
+- `phases` always has four entries `{key,count}` in the order `to_do`, `in_progress`,
+  `in_review`, `ready_for_release`, zero counts included, counting the printed tasks.
 - `due_bucket` is one of `overdue`, `today`, `this_week` (after today, up to Sunday of the
   current Monday–Sunday week), `later` or `none` (no due date); `tasks` keep their order.
 - `buckets` always has five entries in the order `overdue`, `today`, `this_week`, `later`,
@@ -139,6 +151,7 @@ ac get 665/75159 --json        # → the full task object for that ref
 | `--instance <name>` | limit to one configured instance | `mine`, `browse`, `get`, `current` |
 | `--label <name>` | keep tasks carrying the label (exact name, case-insensitive); repeat to require every one | `mine` |
 | `--task-list <name\|id>` | keep tasks in the list: all digits = list id, else the list name (case-insensitive, any project); an unmatched name yields `count` 0 | `mine` |
+| `--phase <key>` | keep tasks in one board phase: `to_do`, `in_progress`, `in_review` or `ready_for_release` (exact keys; combines with `--label` and `--task-list`) | `mine` |
 | `--download-attachments` | fetch every task attachment, comment attachment and inline image to a local directory | `get`, `current` |
 | `--attachments-dir <DIR>` | override the download destination (default: a per-task path under the OS temp dir) | `get`, `current` |
 
@@ -221,7 +234,7 @@ every other operation needs `instance` only when several instances are configure
 
 | Tool | Hint | Operations (parameters) |
 |---|---|---|
-| `ac_read` | read-only | `get` (`ref`, `no_comments`, `refresh`, `no_dependencies` to skip the parents/children lookup) · `current` (optional `branch`, else the git branch of the server's working directory) · `mine` (optional `labels`, an array of label names that must all match, and `task_list`, a list id or name; same rules as `--label` and `--task-list`) |
+| `ac_read` | read-only | `get` (`ref`, `no_comments`, `refresh`, `no_dependencies` to skip the parents/children lookup) · `current` (optional `branch`, else the git branch of the server's working directory) · `mine` (optional `labels`, an array of label names that must all match, and `task_list`, a list id or name, and `phase`, one of the four phase keys; same rules as `--label`, `--task-list` and `--phase`) |
 | `ac_write` | destructive | `comment` (`ref`, `body`, `html`) · `log_time` (`ref`, `hours`, `date`, `summary`, `job_type`) · `set_task` (`ref`, `status`, `assignee`, `estimate`, `list`) · `time_report` (`period` or `start` + `end`, `format`) |
 | `ac_download_attachments` | writes files, idempotent | `ref`, `attachments_dir` (default: the per-task temp path), `instance`; no `operation` field. Fetches the attachments of the task and of its comments, plus inline images. Returns what `ac get --download-attachments --json` prints. `ac_read` `get` does not download. |
 

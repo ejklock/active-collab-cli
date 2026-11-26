@@ -37,6 +37,9 @@ fn make_groups(names: &[&str]) -> Vec<ProjectGroup> {
                 name: format!("Task {i}"),
                 instance: "inst".into(),
                 project_id: i as i64,
+                phase: Default::default(),
+                flagged: false,
+                task_list: None,
                 due_on: None,
                 project_name: None,
                 estimate: None,
@@ -61,6 +64,9 @@ fn make_groups_with_instance(names_and_instances: &[(&str, &str)]) -> Vec<Projec
                 name: format!("Task {i}"),
                 instance: inst.to_string(),
                 project_id: i as i64,
+                phase: Default::default(),
+                flagged: false,
+                task_list: None,
                 due_on: None,
                 project_name: None,
                 estimate: None,
@@ -80,6 +86,9 @@ fn make_tasks(names: &[&str]) -> Vec<TaskRow> {
             task_number: (i + 1) as i64,
             name: name.to_string(),
             instance: format!("instance{i}"),
+            phase: Default::default(),
+            flagged: false,
+            task_list: None,
             project_id: 0,
             due_on: None,
             project_name: None,
@@ -1198,6 +1207,9 @@ fn draw_tasks_due_line_shows_relative_due_text() {
         task_id: 1,
         task_number: 1,
         name: "A Task".into(),
+        phase: Default::default(),
+        flagged: false,
+        task_list: None,
         instance: "inst".into(),
         project_id: 0,
         due_on: Some("2025-06-17".into()),
@@ -1226,6 +1238,9 @@ fn draw_tasks_overdue_task_due_cells_carry_red_fg() {
         task_id: 1,
         task_number: 1,
         name: "Overdue Task".into(),
+        phase: Default::default(),
+        flagged: false,
+        task_list: None,
         instance: "inst".into(),
         project_id: 0,
         due_on: Some("2025-06-10".into()), // 5 days before today_fixed()
@@ -1280,6 +1295,9 @@ fn draw_tasks_near_due_task_due_cells_carry_yellow_fg() {
         task_id: 1,
         task_number: 1,
         name: "Near Due Task".into(),
+        phase: Default::default(),
+        flagged: false,
+        task_list: None,
         instance: "inst".into(),
         project_id: 0,
         due_on: Some("2025-06-16".into()), // 1 day after today_fixed() => Near
@@ -1334,6 +1352,9 @@ fn draw_tasks_no_due_shows_sem_data_with_default_style() {
         task_id: 1,
         task_number: 1,
         name: "No Due Task".into(),
+        phase: Default::default(),
+        flagged: false,
+        task_list: None,
         instance: "inst".into(),
         project_id: 0,
         due_on: None,
@@ -1394,6 +1415,9 @@ fn draw_tasks_selected_card_due_line_keeps_color_on_selection_bg() {
         task_id: 1,
         task_number: 1,
         name: "Overdue Selected".into(),
+        phase: Default::default(),
+        flagged: false,
+        task_list: None,
         instance: "inst".into(),
         project_id: 0,
         due_on: Some("2025-06-10".into()), // overdue: 5 days before today_fixed()
@@ -1465,6 +1489,9 @@ fn draw_tasks_due_line_with_project_name_shows_due_separator_project() {
         task_id: 1,
         task_number: 1,
         name: "Task Alpha".into(),
+        phase: Default::default(),
+        flagged: false,
+        task_list: None,
         instance: "inst".into(),
         project_id: 0,
         due_on: Some("2025-06-10".into()), // 5 days before today_fixed() => overdue
@@ -1528,6 +1555,9 @@ fn draw_tasks_due_line_project_portion_has_default_style_not_due_color() {
         task_id: 1,
         task_number: 1,
         name: "Task Beta".into(),
+        phase: Default::default(),
+        flagged: false,
+        task_list: None,
         instance: "inst".into(),
         project_id: 0,
         due_on: Some("2025-06-10".into()), // overdue => red fg on due cells
@@ -1612,6 +1642,9 @@ fn draw_tasks_due_line_without_project_name_shows_no_separator() {
         task_id: 1,
         task_number: 1,
         name: "Task Gamma".into(),
+        phase: Default::default(),
+        flagged: false,
+        task_list: None,
         instance: "inst".into(),
         project_id: 0,
         due_on: Some("2025-06-10".into()), // overdue
@@ -2748,6 +2781,9 @@ mod v2b_click_targets {
             task_number: id,
             name: name.to_string(),
             instance: "inst".into(),
+            phase: Default::default(),
+            flagged: false,
+            task_list: None,
             project_id: 0,
             due_on: None,
             project_name: None,
@@ -2876,6 +2912,7 @@ mod v2b_click_targets {
                 card_offsets: vec![],
                 rendered_width: usize::MAX,
                 due_today: None,
+                kanban: None,
             }],
             should_quit: false,
             header: empty_header(),
@@ -3026,6 +3063,7 @@ mod v2b_click_targets {
                 card_offsets: vec![],
                 rendered_width: usize::MAX,
                 due_today: None,
+                kanban: None,
             }],
             should_quit: false,
             header: empty_header(),
@@ -3112,6 +3150,9 @@ mod footer_refresh_hint {
                         task_id: 0,
                         task_number: 1,
                         name: "Task 0".into(),
+                        phase: Default::default(),
+                        flagged: false,
+                        task_list: None,
                         instance: "inst".into(),
                         project_id: 0,
                         due_on: None,
@@ -10547,6 +10588,9 @@ fn mine_hours_task(
         task_id: 1,
         task_number: 1,
         name: "Hours Task".into(),
+        phase: Default::default(),
+        flagged: false,
+        task_list: None,
         instance: "inst".into(),
         project_id: 0,
         due_on: Some("2025-06-17".into()),
@@ -10662,6 +10706,8 @@ mod mine_bucket_drawing {
             task_list_id: None,
             task_list: None,
             labels: Vec::new(),
+            phase: crate::board::Phase::default(),
+            flagged: false,
             task_id,
             name: format!("Task {task_id}"),
             due_on: due_on.map(str::to_owned),
@@ -11342,5 +11388,374 @@ mod detail_overlay_render {
             row_text(&buf, 20).starts_with("│└"),
             "viewer bottom border sits one row inside the content frame"
         );
+    }
+}
+
+mod kanban_view_tests {
+    use super::{buf_to_string, LANG_MUTEX};
+    use crate::board::Phase;
+    use crate::i18n::set_language;
+    use crate::render::buckets::due_bucket;
+    use crate::render::MineTableRow;
+    use crate::tui::events::map_browse_key_event;
+    use crate::tui::model::{init_mine_on, update, Header, Model, Screen};
+    use crate::tui::view::view;
+    use crossterm::event::{KeyCode, KeyEvent};
+    use ratatui::{backend::TestBackend, Terminal};
+
+    fn today() -> chrono::NaiveDate {
+        chrono::NaiveDate::from_ymd_opt(2026, 11, 25).unwrap()
+    }
+
+    fn mine_row(id: i64, name: &str, phase: Phase, flagged: bool) -> MineTableRow {
+        MineTableRow {
+            instance: "inst".into(),
+            project_id: 1,
+            task_number: id,
+            task_id: id,
+            name: name.into(),
+            due_on: None,
+            project_name: Some("Proj".into()),
+            estimate: None,
+            logged_week: None,
+            logged_total: None,
+            task_list_id: None,
+            task_list: None,
+            labels: vec![],
+            phase,
+            flagged,
+        }
+    }
+
+    fn seeded_rows() -> Vec<MineTableRow> {
+        vec![
+            mine_row(1, "Alpha todo", Phase::ToDo, false),
+            mine_row(2, "Bravo todo", Phase::ToDo, true),
+            mine_row(3, "Charlie doing", Phase::InProgress, false),
+            mine_row(4, "Delta ready", Phase::ReadyForRelease, false),
+            mine_row(5, "Echo ready", Phase::ReadyForRelease, false),
+            mine_row(6, "Foxtrot ready", Phase::ReadyForRelease, false),
+        ]
+    }
+
+    fn mine_model() -> Model {
+        init_mine_on(
+            Header::from_instances(&[], None),
+            Some(seeded_rows()),
+            today(),
+        )
+        .0
+    }
+
+    fn press_v(model: Model) -> Model {
+        let mut model = model;
+        if let Some(msg) = map_browse_key_event(KeyEvent::from(KeyCode::Char('v'))) {
+            model = update(model, msg).0;
+        }
+        model
+    }
+
+    fn draw(model: &Model) -> String {
+        let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();
+        terminal
+            .draw(|frame| view(model, frame, &mut vec![], &mut vec![]))
+            .unwrap();
+        buf_to_string(terminal.backend().buffer())
+    }
+
+    fn column_of(screen: &str, needle: &str) -> Option<usize> {
+        screen
+            .lines()
+            .find_map(|line| line.find(needle).map(|byte| line[..byte].chars().count()))
+            .map(|x| x / 30)
+    }
+
+    #[test]
+    fn kanban_view_shows_four_phase_columns_with_counts_left_to_right() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let screen = draw(&press_v(mine_model()));
+        let titles = [
+            "TO DO 2",
+            "IN PROGRESS 1",
+            "IN REVIEW 0",
+            "READY FOR RELEASE 3",
+        ];
+        for (column, title) in titles.iter().enumerate() {
+            assert_eq!(column_of(&screen, title), Some(column), "{title}\n{screen}");
+        }
+        let names = [
+            ("Alpha todo", 0),
+            ("Bravo todo", 0),
+            ("Charlie doing", 1),
+            ("Delta ready", 3),
+            ("Echo ready", 3),
+            ("Foxtrot ready", 3),
+        ];
+        for (name, column) in names {
+            assert_eq!(column_of(&screen, name), Some(column), "{name}\n{screen}");
+        }
+    }
+
+    #[test]
+    fn kanban_view_second_toggle_restores_the_due_date_list() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let header = due_bucket(None, today()).label();
+        let kanban = draw(&press_v(mine_model()));
+        assert!(!kanban.contains(&header), "{kanban}");
+        let list = draw(&press_v(press_v(mine_model())));
+        assert!(list.contains(&header), "{list}");
+        assert!(!list.contains("TO DO 2"), "{list}");
+    }
+
+    #[test]
+    fn kanban_view_titles_follow_the_display_language() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("pt_BR");
+        let screen = draw(&press_v(mine_model()));
+        set_language("en");
+        for title in [
+            "A FAZER 2",
+            "EM ANDAMENTO 1",
+            "EM REVISÃO 0",
+            "PRONTO PARA RELEASE 3",
+        ] {
+            assert!(screen.contains(title), "{title}\n{screen}");
+        }
+    }
+
+    #[test]
+    fn kanban_view_marks_only_the_flagged_card() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let screen = draw(&press_v(mine_model()));
+        assert_eq!(screen.matches('⚑').count(), 1, "{screen}");
+    }
+
+    #[test]
+    fn kanban_view_key_does_nothing_on_the_browse_task_list() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let mut model = mine_model();
+        if let Some(Screen::Tasks { due_today, .. }) = model.stack.last_mut() {
+            *due_today = None;
+        }
+        let before = draw(&model);
+        let after = draw(&press_v(model));
+        assert_eq!(before, after);
+        assert!(!after.contains("TO DO 2"), "{after}");
+    }
+
+    fn mine_model_of(rows: Vec<MineTableRow>) -> Model {
+        init_mine_on(Header::from_instances(&[], None), Some(rows), today()).0
+    }
+
+    fn line_of(screen: &str, needle: &str) -> usize {
+        screen
+            .lines()
+            .position(|line| line.contains(needle))
+            .unwrap_or_else(|| panic!("{needle} missing\n{screen}"))
+    }
+
+    #[test]
+    fn kanban_cards_keep_the_due_date_order_within_a_column() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let rows = vec![
+            MineTableRow {
+                due_on: Some("2026-11-30".into()),
+                ..mine_row(1, "Later task", Phase::ToDo, false)
+            },
+            MineTableRow {
+                due_on: Some("2026-11-28".into()),
+                ..mine_row(2, "Sooner task", Phase::ToDo, false)
+            },
+        ];
+        let screen = draw(&press_v(mine_model_of(rows)));
+        assert!(line_of(&screen, "Sooner task") < line_of(&screen, "Later task"));
+    }
+
+    #[test]
+    fn kanban_cards_show_reference_due_date_and_estimate() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let rows = vec![MineTableRow {
+            due_on: Some("2026-11-28".into()),
+            estimate: Some(4.0),
+            ..mine_row(7, "Card facts", Phase::InProgress, false)
+        }];
+        let screen = draw(&press_v(mine_model_of(rows)));
+        assert!(screen.contains("Proj/7"), "{screen}");
+        assert!(screen.contains("2026-11-28"), "{screen}");
+        assert!(screen.contains("est 4"), "{screen}");
+    }
+
+    #[test]
+    fn kanban_cards_cut_a_long_name_to_one_line() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let long = "X".repeat(80);
+        let rows = vec![
+            mine_row(1, &long, Phase::ToDo, false),
+            mine_row(2, "Second card", Phase::ToDo, false),
+        ];
+        let screen = draw(&press_v(mine_model_of(rows)));
+        let name_rows = screen.lines().filter(|l| l.contains("XXXX")).count();
+        assert_eq!(name_rows, 1, "{screen}");
+        assert!(!screen.contains(&"X".repeat(30)), "{screen}");
+        assert!(
+            line_of(&screen, "Second card") > line_of(&screen, "XXXX") + 2,
+            "{screen}"
+        );
+    }
+
+    #[test]
+    fn kanban_cards_empty_column_shows_only_its_title_and_zero() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let screen = draw(&press_v(mine_model()));
+        assert!(screen.contains("IN REVIEW 0"), "{screen}");
+        let empty_column_has_cards = screen
+            .lines()
+            .any(|line| line.chars().skip(60).take(30).any(|c| c == '▌'));
+        assert!(!empty_column_has_cards, "{screen}");
+    }
+}
+
+mod kanban_chrome_tests {
+    use super::{buf_to_string, LANG_MUTEX};
+    use crate::board::Phase;
+    use crate::i18n::set_language;
+    use crate::render::MineTableRow;
+    use crate::tui::model::{init_mine_on, update, Header, Model, Msg, Screen};
+    use crate::tui::view::view;
+    use ratatui::{backend::TestBackend, Terminal};
+
+    fn today() -> chrono::NaiveDate {
+        chrono::NaiveDate::from_ymd_opt(2026, 11, 25).unwrap()
+    }
+
+    fn row(id: i64, flagged: bool) -> MineTableRow {
+        MineTableRow {
+            instance: "inst".into(),
+            project_id: 1,
+            task_number: id,
+            task_id: id,
+            name: format!("Task number {id} with a fairly long name"),
+            due_on: Some("2026-11-28".into()),
+            project_name: Some("A long project name".into()),
+            estimate: Some(2.0),
+            logged_week: None,
+            logged_total: None,
+            task_list_id: None,
+            task_list: None,
+            labels: vec![],
+            phase: Phase::ToDo,
+            flagged,
+        }
+    }
+
+    fn mine_model(flagged: bool) -> Model {
+        init_mine_on(
+            Header::from_instances(&[], None),
+            Some(vec![row(1, flagged)]),
+            today(),
+        )
+        .0
+    }
+
+    fn kanban(model: Model) -> Model {
+        update(model, Msg::ToggleMineView).0
+    }
+
+    fn draw(model: &Model, width: u16, height: u16) -> String {
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        terminal
+            .draw(|frame| view(model, frame, &mut vec![], &mut vec![]))
+            .unwrap();
+        buf_to_string(terminal.backend().buffer())
+    }
+
+    #[test]
+    fn kanban_hint_mine_list_footer_shows_the_way_into_the_kanban() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let screen = draw(&mine_model(false), 80, 24);
+        assert!(screen.contains("v kanban"), "{screen}");
+    }
+
+    #[test]
+    fn kanban_hint_mine_list_footer_is_translated() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("pt_BR");
+        let screen = draw(&mine_model(false), 80, 24);
+        set_language("en");
+        assert!(screen.contains("v kanban"), "{screen}");
+        assert!(screen.contains("mover"), "{screen}");
+    }
+
+    #[test]
+    fn kanban_hint_browse_task_list_footer_does_not_offer_the_kanban() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let mut model = mine_model(false);
+        if let Some(Screen::Tasks { due_today, .. }) = model.stack.last_mut() {
+            *due_today = None;
+        }
+        let screen = draw(&model, 80, 24);
+        assert!(!screen.contains("v kanban"), "{screen}");
+    }
+
+    #[test]
+    fn kanban_hint_kanban_footer_still_offers_the_list() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let screen = draw(&kanban(mine_model(false)), 80, 24);
+        assert!(screen.contains("v list"), "{screen}");
+    }
+
+    #[test]
+    fn kanban_marker_shows_while_the_rows_revalidate_and_clears_after_the_load() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let model = kanban(mine_model(false));
+        for (width, height) in [(80, 24), (120, 30)] {
+            let screen = draw(&model, width, height);
+            assert!(screen.contains('↻'), "{width}x{height}\n{screen}");
+        }
+        let (loaded, _) = update(
+            model,
+            Msg::LoadedMineTasks {
+                rows: vec![row(1, false)],
+                loaded_at: "2026-11-25T10:00:00".into(),
+            },
+        );
+        let screen = draw(&loaded, 120, 30);
+        assert!(!screen.contains('↻'), "{screen}");
+    }
+
+    #[test]
+    fn kanban_hint_fits_eighty_columns_with_every_hint() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        for (language, quit) in [("pt_BR", "q sair"), ("en", "q quit")] {
+            set_language(language);
+            let screen = draw(&mine_model(false), 80, 24);
+            let footer = screen.lines().nth(23).unwrap_or_default().to_string();
+            set_language("en");
+            assert!(footer.contains(quit), "{language}: {footer}");
+            assert!(footer.contains("v kanban"), "{language}: {footer}");
+        }
+    }
+
+    #[test]
+    fn kanban_marker_flag_survives_a_narrow_card() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let model = kanban(mine_model(true));
+        for (width, height) in [(80, 24), (104, 30)] {
+            let screen = draw(&model, width, height);
+            assert!(screen.contains('⚑'), "{width}x{height}\n{screen}");
+        }
     }
 }

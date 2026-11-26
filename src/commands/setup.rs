@@ -1,3 +1,4 @@
+use crate::board::{self, BoardMapping, Phase};
 use crate::client::ActiveCollabClient;
 use crate::http::Http;
 use crate::i18n::{t, SUPPORTED};
@@ -164,6 +165,165 @@ pub(crate) fn setup_theme(
             0
         }
     }
+}
+
+/// What `ac setup board` was asked to do.
+pub(crate) enum BoardAction<'a> {
+    Show,
+    Set {
+        column: &'a str,
+        lists: Option<&'a str>,
+        labels: Option<&'a str>,
+    },
+    Reset,
+}
+
+/// The flag line's column name, beside the four phase keys.
+const FLAG_COLUMN: &str = "flag";
+
+/// Shows, changes or resets the keywords that place tasks in board columns.
+pub(crate) fn setup_board(
+    settings: &SettingsRepository<'_>,
+    action: BoardAction<'_>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    match action {
+        BoardAction::Show => {
+            let stored = board::load_checked(settings);
+            if stored.invalid {
+                writeln!(
+                    out,
+                    "{}",
+                    t("Stored board mapping is invalid; using the defaults.")
+                )
+                .ok();
+            }
+            for phase in Phase::ALL {
+                write_board_column(out, phase.key(), &stored.mapping, Some(phase));
+            }
+            write_board_column(out, FLAG_COLUMN, &stored.mapping, None);
+            0
+        }
+        BoardAction::Set {
+            column,
+            lists,
+            labels,
+        } => set_board_column(settings, column, lists, labels, out, err),
+        BoardAction::Reset => match board::reset(settings) {
+            Ok(()) => {
+                writeln!(out, "{}", t("Board mapping reset to the defaults.")).ok();
+                0
+            }
+            Err(e) => {
+                writeln!(err, "Error saving board mapping: {e}").ok();
+                1
+            }
+        },
+    }
+}
+
+fn write_board_column(
+    out: &mut dyn Write,
+    name: &str,
+    mapping: &BoardMapping,
+    phase: Option<Phase>,
+) {
+    let labels_word = t("labels:");
+    match phase {
+        Some(phase) => {
+            let keywords = mapping.column(phase);
+            writeln!(
+                out,
+                "{name}  {} {}  {labels_word} {}",
+                t("lists:"),
+                keywords.lists.join(", "),
+                keywords.labels.join(", ")
+            )
+        }
+        None => writeln!(
+            out,
+            "{name}  {labels_word} {}",
+            mapping.flag_labels.join(", ")
+        ),
+    }
+    .ok();
+}
+
+/// The phase a `set` targets (`None` for the flag line), or the message of why
+/// the request is invalid.
+fn check_board_set(
+    column: &str,
+    lists: Option<&str>,
+    labels: Option<&str>,
+) -> Result<Option<Phase>, String> {
+    let phase = Phase::from_key(column);
+    if phase.is_none() && column != FLAG_COLUMN {
+        let valid = Phase::ALL
+            .iter()
+            .map(|p| p.key())
+            .chain([FLAG_COLUMN])
+            .collect::<Vec<_>>()
+            .join(", ");
+        return Err(t("Error: unknown board column '{column}'. Valid: {valid}.")
+            .replace("{valid}", &valid)
+            .replace("{column}", column));
+    }
+    if lists.is_none() && labels.is_none() {
+        return Err(t("Error: give --lists or --labels."));
+    }
+    if phase.is_none() && lists.is_some() {
+        return Err(t("Error: the flag column takes only --labels."));
+    }
+    Ok(phase)
+}
+
+/// Stores the given keyword lists as overrides, leaving every other stored
+/// override as it was.
+fn store_board_set(
+    settings: &SettingsRepository<'_>,
+    phase: Option<Phase>,
+    lists: Option<&str>,
+    labels: Option<&str>,
+) -> anyhow::Result<()> {
+    let Some(phase) = phase else {
+        if let Some(text) = labels {
+            board::save_flag_override(settings, board::parse_keywords(text))?;
+        }
+        return Ok(());
+    };
+    if let Some(text) = lists {
+        let words = board::parse_keywords(text);
+        board::save_column_override(settings, phase, board::ColumnField::Lists, words)?;
+    }
+    if let Some(text) = labels {
+        let words = board::parse_keywords(text);
+        board::save_column_override(settings, phase, board::ColumnField::Labels, words)?;
+    }
+    Ok(())
+}
+
+fn set_board_column(
+    settings: &SettingsRepository<'_>,
+    column: &str,
+    lists: Option<&str>,
+    labels: Option<&str>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    let phase = match check_board_set(column, lists, labels) {
+        Ok(phase) => phase,
+        Err(message) => {
+            writeln!(err, "{message}").ok();
+            return 2;
+        }
+    };
+    if let Err(e) = store_board_set(settings, phase, lists, labels) {
+        writeln!(err, "Error saving board mapping: {e}").ok();
+        return 1;
+    }
+    write_board_column(out, column, &board::load(settings), phase);
+    0
 }
 
 /// Inner core for connectivity test — takes pre-resolved rows.

@@ -195,6 +195,9 @@ fn build_groups(
             estimate: None,
             logged_week: None,
             logged_total: None,
+            phase: crate::board::Phase::default(),
+            flagged: false,
+            task_list: None,
         });
     }
 

@@ -180,6 +180,16 @@ ac setup language
 # Set the display language (persists to SQLite; survives across invocations)
 ac setup language en
 ac setup language pt_BR
+
+# Show the keywords that place tasks in the board phases (`ac mine --phase`, `phase` in --json)
+ac setup board
+
+# Replace the list and/or label keywords of one column (to_do, in_progress, in_review,
+# ready_for_release; `flag` takes only --labels). Values are comma-separated; "" clears.
+ac setup board set in_review --lists "to test, homolog" --labels "validação"
+
+# Restore the built-in keywords
+ac setup board reset
 ```
 
 ### get — fetch a task by URL or short form
@@ -208,8 +218,9 @@ When run in a terminal (TTY), `mine` opens an interactive arrow-key list of your
 open tasks aggregated across all configured instances. Select a task to view its
 detail or open/download its assets. When output is piped or redirected (non-TTY),
 `mine` falls back to a plain table suitable for scripts.
-`--label NAME` (repeatable; a task must carry every one) and `--task-list NAME|ID`
-filter the table and the `--json` output, and skip the interactive list.
+`--label NAME` (repeatable; a task must carry every one), `--task-list NAME|ID` and
+`--phase PHASE` filter the table and the `--json` output, and skip the interactive list.
+`--json` gives each task its board `phase` and `flagged` and the top level a `phases` count.
 
 Each task shows its estimate, the hours you logged on it this week (Monday to
 Sunday) and its total logged hours. An hour value the server does not return
@@ -284,6 +295,7 @@ the detail view to bypass the cache and re-fetch from the API.
 | Screen | Keys |
 |---|---|
 | Projects / Tasks lists (including `mine`) | `↑`/`↓` move · `Enter` select · `r` refresh · `H` hours report · `q` quit · `Esc`/`b` back (quits from the first screen) · `Ctrl+C` quit |
+| `ac mine` kanban (`v` switches from the due-date list and back; the last view is kept for the next launch) | `←`/`→` move between the TO DO, IN PROGRESS, IN REVIEW and READY FOR RELEASE columns · `↑`/`↓` move between cards · `Enter` open the task · `r` refresh · `v` due-date list |
 | Task detail | `↑`/`↓` or `k`/`j` move between comments · `PgUp`/`PgDn` page · `r` refresh · `c` new comment · `t` log time · `e` edit estimate · `s` toggle status · `a` assignee picker · `l` task list picker · `H` hours report · `D` download attachments · `Esc`/`b` back · `q` quit · `Ctrl+C` quit |
 
 ### Bare-invocation shortcuts
@@ -299,6 +311,7 @@ ac               # same as: ac current (when branch matches)
 |---|---|---|
 | `--instance NAME` | `get`, `current`, `mine`, `browse` | Force a specific configured instance (required when >1 configured) |
 | `--label NAME`, `--task-list NAME\|ID` | `mine` | Keep only tasks with every given label (case-insensitive) and in that task list (id or name) |
+| `--phase PHASE` | `mine` | Keep only tasks in one board phase: `to_do`, `in_progress`, `in_review` or `ready_for_release` |
 | `--short` | `get`, `current` | Print `PROJECT/TASK<TAB>name` only |
 | `--no-comments` | `get`, `current` | Omit the comments section |
 | `--json` | `get`, `current` | Print raw task JSON (always hits the API, bypasses cache) |

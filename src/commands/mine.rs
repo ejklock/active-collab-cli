@@ -2,6 +2,7 @@ use super::hours_report::{resolve_period, PeriodPreset};
 use super::presenter;
 use super::resolve::load_targets;
 use crate::agent_json;
+use crate::board::{place, BoardMapping, Phase, Placement};
 use crate::client::{ActiveCollabClient, TimeRecordsOutcome, Unauthorized};
 use crate::http::Http;
 use crate::i18n::t;
@@ -25,6 +26,10 @@ pub(crate) struct MineFilter {
     /// Lowercased label names a task must all carry.
     labels: Vec<String>,
     task_list: Option<TaskListMatch>,
+    /// The one board phase a task must sit in.
+    phase: Option<Phase>,
+    /// Places each task in a phase, for the phase requirement and the rows.
+    mapping: BoardMapping,
 }
 
 /// A task list named by id (all ASCII digits) or by name, lowercased.
@@ -49,14 +54,29 @@ impl MineFilter {
                     TaskListMatch::Name(value.to_lowercase())
                 }
             }),
+            phase: None,
+            mapping: Default::default(),
         }
     }
 
+    /// Also requires the task to sit in `phase`.
+    pub(crate) fn with_phase(self, phase: Option<Phase>) -> Self {
+        Self { phase, ..self }
+    }
+
+    /// Places tasks with `mapping` instead of the built-in keywords.
+    pub(crate) fn with_mapping(self, mapping: BoardMapping) -> Self {
+        Self { mapping, ..self }
+    }
+
     pub(crate) fn is_active(&self) -> bool {
-        !self.labels.is_empty() || self.task_list.is_some()
+        !self.labels.is_empty() || self.task_list.is_some() || self.phase.is_some()
     }
 
     fn keeps(&self, task: &crate::models::MineTask) -> bool {
+        let phase_ok = self
+            .phase
+            .is_none_or(|wanted| placement_of(task, &self.mapping).phase == wanted);
         let list_ok = match &self.task_list {
             None => true,
             Some(TaskListMatch::Id(id)) => task.task_list_id == Some(*id),
@@ -66,7 +86,8 @@ impl MineFilter {
                 .is_some_and(|list| list.to_lowercase() == *name),
             Some(TaskListMatch::NoSuchId) => false,
         };
-        list_ok
+        phase_ok
+            && list_ok
             && self.labels.iter().all(|wanted| {
                 task.labels
                     .iter()
@@ -95,7 +116,7 @@ async fn fan_out_instance_rows(
             let rows = match client.fetch_open_tasks().await {
                 Ok(mut tasks) => {
                     tasks.retain(|task| filter.keeps(task));
-                    Ok(fill_task_hours(&inst, &http, tasks, today).await)
+                    Ok(fill_task_hours(&inst, &http, tasks, today, &filter.mapping).await)
                 }
                 Err(e) => Err(e),
             };
@@ -120,6 +141,7 @@ pub(super) async fn fill_task_hours(
     http: &Http,
     tasks: Vec<crate::models::MineTask>,
     today: chrono::NaiveDate,
+    mapping: &BoardMapping,
 ) -> Vec<MineTableRow> {
     let hours = fetch_task_hours(inst, http, &tasks, today).await;
     tasks
@@ -128,7 +150,7 @@ pub(super) async fn fill_task_hours(
         .map(|(task, hours)| MineTableRow {
             logged_week: hours.logged_week,
             logged_total: hours.logged_total,
-            ..mine_task_to_row(task)
+            ..mine_task_to_row(task, mapping)
         })
         .collect()
 }
@@ -162,11 +184,12 @@ pub(crate) async fn collect_mine_task_lists(
     per_index.into_iter().flatten().collect()
 }
 
-/// The rows of the listed tasks, without hours.
-pub(crate) fn mine_rows_of(lists: &[InstanceTasks]) -> Vec<MineTableRow> {
+/// The rows of the listed tasks placed with `mapping`, without hours.
+pub(crate) fn mine_rows_of(lists: &[InstanceTasks], mapping: &BoardMapping) -> Vec<MineTableRow> {
     lists
         .iter()
-        .flat_map(|(_, tasks)| tasks.iter().cloned().map(mine_task_to_row))
+        .flat_map(|(_, tasks)| tasks.iter().cloned())
+        .map(|task| mine_task_to_row(task, mapping))
         .collect()
 }
 
@@ -285,7 +308,12 @@ async fn fetch_total_hours(
     totals
 }
 
-fn mine_task_to_row(task: crate::models::MineTask) -> MineTableRow {
+fn placement_of(task: &crate::models::MineTask, mapping: &BoardMapping) -> Placement {
+    place(&task.labels, task.task_list.as_deref(), mapping)
+}
+
+fn mine_task_to_row(task: crate::models::MineTask, mapping: &BoardMapping) -> MineTableRow {
+    let placement = placement_of(&task, mapping);
     let task_number = match task.task_number {
         Some(n) if n != 0 => n,
         _ => task.id,
@@ -304,6 +332,8 @@ fn mine_task_to_row(task: crate::models::MineTask) -> MineTableRow {
         task_list_id: task.task_list_id,
         task_list: task.task_list,
         labels: task.labels,
+        phase: placement.phase,
+        flagged: placement.flagged,
     }
 }
 

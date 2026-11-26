@@ -1,4 +1,5 @@
 mod agent_json;
+mod board;
 mod cli;
 mod client;
 mod commands;
@@ -61,6 +62,7 @@ async fn run(program: &str, raw_argv: Vec<String>) -> i32 {
                     json: false,
                     label: Vec::new(),
                     task_list: None,
+                    phase: None,
                 }))
                 .await
             }
@@ -157,6 +159,7 @@ async fn dispatch_setup(cmd: cli::SetupCmd) -> i32 {
         cli::SetupCmd::Test(args) => dispatch_setup_test(args).await,
         cli::SetupCmd::Language(args) => dispatch_setup_language(args),
         cli::SetupCmd::Theme(args) => dispatch_setup_theme(args),
+        cli::SetupCmd::Board(args) => dispatch_setup_board(args),
     }
 }
 
@@ -228,6 +231,28 @@ fn dispatch_setup_theme(args: cli::ThemeArgs) -> i32 {
     setup_theme(
         &settings,
         args.code.as_deref(),
+        &mut std::io::stdout(),
+        &mut std::io::stderr(),
+    )
+}
+
+fn dispatch_setup_board(args: cli::BoardArgs) -> i32 {
+    let Some(store) = open_store() else {
+        return 1;
+    };
+    let settings = store::settings::SettingsRepository::new(store.conn());
+    let action = match &args.action {
+        None => commands::BoardAction::Show,
+        Some(cli::BoardCmd::Reset) => commands::BoardAction::Reset,
+        Some(cli::BoardCmd::Set(set)) => commands::BoardAction::Set {
+            column: &set.column,
+            lists: set.lists.as_deref(),
+            labels: set.labels.as_deref(),
+        },
+    };
+    commands::setup_board(
+        &settings,
+        action,
         &mut std::io::stdout(),
         &mut std::io::stderr(),
     )
@@ -401,7 +426,10 @@ async fn dispatch_mine(args: cli::MineArgs) -> i32 {
     let repo = store::instances::InstanceRepository::new(store.conn());
     let is_tty = std::io::stdout().is_terminal() && std::io::stdin().is_terminal();
 
-    let filter = commands::MineFilter::new(&args.label, args.task_list.as_deref());
+    let mapping = board::load(&store::settings::SettingsRepository::new(store.conn()));
+    let filter = commands::MineFilter::new(&args.label, args.task_list.as_deref())
+        .with_phase(args.phase)
+        .with_mapping(mapping);
     let outcome = mine_core(
         &repo,
         &http.clone(),

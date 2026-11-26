@@ -1972,6 +1972,8 @@ fn make_mine_row(instance: &str, project_id: i64, task_id: i64) -> crate::render
         task_list_id: None,
         task_list: None,
         labels: Vec::new(),
+        phase: crate::board::Phase::default(),
+        flagged: false,
     }
 }
 

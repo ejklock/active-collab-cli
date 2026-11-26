@@ -135,6 +135,7 @@ fn expected_flat_schema(tool: &str) -> (BTreeSet<String>, BTreeSet<String>) {
                 "branch",
                 "labels",
                 "task_list",
+                "phase",
                 "instance",
             ]),
         ),
@@ -1203,10 +1204,10 @@ async fn a_long_task_call_with_a_progress_token_reports_progress_below_its_total
 /// Upper bound on the compact JSON size of the `tools/list` result, which a
 /// client pays in context on every session. Set from the measured size of the
 /// trimmed list, rounded up by under 1%; it includes the one sentence on each
-/// long-call tool that says what cancelling a task does, the two `mine`
+/// long-call tool that says what cancelling a task does, the three `mine`
 /// filter arguments and the `get` argument that skips the dependencies lookup
-/// (3925 bytes measured).
-const MAX_TOOLS_LIST_BYTES: usize = 3950;
+/// (4098 bytes measured).
+const MAX_TOOLS_LIST_BYTES: usize = 4130;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn tools_list_stays_within_its_size_bound() {
@@ -1349,7 +1350,8 @@ async fn mine_filter_reaches_the_cli_and_the_mcp_read() {
         json!({ "operation": "mine", "labels": ["nope"] }),
     )
     .await;
-    assert!(by_label.contains(r#""count":0,"tasks":[]"#), "{by_label}");
+    assert!(by_label.contains(r#""count":0,"phases":"#), "{by_label}");
+    assert!(by_label.contains(r#""tasks":[]}"#), "{by_label}");
     assert_eq!(by_label, env.cli(&["mine", "--label", "nope", "--json"]));
 
     let by_list = ok_text(
@@ -1358,7 +1360,8 @@ async fn mine_filter_reaches_the_cli_and_the_mcp_read() {
         json!({ "operation": "mine", "task_list": "99999" }),
     )
     .await;
-    assert!(by_list.contains(r#""count":0,"tasks":[]"#), "{by_list}");
+    assert!(by_list.contains(r#""count":0,"phases":"#), "{by_list}");
+    assert!(by_list.contains(r#""tasks":[]}"#), "{by_list}");
     assert_eq!(
         by_list,
         env.cli(&["mine", "--task-list", "99999", "--json"])
@@ -1366,7 +1369,7 @@ async fn mine_filter_reaches_the_cli_and_the_mcp_read() {
 
     let beyond_i64 = env.cli(&["mine", "--task-list", "99999999999999999999", "--json"]);
     assert!(
-        beyond_i64.contains(r#""count":0,"tasks":[]"#),
+        beyond_i64.contains(r#""count":0,"phases":"#) && beyond_i64.contains(r#""tasks":[]}"#),
         "{beyond_i64}"
     );
     client.cancel().await.unwrap();
@@ -1462,4 +1465,79 @@ async fn current_dependencies_are_looked_up_unless_no_dependencies_is_passed() {
     let looked_up = current_on_branch(&env, &branch, &["--json"]);
     assert!(looked_up["parents"].is_array() && looked_up["children"].is_array());
     assert_eq!(dependency_requests(&server).await, 1);
+}
+
+fn phase_of_task(mine_json: &str, task_id: i64) -> String {
+    let parsed: Value = serde_json::from_str(mine_json).unwrap();
+    let task = parsed["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|task| task["task_id"] == task_id)
+        .unwrap_or_else(|| panic!("task {task_id} missing in {mine_json}"));
+    task["phase"].as_str().unwrap().to_owned()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn mcp_and_cli_mine_read_the_same_stored_board_mapping() {
+    let server = MockServer::start().await;
+    let fixture = Fixture::seeded();
+    mount_seeded(&server, &fixture).await;
+    let env = Env::new(&[("alpha", &server, fixture.user_id)]);
+    let client = env.connect().await;
+    let seeded_list = TASK_LISTS[0].1;
+    let seeded_task = fixture.tasks[0].id;
+
+    let before = ok_text(&client, "ac_read", json!({ "operation": "mine" })).await;
+    assert_eq!(before, env.cli(&["mine", "--json"]));
+    assert_eq!(phase_of_task(&before, seeded_task), "to_do");
+
+    env.cli(&["setup", "board", "set", "in_review", "--lists", seeded_list]);
+
+    let after = ok_text(&client, "ac_read", json!({ "operation": "mine" })).await;
+    assert_eq!(after, env.cli(&["mine", "--json"]));
+    assert_eq!(phase_of_task(&after, seeded_task), "in_review");
+    client.cancel().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn mcp_mine_phase_matches_the_cli_output() {
+    let server = MockServer::start().await;
+    let fixture = Fixture::seeded();
+    mount_seeded(&server, &fixture).await;
+    let env = Env::new(&[("alpha", &server, fixture.user_id)]);
+    let client = env.connect().await;
+
+    let unfiltered = ok_text(&client, "ac_read", json!({ "operation": "mine" })).await;
+    assert_eq!(unfiltered, env.cli(&["mine", "--json"]));
+    let tasks: Value = serde_json::from_str(&unfiltered).unwrap();
+    assert!(tasks["count"].as_i64().unwrap() > 0, "{unfiltered}");
+    assert_eq!(tasks["tasks"][0]["phase"], "to_do", "{unfiltered}");
+    assert_eq!(tasks["tasks"][0]["flagged"], false, "{unfiltered}");
+    assert_eq!(tasks["phases"][0]["key"], "to_do", "{unfiltered}");
+    assert_eq!(tasks["phases"][0]["count"], tasks["count"], "{unfiltered}");
+
+    let in_review = ok_text(
+        &client,
+        "ac_read",
+        json!({ "operation": "mine", "phase": "in_review" }),
+    )
+    .await;
+    let shown: Value = serde_json::from_str(&in_review).unwrap();
+    assert_eq!(shown["count"], 0, "{in_review}");
+    assert_eq!(shown["tasks"], json!([]), "{in_review}");
+    assert_eq!(
+        in_review,
+        env.cli(&["mine", "--phase", "in_review", "--json"])
+    );
+
+    let to_do = ok_text(
+        &client,
+        "ac_read",
+        json!({ "operation": "mine", "phase": "to_do" }),
+    )
+    .await;
+    assert_eq!(to_do, unfiltered);
+    assert_eq!(to_do, env.cli(&["mine", "--phase", "to_do", "--json"]));
+    client.cancel().await.unwrap();
 }

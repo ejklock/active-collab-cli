@@ -11,7 +11,8 @@ pub mod view;
 pub mod widgets;
 
 pub use model::{
-    init_browse, init_mine, update, ClickTarget, Cmd, DetailLoad, ModalButtonTarget, Model, Msg,
+    init_browse, init_mine_in_view, update, ClickTarget, Cmd, DetailLoad, MineView,
+    ModalButtonTarget, Model, Msg,
 };
 pub use view::view;
 
@@ -425,7 +426,12 @@ fn read_browse_snapshot(
 pub async fn run_mine(targets: Vec<Instance>, http: Http, db_path: PathBuf) -> i32 {
     let seed = read_mine_snapshot(&targets, &db_path);
     let header = build_header(&targets, &db_path);
-    let (model, init_cmds) = init_mine(header, seed);
+    let (model, init_cmds) = init_mine_in_view(
+        header,
+        seed,
+        chrono::Local::now().date_naive(),
+        stored_mine_view(&db_path),
+    );
     run_app(targets, http, db_path, model, init_cmds, AppMode::Mine).await
 }
 
@@ -451,6 +457,48 @@ fn read_mine_snapshot(
     serde_json::from_str(&list_json).ok()
 }
 
+const MINE_VIEW_KEY: &str = "mine_view";
+
+/// Run `read` on the settings stored in the database at `db_path`; `None`
+/// when the database cannot be opened.
+fn with_settings<T>(
+    db_path: &Path,
+    read: impl FnOnce(&crate::store::settings::SettingsRepository<'_>) -> T,
+) -> Option<T> {
+    let config = crate::config::Config {
+        db_path: db_path.to_path_buf(),
+        task_cache_ttl_hours: 24,
+    };
+    let store = crate::store::Store::open(&config).ok()?;
+    Some(read(&crate::store::settings::SettingsRepository::new(
+        store.conn(),
+    )))
+}
+
+/// The mine view stored in the database at `db_path`; the list when none is
+/// stored or the database cannot be opened.
+fn stored_mine_view(db_path: &Path) -> MineView {
+    let stored = with_settings(db_path, |settings| {
+        settings.get(MINE_VIEW_KEY, None).ok().flatten()
+    })
+    .flatten();
+    MineView::from_setting(stored.as_deref())
+}
+
+/// Remember the chosen mine view in the database at `db_path`; a failure only
+/// means the next launch opens in the list.
+fn save_mine_view(db_path: &Path, view: MineView) {
+    let _ = with_settings(db_path, |settings| {
+        settings.set(MINE_VIEW_KEY, view.setting())
+    });
+}
+
+/// The board mapping stored in the database at `db_path`; the built-in
+/// keywords when the database cannot be opened.
+fn stored_board_mapping(db_path: &Path) -> crate::board::BoardMapping {
+    with_settings(db_path, crate::board::load).unwrap_or_default()
+}
+
 /// Loads the mine tasks: sends the rows as soon as the task lists arrive, then
 /// the hours once their requests finish.
 async fn load_mine_tasks(
@@ -460,7 +508,9 @@ async fn load_mine_tasks(
     tx: mpsc::UnboundedSender<Msg>,
 ) {
     let lists = crate::commands::collect_mine_task_lists(&targets, &http).await;
-    let rows = controller::attach_project_names(&db_path, crate::commands::mine_rows_of(&lists));
+    let mapping = stored_board_mapping(&db_path);
+    let rows =
+        controller::attach_project_names(&db_path, crate::commands::mine_rows_of(&lists, &mapping));
     let loaded_at = crate::store::now_brt_iso();
     let _ = tx.send(Msg::LoadedMineTasks { rows, loaded_at });
     let hours = crate::commands::collect_mine_hours(&lists, &http).await;
@@ -490,8 +540,10 @@ fn write_mine_snapshot(model: &Model, targets: &[Instance], db_path: &Path) {
             logged_week: t.logged_week,
             logged_total: t.logged_total,
             task_list_id: None,
-            task_list: None,
+            task_list: t.task_list.clone(),
             labels: Vec::new(),
+            phase: t.phase,
+            flagged: t.flagged,
         })
         .collect();
     let Ok(list_json) = serde_json::to_string(&rows) else {
@@ -682,13 +734,22 @@ fn dispatch_cmds(
                     (assignee_id, estimate, task_list_id),
                 );
             }
-            // Only the pure overlay lifecycle of the image viewer is wired; the
-            // fetch and decode are not, so the viewer stays on its Loading placeholder.
-            Cmd::LoadImage { .. } => {}
+            cmd @ (Cmd::LoadImage { .. } | Cmd::SaveMineView(_)) => dispatch_local(cmd, db_path),
             cmd @ (Cmd::ExportHoursReport { .. } | Cmd::DownloadAttachments { .. }) => {
                 dispatch_file_export(cmd, targets, http, &tx);
             }
         }
+    }
+}
+
+/// Run an effect that needs no network: remember the mine view, or the image
+/// viewer's fetch, which is not wired so the viewer stays on its Loading
+/// placeholder.
+fn dispatch_local(cmd: Cmd, db_path: &Path) {
+    match cmd {
+        Cmd::SaveMineView(view) => save_mine_view(db_path, view),
+        Cmd::LoadImage { .. } => {}
+        _ => unreachable!("dispatch_local called with a non-local Cmd"),
     }
 }
 

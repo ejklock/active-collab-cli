@@ -1,3 +1,4 @@
+use crate::board::Phase;
 use crate::commands::{validate_range, MineHours, OwnedReportPeriod, PeriodPreset, ReportFormat};
 use crate::i18n::t;
 use crate::render::{Asset, MineTableRow, StyleRun};
@@ -79,6 +80,121 @@ pub struct TaskRow {
     pub logged_week: Option<f64>,
     #[serde(default)]
     pub logged_total: Option<f64>,
+    /// The board column the task sits in.
+    #[serde(default)]
+    pub phase: crate::board::Phase,
+    /// A status label says the task is waiting or blocked.
+    #[serde(default)]
+    pub flagged: bool,
+    /// Name of the task list the task sits in; `None` when unknown.
+    #[serde(default)]
+    pub task_list: Option<String>,
+}
+
+/// How the mine Tasks screen lays its tasks out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MineView {
+    /// Grouped under due-date bucket headers.
+    #[default]
+    List,
+    /// One column per board phase.
+    Kanban,
+}
+
+impl MineView {
+    /// The value stored in the settings.
+    pub fn setting(self) -> &'static str {
+        match self {
+            MineView::List => "list",
+            MineView::Kanban => "kanban",
+        }
+    }
+
+    /// The view a stored setting names; an absent or unknown value is the list.
+    pub fn from_setting(value: Option<&str>) -> Self {
+        match value {
+            Some("kanban") => MineView::Kanban,
+            _ => MineView::List,
+        }
+    }
+}
+
+/// Where the kanban's focus sits: the focused column and, per column, the
+/// selected card (an index into that column's cards).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct KanbanFocus {
+    pub column: usize,
+    pub cards: [usize; 4],
+}
+
+/// The indices into `tasks` of each column's cards, in `Phase::ALL` order and
+/// keeping the order of `tasks`.
+pub fn kanban_columns(tasks: &[TaskRow]) -> [Vec<usize>; 4] {
+    let mut columns: [Vec<usize>; 4] = Default::default();
+    for (index, task) in tasks.iter().enumerate() {
+        if let Some(column) = Phase::ALL.iter().position(|p| *p == task.phase) {
+            columns[column].push(index);
+        }
+    }
+    columns
+}
+
+impl KanbanFocus {
+    /// Focus on the first column that holds a card, else the first column.
+    fn first_populated(tasks: &[TaskRow]) -> Self {
+        let column = kanban_columns(tasks)
+            .iter()
+            .position(|cards| !cards.is_empty())
+            .unwrap_or(0);
+        Self {
+            column,
+            cards: [0; 4],
+        }
+    }
+
+    /// The index into `tasks` of the focused column's selected card; `None`
+    /// when the column is empty.
+    pub fn selected_task(&self, tasks: &[TaskRow]) -> Option<usize> {
+        kanban_columns(tasks)[self.column]
+            .get(self.cards[self.column])
+            .copied()
+    }
+
+    /// After a reload keep the focused column and, in every column, the same
+    /// task (by instance and id) wherever it moved; a task that is gone leaves
+    /// the old position clamped into its column.
+    fn reselected(mut self, earlier: &[TaskRow], fresh: &[TaskRow]) -> Self {
+        let before = kanban_columns(earlier);
+        let after = kanban_columns(fresh);
+        for ((card, old), new) in self.cards.iter_mut().zip(&before).zip(&after) {
+            let moved = old.get(*card).and_then(|&i| {
+                let prior = &earlier[i];
+                new.iter().position(|&j| {
+                    fresh[j].instance == prior.instance && fresh[j].task_id == prior.task_id
+                })
+            });
+            *card = moved.unwrap_or_else(|| (*card).min(new.len().saturating_sub(1)));
+        }
+        self
+    }
+
+    fn step_column(&mut self, forward: bool) {
+        self.column = if forward {
+            (self.column + 1).min(Phase::ALL.len() - 1)
+        } else {
+            self.column.saturating_sub(1)
+        };
+    }
+
+    fn step_card(&mut self, tasks: &[TaskRow], forward: bool) {
+        let last = kanban_columns(tasks)[self.column].len().saturating_sub(1);
+        let card = &mut self.cards[self.column];
+        *card = if forward {
+            (*card + 1).min(last)
+        } else {
+            card.saturating_sub(1)
+        };
+    }
 }
 
 /// Style classification produced by `relative_due`.
@@ -138,6 +254,8 @@ pub enum Cmd {
     LoadTasksByProject,
     /// Fetch the mine task list in the background (SWR revalidation for the mine TUI).
     LoadMineTasks,
+    /// Store the chosen mine view so the next launch opens in it.
+    SaveMineView(MineView),
     LoadDetail {
         instance: String,
         project_id: i64,
@@ -807,6 +925,9 @@ pub enum Screen {
         /// `Some(today)` groups the tasks under due-date bucket headers, which use this
         /// date; `None` is a plain list. The tasks are kept in bucket order when set.
         due_today: Option<chrono::NaiveDate>,
+        /// `Some` shows the tasks as a kanban of board phases with this focus; `None`
+        /// shows the list. Only the mine screen (`due_today` set) ever holds `Some`.
+        kanban: Option<KanbanFocus>,
     },
     Detail {
         instance: String,
@@ -950,9 +1071,16 @@ fn select_action(stack: &[Screen]) -> Option<SelectAction> {
             })
         }
         Screen::Tasks {
-            tasks, selected, ..
+            tasks,
+            selected,
+            kanban,
+            ..
         } => {
-            let row = tasks.get(*selected)?;
+            let index = match kanban {
+                Some(focus) => focus.selected_task(tasks)?,
+                None => *selected,
+            };
+            let row = tasks.get(index)?;
             Some(SelectAction::PushDetail {
                 instance: row.instance.clone(),
                 project_id: row.project_id,
@@ -996,6 +1124,12 @@ pub struct Model {
 pub enum Msg {
     Up,
     Down,
+    /// `v`: switch the mine screen between the due-date list and the kanban.
+    ToggleMineView,
+    /// ←: move the kanban's column focus one column left.
+    ColumnLeft,
+    /// →: move the kanban's column focus one column right.
+    ColumnRight,
     ScrollUp,
     ScrollDown,
     PageUp,
@@ -1371,7 +1505,13 @@ pub fn update(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
         | Msg::Click { .. }
         | Msg::Drag { .. }
         | Msg::MouseUp { .. }) => update_input(model, m),
-        m @ (Msg::Select | Msg::Back | Msg::Quit | Msg::Refresh) => update_navigation(model, m),
+        m @ (Msg::Select
+        | Msg::Back
+        | Msg::Quit
+        | Msg::Refresh
+        | Msg::ToggleMineView
+        | Msg::ColumnLeft
+        | Msg::ColumnRight) => update_navigation(model, m),
         m @ (Msg::LoadedTasksByProject { .. }
         | Msg::LoadedMineTasks { .. }
         | Msg::LoadedMineHours { .. }
@@ -1593,6 +1733,9 @@ fn update_navigation(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
         Msg::Back => (handle_back(model), vec![]),
         Msg::Quit => (handle_quit(model), vec![]),
         Msg::Refresh => handle_refresh(model),
+        Msg::ToggleMineView => handle_toggle_mine_view(model),
+        Msg::ColumnLeft => (move_kanban_column(model, false), vec![]),
+        Msg::ColumnRight => (move_kanban_column(model, true), vec![]),
         _ => (model, vec![]),
     }
 }
@@ -1734,9 +1877,57 @@ fn update_task_list_picker(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
     }
 }
 
+/// Switch the mine screen between the list and the kanban and ask the shell to
+/// remember the choice; a no-op on every other screen.
+fn handle_toggle_mine_view(mut model: Model) -> (Model, Vec<Cmd>) {
+    let Some(Screen::Tasks {
+        tasks,
+        due_today: Some(_),
+        kanban,
+        ..
+    }) = model.top_mut()
+    else {
+        return (model, vec![]);
+    };
+    let view = if kanban.is_some() {
+        *kanban = None;
+        MineView::List
+    } else {
+        *kanban = Some(KanbanFocus::first_populated(tasks));
+        MineView::Kanban
+    };
+    (model, vec![Cmd::SaveMineView(view)])
+}
+
+fn move_kanban_column(mut model: Model, forward: bool) -> Model {
+    if let Some(Screen::Tasks {
+        kanban: Some(focus),
+        ..
+    }) = model.top_mut()
+    {
+        focus.step_column(forward);
+    }
+    model
+}
+
+fn move_kanban_card(mut model: Model, forward: bool) -> Model {
+    if let Some(Screen::Tasks {
+        tasks,
+        kanban: Some(focus),
+        ..
+    }) = model.top_mut()
+    {
+        focus.step_card(tasks, forward);
+    }
+    model
+}
+
 fn handle_up(model: Model) -> Model {
     match model.top() {
         Some(Screen::Detail { .. }) => handle_focus_prev(model),
+        Some(Screen::Tasks {
+            kanban: Some(_), ..
+        }) => move_kanban_card(model, false),
         Some(_) => {
             let mut model = model;
             let sel = model.top().map(|s| s.selected()).unwrap_or(0);
@@ -1753,6 +1944,9 @@ fn handle_down(model: Model) -> Model {
     let (viewport_cols, viewport_rows) = model.viewport;
     match model.top() {
         Some(Screen::Detail { .. }) => handle_focus_next(model),
+        Some(Screen::Tasks {
+            kanban: Some(_), ..
+        }) => move_kanban_card(model, true),
         Some(screen) => {
             let count = screen.row_count();
             let sel = screen.selected();
@@ -1774,6 +1968,9 @@ fn handle_scroll_up(mut model: Model) -> Model {
         Some(Screen::Detail { offset, .. }) => {
             *offset = offset.saturating_sub(1);
         }
+        Some(Screen::Tasks {
+            kanban: Some(_), ..
+        }) => {}
         Some(screen) => {
             let sel = screen.selected();
             screen.set_selected(sel.saturating_sub(1));
@@ -1795,6 +1992,9 @@ fn handle_scroll_down(mut model: Model) -> Model {
             let max = detail_max_offset(viewport_rows, viewport_cols, lines.len(), assets);
             *offset = (*offset + 1).min(max);
         }
+        Some(Screen::Tasks {
+            kanban: Some(_), ..
+        }) => {}
         Some(screen) => {
             let count = screen.row_count();
             if count > 0 {
@@ -2167,6 +2367,7 @@ fn handle_select(model: Model) -> (Model, Vec<Cmd>) {
                     card_offsets: Vec::new(),
                     rendered_width: usize::MAX,
                     due_today: None,
+                    kanban: None,
                 });
             }
             SelectAction::PushDetail {
@@ -2320,6 +2521,7 @@ fn handle_loaded_mine_tasks(mut model: Model, rows: Vec<MineTableRow>, loaded_at
         rendered_width: ref mut rw,
         selected: ref mut sel,
         due_today,
+        kanban,
         ..
     }) = model.tasks_screen_mut()
     {
@@ -2327,6 +2529,13 @@ fn handle_loaded_mine_tasks(mut model: Model, rows: Vec<MineTableRow>, loaded_at
         *t = order_by_bucket(rows_to_task_rows(rows), *due_today);
         keep_earlier_hours(t, &earlier);
         *sel = reselect(*sel, &earlier, t);
+        if let Some(focus) = kanban {
+            *focus = if earlier.is_empty() {
+                KanbanFocus::first_populated(t)
+            } else {
+                focus.reselected(&earlier, t)
+            };
+        }
         *l = false;
         *rv = false;
         // Invalidate card cache so reflow_tasks rebuilds at current width.
@@ -2419,6 +2628,9 @@ fn rows_to_task_rows(rows: Vec<MineTableRow>) -> Vec<TaskRow> {
             estimate: r.estimate,
             logged_week: r.logged_week,
             logged_total: r.logged_total,
+            phase: r.phase,
+            flagged: r.flagged,
+            task_list: r.task_list,
         })
         .collect()
 }
@@ -3658,16 +3870,28 @@ pub fn init_browse(header: Header, seed: Option<Vec<ProjectGroup>>) -> (Model, V
 ///
 /// ALWAYS emits `Cmd::LoadMineTasks` so the mine list is revalidated on every
 /// entry, regardless of whether a snapshot was present.
+#[cfg(test)]
 pub fn init_mine(header: Header, seed: Option<Vec<MineTableRow>>) -> (Model, Vec<Cmd>) {
     init_mine_on(header, seed, chrono::Local::now().date_naive())
 }
 
 /// `init_mine` with an explicit "today" for the due-date buckets, so tests
 /// inject the date.
+#[cfg(test)]
 pub fn init_mine_on(
     header: Header,
     seed: Option<Vec<MineTableRow>>,
     today: chrono::NaiveDate,
+) -> (Model, Vec<Cmd>) {
+    init_mine_in_view(header, seed, today, MineView::List)
+}
+
+/// `init_mine_on` opening in the given view.
+pub fn init_mine_in_view(
+    header: Header,
+    seed: Option<Vec<MineTableRow>>,
+    today: chrono::NaiveDate,
+    view: MineView,
 ) -> (Model, Vec<Cmd>) {
     let (tasks, loading, revalidating) = match seed {
         Some(rows) if !rows.is_empty() => (
@@ -3677,10 +3901,12 @@ pub fn init_mine_on(
         ),
         _ => (vec![], true, false),
     };
+    let kanban = (view == MineView::Kanban).then(|| KanbanFocus::first_populated(&tasks));
     let model = Model {
         stack: vec![Screen::Tasks {
             project_name: t("My Tasks"),
             tasks,
+            kanban,
             selected: 0,
             loading,
             revalidating,

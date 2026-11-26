@@ -205,3 +205,42 @@ fn mcp_get_no_dependencies_schema_has_a_description() {
         "no_dependencies must be listed with a description"
     );
 }
+
+#[test]
+fn mcp_mine_phase_parses_a_key_and_defaults_to_no_filter() {
+    let Ok(ReadOperation::Mine { phase, .. }) =
+        read_operation(json!({ "operation": "mine", "phase": "in_review" }))
+    else {
+        panic!("a phase key must be accepted by the mine operation");
+    };
+    assert_eq!(phase, Some(crate::board::Phase::InReview));
+    let Ok(ReadOperation::Mine { phase, .. }) = read_operation(json!({ "operation": "mine" }))
+    else {
+        panic!("a bare mine operation must parse");
+    };
+    assert_eq!(phase, None);
+}
+
+#[test]
+fn mcp_mine_phase_rejects_an_unknown_key_and_a_non_string() {
+    for phase in [json!("done"), json!("IN_REVIEW"), json!(1), json!("")] {
+        let err = read_operation(json!({ "operation": "mine", "phase": phase }))
+            .err()
+            .expect("an invalid phase must be rejected");
+        assert_eq!(err.code, rmcp::model::ErrorCode::INVALID_PARAMS);
+    }
+}
+
+#[test]
+fn mcp_mine_phase_schema_lists_the_four_keys_with_a_description() {
+    let schema = input_schema::<ReadOperation>();
+    let phase = &schema["properties"]["phase"];
+    assert!(
+        phase["description"].as_str().is_some_and(|d| !d.is_empty()),
+        "phase must be listed with a description"
+    );
+    let shown = phase.to_string();
+    for key in ["to_do", "in_progress", "in_review", "ready_for_release"] {
+        assert!(shown.contains(&format!("\"{key}\"")), "{shown}");
+    }
+}

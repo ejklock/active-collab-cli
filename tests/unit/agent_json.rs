@@ -302,6 +302,8 @@ fn sample_mine_rows() -> Vec<crate::render::MineTableRow> {
             task_list_id: None,
             task_list: None,
             labels: Vec::new(),
+            phase: crate::board::Phase::default(),
+            flagged: false,
             project_name: None,
             estimate: None,
             logged_week: None,
@@ -316,6 +318,8 @@ fn sample_mine_rows() -> Vec<crate::render::MineTableRow> {
             task_list_id: None,
             task_list: None,
             labels: Vec::new(),
+            phase: crate::board::Phase::default(),
+            flagged: false,
             due_on: None,
             project_name: None,
             estimate: None,
@@ -419,6 +423,9 @@ fn sample_task_row(
         name: name.to_owned(),
         instance: "work".to_owned(),
         project_id,
+        phase: Default::default(),
+        flagged: false,
+        task_list: None,
         due_on: None,
         project_name: None,
         estimate: None,
@@ -762,6 +769,8 @@ fn mine_row_with_hours(
         task_list_id: None,
         task_list: None,
         labels: Vec::new(),
+        phase: crate::board::Phase::default(),
+        flagged: false,
         project_name: None,
         estimate,
         logged_week,
@@ -812,7 +821,7 @@ fn mine_json_keeps_the_existing_task_keys() {
     assert!(task["task_list_id"].is_null());
     assert!(task["task_list"].is_null());
     assert_eq!(task["labels"], json!([]));
-    assert_eq!(task.as_object().unwrap().len(), 14);
+    assert_eq!(task.as_object().unwrap().len(), 16);
 }
 
 fn bucket_today() -> chrono::NaiveDate {
@@ -883,7 +892,7 @@ fn mine_json_buckets_add_only_the_buckets_key_and_the_due_bucket_key() {
     );
     let mut top: Vec<&String> = obj.as_object().unwrap().keys().collect();
     top.sort();
-    assert_eq!(top, ["buckets", "count", "tasks"]);
+    assert_eq!(top, ["buckets", "count", "phases", "tasks"]);
     let mut task: Vec<&String> = obj["tasks"][0].as_object().unwrap().keys().collect();
     task.sort();
     assert_eq!(
@@ -892,11 +901,13 @@ fn mine_json_buckets_add_only_the_buckets_key_and_the_due_bucket_key() {
             "due_bucket",
             "due_on",
             "estimate_hours",
+            "flagged",
             "instance",
             "labels",
             "logged_total_hours",
             "logged_week_hours",
             "name",
+            "phase",
             "project_id",
             "ref",
             "task_id",

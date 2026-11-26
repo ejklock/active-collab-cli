@@ -806,3 +806,90 @@ fn parse_get_looks_dependencies_up_by_default() {
     };
     assert!(!g.display.no_dependencies);
 }
+
+#[test]
+fn mine_phase_filter_flag_parses_each_phase_key() {
+    for phase in crate::board::Phase::ALL {
+        let cli = parse(&["mine", "--phase", phase.key()]).expect("a phase key must parse");
+        let Some(Command::Mine(args)) = cli.command else {
+            panic!("expected the mine command");
+        };
+        assert_eq!(args.phase, Some(phase));
+    }
+    let Some(Command::Mine(args)) = parse(&["mine"]).unwrap().command else {
+        panic!("expected the mine command");
+    };
+    assert_eq!(args.phase, None);
+}
+
+#[test]
+fn mine_phase_filter_flag_rejects_an_unknown_key_and_lists_the_valid_ones() {
+    let err = parse(&["mine", "--phase", "done"]).unwrap_err();
+    assert_eq!(err.exit_code(), 2);
+    let message = err.to_string();
+    for key in ["to_do", "in_progress", "in_review", "ready_for_release"] {
+        assert!(message.contains(key), "{message}");
+    }
+}
+
+#[test]
+fn mine_phase_filter_flag_keys_are_exact() {
+    let err = parse(&["mine", "--phase", "IN_REVIEW"]).unwrap_err();
+    assert_eq!(err.exit_code(), 2);
+}
+
+#[test]
+fn parse_setup_board_without_a_subcommand_shows() {
+    let cli = parse(&["setup", "board"]).unwrap();
+    let Command::Setup(opts) = cli.command.unwrap() else {
+        panic!()
+    };
+    let SetupCmd::Board(board) = opts.subcommand else {
+        panic!()
+    };
+    assert!(board.action.is_none());
+}
+
+#[test]
+fn parse_setup_board_set_takes_a_column_and_both_keyword_options() {
+    let cli = parse(&[
+        "setup",
+        "board",
+        "set",
+        "in_review",
+        "--lists",
+        "a, b",
+        "--labels",
+        "",
+    ])
+    .unwrap();
+    let Command::Setup(opts) = cli.command.unwrap() else {
+        panic!()
+    };
+    let SetupCmd::Board(board) = opts.subcommand else {
+        panic!()
+    };
+    let Some(BoardCmd::Set(set)) = board.action else {
+        panic!()
+    };
+    assert_eq!(set.column, "in_review");
+    assert_eq!(set.lists.as_deref(), Some("a, b"));
+    assert_eq!(set.labels.as_deref(), Some(""));
+}
+
+#[test]
+fn parse_setup_board_set_without_a_column_is_rejected() {
+    assert!(parse(&["setup", "board", "set", "--lists", "a"]).is_err());
+}
+
+#[test]
+fn parse_setup_board_reset() {
+    let cli = parse(&["setup", "board", "reset"]).unwrap();
+    let Command::Setup(opts) = cli.command.unwrap() else {
+        panic!()
+    };
+    let SetupCmd::Board(board) = opts.subcommand else {
+        panic!()
+    };
+    assert!(matches!(board.action, Some(BoardCmd::Reset)));
+}
