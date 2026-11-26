@@ -9,6 +9,20 @@ fn empty_header() -> Header {
     Header::from_instances(&[], None)
 }
 
+/// Open the view modal on the mine screen, move the highlight `downs` choices
+/// down from the current view and apply it.
+fn choose_view(
+    model: crate::tui::model::Model,
+    downs: usize,
+) -> (crate::tui::model::Model, Vec<crate::tui::model::Cmd>) {
+    use crate::tui::model::{update, Msg};
+    let mut model = update(model, Msg::ViewModalOpen).0;
+    for _ in 0..downs {
+        model = update(model, Msg::ViewModalDown).0;
+    }
+    update(model, Msg::ViewModalApply)
+}
+
 fn make_asset(name: &str, url: &str) -> Asset {
     Asset {
         name: name.into(),
@@ -8138,6 +8152,7 @@ fn report_pointer_tasks_model() -> Model {
         rendered_width: usize::MAX,
         due_today: None,
         kanban: None,
+        view_modal: None,
     })
 }
 
@@ -9302,6 +9317,7 @@ fn detail_download_key_on_the_tasks_screen_changes_nothing() {
         rendered_width: usize::MAX,
         due_today: None,
         kanban: None,
+        view_modal: None,
     }];
     let before = format!("{:?}", model.stack);
     let key =
@@ -9450,6 +9466,7 @@ fn task_list_picker_key_l_off_the_detail_changes_nothing() {
         rendered_width: usize::MAX,
         due_today: None,
         kanban: None,
+        view_modal: None,
     }];
     let before = format!("{:?}", model.stack);
     let (model, cmds) = press(model, crossterm::event::KeyCode::Char('l'));
@@ -10197,7 +10214,7 @@ fn closing_the_image_viewer_overlay_shows_the_same_detail_body_on_the_next_frame
 }
 
 mod kanban_model_tests {
-    use super::empty_header;
+    use super::{choose_view, empty_header};
     use crate::board::Phase;
     use crate::render::MineTableRow;
     use crate::tui::model::{
@@ -10233,7 +10250,7 @@ mod kanban_model_tests {
     }
 
     fn kanban_model(rows: Vec<MineTableRow>) -> Model {
-        update(list_model(rows), Msg::ToggleMineView).0
+        choose_view(list_model(rows), 1).0
     }
 
     fn focus(model: &Model) -> KanbanFocus {
@@ -10345,21 +10362,30 @@ mod kanban_model_tests {
     }
 
     #[test]
-    fn kanban_persistence_toggle_stores_the_chosen_view() {
-        let (model, cmds) = update(list_model(mixed_rows()), Msg::ToggleMineView);
-        assert_eq!(cmds, vec![Cmd::SaveMineView(MineView::Kanban)]);
-        let (_, cmds) = update(model, Msg::ToggleMineView);
+    fn kanban_persistence_choosing_a_view_stores_it() {
+        let (model, cmds) = choose_view(list_model(mixed_rows()), 1);
+        assert_eq!(cmds, vec![Cmd::SaveMineView(MineView::KanbanHorizontal)]);
+        let (model, cmds) = choose_view(model, 1);
+        assert_eq!(cmds, vec![Cmd::SaveMineView(MineView::KanbanVertical)]);
+        let (model, cmds) = update(model, Msg::ViewModalOpen);
+        assert!(cmds.is_empty());
+        let (model, cmds) = update(model, Msg::ViewModalUp);
+        assert!(cmds.is_empty());
+        let (model, cmds) = update(model, Msg::ViewModalUp);
+        assert!(cmds.is_empty());
+        let (_, cmds) = update(model, Msg::ViewModalApply);
         assert_eq!(cmds, vec![Cmd::SaveMineView(MineView::List)]);
     }
 
     #[test]
-    fn kanban_persistence_toggle_on_the_browse_list_stores_nothing() {
+    fn kanban_persistence_view_modal_on_the_browse_list_opens_nothing() {
         let mut model = list_model(mixed_rows());
         if let Some(Screen::Tasks { due_today, .. }) = model.stack.last_mut() {
             *due_today = None;
         }
-        let (model, cmds) = update(model, Msg::ToggleMineView);
+        let (model, cmds) = update(model, Msg::ViewModalOpen);
         assert!(cmds.is_empty());
+        assert_eq!(model.view_modal(), None);
         assert!(matches!(
             model.stack.last(),
             Some(Screen::Tasks { kanban: None, .. })
@@ -10384,6 +10410,8 @@ mod kanban_model_tests {
             )
         };
         assert!(open(Some("kanban")));
+        assert!(open(Some("kanban_horizontal")));
+        assert!(open(Some("kanban_vertical")));
         assert!(!open(Some("list")));
         assert!(!open(Some("grid")));
         assert!(!open(None));
@@ -10400,7 +10428,7 @@ mod kanban_model_tests {
 }
 
 mod kanban_reload_tests {
-    use super::empty_header;
+    use super::{choose_view, empty_header};
     use crate::board::Phase;
     use crate::render::MineTableRow;
     use crate::tui::model::{
@@ -10437,7 +10465,7 @@ mod kanban_reload_tests {
 
     fn kanban_with_card_selected(ids: &[i64], card_downs: usize) -> Model {
         let list = init_mine_on(empty_header(), Some(to_do(ids)), today()).0;
-        let mut model = update(list, Msg::ToggleMineView).0;
+        let mut model = choose_view(list, 1).0;
         for _ in 0..card_downs {
             model = update(model, Msg::Down).0;
         }
@@ -10484,7 +10512,8 @@ mod kanban_reload_tests {
 
     #[test]
     fn kanban_reload_cold_launch_focuses_the_first_column_with_rows() {
-        let (model, _) = init_mine_in_view(empty_header(), None, today(), MineView::Kanban);
+        let (model, _) =
+            init_mine_in_view(empty_header(), None, today(), MineView::KanbanHorizontal);
         let model = reload(model, vec![row(1, Phase::ReadyForRelease)]);
         match model.stack.last() {
             Some(Screen::Tasks {
@@ -10500,7 +10529,7 @@ mod kanban_reload_tests {
         let list = init_mine_on(empty_header(), Some(to_do(&[101, 102, 107])), today()).0;
         let list = update(list, Msg::Down).0;
         let list = update(list, Msg::Down).0;
-        let model = update(list, Msg::ToggleMineView).0;
+        let model = choose_view(list, 1).0;
         let selected = |m: &Model| match m.stack.last() {
             Some(Screen::Tasks { selected, .. }) => *selected,
             other => panic!("expected tasks, got {other:?}"),
@@ -10514,7 +10543,7 @@ mod kanban_reload_tests {
 }
 
 mod mine_refresh_tests {
-    use super::empty_header;
+    use super::{choose_view, empty_header};
     use crate::board::Phase;
     use crate::render::MineTableRow;
     use crate::tui::model::{init_mine_on, update, Cmd, Model, Msg, Screen};
@@ -10566,7 +10595,7 @@ mod mine_refresh_tests {
     }
 
     fn settled_kanban() -> Model {
-        update(settled_list(), Msg::ToggleMineView).0
+        choose_view(settled_list(), 1).0
     }
 
     fn flags(model: &Model) -> (bool, bool, Vec<i64>) {
@@ -10639,5 +10668,294 @@ mod mine_refresh_tests {
             matches!(cmds.as_slice(), [Cmd::LoadTasksByProject]),
             "{cmds:?}"
         );
+    }
+}
+
+mod kanban_vertical_navigation_tests {
+    use super::{choose_view, empty_header};
+    use crate::board::Phase;
+    use crate::render::MineTableRow;
+    use crate::tui::model::{
+        init_mine_in_view, init_mine_on, update, Cmd, KanbanFocus, KanbanLayout, MineView, Model,
+        Msg, Screen,
+    };
+
+    fn today() -> chrono::NaiveDate {
+        chrono::NaiveDate::from_ymd_opt(2026, 11, 25).unwrap()
+    }
+
+    fn row(id: i64, phase: Phase) -> MineTableRow {
+        MineTableRow {
+            instance: "inst".into(),
+            project_id: 10 + id,
+            task_number: id,
+            task_id: id,
+            name: format!("Task {id}"),
+            due_on: None,
+            project_name: None,
+            estimate: None,
+            logged_week: None,
+            logged_total: None,
+            task_list_id: None,
+            task_list: None,
+            labels: vec![],
+            phase,
+            flagged: false,
+        }
+    }
+
+    fn rows() -> Vec<MineTableRow> {
+        vec![
+            row(1, Phase::ToDo),
+            row(2, Phase::ToDo),
+            row(3, Phase::ToDo),
+            row(4, Phase::InProgress),
+            row(5, Phase::ReadyForRelease),
+            row(6, Phase::ReadyForRelease),
+        ]
+    }
+
+    fn vertical() -> Model {
+        init_mine_in_view(
+            empty_header(),
+            Some(rows()),
+            today(),
+            MineView::KanbanVertical,
+        )
+        .0
+    }
+
+    fn focus(model: &Model) -> KanbanFocus {
+        match model.stack.last() {
+            Some(Screen::Tasks {
+                kanban: Some(focus),
+                ..
+            }) => *focus,
+            other => panic!("expected the kanban, got {other:?}"),
+        }
+    }
+
+    fn selected_task_id(model: &Model) -> Option<i64> {
+        match model.stack.last() {
+            Some(Screen::Tasks {
+                tasks,
+                kanban: Some(focus),
+                ..
+            }) => focus.selected_task(tasks).map(|i| tasks[i].task_id),
+            other => panic!("expected the kanban, got {other:?}"),
+        }
+    }
+
+    fn press(model: Model, msgs: &[fn() -> Msg]) -> Model {
+        msgs.iter().fold(model, |m, msg| update(m, msg()).0)
+    }
+
+    const DOWN: fn() -> Msg = || Msg::Down;
+    const UP: fn() -> Msg = || Msg::Up;
+    const LEFT: fn() -> Msg = || Msg::ColumnLeft;
+    const RIGHT: fn() -> Msg = || Msg::ColumnRight;
+
+    #[test]
+    fn kanban_vertical_navigation_down_and_up_cross_the_phase_sections() {
+        let model = press(vertical(), &[DOWN, DOWN]);
+        assert_eq!(selected_task_id(&model), Some(3));
+        let model = press(model, &[DOWN]);
+        assert_eq!(selected_task_id(&model), Some(4));
+        assert_eq!(focus(&model).column, 1);
+        let model = press(model, &[DOWN]);
+        assert_eq!(selected_task_id(&model), Some(5));
+        assert_eq!(focus(&model).column, 3);
+        let model = press(model, &[UP, UP]);
+        assert_eq!(selected_task_id(&model), Some(3));
+        assert_eq!(focus(&model).column, 0);
+    }
+
+    #[test]
+    fn kanban_vertical_navigation_stops_on_the_very_first_and_last_card() {
+        let model = press(vertical(), &[UP, UP]);
+        assert_eq!(selected_task_id(&model), Some(1));
+        let model = press(model, &[DOWN, DOWN, DOWN, DOWN, DOWN, DOWN, DOWN, DOWN]);
+        assert_eq!(selected_task_id(&model), Some(6));
+        assert_eq!(focus(&model).column, 3);
+    }
+
+    #[test]
+    fn kanban_vertical_navigation_left_and_right_jump_to_the_first_card_of_a_phase() {
+        let model = press(vertical(), &[DOWN, RIGHT]);
+        assert_eq!(selected_task_id(&model), Some(4));
+        let model = press(model, &[RIGHT]);
+        assert_eq!(focus(&model).column, 3);
+        assert_eq!(selected_task_id(&model), Some(5));
+        let model = press(model, &[RIGHT]);
+        assert_eq!(selected_task_id(&model), Some(5));
+        let model = press(model, &[LEFT]);
+        assert_eq!(focus(&model).column, 1);
+        assert_eq!(selected_task_id(&model), Some(4));
+        let model = press(model, &[LEFT, LEFT]);
+        assert_eq!(focus(&model).column, 0);
+        assert_eq!(selected_task_id(&model), Some(1));
+    }
+
+    #[test]
+    fn kanban_vertical_navigation_enter_opens_the_task_the_list_opens() {
+        let model = press(vertical(), &[DOWN, DOWN, DOWN, DOWN, DOWN]);
+        assert_eq!(selected_task_id(&model), Some(6));
+        let (_, from_kanban) = update(model, Msg::Select);
+        let list = init_mine_on(empty_header(), Some(rows()), today()).0;
+        let list = press(list, &[DOWN, DOWN, DOWN, DOWN, DOWN]);
+        let (_, from_list) = update(list, Msg::Select);
+        assert!(matches!(
+            from_list.as_slice(),
+            [Cmd::LoadDetail { task_id: 6, .. }]
+        ));
+        assert_eq!(from_kanban, from_list);
+    }
+
+    #[test]
+    fn kanban_vertical_navigation_switching_to_the_horizontal_kanban_keeps_the_focus() {
+        let model = press(vertical(), &[DOWN, DOWN, DOWN, DOWN, DOWN]);
+        let before = focus(&model);
+        let model = update(model, Msg::ViewModalOpen).0;
+        let model = update(model, Msg::ViewModalUp).0;
+        let (model, cmds) = update(model, Msg::ViewModalApply);
+        assert_eq!(cmds, vec![Cmd::SaveMineView(MineView::KanbanHorizontal)]);
+        let after = focus(&model);
+        assert_eq!(after.layout, KanbanLayout::Horizontal);
+        assert_eq!((after.column, after.cards), (before.column, before.cards));
+        assert_eq!(selected_task_id(&model), Some(6));
+        let (back, _) = choose_view(model, 1);
+        assert_eq!(focus(&back).layout, KanbanLayout::Vertical);
+        assert_eq!(selected_task_id(&back), Some(6));
+    }
+
+    #[test]
+    fn kanban_vertical_navigation_a_reload_keeps_the_selected_task() {
+        let model = press(vertical(), &[DOWN, DOWN]);
+        assert_eq!(selected_task_id(&model), Some(3));
+        let (model, _) = update(
+            model,
+            Msg::LoadedMineTasks {
+                rows: vec![
+                    row(3, Phase::ToDo),
+                    row(1, Phase::ToDo),
+                    row(4, Phase::InProgress),
+                ],
+                loaded_at: "2026-11-25T10:00:00".into(),
+            },
+        );
+        assert_eq!(selected_task_id(&model), Some(3));
+        assert_eq!(focus(&model).layout, KanbanLayout::Vertical);
+    }
+}
+
+mod vertical_cold_launch_tests {
+    use super::{choose_view, empty_header};
+    use crate::board::Phase;
+    use crate::render::MineTableRow;
+    use crate::tui::model::{
+        init_mine_in_view, init_mine_on, update, KanbanFocus, KanbanLayout, MineView, Model, Msg,
+        Screen,
+    };
+
+    fn today() -> chrono::NaiveDate {
+        chrono::NaiveDate::from_ymd_opt(2026, 11, 25).unwrap()
+    }
+
+    fn rows() -> Vec<MineTableRow> {
+        [(1, Phase::InProgress), (2, Phase::ReadyForRelease)]
+            .into_iter()
+            .map(|(id, phase)| MineTableRow {
+                instance: "inst".into(),
+                project_id: 10 + id,
+                task_number: id,
+                task_id: id,
+                name: format!("Task {id}"),
+                due_on: None,
+                project_name: None,
+                estimate: None,
+                logged_week: None,
+                logged_total: None,
+                task_list_id: None,
+                task_list: None,
+                labels: vec![],
+                phase,
+                flagged: false,
+            })
+            .collect()
+    }
+
+    fn load(model: Model, rows: Vec<MineTableRow>) -> Model {
+        update(
+            model,
+            Msg::LoadedMineTasks {
+                rows,
+                loaded_at: "2026-11-25T10:00:00".into(),
+            },
+        )
+        .0
+    }
+
+    fn focus(model: &Model) -> KanbanFocus {
+        match model.stack.last() {
+            Some(Screen::Tasks {
+                kanban: Some(focus),
+                ..
+            }) => *focus,
+            other => panic!("expected the kanban, got {other:?}"),
+        }
+    }
+
+    /// The vertical layout is kept and the view modal opens on it.
+    fn assert_vertical_and_preselected(model: Model) {
+        assert_eq!(focus(&model).layout, KanbanLayout::Vertical);
+        let opened = update(model, Msg::ViewModalOpen).0;
+        assert_eq!(opened.view_modal(), Some(MineView::KanbanVertical));
+    }
+
+    #[test]
+    fn vertical_cold_launch_without_a_snapshot_stays_vertical_after_the_load() {
+        let (model, _) = init_mine_in_view(empty_header(), None, today(), MineView::KanbanVertical);
+        assert_vertical_and_preselected(load(model, rows()));
+    }
+
+    #[test]
+    fn vertical_cold_launch_with_an_empty_snapshot_stays_vertical_after_the_load() {
+        let (model, _) = init_mine_in_view(
+            empty_header(),
+            Some(vec![]),
+            today(),
+            MineView::KanbanVertical,
+        );
+        assert_vertical_and_preselected(load(model, rows()));
+    }
+
+    #[test]
+    fn vertical_cold_launch_with_no_open_tasks_stays_vertical_on_a_later_reload() {
+        let (model, _) = init_mine_in_view(
+            empty_header(),
+            Some(rows()),
+            today(),
+            MineView::KanbanVertical,
+        );
+        let emptied = load(model, vec![]);
+        assert_eq!(focus(&emptied).layout, KanbanLayout::Vertical);
+        assert_vertical_and_preselected(load(emptied, rows()));
+    }
+
+    #[test]
+    fn vertical_cold_launch_chosen_in_the_modal_before_the_first_load_stays_vertical() {
+        let (model, _) = init_mine_on(empty_header(), None, today());
+        let (model, _) = choose_view(model, 2);
+        assert_vertical_and_preselected(load(model, rows()));
+    }
+
+    #[test]
+    fn vertical_cold_launch_leaves_the_horizontal_start_on_the_first_populated_column() {
+        let (model, _) =
+            init_mine_in_view(empty_header(), None, today(), MineView::KanbanHorizontal);
+        let model = load(model, rows());
+        let focus = focus(&model);
+        assert_eq!(focus.layout, KanbanLayout::Horizontal);
+        assert_eq!(focus.column, 1);
     }
 }

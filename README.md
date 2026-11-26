@@ -295,7 +295,9 @@ the detail view to bypass the cache and re-fetch from the API.
 | Screen | Keys |
 |---|---|
 | Projects / Tasks lists (including `mine`) | `↑`/`↓` move · `Enter` select · `r` refresh · `H` hours report · `q` quit · `Esc`/`b` back (quits from the first screen) · `Ctrl+C` quit |
-| `ac mine` kanban (`v` switches from the due-date list and back; the last view is kept for the next launch) | `←`/`→` move between the TO DO, IN PROGRESS, IN REVIEW and READY FOR RELEASE columns · `↑`/`↓` move between cards · `Enter` open the task · `r` refresh · `v` due-date list |
+| `ac mine` view modal (`v` on the mine screen opens it; the last view is kept for the next launch) | `↑`/`↓` choose between the due-date list, the horizontal kanban and the vertical kanban · `Enter` apply · `Esc` close |
+| `ac mine` horizontal kanban (a column per phase) | `←`/`→` move between the TO DO, IN PROGRESS, IN REVIEW and READY FOR RELEASE columns · `↑`/`↓` move between cards · `Enter` open the task · `r` refresh · `H` hours report · `q` quit · `v` view |
+| `ac mine` vertical kanban (one list, the cards grouped under a header per phase) | `↑`/`↓` move between cards, crossing the phases · `←`/`→` jump to the first card of the previous/next phase that has cards · `Enter` open the task · `r` refresh · `q` quit · `v` view |
 | Task detail | `↑`/`↓` or `k`/`j` move between comments · `PgUp`/`PgDn` page · `r` refresh · `c` new comment · `t` log time · `e` edit estimate · `s` toggle status · `a` assignee picker · `l` task list picker · `H` hours report · `D` download attachments · `Esc`/`b` back · `q` quit · `Ctrl+C` quit |
 
 ### Bare-invocation shortcuts

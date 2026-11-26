@@ -35,6 +35,7 @@ use events::{
     map_assignee_picker_key_event, map_browse_key_event, map_browse_mouse_event,
     map_compose_key_event, map_confirm_key_event, map_estimate_key_event, map_log_time_key_event,
     map_report_key_event, map_status_confirm_key_event, map_task_list_picker_key_event,
+    map_view_modal_key_event,
 };
 use model::DownloadOutcome;
 use ratatui::{backend::CrosstermBackend, Terminal};
@@ -151,6 +152,7 @@ fn assignee_picker_active(model: &Model) -> bool {
 ///
 /// Key routing priority (highest first):
 ///   0. hours-report modal (model-level, open on any screen) — digits, `-`, Tab, Enter, Esc, arrows
+///   0b. view modal (mine screen) — ↑/↓/Enter/Esc only
 ///   1. confirm sub-mode (delete-confirm modal open) — Enter/Esc only
 ///   2. compose sub-mode (comment compose open) — typed chars + Ctrl+S/Esc
 ///   3. log-time sub-mode (log-time modal open) — typed chars + Ctrl+S/Tab/Esc
@@ -172,8 +174,9 @@ type ModalActive = fn(&Model) -> bool;
 
 /// The modal owners of the keyboard, each with the mapper of its keys; at most one
 /// is active at a time, and no match leaves the browse map.
-const KEY_ROUTES: [(ModalActive, KeyMapper); 8] = [
+const KEY_ROUTES: [(ModalActive, KeyMapper); 9] = [
     (report_active, map_report_key_event),
+    (view_modal_active, map_view_modal_key_event),
     (confirm_active, map_confirm_key_event),
     (compose_active, map_compose_key_event),
     (log_time_active, map_log_time_key_event),
@@ -186,6 +189,11 @@ const KEY_ROUTES: [(ModalActive, KeyMapper); 8] = [
 /// Return true when the hours-report modal is open (on any screen).
 fn report_active(model: &Model) -> bool {
     model.report.is_some()
+}
+
+/// Return true when the view modal is open on the mine screen.
+fn view_modal_active(model: &Model) -> bool {
+    model.view_modal().is_some()
 }
 
 /// Handle a crossterm input event: map to a Msg, run update, and dispatch commands.

@@ -129,7 +129,7 @@
   "↑/↓ scroll  r refresh  Esc/b back  q quit": "↑/↓ rolar  r atualizar  Esc/b voltar  q sair",
   "Ctrl/Cmd+click to open": "Ctrl/Cmd+clique abrir anexo",
   "↑/↓ navigate  Enter select  r refresh  H report  Esc/b back  q quit": "↑/↓ navegar  Enter selecionar  r atualizar  H relatório  Esc/b voltar  q sair",
-  "↑/↓ navigate  Enter select  v kanban  r refresh  H report  Esc/b back  q quit": "↑/↓ mover  Enter abrir  v kanban  r atualizar  H relatório  Esc voltar  q sair",
+  "↑/↓ navigate  Enter select  v view  r refresh  H report  Esc/b back  q quit": "↑/↓ mover  Enter abrir  v visão  r atualizar  H relatório  Esc voltar  q sair",
   "footer.hint.selection": "s seleção",
   "footer.selection_indicator": "SELEÇÃO",
   "footer.copied_indicator": "COPIADO",
@@ -234,5 +234,11 @@
   "IN PROGRESS": "EM ANDAMENTO",
   "IN REVIEW": "EM REVISÃO",
   "READY FOR RELEASE": "PRONTO PARA RELEASE",
-  "←/→ column  ↑/↓ card  Enter open  v list  r refresh  H report  Esc/b back  q quit": "←/→ coluna  ↑/↓ cartão  Enter abrir  v lista  r atualizar  H relatório  Esc/b voltar  q sair"
+  "←/→ column  ↑/↓ card  Enter open  v view  r refresh  H report  q quit": "←/→ coluna  ↑/↓ cartão  Enter abrir  v visão  r atualizar  H relatório  q sair",
+  "↑/↓ card  ←/→ phase  Enter open  v view  r refresh  q quit": "↑/↓ card  ←/→ fase  Enter abrir  v visão  r atualizar  q sair",
+  "View": "Visão",
+  "Due-date list": "Lista por prazo",
+  "Horizontal kanban": "Kanban horizontal",
+  "Vertical kanban": "Kanban vertical",
+  "↑/↓ choose · Enter apply · Esc close": "↑/↓ escolher · Enter aplicar · Esc fechar"
 }

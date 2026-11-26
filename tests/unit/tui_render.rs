@@ -2913,6 +2913,7 @@ mod v2b_click_targets {
                 rendered_width: usize::MAX,
                 due_today: None,
                 kanban: None,
+                view_modal: None,
             }],
             should_quit: false,
             header: empty_header(),
@@ -3064,6 +3065,7 @@ mod v2b_click_targets {
                 rendered_width: usize::MAX,
                 due_today: None,
                 kanban: None,
+                view_modal: None,
             }],
             should_quit: false,
             header: empty_header(),
@@ -11398,7 +11400,7 @@ mod kanban_view_tests {
     use crate::render::buckets::due_bucket;
     use crate::render::MineTableRow;
     use crate::tui::events::map_browse_key_event;
-    use crate::tui::model::{init_mine_on, update, Header, Model, Screen};
+    use crate::tui::model::{init_mine_on, update, Header, MineView, Model, Msg, Screen};
     use crate::tui::view::view;
     use crossterm::event::{KeyCode, KeyEvent};
     use ratatui::{backend::TestBackend, Terminal};
@@ -11447,10 +11449,21 @@ mod kanban_view_tests {
         .0
     }
 
+    /// `v` on the mine screen, then the modal choice that swaps the due-date
+    /// list and the horizontal kanban; on the browse list `v` opens nothing.
     fn press_v(model: Model) -> Model {
         let mut model = model;
         if let Some(msg) = map_browse_key_event(KeyEvent::from(KeyCode::Char('v'))) {
             model = update(model, msg).0;
+        }
+        let swap = if model.view_modal() == Some(MineView::List) {
+            Msg::ViewModalDown
+        } else {
+            Msg::ViewModalUp
+        };
+        if model.view_modal().is_some() {
+            model = update(model, swap).0;
+            model = update(model, Msg::ViewModalApply).0;
         }
         model
     }
@@ -11666,7 +11679,9 @@ mod kanban_chrome_tests {
     }
 
     fn kanban(model: Model) -> Model {
-        update(model, Msg::ToggleMineView).0
+        let model = update(model, Msg::ViewModalOpen).0;
+        let model = update(model, Msg::ViewModalDown).0;
+        update(model, Msg::ViewModalApply).0
     }
 
     fn draw(model: &Model, width: u16, height: u16) -> String {
@@ -11678,11 +11693,11 @@ mod kanban_chrome_tests {
     }
 
     #[test]
-    fn kanban_hint_mine_list_footer_shows_the_way_into_the_kanban() {
+    fn kanban_hint_mine_list_footer_shows_the_way_into_the_view_modal() {
         let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         set_language("en");
         let screen = draw(&mine_model(false), 80, 24);
-        assert!(screen.contains("v kanban"), "{screen}");
+        assert!(screen.contains("v view"), "{screen}");
     }
 
     #[test]
@@ -11691,7 +11706,7 @@ mod kanban_chrome_tests {
         set_language("pt_BR");
         let screen = draw(&mine_model(false), 80, 24);
         set_language("en");
-        assert!(screen.contains("v kanban"), "{screen}");
+        assert!(screen.contains("v visão"), "{screen}");
         assert!(screen.contains("mover"), "{screen}");
     }
 
@@ -11704,15 +11719,16 @@ mod kanban_chrome_tests {
             *due_today = None;
         }
         let screen = draw(&model, 80, 24);
-        assert!(!screen.contains("v kanban"), "{screen}");
+        assert!(!screen.contains("v view"), "{screen}");
     }
 
     #[test]
-    fn kanban_hint_kanban_footer_still_offers_the_list() {
+    fn kanban_hint_kanban_footer_offers_the_view_modal() {
         let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         set_language("en");
         let screen = draw(&kanban(mine_model(false)), 80, 24);
-        assert!(screen.contains("v list"), "{screen}");
+        assert!(screen.contains("v view"), "{screen}");
+        assert!(!screen.contains("v list"), "{screen}");
     }
 
     #[test]
@@ -11736,15 +11752,19 @@ mod kanban_chrome_tests {
     }
 
     #[test]
-    fn kanban_hint_fits_eighty_columns_with_every_hint() {
+    fn mine_view_values_footers_fit_eighty_columns_in_both_languages() {
         let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
-        for (language, quit) in [("pt_BR", "q sair"), ("en", "q quit")] {
+        for (language, quit, view) in [("pt_BR", "q sair", "v visão"), ("en", "q quit", "v view")]
+        {
             set_language(language);
-            let screen = draw(&mine_model(false), 80, 24);
-            let footer = screen.lines().nth(23).unwrap_or_default().to_string();
+            let list = draw(&mine_model(false), 80, 24);
+            let boards = draw(&kanban(mine_model(false)), 80, 24);
             set_language("en");
-            assert!(footer.contains(quit), "{language}: {footer}");
-            assert!(footer.contains("v kanban"), "{language}: {footer}");
+            for screen in [list, boards] {
+                let footer = screen.lines().nth(23).unwrap_or_default().to_string();
+                assert!(footer.contains(quit), "{language}: {footer}");
+                assert!(footer.contains(view), "{language}: {footer}");
+            }
         }
     }
 
@@ -11839,7 +11859,9 @@ mod mine_refresh_frame_tests {
     fn mine_refresh_frame_kanban_shows_the_columns_with_the_marker_then_clears() {
         let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         set_language("en");
-        let kanban = update(settled_list(), Msg::ToggleMineView).0;
+        let kanban = update(settled_list(), Msg::ViewModalOpen).0;
+        let kanban = update(kanban, Msg::ViewModalDown).0;
+        let kanban = update(kanban, Msg::ViewModalApply).0;
         let (refreshing, _) = update(kanban, Msg::Refresh);
         let screen = draw(&refreshing);
         assert!(screen.contains("TO DO 1 ↻"), "{screen}");
@@ -11847,4 +11869,722 @@ mod mine_refresh_frame_tests {
         let after = draw(&loaded(refreshing));
         assert!(!after.contains('↻'), "{after}");
     }
+}
+
+mod view_modal_frame_tests {
+    use super::{buf_to_string, LANG_MUTEX};
+    use crate::board::Phase;
+    use crate::i18n::set_language;
+    use crate::render::MineTableRow;
+    use crate::tui::events::map_browse_key_event;
+    use crate::tui::model::{init_mine_on, update, Cmd, Header, MineView, Model, Msg, Screen};
+    use crate::tui::view::view;
+    use crossterm::event::{KeyCode, KeyEvent};
+    use ratatui::{backend::TestBackend, Terminal};
+
+    fn today() -> chrono::NaiveDate {
+        chrono::NaiveDate::from_ymd_opt(2026, 11, 25).unwrap()
+    }
+
+    fn row() -> MineTableRow {
+        MineTableRow {
+            instance: "inst".into(),
+            project_id: 1,
+            task_number: 1,
+            task_id: 1,
+            name: "Alpha todo".into(),
+            due_on: None,
+            project_name: Some("Proj".into()),
+            estimate: None,
+            logged_week: None,
+            logged_total: None,
+            task_list_id: None,
+            task_list: None,
+            labels: vec![],
+            phase: Phase::ToDo,
+            flagged: false,
+        }
+    }
+
+    fn mine_model() -> Model {
+        init_mine_on(
+            Header::from_instances(&[], None),
+            Some(vec![row()]),
+            today(),
+        )
+        .0
+    }
+
+    fn press(model: Model, code: KeyCode) -> Model {
+        match map_browse_key_event(KeyEvent::from(code)) {
+            Some(msg) => update(model, msg).0,
+            None => model,
+        }
+    }
+
+    fn draw(model: &Model) -> String {
+        let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();
+        terminal
+            .draw(|frame| view(model, frame, &mut vec![], &mut vec![]))
+            .unwrap();
+        buf_to_string(terminal.backend().buffer())
+    }
+
+    #[test]
+    fn view_modal_opens_on_v_listing_the_three_views() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let screen = draw(&press(mine_model(), KeyCode::Char('v')));
+        for choice in ["Due-date list", "Horizontal kanban", "Vertical kanban"] {
+            assert!(screen.contains(choice), "{choice}\n{screen}");
+        }
+    }
+
+    /// One key through the shell's routing, as the event loop does.
+    fn send(model: Model, code: KeyCode) -> (Model, Vec<Cmd>) {
+        match crate::tui::route_key_event(&model, KeyEvent::from(code)) {
+            Some(msg) => update(model, msg),
+            None => (model, vec![]),
+        }
+    }
+
+    fn send_all(model: Model, codes: &[KeyCode]) -> (Model, Vec<Cmd>) {
+        codes
+            .iter()
+            .fold((model, vec![]), |(m, _), code| send(m, *code))
+    }
+
+    fn highlighted_line(screen: &str) -> String {
+        screen
+            .lines()
+            .find(|l| l.contains("│> "))
+            .unwrap_or_default()
+            .to_string()
+    }
+
+    #[test]
+    fn view_modal_preselects_the_current_view() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let opened = send(mine_model(), KeyCode::Char('v')).0;
+        let screen = draw(&opened);
+        assert!(
+            highlighted_line(&screen).contains("Due-date list"),
+            "{screen}"
+        );
+        let (vertical, _) = send_all(
+            opened,
+            &[
+                KeyCode::Down,
+                KeyCode::Down,
+                KeyCode::Enter,
+                KeyCode::Char('v'),
+            ],
+        );
+        let screen = draw(&vertical);
+        assert!(
+            highlighted_line(&screen).contains("Vertical kanban"),
+            "{screen}"
+        );
+    }
+
+    #[test]
+    fn view_modal_enter_applies_the_highlighted_view_and_saves_it() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let (model, cmds) = send_all(
+            mine_model(),
+            &[
+                KeyCode::Char('v'),
+                KeyCode::Down,
+                KeyCode::Down,
+                KeyCode::Enter,
+            ],
+        );
+        assert_eq!(cmds, vec![Cmd::SaveMineView(MineView::KanbanVertical)]);
+        assert_eq!(model.view_modal(), None);
+        let screen = draw(&model);
+        assert!(screen.contains("←/→ phase"), "{screen}");
+        assert!(!screen.contains("Due-date list"), "{screen}");
+    }
+
+    #[test]
+    fn view_modal_esc_closes_without_a_change_or_a_save() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let before = draw(&mine_model());
+        let (model, cmds) = send_all(
+            mine_model(),
+            &[KeyCode::Char('v'), KeyCode::Down, KeyCode::Esc],
+        );
+        assert!(cmds.is_empty());
+        assert_eq!(model.view_modal(), None);
+        assert_eq!(draw(&model), before);
+    }
+
+    #[test]
+    fn view_modal_keeps_other_keys_from_the_screen_behind() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let open = send(mine_model(), KeyCode::Char('v')).0;
+        let before = draw(&open);
+        let (after, cmds) = send_all(
+            open,
+            &[
+                KeyCode::Char('r'),
+                KeyCode::Left,
+                KeyCode::Right,
+                KeyCode::Char('q'),
+                KeyCode::Char('v'),
+                KeyCode::Char('H'),
+            ],
+        );
+        assert!(cmds.is_empty());
+        assert!(!after.should_quit);
+        assert_eq!(draw(&after), before);
+    }
+
+    #[test]
+    fn view_modal_ignores_pointer_and_scroll_messages_behind_it() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let open = send(mine_model(), KeyCode::Char('v')).0;
+        let before = draw(&open);
+        let (after, cmds) = [Msg::Refresh, Msg::ScrollDown, Msg::Select]
+            .into_iter()
+            .fold((open, vec![]), |(m, _), msg| update(m, msg));
+        assert!(cmds.is_empty());
+        assert_eq!(draw(&after), before);
+    }
+
+    #[test]
+    fn view_modal_ignores_clicks_on_the_list_card_behind_it() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let selected = |model: &Model| match model.stack.last() {
+            Some(Screen::Tasks { selected, .. }) => *selected,
+            other => panic!("expected the mine list, got {other:?}"),
+        };
+        let drawn = || {
+            let second = MineTableRow {
+                task_number: 2,
+                task_id: 2,
+                name: "Bravo todo".into(),
+                ..row()
+            };
+            let mut model = init_mine_on(
+                Header::from_instances(&[], None),
+                Some(vec![row(), second]),
+                today(),
+            )
+            .0;
+            model.reflow_tasks(crate::tui::task_layout::inner_w(120));
+            let mut targets = vec![];
+            Terminal::new(TestBackend::new(120, 30))
+                .unwrap()
+                .draw(|frame| view(&model, frame, &mut targets, &mut vec![]))
+                .unwrap();
+            let second = targets.iter().find(|t| t.index == 1).map(|t| t.y_start);
+            model.set_click_targets(targets);
+            (model, second.expect("second card"))
+        };
+        let click = |row| Msg::Click {
+            column: 5,
+            row,
+            modifiers: crossterm::event::KeyModifiers::NONE,
+        };
+        let (model, row) = drawn();
+        let (_, control) = update(model, click(row));
+        assert!(
+            !control.is_empty(),
+            "a click opens a card without the modal"
+        );
+
+        let (model, row) = drawn();
+        let open = update(model, Msg::ViewModalOpen).0;
+        let (after, cmds) = update(open, click(row));
+        assert!(cmds.is_empty());
+        assert!(after.view_modal().is_some());
+        assert_eq!(selected(&after), 0);
+    }
+
+    #[test]
+    fn view_modal_reads_in_portuguese() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("pt_BR");
+        let screen = draw(&press(mine_model(), KeyCode::Char('v')));
+        set_language("en");
+        for text in [
+            "Visão",
+            "Lista por prazo",
+            "Kanban horizontal",
+            "Kanban vertical",
+        ] {
+            assert!(screen.contains(text), "{text}\n{screen}");
+        }
+    }
+
+    #[test]
+    fn view_modal_does_not_open_on_the_browse_task_list() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let mut model = mine_model();
+        if let Some(Screen::Tasks { due_today, .. }) = model.stack.last_mut() {
+            *due_today = None;
+        }
+        let screen = draw(&press(model, KeyCode::Char('v')));
+        assert!(!screen.contains("Due-date list"), "{screen}");
+    }
+}
+
+mod kanban_vertical_frame_tests {
+    use super::{buf_to_string, LANG_MUTEX};
+    use crate::board::Phase;
+    use crate::i18n::set_language;
+    use crate::render::MineTableRow;
+    use crate::tui::model::{init_mine_in_view, update, Header, MineView, Model, Msg};
+    use crate::tui::theme;
+    use crate::tui::view::view;
+    use ratatui::{backend::TestBackend, Terminal};
+
+    fn today() -> chrono::NaiveDate {
+        chrono::NaiveDate::from_ymd_opt(2026, 11, 25).unwrap()
+    }
+
+    fn row(id: i64, name: &str, phase: Phase, flagged: bool) -> MineTableRow {
+        MineTableRow {
+            instance: "inst".into(),
+            project_id: 1,
+            task_number: id,
+            task_id: id,
+            name: name.into(),
+            due_on: None,
+            project_name: Some("Proj".into()),
+            estimate: None,
+            logged_week: None,
+            logged_total: None,
+            task_list_id: None,
+            task_list: None,
+            labels: vec![],
+            phase,
+            flagged,
+        }
+    }
+
+    fn rows() -> Vec<MineTableRow> {
+        vec![
+            row(1, "Alpha todo", Phase::ToDo, false),
+            row(2, "Bravo todo", Phase::ToDo, true),
+            row(3, "Charlie todo", Phase::ToDo, false),
+            row(4, "Delta doing", Phase::InProgress, false),
+            row(5, "Echo ready", Phase::ReadyForRelease, false),
+            row(6, "Foxtrot ready", Phase::ReadyForRelease, false),
+            row(7, "Golf ready", Phase::ReadyForRelease, false),
+            row(8, "Hotel ready", Phase::ReadyForRelease, false),
+            row(9, "India ready", Phase::ReadyForRelease, false),
+            row(10, "Juliet ready", Phase::ReadyForRelease, false),
+        ]
+    }
+
+    fn vertical() -> Model {
+        init_mine_in_view(
+            Header::from_instances(&[], None),
+            Some(rows()),
+            today(),
+            MineView::KanbanVertical,
+        )
+        .0
+    }
+
+    fn settled(model: Model) -> Model {
+        update(
+            model,
+            Msg::LoadedMineTasks {
+                rows: rows(),
+                loaded_at: "2026-11-25T10:00:00".into(),
+            },
+        )
+        .0
+    }
+
+    fn draw(model: &Model, width: u16, height: u16) -> String {
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        terminal
+            .draw(|frame| view(model, frame, &mut vec![], &mut vec![]))
+            .unwrap();
+        buf_to_string(terminal.backend().buffer())
+    }
+
+    fn line_of(screen: &str, needle: &str) -> usize {
+        screen
+            .lines()
+            .position(|line| line.contains(needle))
+            .unwrap_or_else(|| panic!("{needle} missing\n{screen}"))
+    }
+
+    fn column_of(screen: &str, needle: &str) -> usize {
+        screen
+            .lines()
+            .find_map(|line| line.find(needle).map(|byte| line[..byte].chars().count()))
+            .unwrap_or_else(|| panic!("{needle} missing\n{screen}"))
+    }
+
+    #[test]
+    fn kanban_vertical_frame_draws_one_header_per_phase_top_to_bottom() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let screen = draw(&settled(vertical()), 120, 30);
+        let headers = [
+            "TO DO 3",
+            "IN PROGRESS 1",
+            "IN REVIEW 0",
+            "READY FOR RELEASE 6",
+        ];
+        let rows: Vec<usize> = headers.iter().map(|h| line_of(&screen, h)).collect();
+        assert!(rows.windows(2).all(|pair| pair[0] < pair[1]), "{screen}");
+        assert!(
+            headers.iter().all(|h| column_of(&screen, h) < 8),
+            "{screen}"
+        );
+    }
+
+    #[test]
+    fn kanban_vertical_frame_stacks_the_cards_of_a_phase_under_its_header() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let screen = draw(&settled(vertical()), 120, 30);
+        let order = [
+            "TO DO 3",
+            "Alpha todo",
+            "Bravo todo",
+            "Charlie todo",
+            "IN PROGRESS 1",
+            "Delta doing",
+            "IN REVIEW 0",
+            "READY FOR RELEASE 6",
+        ];
+        let rows: Vec<usize> = order.iter().map(|text| line_of(&screen, text)).collect();
+        assert!(rows.windows(2).all(|pair| pair[0] < pair[1]), "{screen}");
+        let names = ["Alpha todo", "Bravo todo", "Charlie todo"];
+        let columns: Vec<usize> = names.iter().map(|n| column_of(&screen, n)).collect();
+        assert!(
+            columns.windows(2).all(|pair| pair[0] == pair[1]),
+            "{screen}"
+        );
+    }
+
+    #[test]
+    fn kanban_vertical_frame_empty_phase_shows_its_header_and_zero_with_no_card() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let screen = draw(&settled(vertical()), 120, 30);
+        let review = line_of(&screen, "IN REVIEW 0");
+        let lines: Vec<&str> = screen.lines().collect();
+        assert!(!lines[review + 1].contains("Task"), "{screen}");
+        assert!(lines[review + 2].contains('└'), "{screen}");
+        assert_eq!(
+            line_of(&screen, "READY FOR RELEASE 6"),
+            review + 4,
+            "{screen}"
+        );
+    }
+
+    fn box_rows() -> Vec<MineTableRow> {
+        vec![
+            row(1, "Alpha todo", Phase::ToDo, true),
+            row(2, "Bravo todo", Phase::ToDo, false),
+            row(3, "Delta doing", Phase::InProgress, false),
+            row(4, "Echo ready", Phase::ReadyForRelease, false),
+            row(5, "Foxtrot ready", Phase::ReadyForRelease, false),
+        ]
+    }
+
+    fn boxes(width: u16, height: u16) -> (String, ratatui::buffer::Buffer) {
+        let model = init_mine_in_view(
+            Header::from_instances(&[], None),
+            Some(box_rows()),
+            today(),
+            MineView::KanbanVertical,
+        )
+        .0;
+        let model = update(
+            model,
+            Msg::LoadedMineTasks {
+                rows: box_rows(),
+                loaded_at: "2026-11-25T10:00:00".into(),
+            },
+        )
+        .0;
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        terminal
+            .draw(|frame| view(&model, frame, &mut vec![], &mut vec![]))
+            .unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        (buf_to_string(&buffer), buffer)
+    }
+
+    #[test]
+    fn vertical_boxes_carry_the_phase_title_and_count_in_the_top_border() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        for (width, height) in [(100, 30), (80, 24)] {
+            let (screen, _) = boxes(width, height);
+            for title in ["TO DO 2", "IN PROGRESS 1", "IN REVIEW 0"] {
+                let line = screen.lines().nth(line_of(&screen, title)).unwrap();
+                assert!(line.contains('┌') && line.contains('┐'), "{screen}");
+            }
+        }
+    }
+
+    #[test]
+    fn vertical_boxes_separate_the_cards_with_a_dashed_line_and_no_card_corners() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let (screen, _) = boxes(100, 30);
+        let lines: Vec<&str> = screen.lines().collect();
+        let (alpha, bravo) = (
+            line_of(&screen, "Alpha todo"),
+            line_of(&screen, "Bravo todo"),
+        );
+        let between = &lines[alpha..bravo];
+        assert_eq!(
+            between.iter().filter(|l| l.contains('┄')).count(),
+            1,
+            "{screen}"
+        );
+        assert!(
+            between.iter().all(|l| !l.contains('┌') && !l.contains('└')),
+            "{screen}"
+        );
+        let todo = line_of(&screen, "TO DO 2");
+        let progress = line_of(&screen, "IN PROGRESS 1");
+        assert_eq!(
+            lines[todo..progress]
+                .iter()
+                .filter(|l| l.contains('┄'))
+                .count(),
+            1,
+            "{screen}"
+        );
+    }
+
+    #[test]
+    fn vertical_boxes_draw_an_empty_phase_with_both_borders_and_no_card() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let (screen, _) = boxes(100, 30);
+        let lines: Vec<&str> = screen.lines().collect();
+        let review = line_of(&screen, "IN REVIEW 0");
+        assert!(lines[review + 2].contains('└'), "{screen}");
+        assert!(!lines[review + 1].contains("ready"), "{screen}");
+        let interior = |line: &str| {
+            let chars: Vec<char> = line.chars().collect();
+            chars[1..chars.len() - 1].iter().collect::<String>()
+        };
+        assert!(interior(lines[review + 3]).trim().is_empty(), "{screen}");
+        assert!(interior(lines[review - 1]).trim().is_empty(), "{screen}");
+        assert!(lines[review - 2].contains('└'), "{screen}");
+    }
+
+    #[test]
+    fn vertical_boxes_mark_the_flag_and_highlight_only_the_selected_card() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let (screen, buffer) = boxes(100, 30);
+        assert_eq!(screen.matches('⚑').count(), 1, "{screen}");
+        let background = |needle: &str| {
+            let y = line_of(&screen, needle);
+            let x = column_of(&screen, needle);
+            buffer.cell((x as u16, y as u16)).unwrap().bg
+        };
+        assert_ne!(
+            background("Alpha todo"),
+            background("Bravo todo"),
+            "{screen}"
+        );
+    }
+
+    #[test]
+    fn vertical_boxes_keep_the_selected_card_on_screen_and_cut_the_box_at_the_edge() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let model = (0..4).fold(settled(vertical()), |m, _| update(m, Msg::Down).0);
+        let screen = draw(&model, 100, 14);
+        assert!(screen.contains("Echo ready"), "{screen}");
+        assert!(!screen.contains("Alpha todo"), "{screen}");
+        assert!(!screen.contains("TO DO"), "{screen}");
+        let lines: Vec<&str> = screen.lines().collect();
+        // The scrollbar owns the bottom-right corner cell, so the border is
+        // checked from its corner up to the last cell before it.
+        let bottom: Vec<char> = lines[lines.len() - 2].chars().collect();
+        assert_eq!(bottom[0], '└', "{screen}");
+        assert!(
+            bottom[1..bottom.len() - 1].iter().all(|&c| c == '─'),
+            "{screen}"
+        );
+    }
+
+    #[test]
+    fn kanban_vertical_frame_shows_a_long_name_at_full_width_without_an_overflow_count() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let long = "Y".repeat(70);
+        let model = init_mine_in_view(
+            Header::from_instances(&[], None),
+            Some(vec![row(1, &long, Phase::ToDo, false)]),
+            today(),
+            MineView::KanbanVertical,
+        )
+        .0;
+        let screen = draw(&model, 120, 30);
+        assert!(screen.contains(&long), "{screen}");
+        assert!(!screen.contains('+'), "{screen}");
+    }
+
+    #[test]
+    fn kanban_vertical_frame_marks_the_flagged_card_and_the_revalidating_first_header() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let revalidating = draw(&vertical(), 120, 30);
+        assert_eq!(revalidating.matches('⚑').count(), 1, "{revalidating}");
+        assert!(revalidating.contains("TO DO 3 ↻"), "{revalidating}");
+        assert_eq!(revalidating.matches('↻').count(), 1, "{revalidating}");
+        let settled = draw(&settled(vertical()), 120, 30);
+        assert!(!settled.contains('↻'), "{settled}");
+    }
+
+    #[test]
+    fn kanban_vertical_frame_footer_reads_the_vertical_hints_within_eighty_columns() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        for (language, hint) in [
+            (
+                "en",
+                "↑/↓ card  ←/→ phase  Enter open  v view  r refresh  q quit",
+            ),
+            (
+                "pt_BR",
+                "↑/↓ card  ←/→ fase  Enter abrir  v visão  r atualizar  q sair",
+            ),
+        ] {
+            set_language(language);
+            let screen = draw(&vertical(), 80, 24);
+            set_language("en");
+            let footer = screen.lines().nth(23).unwrap_or_default().to_string();
+            assert!(footer.contains(hint), "{language}: {footer}");
+        }
+    }
+
+    #[test]
+    fn kanban_vertical_navigation_scrolls_to_keep_the_selected_card_drawn() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let before = draw(&settled(vertical()), 80, 12);
+        assert!(before.contains("Alpha todo"), "{before}");
+        assert!(!before.contains("Juliet ready"), "{before}");
+        let model = (0..9).fold(settled(vertical()), |m, _| update(m, Msg::Down).0);
+        let screen = draw(&model, 80, 12);
+        assert!(screen.contains("Juliet ready"), "{screen}");
+        assert!(!screen.contains("Alpha todo"), "{screen}");
+    }
+
+    #[test]
+    fn kanban_vertical_frame_cards_are_drawn_at_the_minimum_width() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let screen = draw(&settled(vertical()), 80, 24);
+        assert!(screen.contains("Alpha todo"), "{screen}");
+    }
+
+    fn due_rows() -> Vec<MineTableRow> {
+        let mut overdue = row(1, "Overdue task", Phase::ToDo, false);
+        overdue.due_on = Some("2026-11-20".into());
+        let mut near = row(2, "Near task", Phase::ToDo, false);
+        near.due_on = Some("2026-11-27".into());
+        let undated = row(3, "Undated task", Phase::ToDo, false);
+        vec![overdue, near, undated]
+    }
+
+    /// The foreground of the last due-text cell and of the first project cell
+    /// on the row that holds `name`'s due line (two rows below the title).
+    fn due_and_project_fg(
+        buffer: &ratatui::buffer::Buffer,
+        screen: &str,
+        name: &str,
+    ) -> (Option<ratatui::style::Color>, Option<ratatui::style::Color>) {
+        let y = line_of(screen, name) + 2;
+        let line = screen.lines().nth(y).unwrap();
+        let project = line[..line.find("Proj").unwrap()].chars().count();
+        let fg = |x: usize| buffer.cell((x as u16, y as u16)).unwrap().style().fg;
+        (fg(project - 4), fg(project))
+    }
+
+    #[test]
+    fn vertical_due_line_colours_only_the_due_text() {
+        let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        set_language("en");
+        let model = init_mine_in_view(
+            Header::from_instances(&[], None),
+            Some(due_rows()),
+            today(),
+            MineView::KanbanVertical,
+        )
+        .0;
+        let model = update(
+            model,
+            Msg::LoadedMineTasks {
+                rows: due_rows(),
+                loaded_at: "2026-11-25T10:00:00".into(),
+            },
+        )
+        .0;
+        let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
+        terminal
+            .draw(|frame| view(&model, frame, &mut vec![], &mut vec![]))
+            .unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        let screen = buf_to_string(&buffer);
+
+        let (due, project) = due_and_project_fg(&buffer, &screen, "Overdue task");
+        assert_eq!(due, Some(theme::ANGIE_DARK.danger), "{screen}");
+        assert_ne!(project, Some(theme::ANGIE_DARK.danger), "{screen}");
+        let (due, project) = due_and_project_fg(&buffer, &screen, "Near task");
+        assert_eq!(due, Some(theme::ANGIE_DARK.warning), "{screen}");
+        assert_ne!(project, Some(theme::ANGIE_DARK.warning), "{screen}");
+        let (due, project) = due_and_project_fg(&buffer, &screen, "Undated task");
+        for fg in [due, project] {
+            assert_ne!(fg, Some(theme::ANGIE_DARK.danger), "{screen}");
+            assert_ne!(fg, Some(theme::ANGIE_DARK.warning), "{screen}");
+        }
+    }
+}
+
+#[test]
+fn vertical_due_line_leaves_the_list_frame_unchanged() {
+    let _guard = LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+    set_language("en");
+    let mut overdue = make_tasks(&["Overdue task", "Plain task"]);
+    overdue[0].due_on = Some("2025-06-10".into());
+    overdue[0].project_name = Some("Proj".into());
+    let buf = render_tasks_to_buf(&overdue, 0, 40, 14);
+    let rows: Vec<String> = buf_to_string(&buf)
+        .lines()
+        .map(|l| l.trim_end().to_string())
+        .collect();
+    let expected = [
+        "┌ Project A ───────────────────────────┐",
+        "│┌────────────────────────────────────┐│",
+        "││ #1 Overdue task                    ││",
+        "││ est – · week – · total –           ││",
+        "││ due_overdue 5 due_days · Proj      ││",
+        "│└────────────────────────────────────┘│",
+        "│┌────────────────────────────────────┐│",
+        "││ #2 Plain task                      ││",
+        "││ est – · week – · total –           ││",
+        "││ due_none                           ││",
+        "│└────────────────────────────────────┘│",
+        "│                                      │",
+        "│                                      │",
+        "└──────────────────────────────────────┘",
+    ];
+    assert_eq!(rows, expected);
 }

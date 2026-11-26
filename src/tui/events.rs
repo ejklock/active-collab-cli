@@ -53,7 +53,7 @@ fn map_action_key(code: KeyCode) -> Option<Msg> {
         KeyCode::Char('s') => Some(Msg::StatusToggleOpen),
         KeyCode::Char('a') => Some(Msg::AssigneePickerOpen),
         KeyCode::Char('l') => Some(Msg::TaskListPickerOpen),
-        KeyCode::Char('v') => Some(Msg::ToggleMineView),
+        KeyCode::Char('v') => Some(Msg::ViewModalOpen),
         KeyCode::Char('H') => Some(Msg::ReportOpen),
         KeyCode::Char('D') => Some(Msg::DownloadAttachments),
         _ => None,
@@ -115,6 +115,20 @@ pub fn map_report_key_event(key: crossterm::event::KeyEvent) -> Option<Msg> {
         KeyCode::Down => Some(Msg::ReportDown),
         KeyCode::Left | KeyCode::Right => Some(Msg::ReportToggleFormat),
         KeyCode::Char(c) => Some(Msg::ReportChar(c)),
+        _ => None,
+    }
+}
+
+/// Map a key event when the view modal is open.
+///
+/// ↑/↓ move the highlighted view; Enter applies it; Esc closes without a
+/// change. Every other key is consumed so it never reaches the screen behind.
+pub fn map_view_modal_key_event(key: crossterm::event::KeyEvent) -> Option<Msg> {
+    match key.code {
+        KeyCode::Up => Some(Msg::ViewModalUp),
+        KeyCode::Down => Some(Msg::ViewModalDown),
+        KeyCode::Enter => Some(Msg::ViewModalApply),
+        KeyCode::Esc => Some(Msg::ViewModalClose),
         _ => None,
     }
 }

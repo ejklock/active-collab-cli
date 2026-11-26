@@ -97,34 +97,68 @@ pub enum MineView {
     /// Grouped under due-date bucket headers.
     #[default]
     List,
-    /// One column per board phase.
-    Kanban,
+    /// One column per board phase, side by side, cards stacked.
+    KanbanHorizontal,
+    /// One list grouped by board phase: a bordered box per phase with its cards
+    /// stacked inside.
+    KanbanVertical,
 }
 
 impl MineView {
+    /// Every view, in the order the view modal lists them.
+    pub const ALL: [MineView; 3] = [
+        MineView::List,
+        MineView::KanbanHorizontal,
+        MineView::KanbanVertical,
+    ];
+
     /// The value stored in the settings.
     pub fn setting(self) -> &'static str {
         match self {
             MineView::List => "list",
-            MineView::Kanban => "kanban",
+            MineView::KanbanHorizontal => "kanban_horizontal",
+            MineView::KanbanVertical => "kanban_vertical",
         }
     }
 
-    /// The view a stored setting names; an absent or unknown value is the list.
+    /// The view a stored setting names; an absent or unknown value is the list,
+    /// and the plain `kanban` an earlier version stored is the horizontal one.
     pub fn from_setting(value: Option<&str>) -> Self {
         match value {
-            Some("kanban") => MineView::Kanban,
+            Some("kanban" | "kanban_horizontal") => MineView::KanbanHorizontal,
+            Some("kanban_vertical") => MineView::KanbanVertical,
             _ => MineView::List,
+        }
+    }
+
+    /// The kanban layout this view draws; `None` for the list.
+    fn layout(self) -> Option<KanbanLayout> {
+        match self {
+            MineView::List => None,
+            MineView::KanbanHorizontal => Some(KanbanLayout::Horizontal),
+            MineView::KanbanVertical => Some(KanbanLayout::Vertical),
         }
     }
 }
 
-/// Where the kanban's focus sits: the focused column and, per column, the
-/// selected card (an index into that column's cards).
+/// How the kanban arranges the phases.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum KanbanLayout {
+    /// Phases are columns side by side.
+    #[default]
+    Horizontal,
+    /// Phases are sections of one list, top to bottom.
+    Vertical,
+}
+
+/// Where the kanban's focus sits: the focused phase and, per phase, the
+/// selected card (an index into that phase's cards). `column` is the phase
+/// index whichever way the phases are drawn.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct KanbanFocus {
     pub column: usize,
     pub cards: [usize; 4],
+    pub layout: KanbanLayout,
 }
 
 /// The indices into `tasks` of each column's cards, in `Phase::ALL` order and
@@ -139,6 +173,26 @@ pub fn kanban_columns(tasks: &[TaskRow]) -> [Vec<usize>; 4] {
     columns
 }
 
+/// The nearest phase after (`forward`) or before `from` that has cards.
+fn populated_phase(columns: &[Vec<usize>; 4], from: usize, forward: bool) -> Option<usize> {
+    let populated = |phase: &usize| !columns[*phase].is_empty();
+    if forward {
+        (from + 1..columns.len()).find(populated)
+    } else {
+        (0..from).rev().find(populated)
+    }
+}
+
+/// The card a move into a phase of `len` cards lands on: its first card going
+/// forward, its last going back.
+fn entering_card(len: usize, forward: bool) -> usize {
+    if forward {
+        0
+    } else {
+        len.saturating_sub(1)
+    }
+}
+
 impl KanbanFocus {
     /// Focus on the first column that holds a card, else the first column.
     fn first_populated(tasks: &[TaskRow]) -> Self {
@@ -149,6 +203,15 @@ impl KanbanFocus {
         Self {
             column,
             cards: [0; 4],
+            layout: KanbanLayout::default(),
+        }
+    }
+
+    /// The view this focus is drawn in.
+    fn view(&self) -> MineView {
+        match self.layout {
+            KanbanLayout::Horizontal => MineView::KanbanHorizontal,
+            KanbanLayout::Vertical => MineView::KanbanVertical,
         }
     }
 
@@ -184,6 +247,30 @@ impl KanbanFocus {
         } else {
             self.column.saturating_sub(1)
         };
+    }
+
+    /// Move the selection to the next or previous card of the whole list,
+    /// crossing from one phase into the next phase that has cards; at the very
+    /// first or last card it stays.
+    fn step_through(&mut self, tasks: &[TaskRow], forward: bool) {
+        let before = self.cards[self.column];
+        self.step_card(tasks, forward);
+        if self.cards[self.column] != before {
+            return;
+        }
+        let columns = kanban_columns(tasks);
+        if let Some(phase) = populated_phase(&columns, self.column, forward) {
+            self.column = phase;
+            self.cards[phase] = entering_card(columns[phase].len(), forward);
+        }
+    }
+
+    /// Jump to the first card of the next or previous phase that has cards.
+    fn jump_phase(&mut self, tasks: &[TaskRow], forward: bool) {
+        if let Some(phase) = populated_phase(&kanban_columns(tasks), self.column, forward) {
+            self.column = phase;
+            self.cards[phase] = 0;
+        }
     }
 
     fn step_card(&mut self, tasks: &[TaskRow], forward: bool) {
@@ -928,6 +1015,9 @@ pub enum Screen {
         /// `Some` shows the tasks as a kanban of board phases with this focus; `None`
         /// shows the list. Only the mine screen (`due_today` set) ever holds `Some`.
         kanban: Option<KanbanFocus>,
+        /// `Some` while the view modal is open: the highlighted choice. Only the mine
+        /// screen (`due_today` set) ever holds `Some`.
+        view_modal: Option<MineView>,
     },
     Detail {
         instance: String,
@@ -1124,11 +1214,21 @@ pub struct Model {
 pub enum Msg {
     Up,
     Down,
-    /// `v`: switch the mine screen between the due-date list and the kanban.
-    ToggleMineView,
-    /// ←: move the kanban's column focus one column left.
+    /// `v`: open the view modal on the mine screen.
+    ViewModalOpen,
+    /// ↑ in the view modal: highlight the previous view.
+    ViewModalUp,
+    /// ↓ in the view modal: highlight the next view.
+    ViewModalDown,
+    /// Enter in the view modal: show the highlighted view and close.
+    ViewModalApply,
+    /// Esc in the view modal: close without changing the view.
+    ViewModalClose,
+    /// ←: move the kanban's focus one column left, or to the previous phase in
+    /// the vertical kanban.
     ColumnLeft,
-    /// →: move the kanban's column focus one column right.
+    /// →: move the kanban's focus one column right, or to the next phase in the
+    /// vertical kanban.
     ColumnRight,
     ScrollUp,
     ScrollDown,
@@ -1388,6 +1488,14 @@ impl Model {
         self.stack.last()
     }
 
+    /// The view modal's highlighted choice while it is open on the top screen.
+    pub fn view_modal(&self) -> Option<MineView> {
+        match self.top() {
+            Some(Screen::Tasks { view_modal, .. }) => *view_modal,
+            _ => None,
+        }
+    }
+
     fn top_mut(&mut self) -> Option<&mut Screen> {
         self.stack.last_mut()
     }
@@ -1495,6 +1603,13 @@ impl Model {
 /// Dispatches to family sub-handlers to keep each function within the
 /// cyclomatic-complexity budget (≤ 10).
 pub fn update(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
+    if model.view_modal().is_some() && behind_view_modal(&msg) {
+        return (model, vec![]);
+    }
+    update_by_family(model, msg)
+}
+
+fn update_by_family(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
     match msg {
         m @ (Msg::Up
         | Msg::ScrollUp
@@ -1509,7 +1624,11 @@ pub fn update(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
         | Msg::Back
         | Msg::Quit
         | Msg::Refresh
-        | Msg::ToggleMineView
+        | Msg::ViewModalOpen
+        | Msg::ViewModalUp
+        | Msg::ViewModalDown
+        | Msg::ViewModalApply
+        | Msg::ViewModalClose
         | Msg::ColumnLeft
         | Msg::ColumnRight) => update_navigation(model, m),
         m @ (Msg::LoadedTasksByProject { .. }
@@ -1733,9 +1852,19 @@ fn update_navigation(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
         Msg::Back => (handle_back(model), vec![]),
         Msg::Quit => (handle_quit(model), vec![]),
         Msg::Refresh => handle_refresh(model),
-        Msg::ToggleMineView => handle_toggle_mine_view(model),
-        Msg::ColumnLeft => (move_kanban_column(model, false), vec![]),
-        Msg::ColumnRight => (move_kanban_column(model, true), vec![]),
+        Msg::ColumnLeft => (move_kanban(model, false, false), vec![]),
+        Msg::ColumnRight => (move_kanban(model, false, true), vec![]),
+        m => update_view_modal(model, m),
+    }
+}
+
+fn update_view_modal(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
+    match msg {
+        Msg::ViewModalOpen => (open_view_modal(model), vec![]),
+        Msg::ViewModalUp => (move_view_modal(model, false), vec![]),
+        Msg::ViewModalDown => (move_view_modal(model, true), vec![]),
+        Msg::ViewModalApply => apply_view_modal(model),
+        Msg::ViewModalClose => (close_view_modal(model), vec![]),
         _ => (model, vec![]),
     }
 }
@@ -1877,47 +2006,110 @@ fn update_task_list_picker(model: Model, msg: Msg) -> (Model, Vec<Cmd>) {
     }
 }
 
-/// Switch the mine screen between the list and the kanban and ask the shell to
-/// remember the choice; a no-op on every other screen.
-fn handle_toggle_mine_view(mut model: Model) -> (Model, Vec<Cmd>) {
-    let Some(Screen::Tasks {
-        tasks,
+/// Messages that must not reach the screen behind the open view modal: they
+/// would move or reload it while the modal owns the keyboard and the pointer.
+fn behind_view_modal(msg: &Msg) -> bool {
+    matches!(
+        msg,
+        Msg::Up
+            | Msg::Down
+            | Msg::ScrollUp
+            | Msg::ScrollDown
+            | Msg::PageUp
+            | Msg::PageDown
+            | Msg::Click { .. }
+            | Msg::Drag { .. }
+            | Msg::MouseUp { .. }
+            | Msg::Select
+            | Msg::Back
+            | Msg::Refresh
+            | Msg::ColumnLeft
+            | Msg::ColumnRight
+            | Msg::ViewModalOpen
+    )
+}
+
+/// Open the view modal on the mine screen with the current view highlighted;
+/// a no-op on every other screen.
+fn open_view_modal(mut model: Model) -> Model {
+    if let Some(Screen::Tasks {
         due_today: Some(_),
         kanban,
+        view_modal,
+        ..
+    }) = model.top_mut()
+    {
+        *view_modal = Some(kanban.as_ref().map_or(MineView::List, KanbanFocus::view));
+    }
+    model
+}
+
+/// Highlight the previous or next view, stopping at the ends of the list.
+fn move_view_modal(mut model: Model, forward: bool) -> Model {
+    if let Some(Screen::Tasks {
+        view_modal: Some(choice),
+        ..
+    }) = model.top_mut()
+    {
+        let at = MineView::ALL.iter().position(|v| v == choice).unwrap_or(0);
+        let next = if forward {
+            (at + 1).min(MineView::ALL.len() - 1)
+        } else {
+            at.saturating_sub(1)
+        };
+        *choice = MineView::ALL[next];
+    }
+    model
+}
+
+fn close_view_modal(mut model: Model) -> Model {
+    if let Some(Screen::Tasks { view_modal, .. }) = model.top_mut() {
+        *view_modal = None;
+    }
+    model
+}
+
+/// Show the highlighted view, close the modal and ask the shell to remember
+/// the choice. A kanban keeps the focus it already has, so switching between
+/// the two layouts leaves the same card selected.
+fn apply_view_modal(mut model: Model) -> (Model, Vec<Cmd>) {
+    let Some(Screen::Tasks {
+        tasks,
+        kanban,
+        view_modal,
         ..
     }) = model.top_mut()
     else {
         return (model, vec![]);
     };
-    let view = if kanban.is_some() {
-        *kanban = None;
-        MineView::List
-    } else {
-        *kanban = Some(KanbanFocus::first_populated(tasks));
-        MineView::Kanban
+    let Some(view) = view_modal.take() else {
+        return (model, vec![]);
     };
+    *kanban = view.layout().map(|layout| KanbanFocus {
+        layout,
+        ..kanban.unwrap_or_else(|| KanbanFocus::first_populated(tasks))
+    });
     (model, vec![Cmd::SaveMineView(view)])
 }
 
-fn move_kanban_column(mut model: Model, forward: bool) -> Model {
-    if let Some(Screen::Tasks {
-        kanban: Some(focus),
-        ..
-    }) = model.top_mut()
-    {
-        focus.step_column(forward);
-    }
-    model
-}
-
-fn move_kanban_card(mut model: Model, forward: bool) -> Model {
+/// Move the kanban's focus one step. ↑/↓ (`along_cards`) step the card within
+/// the focused column in the horizontal kanban and through the whole
+/// phase-grouped list in the vertical one; ←/→ step the column in the
+/// horizontal kanban and jump to the first card of the neighbouring phase that
+/// has cards in the vertical one.
+fn move_kanban(mut model: Model, along_cards: bool, forward: bool) -> Model {
     if let Some(Screen::Tasks {
         tasks,
         kanban: Some(focus),
         ..
     }) = model.top_mut()
     {
-        focus.step_card(tasks, forward);
+        match (focus.layout, along_cards) {
+            (KanbanLayout::Horizontal, true) => focus.step_card(tasks, forward),
+            (KanbanLayout::Horizontal, false) => focus.step_column(forward),
+            (KanbanLayout::Vertical, true) => focus.step_through(tasks, forward),
+            (KanbanLayout::Vertical, false) => focus.jump_phase(tasks, forward),
+        }
     }
     model
 }
@@ -1927,7 +2119,7 @@ fn handle_up(model: Model) -> Model {
         Some(Screen::Detail { .. }) => handle_focus_prev(model),
         Some(Screen::Tasks {
             kanban: Some(_), ..
-        }) => move_kanban_card(model, false),
+        }) => move_kanban(model, true, false),
         Some(_) => {
             let mut model = model;
             let sel = model.top().map(|s| s.selected()).unwrap_or(0);
@@ -1946,7 +2138,7 @@ fn handle_down(model: Model) -> Model {
         Some(Screen::Detail { .. }) => handle_focus_next(model),
         Some(Screen::Tasks {
             kanban: Some(_), ..
-        }) => move_kanban_card(model, true),
+        }) => move_kanban(model, true, true),
         Some(screen) => {
             let count = screen.row_count();
             let sel = screen.selected();
@@ -2368,6 +2560,7 @@ fn handle_select(model: Model) -> (Model, Vec<Cmd>) {
                     rendered_width: usize::MAX,
                     due_today: None,
                     kanban: None,
+                    view_modal: None,
                 });
             }
             SelectAction::PushDetail {
@@ -2544,7 +2737,10 @@ fn handle_loaded_mine_tasks(mut model: Model, rows: Vec<MineTableRow>, loaded_at
         *sel = reselect(*sel, &earlier, t);
         if let Some(focus) = kanban {
             *focus = if earlier.is_empty() {
-                KanbanFocus::first_populated(t)
+                KanbanFocus {
+                    layout: focus.layout,
+                    ..KanbanFocus::first_populated(t)
+                }
             } else {
                 focus.reselected(&earlier, t)
             };
@@ -3914,12 +4110,16 @@ pub fn init_mine_in_view(
         ),
         _ => (vec![], true, false),
     };
-    let kanban = (view == MineView::Kanban).then(|| KanbanFocus::first_populated(&tasks));
+    let kanban = view.layout().map(|layout| KanbanFocus {
+        layout,
+        ..KanbanFocus::first_populated(&tasks)
+    });
     let model = Model {
         stack: vec![Screen::Tasks {
             project_name: t("My Tasks"),
             tasks,
             kanban,
+            view_modal: None,
             selected: 0,
             loading,
             revalidating,

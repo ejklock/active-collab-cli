@@ -469,14 +469,14 @@ fn kanban_persistence_save_command_writes_the_view_read_at_the_next_launch() {
     let mut model = snapshot_model(vec![row(1, None, None, None)]);
     let http = Http::new().unwrap();
     dispatch_cmds(
-        vec![Cmd::SaveMineView(MineView::Kanban)],
+        vec![Cmd::SaveMineView(MineView::KanbanHorizontal)],
         &mut model,
         &[],
         &http,
         &db_path,
         tx.clone(),
     );
-    assert_eq!(stored_mine_view(&db_path), MineView::Kanban);
+    assert_eq!(stored_mine_view(&db_path), MineView::KanbanHorizontal);
     dispatch_cmds(
         vec![Cmd::SaveMineView(MineView::List)],
         &mut model,
@@ -489,27 +489,107 @@ fn kanban_persistence_save_command_writes_the_view_read_at_the_next_launch() {
 }
 
 #[test]
-fn kanban_persistence_key_is_mine_view() {
+fn mine_view_values_each_choice_is_stored_under_mine_view_and_read_back() {
+    for (view, stored) in [
+        (MineView::List, "list"),
+        (MineView::KanbanHorizontal, "kanban_horizontal"),
+        (MineView::KanbanVertical, "kanban_vertical"),
+    ] {
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join("view.db");
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let mut model = snapshot_model(vec![row(1, None, None, None)]);
+        dispatch_cmds(
+            vec![Cmd::SaveMineView(view)],
+            &mut model,
+            &[],
+            &Http::new().unwrap(),
+            &db_path,
+            tx,
+        );
+        {
+            let config = crate::config::Config {
+                db_path: db_path.clone(),
+                task_cache_ttl_hours: 24,
+            };
+            let store = crate::store::Store::open(&config).unwrap();
+            let settings = crate::store::settings::SettingsRepository::new(store.conn());
+            assert_eq!(
+                settings.get("mine_view", None).unwrap().as_deref(),
+                Some(stored)
+            );
+        }
+        assert_eq!(stored_mine_view(&db_path), view);
+    }
+}
+
+#[test]
+fn mine_view_values_the_earlier_kanban_value_opens_the_horizontal_kanban() {
     let dir = TempDir::new().unwrap();
     let db_path = dir.path().join("view.db");
-    let (tx, _rx) = mpsc::unbounded_channel();
-    let mut model = snapshot_model(vec![row(1, None, None, None)]);
-    dispatch_cmds(
-        vec![Cmd::SaveMineView(MineView::Kanban)],
-        &mut model,
-        &[],
-        &Http::new().unwrap(),
-        &db_path,
-        tx,
-    );
-    let config = crate::config::Config {
-        db_path,
-        task_cache_ttl_hours: 24,
-    };
-    let store = crate::store::Store::open(&config).unwrap();
-    let settings = crate::store::settings::SettingsRepository::new(store.conn());
-    assert_eq!(
-        settings.get("mine_view", None).unwrap().as_deref(),
-        Some("kanban")
-    );
+    {
+        let config = crate::config::Config {
+            db_path: db_path.clone(),
+            task_cache_ttl_hours: 24,
+        };
+        let store = crate::store::Store::open(&config).unwrap();
+        crate::store::settings::SettingsRepository::new(store.conn())
+            .set("mine_view", "kanban")
+            .unwrap();
+    }
+    assert_eq!(stored_mine_view(&db_path), MineView::KanbanHorizontal);
+}
+
+#[test]
+fn mine_view_values_the_launch_view_follows_each_stored_value() {
+    use crate::tui::model::{init_mine_in_view, KanbanLayout};
+    let today = chrono::NaiveDate::from_ymd_opt(2026, 11, 25).unwrap();
+    for (stored, expected) in [
+        ("list", None),
+        ("kanban", Some(KanbanLayout::Horizontal)),
+        ("kanban_horizontal", Some(KanbanLayout::Horizontal)),
+        ("kanban_vertical", Some(KanbanLayout::Vertical)),
+        ("unheard-of", None),
+    ] {
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join("view.db");
+        {
+            let config = crate::config::Config {
+                db_path: db_path.clone(),
+                task_cache_ttl_hours: 24,
+            };
+            let store = crate::store::Store::open(&config).unwrap();
+            crate::store::settings::SettingsRepository::new(store.conn())
+                .set("mine_view", stored)
+                .unwrap();
+        }
+        let (model, _) = init_mine_in_view(
+            Header::from_instances(&[], None),
+            Some(vec![row(1, None, None, None)]),
+            today,
+            stored_mine_view(&db_path),
+        );
+        let layout = match model.stack.last() {
+            Some(Screen::Tasks { kanban, .. }) => kanban.map(|focus| focus.layout),
+            other => panic!("expected tasks, got {other:?}"),
+        };
+        assert_eq!(layout, expected, "stored value {stored}");
+    }
+}
+
+#[test]
+fn mine_view_values_an_unknown_stored_value_opens_the_list() {
+    let dir = TempDir::new().unwrap();
+    let db_path = dir.path().join("view.db");
+    {
+        let config = crate::config::Config {
+            db_path: db_path.clone(),
+            task_cache_ttl_hours: 24,
+        };
+        let store = crate::store::Store::open(&config).unwrap();
+        crate::store::settings::SettingsRepository::new(store.conn())
+            .set("mine_view", "grid")
+            .unwrap();
+    }
+    assert_eq!(stored_mine_view(&db_path), MineView::List);
 }

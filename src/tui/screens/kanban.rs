@@ -17,10 +17,10 @@ const CARD_ROWS: u16 = 3;
 const CARD_GAP: u16 = 1;
 /// The colored bar and the space that follow it, at the left of every card line.
 const BAR_COLS: usize = 2;
-const FLAG: &str = "⚑";
+pub(super) const FLAG: &str = "⚑";
 
 /// The column title of a phase, in the display language.
-fn phase_title(phase: Phase) -> String {
+pub(super) fn phase_title(phase: Phase) -> String {
     match phase {
         Phase::ToDo => t("TO DO"),
         Phase::InProgress => t("IN PROGRESS"),
