@@ -4143,7 +4143,7 @@ pub fn init_mine_in_view(
 
 const NEAR_DUE_WINDOW_DAYS: i64 = 3;
 
-/// Map an optional `YYYY-MM-DD` due date to a Brazilian-Portuguese label and style.
+/// Map an optional `YYYY-MM-DD` due date to a label translated into the active language, plus a style.
 ///
 /// Pure and total: no side effects, no I/O. Accepts an injected `today` so callers
 /// remain deterministic in tests.
@@ -4151,40 +4151,40 @@ pub fn relative_due(due_on: Option<&str>, today: chrono::NaiveDate) -> (String, 
     use chrono::NaiveDate;
 
     let Some(s) = due_on else {
-        return (t("due_none"), DueStyle::None);
+        return (t("no due date"), DueStyle::None);
     };
 
     let Ok(date) = NaiveDate::parse_from_str(s, "%Y-%m-%d") else {
-        return (t("due_none"), DueStyle::None);
+        return (t("no due date"), DueStyle::None);
     };
 
     let delta = (date - today).num_days();
 
     match delta {
-        0 => (t("due_today"), DueStyle::Near),
-        1 => (t("due_tomorrow"), DueStyle::Near),
+        0 => (t("today"), DueStyle::Near),
+        1 => (t("tomorrow"), DueStyle::Near),
         2..=NEAR_DUE_WINDOW_DAYS => {
             let day_word = day_word(delta);
             (
-                format!("{} {} {}", t("due_in"), delta, day_word),
+                format!("{} {} {}", t("due in"), delta, day_word),
                 DueStyle::Near,
             )
         }
         d if d > NEAR_DUE_WINDOW_DAYS => {
             let day_word = day_word(d);
             (
-                format!("{} {} {}", t("due_in"), d, day_word),
+                format!("{} {} {}", t("due in"), d, day_word),
                 DueStyle::Normal,
             )
         }
         -1 => (
-            format!("{} 1 {}", t("due_overdue"), t("due_day")),
+            format!("{} 1 {}", t("overdue"), t("day")),
             DueStyle::Overdue,
         ),
         d => {
             let abs_d = d.unsigned_abs() as i64;
             (
-                format!("{} {} {}", t("due_overdue"), abs_d, t("due_days")),
+                format!("{} {} {}", t("overdue"), abs_d, t("days")),
                 DueStyle::Overdue,
             )
         }
@@ -4193,9 +4193,9 @@ pub fn relative_due(due_on: Option<&str>, today: chrono::NaiveDate) -> (String, 
 
 fn day_word(n: i64) -> String {
     if n == 1 {
-        t("due_day")
+        t("day")
     } else {
-        t("due_days")
+        t("days")
     }
 }
 

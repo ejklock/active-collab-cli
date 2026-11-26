@@ -10959,3 +10959,78 @@ mod vertical_cold_launch_tests {
         assert_eq!(focus.column, 1);
     }
 }
+
+static DUE_LANG_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn due_labels_in(language: &str) -> Vec<(String, DueStyle)> {
+    let _guard = DUE_LANG_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+    crate::i18n::set_language(language);
+    let today = chrono::NaiveDate::from_ymd_opt(2026, 11, 25).unwrap();
+    let labels = [
+        None,
+        Some("bad-date"),
+        Some("2026-11-25"),
+        Some("2026-11-26"),
+        Some("2026-11-27"),
+        Some("2026-12-11"),
+        Some("2026-11-24"),
+        Some("2026-03-23"),
+    ]
+    .into_iter()
+    .map(|due| relative_due(due, today))
+    .collect();
+    crate::i18n::set_language("en");
+    labels
+}
+
+#[test]
+fn relative_due_reads_plain_english_in_english() {
+    let labels = due_labels_in("en");
+    let texts: Vec<&str> = labels.iter().map(|(l, _)| l.as_str()).collect();
+    assert_eq!(
+        texts,
+        [
+            "no due date",
+            "no due date",
+            "today",
+            "tomorrow",
+            "due in 2 days",
+            "due in 16 days",
+            "overdue 1 day",
+            "overdue 247 days",
+        ]
+    );
+    let styles: Vec<DueStyle> = labels.iter().map(|(_, s)| *s).collect();
+    assert_eq!(
+        styles,
+        [
+            DueStyle::None,
+            DueStyle::None,
+            DueStyle::Near,
+            DueStyle::Near,
+            DueStyle::Near,
+            DueStyle::Normal,
+            DueStyle::Overdue,
+            DueStyle::Overdue,
+        ]
+    );
+}
+
+#[test]
+fn relative_due_reads_unchanged_portuguese_in_pt_br() {
+    let labels = due_labels_in("pt_BR");
+    let texts: Vec<&str> = labels.iter().map(|(l, _)| l.as_str()).collect();
+    assert_eq!(
+        texts,
+        [
+            "sem data",
+            "sem data",
+            "hoje",
+            "amanhã",
+            "vence em 2 dias",
+            "vence em 16 dias",
+            "atrasada 1 dia",
+            "atrasada 247 dias",
+        ]
+    );
+}

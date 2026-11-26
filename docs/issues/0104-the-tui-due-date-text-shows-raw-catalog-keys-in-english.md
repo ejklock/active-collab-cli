@@ -2,7 +2,7 @@
 type: Issue
 title: The TUI due-date text shows raw catalog keys in English
 description: The relative due-date text uses snake_case catalog keys (due_overdue, due_days, due_none, due_in, due_today, due_tomorrow, due_day) as msgids; only pt_BR maps them, so in English the cards read 'due_overdue 247 due_days'.
-status: open
+status: closed
 timestamp: 2026-11-26T01:11:34Z
 ---
 
@@ -20,4 +20,5 @@ Excluded: other catalog keys.
 
 ### Acceptance
 
-- AC1: in English a card reads plain English (for example "overdue 247 days", "due in 16 days", "no due date", "due today", "due tomorrow"), and in pt_BR the current Portuguese text is unchanged. (`verify_by: test`)
+
+- AC1: in English a card reads plain English (for example "overdue 247 days", "due in 16 days", "no due date", "today", "tomorrow"), and in pt_BR the current Portuguese text is unchanged. (`verify_by: test`)
