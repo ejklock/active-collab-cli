@@ -11,6 +11,27 @@ pre-cutover Python package's history is preserved verbatim under
 version numbers are a separate line and do not continue into the Rust crate
 (issue 0055).
 
+## [0.12.8] - 2026-11-26
+
+### Added
+
+- `ac mine --json` and the MCP `ac_read mine` carry each task's board `phase`
+  (`to_do`, `in_progress`, `in_review`, `ready_for_release`) and `flagged`,
+  plus a `phases` count summary. The phase comes from the task's `STATUS:`
+  labels, then its task list name, else `to_do`.
+- `ac mine --phase <key>` and the `ac_read mine` `phase` argument keep one phase.
+- `ac setup board` shows, sets and resets the keywords that place tasks in
+  phases; only your overrides are stored.
+- In the `ac mine` TUI, `v` opens a view modal: due-date list, horizontal
+  kanban (phase columns, tabs below 100 columns) or vertical kanban (bordered
+  phase boxes). `l` on a task opens it with the task list picker, and the mine
+  screen reloads when you come back after an edit.
+
+### Fixed
+
+- `r` on the `ac mine` TUI screen no longer stays on "Loading…".
+- The TUI due-date text reads plain English instead of catalog keys.
+
 ## [0.12.7] - 2026-11-25
 
 ### Added
