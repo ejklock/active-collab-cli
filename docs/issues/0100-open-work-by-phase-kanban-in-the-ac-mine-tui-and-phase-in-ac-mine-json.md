@@ -2,7 +2,7 @@
 type: Issue
 title: "Open work by phase: kanban in the ac mine TUI and phase in ac mine --json"
 description: A TUI kanban view of the logged-in user's open tasks, grouped into board phases derived from STATUS labels and task list names, so open work across projects reads at a glance.
-status: in-progress
+status: closed
 blocked_by: []
 timestamp: 2026-11-25T20:45:57Z
 ---

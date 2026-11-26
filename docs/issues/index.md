@@ -29,7 +29,6 @@ TUI/UX work (V/R/ARCH slices), tracing to
 * [0096 — ac mcp keeps every finished task result for the life of the process](0096-ac-mcp-keeps-every-finished-task-result-for-the-life-of-the-process.md) - open
 * [0097 — ac mcp cuts off a running call five seconds after the client disconnects](0097-ac-mcp-cuts-off-a-running-call-five-seconds-after-the-client-disconnects.md) - open
 * [0099 — ac get serves a stale task list from the cache after ac task set moves the task](0099-ac-get-serves-a-stale-task-list-from-the-cache-after-ac-task-set-moves-the-task.md) - open
-* [0100 — Open work by phase: kanban in the ac mine TUI and phase in ac mine --json](0100-open-work-by-phase-kanban-in-the-ac-mine-tui-and-phase-in-ac-mine-json.md) - in-progress
 * [0102 — A failed mine reload empties the ac mine TUI and its cache instead of reporting the error](0102-a-failed-mine-reload-empties-the-ac-mine-tui-and-its-cache-instead-of-reporting-the-error.md) - open
 * [0103 — r on a browse task list in the TUI stays on Loading forever](0103-r-on-a-browse-task-list-in-the-tui-stays-on-loading-forever.md) - open
 * [0105 — The vertical kanban edge-cut test never cuts a box at the top](0105-the-vertical-kanban-edge-cut-test-never-cuts-a-box-at-the-top.md) - open
@@ -112,5 +111,6 @@ TUI/UX work (V/R/ARCH slices), tracing to
 * [0094 — The served skill tells the agent to prefer the MCP tools](0094-the-served-skill-tells-the-agent-to-prefer-the-mcp-tools.md) - closed
 * [0095 — ac mcp serves the skill, runs long calls as tasks and trims its context cost](0095-ac-mcp-serves-the-skill-runs-long-calls-as-tasks-and-trims-its-context-cost.md) - closed
 * [0098 — JSON reads expose task list, labels and parent/child tasks, with filters](0098-json-reads-expose-task-list-labels-and-parent-child-tasks-with-filters.md) - closed
+* [0100 — Open work by phase: kanban in the ac mine TUI and phase in ac mine --json](0100-open-work-by-phase-kanban-in-the-ac-mine-tui-and-phase-in-ac-mine-json.md) - closed
 * [0101 — r on the ac mine TUI screen stays on Loading forever](0101-r-on-the-ac-mine-tui-screen-stays-on-loading-forever.md) - closed
 * [0104 — The TUI due-date text shows raw catalog keys in English](0104-the-tui-due-date-text-shows-raw-catalog-keys-in-english.md) - closed
